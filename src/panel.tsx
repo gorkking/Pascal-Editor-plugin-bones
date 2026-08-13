@@ -270,7 +270,10 @@ function WallOverrideSection({
 }
 
 function TakeoffSection({ result }: { result: NonNullable<ReturnType<typeof computeLevel>> }) {
-  const rows = useMemo(() => computeTakeoff(result.members, result.fixtures), [result])
+  const rows = useMemo(
+    () => computeTakeoff(result.members, result.fixtures, result.areas),
+    [result],
+  )
 
   // Group by section (the takeoff engine's `section` field; tolerate rows
   // that predate it). FLAG rows always surface in their own group on top.

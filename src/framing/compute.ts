@@ -19,6 +19,7 @@ import { frameRoofs, extractRoofs } from '../engines/roof-framing'
 import { frameWalls } from '../engines/wall-framing'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
+import type { TakeoffAreas } from '../engines/takeoff'
 import type { FramingNode, WallConstruction } from './schema'
 
 export type ComputeResult = {
@@ -28,6 +29,8 @@ export type ComputeResult = {
   /** Resolved jurisdiction code actually used ('AUTO' → guessed). */
   jurisdiction: string
   spec: FramingSpec
+  /** Gross sheet-goods areas for the takeoff (walls/slabs aren't returned). */
+  areas: TakeoffAreas
 }
 
 /** Construction system for one wall: override → jurisdiction default → framed. */
@@ -55,6 +58,7 @@ export function computeLevel(
       warnings: ['Framing node has no level'],
       jurisdiction: 'INTL',
       spec: DEFAULT_SPEC,
+      areas: {},
     }
   }
 
@@ -144,5 +148,38 @@ export function computeLevel(
     fixtures.push(...hvac.fixtures)
   }
 
-  return { members, fixtures, warnings, jurisdiction: code, spec }
+  // ---- gross sheet-goods areas for the takeoff ----
+  // Sheets are bought gross (openings are cut out of a full sheet), so the
+  // areas are simple length × height / polygon sums over the ACTIVE walls.
+  const areas: TakeoffAreas = { wallSheathingM2: 0, subfloorM2: 0, drywallM2: 0 }
+  for (const wall of activeWalls) {
+    if (wall.curved) continue
+    const construction = wallConstruction(wall, config, profile.exteriorWallDefault)
+    const faceArea = wall.length * wall.height
+    // WSP sheathing wraps FRAMED exterior walls only (CMU gets stucco/furring).
+    if (wall.exterior && construction === 'framed') {
+      areas.wallSheathingM2 = (areas.wallSheathingM2 ?? 0) + faceArea
+    }
+    // Drywall: both faces of interior walls, the inside face of exterior ones.
+    areas.drywallM2 = (areas.drywallM2 ?? 0) + faceArea * (wall.exterior ? 1 : 2)
+  }
+  if (!isGroundLevel) {
+    for (const slab of slabs) {
+      let area = 0
+      const ring = (poly: readonly (readonly [number, number])[]): number => {
+        let sum = 0
+        for (let i = 0; i < poly.length; i++) {
+          const [x1, z1] = poly[i] as readonly [number, number]
+          const [x2, z2] = poly[(i + 1) % poly.length] as readonly [number, number]
+          sum += x1 * z2 - x2 * z1
+        }
+        return Math.abs(sum) / 2
+      }
+      area += ring(slab.polygon)
+      for (const hole of slab.holes) area -= ring(hole)
+      areas.subfloorM2 = (areas.subfloorM2 ?? 0) + Math.max(0, area)
+    }
+  }
+
+  return { members, fixtures, warnings, jurisdiction: code, spec, areas }
 }
