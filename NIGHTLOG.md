@@ -67,6 +67,21 @@
 - Adversarial verification pass over roof/CMU/electrical math (3 reviewer
   agents attempting refutation with runnable counter-tests).
 
+## Dawn — verified and shipped
+
+- Adversarial verification found and FIXED three real bugs, each proven with
+  a failing test first: hip common rafters sloped the wrong way on
+  depth>width segments (inverted yaw); a degenerate door could float a
+  switch past its wall end; the `skip` wall override silently deleted all
+  plumbing when it hit a wet room's boundary wall. Regression suites kept
+  (incl. a 400-case NEC 210.52 property test).
+- Final: **214 tests / 20,309 assertions green**, typecheck clean, live E2E
+  re-run on the shipped pin (105 members, takeoff intact, zero page errors).
+- Both hosts pinned to the verified sha on `feat/plugin-bones`
+  (private-editor + editor submodule). Morning routine: pull both branches,
+  `bun install`, `cd editor/apps/editor && bun run dev` → localhost:3002 →
+  Bones panel → ⚡ X-Ray this level.
+
 ## Known limitations (honest list)
 
 - Curved walls skipped (panel warning). California corners not yet framed.
