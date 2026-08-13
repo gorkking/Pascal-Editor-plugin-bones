@@ -10,6 +10,10 @@ plumbing, ductwork — derived from your model, sized to your jurisdiction, rend
 
 ---
 
+<p align="center">
+  <img src="assets/xray-hero.png" alt="The Bones X-ray in the Pascal editor — studs, headers, and foundation visible through the finished walls, with the live takeoff" width="820" />
+</p>
+
 ## What it does
 
 Draw a house in Pascal. Click **⚡ X-Ray this level**. Bones derives the

@@ -46,6 +46,27 @@
   CMU coursing (running bond, lintels, bond beams), takeoff (stock rounding,
   board feet, concrete yards), plumbing + HVAC (schematic DWV/supply/ducts).
 
+## Deep night — every system online
+
+- Fleet round 1 landed foundation / electrical / CMU / takeoff (with their
+  agents' own numeric test suites). Floor, roof, and MEP agents stalled —
+  rebuilt by hand: polygon-clipped floor joists (scanline over the slab
+  polygon — L-shapes frame correctly), the full roof engine against the real
+  `roof-segment` schema (gable/shed/hip, rafter rotations verified by
+  rotating vectors through three.js Eulers), schematic plumbing (wet-core
+  clustering, through-roof vent stack) and HVAC (tonnage from conditioned
+  area, trunk + branch ducts).
+- Climate retry: 51-state dataset merged (N–W fully sourced; A–M
+  backfilled approximations, flagged).
+- **191 unit tests green**, typecheck clean.
+- Live E2E in the real editor (Playwright driving the actual wall/door/
+  window tools): walls + door → **105 members · devices**, takeoff showing
+  2x4s by stock length, a 4x10 header sized from the actual opening,
+  11.1 yd³ of concrete (NY's 48" frost line doing its job via the AUTO
+  jurisdiction guess), 17 anchor bolts per R403.1.6.
+- Adversarial verification pass over roof/CMU/electrical math (3 reviewer
+  agents attempting refutation with runnable counter-tests).
+
 ## Known limitations (honest list)
 
 - Curved walls skipped (panel warning). California corners not yet framed.
