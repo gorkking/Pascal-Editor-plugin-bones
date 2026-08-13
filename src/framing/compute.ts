@@ -9,14 +9,14 @@ import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Fixture, Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { extractLevels, extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
-import { cmuWall } from '../engines/cmu'
+import { cmuWalls } from '../engines/cmu'
 import { layoutElectrical } from '../engines/electrical'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
-import { frameWall } from '../engines/wall-framing'
+import { frameWalls } from '../engines/wall-framing'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
 import type { FramingNode, WallConstruction } from './schema'
@@ -94,18 +94,26 @@ export function computeLevel(
   )
 
   if (config.showWalls) {
+    // Route walls as GROUPS so cross-wall fabrication (corner assemblies,
+    // partition backing, CMU corner interlock) can see its neighbors.
+    const framed: WallSlice[] = []
+    const masonry: WallSlice[] = []
     for (const wall of activeWalls) {
       if (wall.curved) {
         warnings.push(`Curved wall skipped (framing for curved walls lands later)`)
         continue
       }
       const construction = wallConstruction(wall, config, profile.exteriorWallDefault)
-      members.push(...(construction === 'cmu' ? cmuWall(wall, spec) : frameWall(wall, spec)))
+      if (construction === 'cmu') masonry.push(wall)
+      else framed.push(wall)
     }
+    members.push(...frameWalls(framed, spec))
+    members.push(...cmuWalls(masonry, spec))
   }
 
   if (config.showFloor && !isGroundLevel) {
-    members.push(...frameFloor(slabs, spec))
+    const storeyBelowHeight = levels[levelIndex - 1]?.height ?? 2.4
+    members.push(...frameFloor(slabs, activeWalls, spec, storeyBelowHeight))
   }
 
   if (config.showRoof) {

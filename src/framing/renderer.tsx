@@ -45,6 +45,10 @@ function colorOf(member: Member): string {
       break
   }
   switch (member.role) {
+    case 'rebar':
+      return '#8a4b2a'
+    case 'wire-run':
+      return '#e6c84a'
     case 'header':
       return '#c1904f'
     case 'king-stud':
@@ -56,6 +60,7 @@ function colorOf(member: Member): string {
 }
 
 const FIXTURE_COLORS: Record<string, string> = {
+  'exhaust-fan': '#9fb8c8',
   receptacle: '#f2b63d',
   'receptacle-gfci': '#e88f2a',
   switch: '#7fb3e0',

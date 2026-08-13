@@ -113,6 +113,7 @@ const FIXTURE_ROWS: Record<FixtureKind, { item: string; detail: string }> = {
   equipment: { item: 'Mechanical equipment', detail: 'AHU / condenser' },
   'water-heater': { item: 'Water heaters', detail: 'tank/tankless' },
   cleanout: { item: 'Cleanouts', detail: 'IRC P3005.2' },
+  'exhaust-fan': { item: 'Exhaust fans', detail: 'bath/dryer ventilation (M1505)' },
   thermostat: { item: 'Thermostats', detail: 'zone control' },
 }
 
@@ -132,6 +133,7 @@ const FIXTURE_ORDER: readonly FixtureKind[] = [
   'water-heater',
   'cleanout',
   'thermostat',
+  'exhaust-fan',
 ]
 
 // ---------------------------------------------------------------------------

@@ -58,6 +58,16 @@ export type MemberRole =
   | 'pipe-run'
   | 'vent-stack'
   | 'duct-run'
+  | 'wire-run'
+  // fabrication (LOD 350/400)
+  | 'rebar'
+  | 'hanger'
+  | 'plate-washer'
+  | 'jack-rafter'
+  | 'outlooker'
+  | 'fascia'
+  | 'fire-blocking'
+  | 'backing'
 
 export type MemberMaterial =
   | 'lumber'
@@ -112,6 +122,7 @@ export type FixtureKind =
   | 'water-heater'
   | 'cleanout'
   | 'thermostat'
+  | 'exhaust-fan'
 
 export type Fixture = {
   system: BonesSystem

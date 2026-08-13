@@ -280,3 +280,16 @@ export function cmuWall(wall: WallSlice, _spec: FramingSpec): Member[] {
 
   return members
 }
+
+/**
+ * Lay up a SET of CMU walls. Group-aware entry point so corner interlock
+ * (courses alternating through shared corners) can be computed across walls
+ * — currently a plain per-wall loop; the LOD 400 interlock lands here.
+ */
+export function cmuWalls(walls: WallSlice[], spec: FramingSpec): Member[] {
+  const members: Member[] = []
+  for (const wall of walls) {
+    members.push(...cmuWall(wall, spec))
+  }
+  return members
+}

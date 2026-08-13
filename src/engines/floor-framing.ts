@@ -16,7 +16,7 @@
 
 import { LUMBER_CROSS_SECTIONS, type LumberSize } from '../lumber'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
-import type { Member, SlabSlice } from '../core/types'
+import type { Member, SlabSlice, WallSlice } from '../core/types'
 import { feet, inches } from '../core/units'
 
 const EPS = 1e-9
@@ -251,8 +251,17 @@ function frameSlab(slab: SlabSlice, spec: FramingSpec): Member[] {
   return members
 }
 
-/** Frame every slab on a level. */
-export function frameFloor(slabs: SlabSlice[], spec: FramingSpec = DEFAULT_SPEC): Member[] {
+/**
+ * Frame every slab on a level. `walls` are the level's walls (for doubled
+ * joists under parallel bearing partitions — LOD 350) and
+ * `storeyBelowHeight` is the storey the girder posts descend into.
+ */
+export function frameFloor(
+  slabs: SlabSlice[],
+  _walls: WallSlice[] = [],
+  spec: FramingSpec = DEFAULT_SPEC,
+  _storeyBelowHeight: number = POST_HEIGHT,
+): Member[] {
   const members: Member[] = []
   for (const slab of slabs) {
     members.push(...frameSlab(slab, spec))
