@@ -1,8 +1,20 @@
 # Bones — Spec
 
-**One line:** open any Pascal house and see what it's actually made of — the plugin
-infers the structural skeleton (wall framing, floor framing, roof framing, foundation)
-from the architectural model and renders it in 3D, member by member.
+**One line:** the engineering X-ray for Pascal — open any house and see what it's
+actually made of: framing, foundation, wiring, plumbing, ducts, derived member-by-
+member from the architectural model, sized to your jurisdiction, rendered see-through
+in 3D.
+
+## LOD ladder (the BIM mindset)
+
+| LOD | Meaning | Status |
+|---|---|---|
+| **200** | Generic assemblies — every member laid out at default spacing/sizes | shipping tonight |
+| **300** | Code-informed — jurisdiction profile sizes footings/anchors/rafters/headers from researched datasets (data/) | shipping tonight |
+| **400** | Connection details — hangers, clips, hold-downs, nailing, California corners, joist-bay-aware MEP routing | next |
+
+Each completed level unlocks the next; `// LOD 400:` comments in the engines mark
+exactly where the next refinement goes.
 
 Pascal models *architecture*: walls, doors, windows, slabs, roofs, levels. Bones infers
 *construction*: the studs inside the walls, the joists under the floors, the rafters
