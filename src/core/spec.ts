@@ -10,6 +10,8 @@ import { feet, inches } from './units'
 export type HeaderRule = { maxSpan: number; size: LumberSize }
 
 export type FramingSpec = {
+  /** Resolved LOD: '200' generic · '300' code-sized · '400' fabrication. */
+  detail: '200' | '300' | '400'
   /** Stud on-center spacing (16" default, 24" allowed). */
   studSpacing: number
   /** Double top plate by default. */
@@ -51,6 +53,7 @@ export type FramingSpec = {
 }
 
 export const DEFAULT_SPEC: FramingSpec = {
+  detail: '300',
   studSpacing: inches(16),
   topPlateCount: 2,
   interiorStudSize: '2x4',

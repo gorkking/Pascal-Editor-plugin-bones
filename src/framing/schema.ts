@@ -11,8 +11,9 @@ import { z } from 'zod'
 export const WallConstruction = z.enum(['framed', 'cmu', 'skip'])
 export type WallConstruction = z.infer<typeof WallConstruction>
 
-/** BIM-ish level of detail: 200 = generic members, 300 = code-sized + jurisdiction. */
-export const BonesDetail = z.enum(['200', '300'])
+/** BIM-ish level of detail: 200 generic members · 300 code-sized (jurisdiction) ·
+ * 400 fabrication (connections, routing, cut/fastener data). */
+export const BonesDetail = z.enum(['200', '300', '400'])
 
 export const FramingNode = BaseNode.extend({
   id: objectId('bonesframing'),
@@ -22,7 +23,7 @@ export const FramingNode = BaseNode.extend({
   /** Jurisdiction code: 2-letter US state, 'INTL', or 'AUTO' (guess from browser). */
   jurisdiction: z.string().default('AUTO'),
   /** Level of detail (see SPEC.md → LOD ladder). */
-  detail: BonesDetail.default('300'),
+  detail: BonesDetail.default('400'),
   studSpacingIn: z.union([z.literal(16), z.literal(24)]).default(16),
   // Per-system visibility. Top-level booleans so the stock inspector can
   // render them without custom UI.
@@ -42,7 +43,7 @@ export const FramingNode = BaseNode.extend({
 }).describe(
   `Bones framing config (engineering X-ray) — one per level.
   - jurisdiction: US state code ('CA'), 'INTL', or 'AUTO' (guessed from the browser locale/timezone)
-  - detail: '200' generic members, '300' jurisdiction/code-sized members
+  - detail: '200' generic members, '300' jurisdiction/code-sized, '400' fabrication (connections, routing, fastener data)
   - studSpacingIn: stud spacing on-center in inches (16 or 24)
   - show*: per-system visibility (walls, floor, roof, foundation, electrical, plumbing, hvac)
   - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'skip'

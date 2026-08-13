@@ -12,7 +12,7 @@ const framingParametrics: ParametricDescriptor<FramingNode> = {
       label: 'Code',
       fields: [
         { key: 'jurisdiction', kind: 'enum', options: jurisdictionEnum },
-        { key: 'detail', kind: 'enum', options: ['200', '300'], display: 'segmented' },
+        { key: 'detail', kind: 'enum', options: ['200', '300', '400'], display: 'segmented' },
         { key: 'studSpacingIn', kind: 'enum', options: [16, 24] as unknown as string[], display: 'segmented' },
       ],
     },
@@ -49,7 +49,7 @@ export const framingDefinition: FramingDefinition = {
     position: [0, 0, 0],
     rotation: [0, 0, 0],
     jurisdiction: 'AUTO',
-    detail: '300',
+    detail: '400',
     studSpacingIn: 16,
     showWalls: true,
     showFloor: true,

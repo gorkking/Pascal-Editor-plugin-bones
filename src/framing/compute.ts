@@ -60,8 +60,13 @@ export function computeLevel(
 
   const { code } = resolveJurisdiction(config.jurisdiction)
   const profile = profileFor(code)
-  let spec: FramingSpec = { ...DEFAULT_SPEC, studSpacing: inches(config.studSpacingIn) }
-  if (config.detail === '300') spec = applyJurisdiction(spec, profile)
+  let spec: FramingSpec = {
+    ...DEFAULT_SPEC,
+    detail: config.detail,
+    studSpacing: inches(config.studSpacingIn),
+  }
+  // 400 (fabrication) builds ON TOP of the code-sized pass — jurisdiction applies to both.
+  if (config.detail !== '200') spec = applyJurisdiction(spec, profile)
 
   const walls = extractWalls(nodes, levelId)
   const slabs = extractSlabs(nodes, levelId)

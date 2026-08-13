@@ -163,7 +163,8 @@ function XraySection({
             }
             options={[
               { label: 'Generic', value: '200' },
-              { label: 'Code-sized', value: '300' },
+              { label: 'Code', value: '300' },
+              { label: 'Fab', value: '400' },
             ]}
             value={framingNode.detail}
           />
