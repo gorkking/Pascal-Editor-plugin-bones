@@ -38,6 +38,13 @@ export default function BonesPanel() {
       (n) => (n.type as string) === FRAMING_KIND && n.parentId === activeLevelId,
     ) as (FramingNode & { id: string }) | undefined
   })
+  // ONE derivation per scene edit, shared by the X-Ray status line and the
+  // takeoff — the renderer runs its own (also once). Reviewer advisory r1.
+  const nodes = useScene((s) => s.nodes)
+  const result = useMemo(() => {
+    if (!framingNode) return null
+    return computeLevel(nodes as Record<string, Record<string, unknown>>, framingNode)
+  }, [nodes, framingNode])
 
   return (
     <div className="flex flex-col gap-4 p-4 text-sidebar-foreground">
@@ -49,10 +56,10 @@ export default function BonesPanel() {
         </p>
       </header>
 
-      <XraySection activeLevelId={activeLevelId ?? null} framingNode={framingNode} />
+      <XraySection activeLevelId={activeLevelId ?? null} framingNode={framingNode} result={result} />
 
       {framingNode && <WallOverrideSection framingNode={framingNode} />}
-      {framingNode && <TakeoffSection framingNode={framingNode} />}
+      {framingNode && result && <TakeoffSection result={result} />}
 
       <LumberSection />
 
@@ -66,17 +73,12 @@ export default function BonesPanel() {
 function XraySection({
   activeLevelId,
   framingNode,
+  result,
 }: {
   activeLevelId: string | null
   framingNode: (FramingNode & { id: string }) | undefined
+  result: ReturnType<typeof computeLevel> | null
 }) {
-  const nodes = useScene((s) => s.nodes)
-
-  const result = useMemo(() => {
-    if (!framingNode) return null
-    return computeLevel(nodes as Record<string, Record<string, unknown>>, framingNode)
-  }, [nodes, framingNode])
-
   // Client-only guess: the timezone differs between SSR and browser, which
   // would desync hydration — render a stable label first, fill in on mount.
   const [guess, setGuess] = useState<{ code: string; reason: string } | null>(null)
@@ -216,12 +218,14 @@ function XraySection({
       </div>
 
       {result && (
-        <p className="text-[11px] text-sidebar-foreground/50">
+        <div className="text-[11px] text-sidebar-foreground/50">
           {result.members.length} members · {result.fixtures.length} devices
-          {result.warnings.length > 0 && (
-            <span className="block text-amber-500/80">{result.warnings[0]}</span>
-          )}
-        </p>
+          {[...new Set(result.warnings)].map((warning) => (
+            <span className="block text-amber-500/80" key={warning}>
+              {warning}
+            </span>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -265,12 +269,23 @@ function WallOverrideSection({
   )
 }
 
-function TakeoffSection({ framingNode }: { framingNode: FramingNode & { id: string } }) {
-  const nodes = useScene((s) => s.nodes)
-  const rows = useMemo(() => {
-    const result = computeLevel(nodes as Record<string, Record<string, unknown>>, framingNode)
-    return computeTakeoff(result.members, result.fixtures)
-  }, [nodes, framingNode])
+function TakeoffSection({ result }: { result: NonNullable<ReturnType<typeof computeLevel>> }) {
+  const rows = useMemo(() => computeTakeoff(result.members, result.fixtures), [result])
+
+  // Group by section (the takeoff engine's `section` field; tolerate rows
+  // that predate it). FLAG rows always surface in their own group on top.
+  const sections = useMemo(() => {
+    const bySection = new Map<string, typeof rows>()
+    for (const row of rows) {
+      const section = ((row as { section?: string }).section ?? 'Takeoff') as string
+      const bucket = bySection.get(section)
+      if (bucket) bucket.push(row)
+      else bySection.set(section, [row])
+    }
+    const entries = [...bySection.entries()]
+    entries.sort(([a], [b]) => (a === 'Flags' ? -1 : b === 'Flags' ? 1 : 0))
+    return entries
+  }, [rows])
 
   if (rows.length === 0) return null
   return (
@@ -285,20 +300,32 @@ function TakeoffSection({ framingNode }: { framingNode: FramingNode & { id: stri
           Copy CSV
         </button>
       </div>
-      <div className="flex flex-col gap-0.5">
-        {rows.slice(0, 12).map((row) => (
-          <div
-            className="flex items-baseline justify-between text-[11px]"
-            key={`${row.item}-${row.detail}`}
-          >
-            <span className="text-sidebar-foreground/70">
-              {row.item}
-              <span className="text-sidebar-foreground/40"> {row.detail}</span>
-            </span>
-            <span className="tabular-nums text-sidebar-foreground/90">
-              {row.quantity} {row.unit}
-            </span>
-          </div>
+      <div className="flex max-h-80 flex-col gap-1 overflow-y-auto pr-1">
+        {sections.map(([section, sectionRows], index) => (
+          <details className="group" key={section} open={index === 0 || section === 'Flags'}>
+            <summary className="flex cursor-pointer items-center justify-between text-[11px] text-sidebar-foreground/80">
+              <span className={section === 'Flags' ? 'font-medium text-amber-500/90' : 'font-medium'}>
+                {section}
+              </span>
+              <span className="text-[10px] text-sidebar-foreground/40">{sectionRows.length}</span>
+            </summary>
+            <div className="mt-0.5 flex flex-col gap-0.5 pl-1">
+              {sectionRows.map((row) => (
+                <div
+                  className="flex items-baseline justify-between gap-2 text-[11px]"
+                  key={`${row.item}-${row.detail}`}
+                >
+                  <span className="min-w-0 flex-1 truncate text-sidebar-foreground/70">
+                    {row.item}
+                    <span className="text-sidebar-foreground/40"> {row.detail}</span>
+                  </span>
+                  <span className="shrink-0 tabular-nums text-sidebar-foreground/90">
+                    {row.quantity} {row.unit}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </details>
         ))}
       </div>
     </div>

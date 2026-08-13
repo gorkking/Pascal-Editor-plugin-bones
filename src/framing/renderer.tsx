@@ -79,7 +79,7 @@ function fixtureBox(fixture: Fixture): { dims: [number, number, number]; color: 
 
 type Bucket = { color: string; entries: { dims: readonly [number, number, number]; position: readonly [number, number, number]; rotation: readonly [number, number, number] }[] }
 
-function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: boolean): Group {
+export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: boolean): Group {
   const buckets = new Map<string, Bucket>()
   const push = (
     color: string,
