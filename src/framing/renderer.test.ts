@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { Mesh } from 'three'
+import { BackSide } from 'three'
 import type { Fixture, Member, MemberMaterial, MemberRole } from '../core/types'
 import { buildGroup } from './renderer'
 
@@ -83,34 +85,46 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(doubled).toBe(saturated)
   })
 
-  test('members ALWAYS depth-test — X-ray clears host depth via a sentinel instead', () => {
+  test('members ALWAYS depth-test — X-ray wipes host depth via material state only', () => {
     // Round-2 user reports: with depth tricks on the members themselves, a
     // footing painted over nearer studs, then far stud tops read through the
-    // top plate. Members must occlude each other naturally in BOTH modes;
-    // the X-ray effect lives in one depth-clearing sentinel drawn before
-    // them (renderOrder 998 vs 999), which only defeats HOST occlusion.
+    // top plate. Members must occlude each other naturally in BOTH modes.
+    // The X-ray effect lives in one inverted depth-wipe box drawn before
+    // them (renderOrder 998 vs 999) that only defeats HOST occlusion — and
+    // it must be pure pipeline state (no renderer.clearDepth(): that WebGL
+    // call poisoned the host's WebGPU render pass and hid every member).
     type MeshLike = {
       isInstancedMesh?: boolean
-      material: { depthTest: boolean; depthWrite: boolean; transparent: boolean; colorWrite: boolean }
+      material: {
+        depthTest: boolean
+        depthWrite: boolean
+        transparent: boolean
+        colorWrite: boolean
+        side: number
+      }
       renderOrder: number
-      onBeforeRender?: unknown
+      onBeforeRender?: { toString(): string }
     }
     const xray = buildGroup(synthesizeMembers(100), [], true)
     const meshes = xray.children as unknown as MeshLike[]
     const memberMeshes = meshes.filter((m) => m.isInstancedMesh)
-    const sentinels = meshes.filter((m) => !m.isInstancedMesh)
+    const wipes = meshes.filter((m) => !m.isInstancedMesh)
     expect(memberMeshes.length).toBeGreaterThan(0)
     for (const m of memberMeshes) {
       expect(m.material.depthTest).toBe(true) // natural near-hides-far
       expect(m.material.transparent).toBe(false)
       expect(m.renderOrder).toBe(999) // drawn after the host scene
     }
-    expect(sentinels).toHaveLength(1)
-    const sentinel = sentinels[0] as MeshLike
-    expect(sentinel.renderOrder).toBe(998) // clears depth BEFORE the members
-    expect(sentinel.material.colorWrite).toBe(false) // draws no pixels
-    expect(typeof sentinel.onBeforeRender).toBe('function')
-    // X-ray off: no sentinel, members depth-test in the normal pass order
+    expect(wipes).toHaveLength(1)
+    const wipe = wipes[0] as MeshLike
+    expect(wipe.renderOrder).toBe(998) // wipes depth BEFORE the members
+    expect(wipe.material.colorWrite).toBe(false) // paints nothing
+    expect(wipe.material.depthTest).toBe(false) // always passes…
+    expect(wipe.material.depthWrite).toBe(true) // …and overwrites depth
+    expect(wipe.material.side).toBe(BackSide) // seen from inside the box
+    // no custom render hooks — WebGPU-safe pure pipeline state
+    expect(wipe.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
+    // X-ray off: no wipe, members depth-test in the normal pass order
     const off = buildGroup(synthesizeMembers(100), [], false)
     for (const m of off.children as unknown as MeshLike[]) {
       expect(m.isInstancedMesh).toBe(true)

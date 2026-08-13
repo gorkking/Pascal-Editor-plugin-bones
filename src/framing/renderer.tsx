@@ -3,6 +3,7 @@
 import { useRegistry, useScene } from '@pascal-app/core'
 import { useEffect, useMemo, useRef } from 'react'
 import {
+  BackSide,
   BoxGeometry,
   Euler,
   Group,
@@ -114,22 +115,30 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   const euler = new Euler()
 
   // X-ray = depth-buffer overlay: every member mesh draws AFTER the host
-  // scene (renderOrder 999) with normal depth testing, and a zero-pixel
-  // sentinel drawn just before them (renderOrder 998) clears the depth
-  // buffer. Members therefore depth-test only against EACH OTHER — the top
-  // plate hides the stud tops behind it, the footing never paints over a
-  // nearer stud — while the host's walls/floors can no longer occlude the
-  // skeleton. Exactly the editor's natural camera behavior, applied to the
-  // members, with the X-ray effect confined to host geometry.
+  // scene (renderOrder 999) with normal depth testing, right after a
+  // depth-WIPE box (renderOrder 998). The wipe is an inverted 500 m box
+  // around the level whose back faces cover the whole viewport from any
+  // camera inside it: colorWrite off (paints nothing), depthTest off
+  // (always passes), depthWrite ON — so it overwrites the host's depth
+  // with "very far" everywhere. Members then depth-test only against EACH
+  // OTHER — the top plate hides the stud tops behind it, the footing never
+  // paints over a nearer stud — while the host's walls/floors can no longer
+  // occlude the skeleton. Pure pipeline state, no renderer API: the
+  // WebGL-only `renderer.clearDepth()` sentinel this replaces poisoned the
+  // host's WebGPU render pass and killed every draw after it.
   if (seeThrough) {
-    const sentinel = new Mesh(
-      new BoxGeometry(0.0001, 0.0001, 0.0001),
-      new MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }),
+    const wipe = new Mesh(
+      new BoxGeometry(500, 500, 500),
+      new MeshBasicMaterial({
+        colorWrite: false,
+        depthTest: false,
+        depthWrite: true,
+        side: BackSide,
+      }),
     )
-    sentinel.frustumCulled = false
-    sentinel.renderOrder = 998
-    sentinel.onBeforeRender = (renderer) => renderer.clearDepth()
-    group.add(sentinel)
+    wipe.frustumCulled = false
+    wipe.renderOrder = 998
+    group.add(wipe)
   }
 
   for (const bucket of buckets.values()) {
