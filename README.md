@@ -34,7 +34,7 @@ the framing trade — plans, not pictures.
 ## Publisher
 
 - **Author:** Julien Brissonneau — [@Snoopy147](https://github.com/Snoopy147)
-- **Support:** [GitHub issues](https://github.com/Snoopy147/plugin-bones/issues)
+- **Support:** [GitHub issues](https://github.com/pascalorg/plugin-bones/issues)
 - **License:** MIT
 
 ## Capabilities & data
@@ -52,7 +52,7 @@ the framing trade — plans, not pictures.
 
 Follows the [plugin authoring contract](https://editor.pascal.app/docs/developers/plugins)
 and the layout of the first-party [Nature plugin](https://github.com/pascalorg/plugin-trees):
-one npm package (`@bones/pascal-plugin`), `@pascal-app/*` / React / Three.js as peer
+one npm package (`@pascal-app/plugin-bones`), `@pascal-app/*` / React / Three.js as peer
 dependencies, TypeScript source shipped directly (hosts transpile).
 
 ```
@@ -81,7 +81,7 @@ bun test
 import { extendPluginDiscovery } from '@pascal-app/core'
 
 extendPluginDiscovery(async () => {
-  const { bonesPlugin } = await import('@bones/pascal-plugin')
+  const { bonesPlugin } = await import('@pascal-app/plugin-bones')
   return [bonesPlugin]
 })
 ```
@@ -90,7 +90,7 @@ and register the panel where the host registers plugin panels:
 
 ```ts
 import { registerEditorHostPanel } from '@pascal-app/editor'
-import { bonesHostPanel } from '@bones/pascal-plugin'
+import { bonesHostPanel } from '@pascal-app/plugin-bones'
 
 registerEditorHostPanel(bonesHostPanel)
 ```

@@ -5,7 +5,7 @@ import { LumberNode } from './schema'
 
 describe('Bones plugin manifest', () => {
   test('exports the stable plugin identity and node kinds', () => {
-    expect(bonesPlugin.id).toBe('snoopy:bones')
+    expect(bonesPlugin.id).toBe('pascal:bones')
     expect(bonesPlugin.apiVersion).toBe(1)
     expect(bonesPlugin.nodes?.map((definition) => definition.kind)).toEqual(['bones:lumber'])
   })
@@ -13,7 +13,7 @@ describe('Bones plugin manifest', () => {
   test('associates the Bones panel with the plugin', () => {
     expect(bonesHostPanel.pluginId).toBe(bonesPlugin.id)
     expect(bonesHostPanel.defaultInstalled).toBe(true)
-    expect(bonesHostPanel.pluginUrl).toBe('https://github.com/Snoopy147/plugin-bones')
+    expect(bonesHostPanel.pluginUrl).toBe('https://github.com/pascalorg/plugin-bones')
   })
 })
 

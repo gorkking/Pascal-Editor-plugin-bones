@@ -1,14 +1,14 @@
 {
-  "name": "@bones/pascal-plugin",
+  "name": "@pascal-app/plugin-bones",
   "version": "0.1.0",
-  "description": "Bones — structural framing for Pascal. Dimensional lumber members today; full wall/floor/roof framing inference (studs, plates, headers, joists, rafters) from any Pascal house next.",
+  "description": "Bones \u2014 structural framing for Pascal. Dimensional lumber members today; full wall/floor/roof framing inference (studs, plates, headers, joists, rafters) from any Pascal house next.",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Snoopy147/plugin-bones.git"
+    "url": "git+https://github.com/pascalorg/plugin-bones.git"
   },
-  "homepage": "https://github.com/Snoopy147/plugin-bones",
+  "homepage": "https://github.com/pascalorg/plugin-bones",
   "bugs": {
-    "url": "https://github.com/Snoopy147/plugin-bones/issues"
+    "url": "https://github.com/pascalorg/plugin-bones/issues"
   },
   "type": "module",
   "main": "./src/index.ts",

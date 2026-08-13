@@ -24,13 +24,13 @@ type PluginHostPanel = {
  * Framing inference kinds (`bones:framing`, …) land next — see SPEC.md.
  */
 export const bonesPlugin: Plugin = {
-  id: 'snoopy:bones',
+  id: 'pascal:bones',
   apiVersion: 1,
   nodes: [lumberDefinition as unknown as AnyNodeDefinition],
 }
 
 export const bonesHostPanel: PluginHostPanel = {
-  id: 'snoopy:bones:panel',
+  id: 'pascal:bones:panel',
   label: 'Bones',
   icon: { kind: 'url', src: BONES_ICON },
   component: () => import('./panel'),
@@ -41,7 +41,7 @@ export const bonesHostPanel: PluginHostPanel = {
     name: 'Julien Brissonneau',
     url: 'https://github.com/Snoopy147',
   },
-  pluginUrl: 'https://github.com/Snoopy147/plugin-bones',
+  pluginUrl: 'https://github.com/pascalorg/plugin-bones',
   defaultInstalled: true,
 }
 
