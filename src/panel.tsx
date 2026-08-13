@@ -3,7 +3,7 @@
 import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
 import { SegmentedControl, SliderControl, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
 import { FramingNode, type WallConstruction } from './framing/schema'
 import { computeTakeoff, takeoffCsv } from './engines/takeoff'
@@ -86,7 +86,10 @@ function XraySection({
     return computeLevel(nodes as Record<string, Record<string, unknown>>, framingNode)
   }, [nodes, framingNode])
 
-  const guess = useMemo(() => guessJurisdiction(), [])
+  // Client-only guess: the timezone differs between SSR and browser, which
+  // would desync hydration — render a stable label first, fill in on mount.
+  const [guess, setGuess] = useState<{ code: string; reason: string } | null>(null)
+  useEffect(() => setGuess(guessJurisdiction()), [])
   const options = useMemo(() => jurisdictionOptions(), [])
 
   const toggle = (key: keyof FramingNode) => {
@@ -149,7 +152,7 @@ function XraySection({
           }
           value={framingNode.jurisdiction}
         >
-          <option value="AUTO">Auto — {guess.code} ({guess.reason})</option>
+          <option value="AUTO">{guess ? `Auto — ${guess.code} (${guess.reason})` : 'Auto'}</option>
           {options.map((o) => (
             <option key={o.code} value={o.code}>
               {o.name}
@@ -200,6 +203,7 @@ function XraySection({
             ['showRoof', 'Roof'],
             ['showFoundation', 'Foundation'],
             ['showElectrical', 'Electrical'],
+            ['seeThrough', 'X-ray vision'],
           ] as const
         ).map(([key, label]) => (
           <button

@@ -35,6 +35,8 @@ export const FramingNode = BaseNode.extend({
   showHvac: z.boolean().default(false),
   /** Fade the architectural shell: 0 = skeleton only (future host affordance). */
   xray: z.number().min(0).max(1).default(1),
+  /** X-ray vision: draw the skeleton through walls/finishes (depth-test off). */
+  seeThrough: z.boolean().default(true),
   /** Per-wall construction overrides, keyed by wall id. */
   wallOverrides: z.record(z.string(), WallConstruction).default({}),
 }).describe(

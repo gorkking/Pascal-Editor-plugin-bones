@@ -68,7 +68,7 @@ function fixtureBox(fixture: Fixture): { dims: [number, number, number]; color: 
 
 type Bucket = { color: string; entries: { dims: readonly [number, number, number]; position: readonly [number, number, number]; rotation: readonly [number, number, number] }[] }
 
-function buildGroup(members: Member[], fixtures: Fixture[]): Group {
+function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: boolean): Group {
   const buckets = new Map<string, Bucket>()
   const push = (
     color: string,
@@ -101,8 +101,15 @@ function buildGroup(members: Member[], fixtures: Fixture[]): Group {
   const euler = new Euler()
 
   for (const bucket of buckets.values()) {
-    const material = new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 })
+    // X-ray vision: skip the depth test and draw late so the skeleton reads
+    // through walls and finishes — the whole point of an engineering view.
+    const material = new MeshStandardMaterial({
+      color: bucket.color,
+      roughness: 0.82,
+      ...(seeThrough ? { depthTest: false, transparent: true, opacity: 0.92 } : {}),
+    })
     const mesh = new InstancedMesh(unitBox, material, bucket.entries.length)
+    if (seeThrough) mesh.renderOrder = 999
     bucket.entries.forEach((entry, i) => {
       euler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
       quaternion.setFromEuler(euler)
@@ -146,7 +153,10 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     [nodes, node],
   )
 
-  const group = useMemo(() => buildGroup(result.members, result.fixtures), [result])
+  const group = useMemo(
+    () => buildGroup(result.members, result.fixtures, node.seeThrough !== false),
+    [result, node.seeThrough],
+  )
   useEffect(() => () => disposeGroup(group), [group])
 
   if (!node.visible) return null
