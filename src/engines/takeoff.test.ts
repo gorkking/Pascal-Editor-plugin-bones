@@ -214,10 +214,27 @@ describe('concrete', () => {
     expect(find(rows, 'Concrete')).toEqual({
       section: 'Foundation',
       item: 'Concrete',
-      detail: 'footings/stem/lintels',
+      detail: 'footings',
       quantity: 2.6,
       unit: 'yd³',
     })
+  })
+
+  test('foundation pours split by ELEMENT: footing / stemwall / slab edge', () => {
+    const rows = computeTakeoff(
+      [
+        concrete([2, 0.5, 1]), // footing, 1 m³
+        concrete([2, 0.4, 0.5], { role: 'stemwall' }), // 0.4 m³
+        concrete([2, 0.3, 0.3], { role: 'slab-edge' }), // 0.18 m³
+      ],
+      [],
+    )
+    expect(find(rows, 'Concrete', 'footings')?.quantity).toBeCloseTo(1.3, 5)
+    expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBeCloseTo(0.5, 5)
+    expect(find(rows, 'Concrete', 'slab edge')?.quantity).toBeCloseTo(0.2, 5)
+    for (const detail of ['footings', 'stemwalls', 'slab edge']) {
+      expect(find(rows, 'Concrete', detail)?.section).toBe('Foundation')
+    }
   })
 
   test('CMU blocks are counted each and excluded from the poured yardage', () => {
@@ -228,13 +245,18 @@ describe('concrete', () => {
     expect(find(rows, 'Concrete')).toBeUndefined() // blocks alone pour nothing
   })
 
-  test('lintels (concrete, non-block) contribute volume alongside footings', () => {
+  test('non-foundation pours (CMU lintels) pool per their own section', () => {
     const rows = computeTakeoff(
-      [concrete([2, 0.5, 1]), concrete([1.2, 0.19, 0.19], { role: 'lintel' })],
+      [
+        concrete([2, 0.5, 1]), // foundation footing
+        concrete([1.2, 0.19, 0.19], { role: 'lintel', system: 'wall-framing' }),
+      ],
       [],
     )
-    // 1 + 0.04332 = 1.04332 m³ × 1.30795 = 1.3646 → 1.4
-    expect(find(rows, 'Concrete')?.quantity).toBeCloseTo(1.4, 5)
+    expect(find(rows, 'Concrete', 'footings')?.section).toBe('Foundation')
+    const lintelRow = find(rows, 'Concrete', 'lintels/beams')
+    expect(lintelRow?.section).toBe('Wall framing')
+    expect(lintelRow?.quantity).toBe(0.1) // 0.0433 m³ floors at the 0.1 yd³ batch
   })
 
   test('a real but tiny pour never rounds to 0.0 yd³', () => {
@@ -332,7 +354,9 @@ describe('fixtures', () => {
   test('absent kinds emit no row', () => {
     const rows = computeTakeoff([], [fixture('receptacle')])
     expect(find(rows, 'Switches')).toBeUndefined()
-    expect(rows).toHaveLength(1)
+    // one device row + its 1-gang box row
+    expect(rows).toHaveLength(2)
+    expect(find(rows, 'Device boxes (1-gang)')?.quantity).toBe(1)
   })
 })
 
@@ -634,5 +658,112 @@ describe('cutList — every wood member, exact lengths, grouped', () => {
     const csv = cutListCsv(cutList([lumber('2x4', 2.4384)]))
     expect(csv.split('\n')[0]).toBe('section,size,role,length,qty')
     expect(csv.split('\n')[1]).toContain('Wall framing,2x4,stud')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round-2 fabrication gaps (fittings, boxes, split nail gauges)
+// ---------------------------------------------------------------------------
+
+describe('MEP fittings — elbows at each bend, boots, collars', () => {
+  const pipeLeg = (sourceId: string, i: number) =>
+    mem({
+      system: 'plumbing' as const,
+      role: 'pipe-run' as const,
+      material: 'pvc' as const,
+      size: undefined,
+      dims: [1 + i * 0.1, 0.0508, 0.0508], // 2" pipe legs
+      length: 1 + i * 0.1,
+      sourceId,
+    })
+
+  test('a chain of n pipe legs yields n−1 elbows, grouped by size', () => {
+    // room A routes in 3 legs (2 bends), room B in 2 legs (1 bend)
+    const rows = computeTakeoff(
+      [pipeLeg('r_a', 0), pipeLeg('r_a', 1), pipeLeg('r_a', 2), pipeLeg('r_b', 0), pipeLeg('r_b', 1)],
+      [],
+    )
+    const elbows = find(rows, 'PVC 2" fittings')
+    expect(elbows?.quantity).toBe(3) // 2 + 1
+    expect(elbows?.unit).toBe('pcs')
+    expect(elbows?.section).toBe('Plumbing')
+    expect(elbows?.detail).toContain('elbows')
+  })
+
+  test('single straight legs produce no fitting row', () => {
+    const rows = computeTakeoff([pipeLeg('r_a', 0)], [])
+    expect(find(rows, 'PVC 2" fittings')).toBeUndefined()
+  })
+
+  test('duct bends, register boots, and takeoff collars are counted', () => {
+    const trunkLeg = (i: number) =>
+      mem({
+        system: 'hvac' as const,
+        role: 'duct-run' as const,
+        material: 'duct' as const,
+        size: undefined,
+        dims: [2, 0.2032, 0.3556], // 14×8
+        length: 2,
+        sourceId: 'r_equip',
+      })
+    const branchLeg = (room: string) =>
+      mem({
+        system: 'hvac' as const,
+        role: 'duct-run' as const,
+        material: 'duct' as const,
+        size: undefined,
+        dims: [1.5, 0.1524, 0.1524], // 6" round
+        length: 1.5,
+        sourceId: room,
+      })
+    const rows = computeTakeoff(
+      [trunkLeg(0), trunkLeg(1), branchLeg('r_bed'), branchLeg('r_kitchen')],
+      [
+        fixture('register', { system: 'hvac', sourceId: 'r_bed' }),
+        fixture('register', { system: 'hvac', sourceId: 'r_kitchen' }),
+      ],
+    )
+    expect(find(rows, 'Duct 14×8" fittings')?.quantity).toBe(1) // 2 trunk legs → 1 bend
+    expect(find(rows, 'Register boots')?.quantity).toBe(2)
+    expect(find(rows, 'Takeoff collars')?.quantity).toBe(2) // 2 branch chains
+    expect(find(rows, 'Register boots')?.section).toBe('HVAC')
+  })
+})
+
+describe('electrical boxes by type', () => {
+  test('gang boxes, ceiling boxes, and panel cans from fixture kinds', () => {
+    const rows = computeTakeoff(
+      [],
+      [
+        fixture('receptacle'),
+        fixture('receptacle-gfci'),
+        fixture('switch'),
+        fixture('light'),
+        fixture('smoke-alarm'),
+        fixture('panel'),
+      ],
+    )
+    expect(find(rows, 'Device boxes (1-gang)')?.quantity).toBe(3)
+    expect(find(rows, 'Ceiling boxes')?.quantity).toBe(2)
+    expect(find(rows, 'Panel cans')?.quantity).toBe(1)
+    for (const item of ['Device boxes (1-gang)', 'Ceiling boxes', 'Panel cans']) {
+      expect(find(rows, item)?.section).toBe('Electrical')
+    }
+  })
+})
+
+describe('fastener gauges split per the R602.3(1) schedule', () => {
+  test('a joist books 16d rim nails AND 10d toe-nails (pinning test)', () => {
+    const joist = lumber('2x10', 3.5, { system: 'floor-framing', role: 'joist' })
+    const rows = computeTakeoff([joist], [])
+    expect(find(rows, 'Nails 16d common')?.detail).toContain('3 nails')
+    expect(find(rows, 'Nails 10d common')?.detail).toContain('3 nails')
+  })
+
+  test('a rafter books 16d at the ridge AND 10d at the plate — never 6×16d', () => {
+    const rafter = lumber('2x6', 4.2, { system: 'roof-framing', role: 'rafter' })
+    const rows = computeTakeoff([rafter], [])
+    expect(find(rows, 'Nails 16d common')?.detail).toContain('3 nails')
+    expect(find(rows, 'Nails 10d common')?.detail).toContain('3 nails')
   })
 })

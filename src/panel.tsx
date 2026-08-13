@@ -6,7 +6,7 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
 import { FramingNode, type WallConstruction } from './framing/schema'
-import { computeTakeoff, takeoffCsv } from './engines/takeoff'
+import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
 import { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, type LumberSize } from './lumber'
@@ -295,13 +295,25 @@ function TakeoffSection({ result }: { result: NonNullable<ReturnType<typeof comp
     <div className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between">
         <span className="font-medium text-xs">Takeoff</span>
-        <button
-          className="rounded-md border border-sidebar-border/60 px-2 py-0.5 text-[10px] text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent"
-          onClick={() => navigator.clipboard?.writeText(takeoffCsv(rows))}
-          type="button"
-        >
-          Copy CSV
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            className="rounded-md border border-sidebar-border/60 px-2 py-0.5 text-[10px] text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent"
+            onClick={() => navigator.clipboard?.writeText(takeoffCsv(rows))}
+            type="button"
+          >
+            Copy CSV
+          </button>
+          <button
+            className="rounded-md border border-sidebar-border/60 px-2 py-0.5 text-[10px] text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent"
+            onClick={() =>
+              navigator.clipboard?.writeText(cutListCsv(cutList(result.members)))
+            }
+            title="Every wood member: size × exact cut length × qty"
+            type="button"
+          >
+            Copy cut list
+          </button>
+        </div>
       </div>
       <div className="flex max-h-80 flex-col gap-1 overflow-y-auto pr-1">
         {sections.map(([section, sectionRows], index) => (

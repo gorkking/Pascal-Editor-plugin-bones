@@ -152,34 +152,43 @@ const round1 = (n: number): number => Math.round(n * 10) / 10
 type NailType = keyof typeof fastening.nails
 
 /**
- * One representative connection per member role (the schedule's most
- * load-bearing line for that role). ASSUMPTION: roles with several real
- * connections (a joist is end-nailed AND toe-nailed) count the primary one —
- * the takeoff under-counts slightly rather than double-counting.
+ * Fastening connections per member role, straight from the R602.3(1) data.
+ * Roles with several real connections carry several entries — a joist is
+ * end-nailed at the rim (16d) AND toe-nailed at its bearing (10d), a rafter
+ * takes 16d at the ridge and 10d toe-nails at the plate — so the per-gauge
+ * pounds match the schedule instead of over-weighting one nail type.
  */
-const ROLE_CONNECTION: Partial<
-  Record<Member['role'], { nail: NailType; count?: number; perFt?: number }>
-> = {
-  stud: { nail: '16d-common', count: 4 }, // 2 per end (stud-to-plate-end)
-  'king-stud': { nail: '16d-common', count: 4 },
-  cripple: { nail: '16d-common', count: 4 }, // cripple-to-plate
-  trimmer: { nail: '16d-common', perFt: 1.5 }, // trimmer-to-king
-  'bottom-plate': { nail: '16d-common', perFt: 0.75 },
-  'top-plate': { nail: '16d-common', perFt: 0.75 }, // doubleTopPlate-run
-  'cap-plate': { nail: '16d-common', perFt: 0.75 },
-  header: { nail: '16d-common', count: 8 }, // header-to-king, 4 per end
-  sill: { nail: '16d-common', count: 4 }, // sill-to-trimmer
-  'fire-blocking': { nail: '16d-common', count: 4 },
-  backing: { nail: '10d-common', count: 4 },
-  blocking: { nail: '10d-common', count: 4 }, // blocking-to-joist
-  joist: { nail: '16d-common', count: 3 }, // joist-to-rim
-  'rim-joist': { nail: '10d-common', count: 3 }, // joist-to-plate-toe
-  rafter: { nail: '16d-common', count: 6 }, // ridge (3) + plate toe (3)
-  'jack-rafter': { nail: '16d-common', count: 3 },
-  'collar-tie': { nail: '10d-common', count: 6 }, // 3 per end
-  'ceiling-joist': { nail: '10d-common', count: 6 }, // bearing + lap
-  outlooker: { nail: '10d-common', count: 4 },
-  fascia: { nail: '16d-common', perFt: 0.75 },
+type Connection = { nail: NailType; count?: number; perFt?: number }
+const ROLE_CONNECTIONS: Partial<Record<Member['role'], Connection[]>> = {
+  stud: [{ nail: '16d-common', count: 4 }], // 2 per end (stud-to-plate-end)
+  'king-stud': [{ nail: '16d-common', count: 4 }],
+  cripple: [{ nail: '16d-common', count: 4 }], // cripple-to-plate
+  trimmer: [{ nail: '16d-common', perFt: 1.5 }], // trimmer-to-king
+  'bottom-plate': [{ nail: '16d-common', perFt: 0.75 }],
+  'top-plate': [{ nail: '16d-common', perFt: 0.75 }], // doubleTopPlate-run
+  'cap-plate': [{ nail: '16d-common', perFt: 0.75 }],
+  header: [{ nail: '16d-common', count: 8 }], // header-to-king, 4 per end
+  sill: [{ nail: '16d-common', count: 4 }], // sill-to-trimmer
+  'fire-blocking': [{ nail: '16d-common', count: 4 }],
+  backing: [{ nail: '10d-common', count: 4 }],
+  blocking: [{ nail: '10d-common', count: 4 }], // blocking-to-joist
+  joist: [
+    { nail: '16d-common', count: 3 }, // joist-to-rim end nails
+    { nail: '10d-common', count: 3 }, // joist-to-plate toe-nails
+  ],
+  'rim-joist': [{ nail: '10d-common', count: 3 }], // joist-to-plate-toe
+  rafter: [
+    { nail: '16d-common', count: 3 }, // rafter-to-ridge
+    { nail: '10d-common', count: 3 }, // rafter-to-plate-toe
+  ],
+  'jack-rafter': [
+    { nail: '16d-common', count: 3 }, // cheek to hip/valley
+    { nail: '10d-common', count: 3 }, // plate toe
+  ],
+  'collar-tie': [{ nail: '10d-common', count: 6 }], // 3 per end
+  'ceiling-joist': [{ nail: '10d-common', count: 6 }], // bearing + lap
+  outlooker: [{ nail: '10d-common', count: 4 }],
+  fascia: [{ nail: '16d-common', perFt: 0.75 }],
 }
 
 /** Hardware nail loads (json `hardware` block). */
@@ -291,12 +300,12 @@ export function computeTakeoff(
     }
   }
 
-  // Framing nails from the member counts (one connection per role).
+  // Framing nails from the member counts (per-role connection list).
   for (const m of members) {
     if (!WOOD_MATERIALS.has(m.material)) continue
-    const conn = ROLE_CONNECTION[m.role]
-    if (!conn) continue
-    addNails(conn.nail, conn.count ?? Math.ceil((conn.perFt ?? 0) * toFeet(m.length)))
+    for (const conn of ROLE_CONNECTIONS[m.role] ?? []) {
+      addNails(conn.nail, conn.count ?? Math.ceil((conn.perFt ?? 0) * toFeet(m.length)))
+    }
   }
 
   // ---- SHEATHING: 4x8 sheet counts from gross areas ----
@@ -316,7 +325,15 @@ export function computeTakeoff(
   }
 
   // ---- CONCRETE + MASONRY per system ----
-  const concreteBySection = new Map<string, number>()
+  // Foundation pours split by ELEMENT (footing / stemwall / slab edge /
+  // other) so each can be ordered and formed separately; other systems'
+  // pours (CMU lintels, bond beams) stay pooled per section.
+  const FOUNDATION_POUR: Partial<Record<Member['role'], string>> = {
+    footing: 'footings',
+    stemwall: 'stemwalls',
+    'slab-edge': 'slab edge',
+  }
+  const concretePours = new Map<string, { section: string; detail: string; m3: number }>()
   let blockCount = 0
   let groutedCells = 0
   for (const m of members) {
@@ -327,16 +344,19 @@ export function computeTakeoff(
       continue
     }
     const section = SECTION_OF[m.system]
-    concreteBySection.set(
-      section,
-      (concreteBySection.get(section) ?? 0) + m.dims[0] * m.dims[1] * m.dims[2],
-    )
+    const detail =
+      section === 'Foundation'
+        ? (FOUNDATION_POUR[m.role] ?? 'other pours')
+        : 'lintels/beams'
+    const key = `${section}|${detail}`
+    const pour = concretePours.get(key) ?? { section, detail, m3: 0 }
+    pour.m3 += m.dims[0] * m.dims[1] * m.dims[2]
+    concretePours.set(key, pour)
   }
-  for (const section of SECTION_ORDER) {
-    const m3 = concreteBySection.get(section)
-    if (!m3 || m3 <= 0) continue
+  for (const pour of concretePours.values()) {
+    if (pour.m3 <= 0) continue
     // Ready-mix trucks batch to 0.1 yd³; never show a real pour as 0.0.
-    push(section, 'Concrete', 'footings/stem/lintels', Math.max(0.1, round1(m3 * M3_TO_YD3)), 'yd³')
+    push(pour.section, 'Concrete', pour.detail, Math.max(0.1, round1(pour.m3 * M3_TO_YD3)), 'yd³')
   }
   if (blockCount > 0) {
     push('Wall framing', 'CMU block', '8x8x16 running bond', blockCount, 'pcs')
@@ -444,6 +464,76 @@ export function computeTakeoff(
   for (const [gauge, lf] of wireTallies) {
     push('Electrical', `NM-B ${gauge}/2 w/G`, 'homeruns + branch chains', round1(lf), 'lf')
   }
+
+  // ---- MEP fittings (LOD 400): elbows at each bend, boots, collars ----
+  // Every direction change between consecutive legs of one routed chain is a
+  // fitting. Chains are identified by sourceId (the engines route per room /
+  // per circuit); a chain of n legs carries n−1 bends. ESTIMATE by
+  // construction — couplings on straight >20ft sticks are not counted.
+  const fittingChains = new Map<string, { section: string; item: string; legs: number }>()
+  for (const m of members) {
+    if (m.role === 'pipe-run') {
+      const sizeIn = Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
+      const materialName = m.material === 'copper' ? 'Copper' : m.material === 'pvc' ? 'PVC' : 'Pipe'
+      const key = `${m.system}|${materialName}|${sizeIn}|${m.sourceId}`
+      const chain = fittingChains.get(key) ?? {
+        section: SECTION_OF[m.system],
+        item: `${materialName} ${sizeIn}" fittings`,
+        legs: 0,
+      }
+      chain.legs += 1
+      fittingChains.set(key, chain)
+    } else if (m.role === 'duct-run') {
+      const w = Math.round(m.dims[2] / 0.0254)
+      const h = Math.round(m.dims[1] / 0.0254)
+      const item = w === h ? `Duct ${w}" fittings` : `Duct ${w}×${h}" fittings`
+      const key = `${m.system}|${item}|${m.sourceId}`
+      const chain = fittingChains.get(key) ?? { section: SECTION_OF[m.system], item, legs: 0 }
+      chain.legs += 1
+      fittingChains.set(key, chain)
+    }
+  }
+  const fittingRows = new Map<string, { section: string; item: string; count: number }>()
+  for (const chain of fittingChains.values()) {
+    const bends = Math.max(0, chain.legs - 1)
+    if (bends === 0) continue
+    const key = `${chain.section}|${chain.item}`
+    const row = fittingRows.get(key) ?? { section: chain.section, item: chain.item, count: 0 }
+    row.count += bends
+    fittingRows.set(key, row)
+  }
+  for (const row of fittingRows.values()) {
+    push(row.section, row.item, 'elbows at bends (est.)', row.count, 'pcs')
+  }
+  // Register boots (one per supply register) + takeoff collars (one per
+  // branch tap = per distinct round-duct chain) — counted from fixtures and
+  // chain topology, never labels.
+  const registerCount = fixtures.filter((f) => f.kind === 'register').length
+  if (registerCount > 0) {
+    push('HVAC', 'Register boots', 'one per supply register', registerCount, 'pcs')
+    const branchChains = new Set<string>()
+    for (const m of members) {
+      if (m.role !== 'duct-run') continue
+      const w = Math.round(m.dims[2] / 0.0254)
+      const h = Math.round(m.dims[1] / 0.0254)
+      if (w === h) branchChains.add(m.sourceId) // round duct = branch run
+    }
+    if (branchChains.size > 0) {
+      push('HVAC', 'Takeoff collars', 'one per trunk branch tap', branchChains.size, 'pcs')
+    }
+  }
+
+  // ---- Electrical boxes by type (LOD 400) — derived from fixture kinds ----
+  const gangBoxes = fixtures.filter(
+    (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
+  ).length
+  const ceilingBoxes = fixtures.filter(
+    (f) => f.kind === 'light' || f.kind === 'smoke-alarm',
+  ).length
+  const panelCans = fixtures.filter((f) => f.kind === 'panel').length
+  if (gangBoxes > 0) push('Electrical', 'Device boxes (1-gang)', 'receptacles + switches', gangBoxes, 'pcs')
+  if (ceilingBoxes > 0) push('Electrical', 'Ceiling boxes', 'lights + smoke alarms', ceilingBoxes, 'pcs')
+  if (panelCans > 0) push('Electrical', 'Panel cans', 'load center enclosures', panelCans, 'pcs')
 
   // ---- Electrical circuits (panel schedule) ----
   for (const circuit of circuitSchedule(fixtures)) {

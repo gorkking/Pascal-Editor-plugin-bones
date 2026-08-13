@@ -15,6 +15,12 @@
  * LOD 400 (detail === '400') adds:
  *   3×3×0.229" plate washers on every anchor bolt in SDC D (R602.11.1).
  *
+ * STEMWALL STEP-DOWNS — documented N/A: Pascal levels are flat planes
+ * (level-local y = 0 is the whole plate line) and the scene carries no
+ * grade/terrain data, so stepped footings on sloped sites (R403.1.5) cannot
+ * be derived. Every run is emitted at one elevation; when the host gains a
+ * terrain model, step detection belongs in cornerExtensions' pass.
+ *
  * Geometry convention matches wall-framing.ts exactly: each wall gets a
  * local frame with X along the wall (from `start`), Y up, Z across the
  * thickness; every member is an axis-aligned box in that frame, so the
