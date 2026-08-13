@@ -73,14 +73,19 @@ export function computeLevel(
   const members: Member[] = []
   const fixtures: Fixture[] = []
 
+  // A wall overridden to 'skip' is excluded from EVERY system — no framing,
+  // no foundation under it, no devices on it. It's "not real construction".
+  const activeWalls = walls.filter(
+    (wall) => wallConstruction(wall, config, profile.exteriorWallDefault) !== 'skip',
+  )
+
   if (config.showWalls) {
-    for (const wall of walls) {
+    for (const wall of activeWalls) {
       if (wall.curved) {
         warnings.push(`Curved wall skipped (framing for curved walls lands later)`)
         continue
       }
       const construction = wallConstruction(wall, config, profile.exteriorWallDefault)
-      if (construction === 'skip') continue
       members.push(...(construction === 'cmu' ? cmuWall(wall, spec) : frameWall(wall, spec)))
     }
   }
@@ -91,25 +96,25 @@ export function computeLevel(
 
   if (config.showRoof) {
     const roofs = extractRoofs(nodes, levelId)
-    members.push(...frameRoofs(roofs, walls, spec))
+    members.push(...frameRoofs(roofs, activeWalls, spec))
   }
 
   if (config.showFoundation && isGroundLevel) {
-    members.push(...buildFoundation(walls, slabs, spec))
+    members.push(...buildFoundation(activeWalls, slabs, spec))
   }
 
   if (config.showElectrical) {
-    fixtures.push(...layoutElectrical(walls, rooms))
+    fixtures.push(...layoutElectrical(activeWalls, rooms))
   }
 
   if (config.showPlumbing) {
-    const plumbing = layoutPlumbing(walls, rooms, spec)
+    const plumbing = layoutPlumbing(activeWalls, rooms, spec)
     members.push(...plumbing.members)
     fixtures.push(...plumbing.fixtures)
   }
 
   if (config.showHvac) {
-    const hvac = layoutHvac(walls, rooms, spec)
+    const hvac = layoutHvac(activeWalls, rooms, spec)
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
   }
