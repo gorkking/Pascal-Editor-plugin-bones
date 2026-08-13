@@ -448,14 +448,25 @@ describe('frameRoofs — rake framing + fascia (LOD 350/400)', () => {
     expect(byRole(frameRoofs([seg({ overhang: 0.05 })], [], DEFAULT_SPEC), 'outlooker')).toHaveLength(0)
   })
 
-  test('sub-fascia at 400 only: 2 on a gable, 4 around a hip', () => {
+  test('fascia at 400 only: sub + FINISH pairs — 4 on a gable, 8 around a hip', () => {
     expect(byRole(frameRoofs([roof], [], DEFAULT_SPEC), 'fascia')).toHaveLength(0)
     const at400 = frameRoofs([roof], [], { ...DEFAULT_SPEC, detail: '400' })
     const gableFascia = byRole(at400, 'fascia')
-    expect(gableFascia).toHaveLength(2)
-    expect((gableFascia[0] as Member).length).toBeCloseTo(8.6, 5)
+    expect(gableFascia).toHaveLength(4) // 2 eaves × (sub + finish)
+    const subs = gableFascia.filter((f) => f.label?.includes('Sub-fascia'))
+    const finish = gableFascia.filter((f) => f.label?.includes('finish'))
+    expect(subs).toHaveLength(2)
+    expect(finish).toHaveLength(2)
+    expect((subs[0] as Member).length).toBeCloseTo(8.6, 5)
+    // the finish 1x8 sits proud of the sub's face: (1.5" + 0.75")/2 outward
+    const sub = subs.find((f) => (f.position[2] as number) > 0) as Member
+    const fin = finish.find((f) => (f.position[2] as number) > 0) as Member
+    const proud = ((1.5 + 0.75) / 2) * 0.0254
+    expect((fin.position[2] as number) - (sub.position[2] as number)).toBeCloseTo(proud, 6)
+    expect(fin.dims[1]).toBeCloseTo(7.25 * 0.0254, 6) // 1x8 face
+    expect(fin.dims[2]).toBeCloseTo(0.75 * 0.0254, 6)
     const hip400 = frameRoofs([seg({ roofType: 'hip' })], [], { ...DEFAULT_SPEC, detail: '400' })
-    expect(byRole(hip400, 'fascia')).toHaveLength(4)
+    expect(byRole(hip400, 'fascia')).toHaveLength(8)
   })
 })
 
@@ -481,5 +492,60 @@ describe('frameRoofs — spec-driven sizing + cut data (LOD 400)', () => {
     // 300 keeps the labels clean
     const at300 = frameRoofs([seg()], [], DEFAULT_SPEC)
     expect((byRole(at300, 'rafter')[0] as Member).label).not.toContain('HAP')
+  })
+})
+
+describe('frameRoofs — valley jacks land on the valley (round-2 gap)', () => {
+  const major = seg() // 8 × 6, ridge on X, run 3
+  const minor = seg({
+    id: 'roofseg_wing',
+    width: 4,
+    depth: 4,
+    yaw: Math.PI / 2,
+    position: [1, 2.5, 4],
+  })
+  const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+  const jacks = byRole(members, 'jack-rafter').filter((j) => j.label?.includes('Valley jack'))
+  const baseY = 2.5 + 0.5
+  const rise2 = 2 * Math.tan(major.pitch)
+
+  test('jacks exist on both sides of the wing ridge, top on the ridge, bottom ON the valley', () => {
+    expect(jacks.length).toBeGreaterThanOrEqual(4)
+    for (const j of jacks) {
+      const axis = longAxis(j)
+      const e1 = new Vector3(...j.position).add(axis.clone().multiplyScalar(j.length / 2))
+      const e2 = new Vector3(...j.position).sub(axis.clone().multiplyScalar(j.length / 2))
+      const top = e1.y > e2.y ? e1 : e2
+      const bot = e1.y > e2.y ? e2 : e1
+      // top on the wing ridge line (x = 1 at the wing ridge height)
+      expect(top.x).toBeCloseTo(1, 5)
+      expect(top.y).toBeCloseTo(baseY + rise2, 5)
+      // bottom on the valley: the valley plan line runs 45° from the apex
+      // (1, 1) to the foot (3, 3) — x-offset from the wing ridge = z − z*
+      expect(Math.abs(bot.x - 1)).toBeCloseTo(bot.z - 1, 4)
+      // and on the major slope plane: y = eave + (run1 − z)·tanθ
+      expect(bot.y).toBeCloseTo(baseY + (3 - bot.z) * Math.tan(major.pitch), 4)
+    }
+  })
+
+  test('jacks shorten toward the apex', () => {
+    const bySide = jacks.filter((j) => (j.position[0] as number) > 1)
+    const sorted = bySide.sort((a, b) => (a.position[2] as number) - (b.position[2] as number))
+    for (let i = 1; i < sorted.length; i++) {
+      expect((sorted[i] as Member).length).toBeGreaterThan((sorted[i - 1] as Member).length)
+    }
+  })
+})
+
+describe('frameRoofs — hip jacks carry hurricane ties in high-wind specs', () => {
+  test('every bearing rafter on a hip (commons, kings, jacks) gets a tie', () => {
+    const windy = frameRoofs([seg({ roofType: 'hip' })], [], {
+      ...DEFAULT_SPEC,
+      hurricaneTies: true,
+    })
+    const ties = windy.filter((m) => m.label === 'hurricane tie')
+    const bearing =
+      byRole(windy, 'rafter').length + byRole(windy, 'jack-rafter').length
+    expect(ties.length).toBe(bearing)
   })
 })
