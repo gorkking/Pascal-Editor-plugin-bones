@@ -10,7 +10,7 @@ import type { Fixture, Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { extractLevels, extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
 import { cmuWalls } from '../engines/cmu'
-import { layoutElectrical } from '../engines/electrical'
+import { layoutElectrical, routeWiring } from '../engines/electrical'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
@@ -126,7 +126,10 @@ export function computeLevel(
   }
 
   if (config.showElectrical) {
-    fixtures.push(...layoutElectrical(activeWalls, activeRooms))
+    const electrical = layoutElectrical(activeWalls, activeRooms)
+    fixtures.push(...electrical)
+    // LOD 400: homerun + branch wiring as geometry, converging on the panel.
+    if (spec.detail === '400') members.push(...routeWiring(electrical))
   }
 
   if (config.showPlumbing) {

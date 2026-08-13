@@ -570,3 +570,276 @@ describe('count sanity — two-room plan (living + kitchen)', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Round-1 fabrication features (circuits, panel schedule, 3-way, wiring)
+// ---------------------------------------------------------------------------
+
+import { assignCircuits, circuitSchedule, polygonArea, routeWiring } from './electrical'
+
+/** The two-room shell again, plus a bathroom strip — enough category variety. */
+function circuitPlan() {
+  const south = makeWall({
+    id: 'w_south',
+    start: [0, 0],
+    end: [8, 0],
+    exterior: true,
+    openings: [door(6, 0.9, 'door_entry')],
+  })
+  const east = makeWall({ id: 'w_east', start: [8, 0], end: [8, 4], exterior: true })
+  const north = makeWall({ id: 'w_north', start: [8, 4], end: [0, 4], exterior: true })
+  const west = makeWall({ id: 'w_west', start: [0, 4], end: [0, 0], exterior: true })
+  const divider = makeWall({
+    id: 'w_div',
+    start: [3.5, 0],
+    end: [3.5, 4],
+    openings: [door(2, 0.9, 'door_kitchen')],
+  })
+  const living = room('other', [
+    [0, 0],
+    [3.5, 0],
+    [3.5, 4],
+    [0, 4],
+  ], { id: 'room_living' })
+  const kitchen = room('kitchen', [
+    [3.5, 0],
+    [8, 0],
+    [8, 4],
+    [3.5, 4],
+  ], { id: 'room_kitchen' })
+  const walls = [south, east, north, west, divider]
+  const rooms = [living, kitchen]
+  return { walls, rooms, fixtures: layoutElectrical(walls, rooms) }
+}
+
+describe('circuiting — NEC 210.11 required circuits in fixture.meta', () => {
+  const { fixtures } = circuitPlan()
+
+  test('kitchen receptacles alternate across BOTH small-appliance circuits at 20A/12AWG', () => {
+    const kitchenRecs = receptaclesOf(fixtures).filter((r) => (r.position[0] ?? 0) > 3.51)
+    expect(kitchenRecs.length).toBeGreaterThanOrEqual(4)
+    const circuits = new Set(kitchenRecs.map((r) => r.meta?.circuit))
+    expect(circuits).toEqual(new Set(['SA-1', 'SA-2']))
+    for (const r of kitchenRecs) {
+      expect(r.meta?.breakerA).toBe(20)
+      expect(r.meta?.gaugeAwg).toBe(12)
+      expect(r.meta?.va).toBe(180)
+      expect(r.meta?.gfci).toBe(true)
+      expect(r.meta?.afci).toBe(true)
+    }
+  })
+
+  test('general receptacles fill GEN-1 at 15A/14AWG', () => {
+    const livingRecs = receptaclesOf(fixtures).filter((r) => (r.position[0] ?? 0) < 3.49)
+    expect(livingRecs.length).toBeGreaterThan(0)
+    for (const r of livingRecs) {
+      expect(r.meta?.circuit).toBe('GEN-1')
+      expect(r.meta?.breakerA).toBe(15)
+      expect(r.meta?.gaugeAwg).toBe(14)
+      expect(r.meta?.afci).toBe(true)
+      expect(r.meta?.gfci).toBeUndefined()
+    }
+  })
+
+  test('a 9th general receptacle spills into GEN-2', () => {
+    const fixtures: Fixture[] = Array.from({ length: 9 }, (_, i) => ({
+      system: 'electrical' as const,
+      kind: 'receptacle' as const,
+      position: [i, 0.38, 0] as [number, number, number],
+      rotationY: 0,
+      sourceId: `w${i}`,
+    }))
+    assignCircuits(fixtures, [])
+    expect(fixtures[7]?.meta?.circuit).toBe('GEN-1')
+    expect(fixtures[8]?.meta?.circuit).toBe('GEN-2')
+  })
+
+  test('bathroom receptacles land on the dedicated 20A BA-1 (GFCI, no AFCI)', () => {
+    const bath = room('bathroom', [
+      [0, 0],
+      [3, 0],
+      [3, 2.5],
+      [0, 2.5],
+    ], { id: 'room_bath' })
+    const wall = makeWall({ id: 'w_b', start: [0, 0], end: [3, 0], exterior: true })
+    const fixtures = layoutElectrical([wall], [bath])
+    const recs = receptaclesOf(fixtures)
+    expect(recs.length).toBeGreaterThan(0)
+    for (const r of recs) {
+      expect(r.meta?.circuit).toBe('BA-1')
+      expect(r.meta?.breakerA).toBe(20)
+      expect(r.meta?.afci).toBeUndefined()
+      expect(r.meta?.gfci).toBe(true)
+    }
+  })
+
+  test('lights and their switches share the room lighting circuit; VA from 3VA/sqft', () => {
+    const { fixtures, rooms } = circuitPlan()
+    const light = ofKind(fixtures, 'light').find((l) => l.sourceId === 'room_kitchen')
+    expect(light?.meta?.circuit).toMatch(/^LTG-/)
+    // kitchen 4.5m × 4m = 18 m² = 193.75 ft² → 581 VA
+    expect(light?.meta?.va).toBe(Math.round(polygonArea(rooms[1]?.polygon ?? []) * 10.7639 * 3))
+    // the switch standing in the kitchen rides the same circuit
+    const kitchenSwitch = ofKind(fixtures, 'switch').find((s) => (s.position[0] ?? 0) > 3.51)
+    expect(kitchenSwitch?.meta?.circuit).toBe(light?.meta?.circuit)
+  })
+
+  test('big rooms split lighting circuits at ~1200 VA', () => {
+    const big1 = room('other', [
+      [0, 0],
+      [15, 0],
+      [15, 8],
+      [0, 8],
+    ], { id: 'r1' })
+    const big2 = room('other', [
+      [15, 0],
+      [30, 0],
+      [30, 8],
+      [15, 8],
+    ], { id: 'r2' })
+    const fixtures = layoutElectrical([], [big1, big2])
+    const lights = ofKind(fixtures, 'light')
+    expect(lights[0]?.meta?.circuit).toBe('LTG-1')
+    expect(lights[1]?.meta?.circuit).toBe('LTG-2')
+  })
+
+  test('panel meta counts the distinct circuits', () => {
+    const { fixtures } = circuitPlan()
+    const panel = ofKind(fixtures, 'panel')[0]
+    const distinct = new Set(
+      fixtures.filter((f) => f.kind !== 'panel' && f.meta?.circuit).map((f) => f.meta?.circuit),
+    )
+    expect(panel?.meta?.circuits).toBe(distinct.size)
+  })
+})
+
+describe('circuitSchedule — panel schedule rows', () => {
+  const { fixtures } = circuitPlan()
+  const schedule = circuitSchedule(fixtures)
+
+  test('one row per circuit, dedicated circuits sorted first', () => {
+    const names = schedule.map((r) => r.circuit)
+    expect(names[0]).toBe('SA-1')
+    expect(names[1]).toBe('SA-2')
+    expect(names).toContain('GEN-1')
+    expect(names[names.length - 1]).toMatch(/^LTG-/)
+  })
+
+  test('rows aggregate device counts and VA', () => {
+    const sa1 = schedule.find((r) => r.circuit === 'SA-1')
+    const sa2 = schedule.find((r) => r.circuit === 'SA-2')
+    // 8 kitchen receptacles alternate → 4 + 4
+    expect((sa1?.devices ?? 0) + (sa2?.devices ?? 0)).toBe(8)
+    expect(sa1?.va).toBe((sa1?.devices ?? 0) * 180)
+    expect(sa1?.breakerA).toBe(20)
+    expect(sa1?.gaugeAwg).toBe(12)
+    expect(sa1?.gfci).toBe(true)
+    const gen = schedule.find((r) => r.circuit === 'GEN-1')
+    expect(gen?.afci).toBe(true)
+    expect(gen?.gaugeAwg).toBe(14)
+  })
+})
+
+describe('3-way switching — rooms with 2+ entries', () => {
+  test('a room with two doors gets a 3-way pair; single-door rooms stay 2-way', () => {
+    // Living room with doors in the south wall AND the divider: both switch
+    // faces land inside it.
+    const south = makeWall({
+      id: 'w_south',
+      start: [0, 0],
+      end: [8, 0],
+      exterior: true,
+      openings: [door(1.5, 0.9, 'door_front')],
+    })
+    const divider = makeWall({
+      id: 'w_div',
+      start: [3.5, 0],
+      end: [3.5, 4],
+      openings: [door(2, 0.9, 'door_side')],
+    })
+    const north = makeWall({ id: 'w_north', start: [8, 4], end: [0, 4], exterior: true })
+    const living = room('other', [
+      [0, 0],
+      [3.5, 0],
+      [3.5, 4],
+      [0, 4],
+    ], { id: 'room_l', name: 'living' })
+    const den = room('other', [
+      [3.5, 0],
+      [8, 0],
+      [8, 4],
+      [3.5, 4],
+    ], { id: 'room_d' })
+    const fixtures = layoutElectrical([south, divider, north], [living, den])
+    const inLiving = ofKind(fixtures, 'switch').filter(
+      (s) => (s.position[0] ?? 0) < 3.5 && pointInPolygon([s.position[0], s.position[2]], living.polygon),
+    )
+    expect(inLiving.length).toBeGreaterThanOrEqual(2)
+    for (const s of inLiving) {
+      expect(s.meta?.threeWay).toBe(true)
+      expect(s.label).toContain('3-way')
+    }
+    // the den has only the divider door's switch → stays 2-way
+    const inDen = ofKind(fixtures, 'switch').filter((s) =>
+      pointInPolygon([s.position[0], s.position[2]], den.polygon),
+    )
+    expect(inDen).toHaveLength(1)
+    expect(inDen[0]?.meta?.threeWay).toBeUndefined()
+  })
+})
+
+describe('routeWiring — LOD 400 homerun + branch geometry', () => {
+  const { fixtures } = circuitPlan()
+  const wires = routeWiring(fixtures)
+  const panel = ofKind(fixtures, 'panel')[0] as Fixture
+
+  test('every run is an axis-aligned wire-run member in copper', () => {
+    expect(wires.length).toBeGreaterThan(10)
+    for (const w of wires) {
+      expect(w.role).toBe('wire-run')
+      expect(w.system).toBe('electrical')
+      expect(w.material).toBe('copper')
+      expect(w.rotation[2]).toBe(0) // never tilted
+      const yaw = Math.abs(w.rotation[1] as number)
+      expect(yaw === 0 || Math.abs(yaw - Math.PI / 2) < 1e-9).toBe(true)
+    }
+  })
+
+  test('every circuit drops a homerun at the panel plan position', () => {
+    const circuits = new Set(
+      fixtures.filter((f) => f.kind !== 'panel' && f.meta?.circuit).map((f) => String(f.meta?.circuit)),
+    )
+    for (const circuit of circuits) {
+      const drop = wires.find(
+        (w) =>
+          w.sourceId === circuit &&
+          w.dims[1] > w.dims[0] && // vertical leg
+          Math.abs((w.position[0] as number) - panel.position[0]) < 1e-6 &&
+          Math.abs((w.position[2] as number) - panel.position[2]) < 1e-6,
+      )
+      expect(drop).toBeDefined()
+    }
+  })
+
+  test('gauge follows the circuit: 12/2 to the kitchen, 14/2 to general', () => {
+    expect(wires.some((w) => w.sourceId === 'SA-1' && w.label?.includes('12/2'))).toBe(true)
+    expect(wires.some((w) => w.sourceId === 'GEN-1' && w.label?.includes('14/2'))).toBe(true)
+  })
+
+  test('chains touch every device: a vertical leg lands at each fixture plan point', () => {
+    for (const f of fixtures) {
+      if (f.kind === 'panel' || typeof f.meta?.circuit !== 'string') continue
+      const leg = wires.find(
+        (w) =>
+          w.dims[1] > w.dims[0] &&
+          Math.abs((w.position[0] as number) - f.position[0]) < 1e-6 &&
+          Math.abs((w.position[2] as number) - f.position[2]) < 1e-6,
+      )
+      expect(leg).toBeDefined()
+    }
+  })
+
+  test('no panel → no wiring', () => {
+    expect(routeWiring(fixtures.filter((f) => f.kind !== 'panel'))).toHaveLength(0)
+  })
+})
