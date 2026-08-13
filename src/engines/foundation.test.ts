@@ -232,9 +232,19 @@ describe('buildFoundation — wall frame mapping (rotated wall)', () => {
 })
 
 describe('buildFoundation — guards', () => {
-  test('interior walls get nothing (slab bears them)', () => {
+  test('interior walls get no perimeter run (no stemwall/bolts/slab-edge)', () => {
     const interior = makeWall({ exterior: false })
-    expect(buildFoundation([interior], [slab])).toHaveLength(0)
+    const members = buildFoundation([interior], [slab])
+    expect(byRole(members, 'stemwall')).toHaveLength(0)
+    expect(byRole(members, 'anchor-bolt')).toHaveLength(0)
+    expect(byRole(members, 'slab-edge')).toHaveLength(0)
+    expect(byRole(members, 'hold-down')).toHaveLength(0)
+  })
+
+  test('at LOD 200 interior walls get nothing at all (slab bears them)', () => {
+    const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
+    const interior = makeWall({ exterior: false })
+    expect(buildFoundation([interior], [slab], lod200)).toHaveLength(0)
   })
 
   test('curved walls are skipped like wall-framing v1', () => {
@@ -251,16 +261,325 @@ describe('buildFoundation — guards', () => {
     expect((f.position[1] ?? 0) + f.dims[1] / 2).toBeCloseTo(0, 6)
   })
 
-  test('mixed level: only exterior walls produce foundation members', () => {
+  test('mixed level: interior walls never join the perimeter run', () => {
     const walls = [
       makeWall({ id: 'ext_a' }),
       makeWall({ id: 'int_b', exterior: false, start: [0, 2], end: [4, 2] }),
       makeWall({ id: 'ext_c', start: [0, 0], end: [0, 4] }),
     ]
     const members = buildFoundation(walls, [])
-    const sources = new Set(members.map((m) => m.sourceId))
-    expect(sources.has('ext_a')).toBe(true)
-    expect(sources.has('ext_c')).toBe(true)
-    expect(sources.has('int_b')).toBe(false)
+    const perimeterRoles = ['stemwall', 'anchor-bolt', 'slab-edge', 'hold-down']
+    const intMembers = members.filter((m) => m.sourceId === 'int_b')
+    // the long interior wall gets ONLY its thickened footing + bars
+    expect(intMembers.length).toBeGreaterThan(0)
+    for (const m of intMembers) expect(perimeterRoles).not.toContain(m.role)
+    expect(members.some((m) => m.sourceId === 'ext_a' && m.role === 'stemwall')).toBe(true)
+    expect(members.some((m) => m.sourceId === 'ext_c' && m.role === 'stemwall')).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD 350 — corner continuity (rubric: monolithic footing corners)
+// ---------------------------------------------------------------------------
+
+/** World-space run extents of a member along its local +X axis. */
+function runEnds(m: Member): { near: Vector3; far: Vector3; axis: Vector3 } {
+  const axis = new Vector3(1, 0, 0).applyEuler(new Euler(...m.rotation))
+  const c = new Vector3(...m.position)
+  const half = axis.clone().multiplyScalar((m.dims[0] ?? 0) / 2)
+  return { near: c.clone().sub(half), far: c.clone().add(half), axis }
+}
+
+/** Plan-view (XZ) check that `point` lies inside the member's box. */
+function coversInPlan(m: Member, point: readonly [number, number]): boolean {
+  const { near, axis } = runEnds(m)
+  const p = new Vector3(point[0], near.y, point[1])
+  const d = p.clone().sub(near)
+  const along = d.dot(axis)
+  const acrossV = d.clone().sub(axis.clone().multiplyScalar(along))
+  return (
+    along >= -1e-9 &&
+    along <= (m.dims[0] ?? 0) + 1e-9 &&
+    acrossV.length() <= (m.dims[2] ?? 0) / 2 + 1e-9
+  )
+}
+
+describe('buildFoundation — LOD 350 corner continuity', () => {
+  const halfOtherFooting = DEFAULT_SPEC.footingWidth / 2 // 8" = 0.2032 m
+  // L-corner at (4, 0): A runs +X and ends there, B runs +Z and starts there.
+  const wallA = makeWall({ id: 'wall_a', start: [0, 0], end: [4, 0] })
+  const wallB = makeWall({ id: 'wall_b', start: [4, 0], end: [4, 3] })
+  const members = buildFoundation([wallA, wallB], [])
+  const footA = byRole(members, 'footing').find((m) => m.sourceId === 'wall_a') as Member
+  const footB = byRole(members, 'footing').find((m) => m.sourceId === 'wall_b') as Member
+
+  test("each footing run extends past the corner by HALF the other wall's footing width", () => {
+    // extension length asserted numerically: run − wall length = footingWidth/2
+    expect(footA.dims[0] - wallA.length).toBeCloseTo(halfOtherFooting, 6)
+    expect(footB.dims[0] - wallB.length).toBeCloseTo(halfOtherFooting, 6)
+    expect(footA.length).toBeCloseTo(4 + halfOtherFooting, 6)
+    // A extends only at its corner end: world x span [0, 4 + 8"]
+    const { near: aNear, far: aFar } = runEnds(footA)
+    expect(aNear.x).toBeCloseTo(0, 6) // free end untouched
+    expect(aFar.x).toBeCloseTo(4 + halfOtherFooting, 6)
+    // B extends only backwards past its start: world z span [-8", 3]
+    const { near: bNear, far: bFar } = runEnds(footB)
+    expect(bNear.z).toBeCloseTo(-halfOtherFooting, 6)
+    expect(bFar.z).toBeCloseTo(3, 6)
+  })
+
+  test('both extended footing runs COVER the corner point in plan', () => {
+    expect(coversInPlan(footA, [4, 0])).toBe(true)
+    expect(coversInPlan(footB, [4, 0])).toBe(true)
+    // the overlap starts a full 8" before the corner along each run
+    const { far: aFar } = runEnds(footA)
+    expect(aFar.x - 4).toBeCloseTo(halfOtherFooting, 6)
+  })
+
+  test('no double-height stack: one footing per wall, both on the SAME course', () => {
+    expect(byRole(members, 'footing')).toHaveLength(2)
+    expect(footA.position[1] ?? 0).toBeCloseTo(footB.position[1] ?? 0, 6)
+    expect(footA.dims[1]).toBeCloseTo(footB.dims[1], 6)
+    // course top/bottom identical → overlap is within one pour, not stacked
+    const topA = (footA.position[1] ?? 0) + footA.dims[1] / 2
+    const topB = (footB.position[1] ?? 0) + footB.dims[1] / 2
+    expect(topA).toBeCloseTo(topB, 6)
+  })
+
+  test('stemwall runs extend and cover the corner exactly like the footings', () => {
+    const stemA = byRole(members, 'stemwall').find((m) => m.sourceId === 'wall_a') as Member
+    const stemB = byRole(members, 'stemwall').find((m) => m.sourceId === 'wall_b') as Member
+    expect(stemA.dims[0] - wallA.length).toBeCloseTo(halfOtherFooting, 6)
+    expect(stemB.dims[0] - wallB.length).toBeCloseTo(halfOtherFooting, 6)
+    expect(coversInPlan(stemA, [4, 0])).toBe(true)
+    expect(coversInPlan(stemB, [4, 0])).toBe(true)
+  })
+
+  test('anchor bolts stay on the PLATE (never march into the extended pour)', () => {
+    const boltsA = byRole(members, 'anchor-bolt').filter((m) => m.sourceId === 'wall_a')
+    for (const b of boltsA) {
+      expect(b.position[0] ?? 0).toBeGreaterThanOrEqual(0)
+      expect(b.position[0] ?? 0).toBeLessThanOrEqual(4)
+    }
+  })
+
+  test('diagonal corner: extension measured along the run is still footingWidth/2', () => {
+    // corner at (3,3) between two 45° walls
+    const diagA = makeWall({ id: 'diag_a', start: [0, 0], end: [3, 3] })
+    const diagB = makeWall({ id: 'diag_b', start: [3, 3], end: [6, 0] })
+    const foots = byRole(buildFoundation([diagA, diagB], []), 'footing')
+    const fA = foots.find((m) => m.sourceId === 'diag_a') as Member
+    expect(fA.dims[0] - diagA.length).toBeCloseTo(halfOtherFooting, 6)
+    // far end of the run sits exactly 8" past the corner point in plan
+    const { far } = runEnds(fA)
+    expect(Math.hypot(far.x - 3, far.z - 3)).toBeCloseTo(halfOtherFooting, 6)
+    expect(coversInPlan(fA, [3, 3])).toBe(true)
+    expect(coversInPlan(foots.find((m) => m.sourceId === 'diag_b') as Member, [3, 3])).toBe(true)
+  })
+
+  test('LOD 200 keeps plain wall-length runs (350 gate)', () => {
+    const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
+    const foots = byRole(buildFoundation([wallA, wallB], [], lod200), 'footing')
+    for (const f of foots) expect(f.dims[0]).toBeCloseTo(f.sourceId === 'wall_a' ? 4 : 3, 6)
+  })
+
+  test('collinear butt splice is NOT a corner — no extension', () => {
+    const a = makeWall({ id: 'seg_a', start: [0, 0], end: [4, 0] })
+    const b = makeWall({ id: 'seg_b', start: [4, 0], end: [8, 0] })
+    const foots = byRole(buildFoundation([a, b], []), 'footing')
+    for (const f of foots) expect(f.dims[0]).toBeCloseTo(4, 6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD 350 — interior thickened footings under bearing walls
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — interior thickened footings (LOD 350)', () => {
+  const bearing = makeWall({ id: 'int_bearing', exterior: false, start: [0, 1], end: [3, 1] })
+
+  test('interior wall > 2.4 m gets a 12"-deep × footingWidth footing, top at slab line', () => {
+    const members = buildFoundation([bearing], [slab])
+    const foots = byRole(members, 'footing')
+    expect(foots).toHaveLength(1)
+    const f = foots[0] as Member
+    expect(f.material).toBe('concrete')
+    expect(f.dims[0]).toBeCloseTo(3, 6) // runs the wall
+    expect(f.dims[1]).toBeCloseTo(inches(12), 6) // 12" deep
+    expect(f.dims[2]).toBeCloseTo(DEFAULT_SPEC.footingWidth, 6)
+    // monolithic with the slab: top at y = 0, bottom 12" down
+    expect((f.position[1] ?? 0) + f.dims[1] / 2).toBeCloseTo(0, 6)
+    expect((f.position[1] ?? 0) - f.dims[1] / 2).toBeCloseTo(-inches(12), 6)
+    // centered under the wall in plan
+    expect(f.position[0] ?? 0).toBeCloseTo(1.5, 6)
+    expect(f.position[2] ?? 0).toBeCloseTo(1, 6)
+    // no perimeter kit sneaks in
+    expect(byRole(members, 'stemwall')).toHaveLength(0)
+    expect(byRole(members, 'anchor-bolt')).toHaveLength(0)
+  })
+
+  test('short partitions (≤ 2.4 m) bear on the slab — no footing', () => {
+    const short = makeWall({ id: 'int_short', exterior: false, start: [0, 1], end: [2.4, 1] })
+    expect(buildFoundation([short], [slab])).toHaveLength(0)
+  })
+
+  test('gated at LOD 350: detail 200 emits nothing for interior walls', () => {
+    const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
+    expect(buildFoundation([bearing], [slab], lod200)).toHaveLength(0)
+  })
+
+  test('interior footing carries its own 2× #4 bars at 3" clear off ITS bottom', () => {
+    const bars = byRole(buildFoundation([bearing], [slab]), 'rebar')
+    expect(bars).toHaveLength(2)
+    for (const b of bars) {
+      const bottom = (b.position[1] ?? 0) - b.dims[1] / 2
+      expect(bottom - -inches(12)).toBeCloseTo(inches(3), 6) // 3" clear cover
+      expect(b.dims[0]).toBeCloseTo(3, 6) // continuous along the run
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD 350 — rebar (2× #4 continuous + stemwall verticals)
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — rebar (LOD 350)', () => {
+  const wall = makeWall() // 4 m along +X, no corners
+  const members = buildFoundation([wall], [])
+  const longs = members.filter((m) => m.role === 'rebar' && m.label === '#4 continuous footing bar')
+  const verts = members.filter((m) => m.role === 'rebar' && m.label === '#4 stemwall vertical')
+
+  test('2 continuous #4 bars per footing run, 0.5" square, full run length', () => {
+    expect(longs).toHaveLength(2)
+    for (const b of longs) {
+      expect(b.material).toBe('steel')
+      expect(b.dims[0]).toBeCloseTo(4, 6)
+      expect(b.dims[1]).toBeCloseTo(inches(0.5), 6)
+      expect(b.dims[2]).toBeCloseTo(inches(0.5), 6)
+      expect(b.length).toBeCloseTo(4, 6)
+    }
+  })
+
+  test('longitudinal bars sit 3" clear off the footing bottom', () => {
+    for (const b of longs) {
+      const barBottom = (b.position[1] ?? 0) - b.dims[1] / 2
+      const footingBottom = -DEFAULT_SPEC.footingDepth
+      expect(barBottom - footingBottom).toBeCloseTo(inches(3), 6)
+    }
+  })
+
+  test('longitudinal bars split the footing width in thirds (v = ±width/6)', () => {
+    // wall runs +X → across-offset v shows up on world z
+    const zs = longs.map((b) => b.position[2] ?? 0).sort((a, b) => a - b)
+    expect(zs[0]).toBeCloseTo(-DEFAULT_SPEC.footingWidth / 6, 6)
+    expect(zs[1]).toBeCloseTo(DEFAULT_SPEC.footingWidth / 6, 6)
+  })
+
+  test('stemwall verticals at 48" o.c. — 5 bars on a 4 m run, even gaps', () => {
+    expect(verts).toHaveLength(5)
+    const us = verts.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
+    expect(us[0]).toBeCloseTo(inches(4), 6) // end cover
+    expect(us[us.length - 1]).toBeCloseTo(4 - inches(4), 6)
+    for (let i = 1; i < us.length; i++) {
+      const gap = (us[i] ?? 0) - (us[i - 1] ?? 0)
+      expect(gap).toBeLessThanOrEqual(inches(48) + 1e-9)
+      expect(gap).toBeCloseTo((4 - 2 * inches(4)) / 4, 6) // even layout
+    }
+  })
+
+  test('verticals RISE from the footing into the stemwall (numeric extents)', () => {
+    const footingTop = -DEFAULT_SPEC.footingDepth + FOOTING_HEIGHT
+    for (const v of verts) {
+      const bottom = (v.position[1] ?? 0) - v.dims[1] / 2
+      const top = (v.position[1] ?? 0) + v.dims[1] / 2
+      expect(bottom).toBeCloseTo(-DEFAULT_SPEC.footingDepth + inches(3), 6) // stands on the mat
+      expect(top).toBeCloseTo(-inches(2), 6) // 2" shy of the stemwall top
+      expect(bottom).toBeLessThan(footingTop) // anchored IN the footing
+      expect(top).toBeGreaterThan(footingTop) // …rising INTO the stemwall
+      expect(v.dims[0]).toBeCloseTo(inches(0.5), 6)
+      expect(v.dims[2]).toBeCloseTo(inches(0.5), 6)
+    }
+  })
+
+  test('seismic spec tightens verticals to 24" o.c. — 8 bars on the 4 m run', () => {
+    const seismic: FramingSpec = { ...DEFAULT_SPEC, seismicHoldDowns: true }
+    const sVerts = buildFoundation([wall], [], seismic).filter(
+      (m) => m.label === '#4 stemwall vertical',
+    )
+    expect(sVerts).toHaveLength(8)
+    const us = sVerts.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
+    for (let i = 1; i < us.length; i++) {
+      expect((us[i] ?? 0) - (us[i - 1] ?? 0)).toBeLessThanOrEqual(inches(24) + 1e-9)
+    }
+  })
+
+  test('corner-extended runs carry full-length continuous bars', () => {
+    const a = makeWall({ id: 'ca', start: [0, 0], end: [4, 0] })
+    const b = makeWall({ id: 'cb', start: [4, 0], end: [4, 3] })
+    const bars = buildFoundation([a, b], []).filter(
+      (m) => m.label === '#4 continuous footing bar' && m.sourceId === 'ca',
+    )
+    expect(bars).toHaveLength(2)
+    for (const bar of bars) {
+      expect(bar.dims[0]).toBeCloseTo(4 + DEFAULT_SPEC.footingWidth / 2, 6)
+    }
+  })
+
+  test('no stemwall → no verticals (shallow spec), longitudinal bars remain', () => {
+    const shallow: FramingSpec = { ...DEFAULT_SPEC, footingDepth: inches(8) }
+    const rebar = byRole(buildFoundation([wall], [], shallow), 'rebar')
+    expect(rebar.filter((m) => m.label === '#4 stemwall vertical')).toHaveLength(0)
+    expect(rebar.filter((m) => m.label === '#4 continuous footing bar')).toHaveLength(2)
+  })
+
+  test('gated at LOD 350: detail 200 emits zero rebar', () => {
+    const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
+    expect(byRole(buildFoundation([wall], [], lod200), 'rebar')).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD 400 — plate washers at anchor bolts (R602.11.1)
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — plate washers (LOD 400, R602.11.1)', () => {
+  const fabSeismic: FramingSpec = { ...DEFAULT_SPEC, detail: '400', seismicHoldDowns: true }
+  const wall = makeWall() // 4 m → 3 anchor bolts under the default spec
+  const members = buildFoundation([wall], [], fabSeismic)
+  const bolts = byRole(members, 'anchor-bolt')
+  const washers = byRole(members, 'plate-washer')
+
+  test('exactly one 3×3×0.229" steel washer per anchor bolt', () => {
+    expect(bolts.length).toBeGreaterThan(0)
+    expect(washers).toHaveLength(bolts.length)
+    for (const w of washers) {
+      expect(w.material).toBe('steel')
+      expect(w.dims[0]).toBeCloseTo(inches(3), 6)
+      expect(w.dims[1]).toBeCloseTo(inches(0.229), 6)
+      expect(w.dims[2]).toBeCloseTo(inches(3), 6)
+    }
+  })
+
+  test('each washer is centered on its bolt in plan, seated on the 1.5" plate', () => {
+    const boltUs = bolts.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
+    const washerUs = washers.map((w) => w.position[0] ?? 0).sort((a, b) => a - b)
+    for (let i = 0; i < boltUs.length; i++) {
+      expect(washerUs[i]).toBeCloseTo(boltUs[i] ?? 0, 6)
+    }
+    for (const w of washers) {
+      expect(w.position[2] ?? 0).toBeCloseTo(0, 6) // on the wall line, like the bolts
+      const bottom = (w.position[1] ?? 0) - w.dims[1] / 2
+      expect(bottom).toBeCloseTo(inches(1.5), 6) // top of the 2x mudsill
+    }
+  })
+
+  test('washers vanish without the seismic trigger, even at detail 400', () => {
+    const fabOnly: FramingSpec = { ...DEFAULT_SPEC, detail: '400' }
+    expect(byRole(buildFoundation([wall], [], fabOnly), 'plate-washer')).toHaveLength(0)
+  })
+
+  test('washers vanish below detail 400, even with the seismic trigger', () => {
+    const seismic300: FramingSpec = { ...DEFAULT_SPEC, detail: '300', seismicHoldDowns: true }
+    expect(byRole(buildFoundation([wall], [], seismic300), 'plate-washer')).toHaveLength(0)
   })
 })

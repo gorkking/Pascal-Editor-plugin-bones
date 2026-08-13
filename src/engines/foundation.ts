@@ -1,11 +1,19 @@
 /**
- * Foundation engine — pure function: exterior WallSlices + SlabSlices +
- * FramingSpec → the concrete-and-hardware member set that carries the frame:
+ * Foundation engine — pure function: WallSlices + SlabSlices + FramingSpec →
+ * the concrete-and-hardware member set that carries the frame:
  *
  *   continuous footing (IRC R403.1) · stemwall up to the plate line ·
  *   anchor bolts at code spacing (R403.1.6) · seismic hold-downs at wall
  *   ends when the jurisdiction demands them · a subtle thickened slab edge
  *   when the level has slabs.
+ *
+ * LOD 350 (detail !== '200') adds:
+ *   corner continuity — footing/stemwall runs extended past shared corners
+ *   so perimeter pours are monolithic · interior thickened footings under
+ *   bearing interior walls · rebar (2× #4 continuous per footing run +
+ *   stemwall verticals per SDC).
+ * LOD 400 (detail === '400') adds:
+ *   3×3×0.229" plate washers on every anchor bolt in SDC D (R602.11.1).
  *
  * Geometry convention matches wall-framing.ts exactly: each wall gets a
  * local frame with X along the wall (from `start`), Y up, Z across the
@@ -40,6 +48,33 @@ const HOLD_DOWN_HEIGHT = inches(12)
 /** Monolithic slab thickened-edge depth (R403.1.3.1 turned-down edge). */
 const SLAB_EDGE_DEPTH = inches(12)
 
+/** #4 rebar: 0.5" nominal diameter, modeled as a 0.5" square bar. */
+const REBAR_SIDE = inches(0.5)
+/** ACI 318 §20.5.1.3 / IRC R403.1.3: 3" clear cover against earth. */
+const REBAR_BOTTOM_COVER = inches(3)
+/** Cover kept below the stemwall top so verticals never pierce the plate. */
+const REBAR_TOP_COVER = inches(2)
+/** End cover for the stemwall-vertical layout along the run. */
+const REBAR_END_COVER = inches(4)
+/** R403.1.3.2 dowels/verticals: #4 @ 48" o.c. (24" tightened for SDC D). */
+const VERTICAL_SPACING = inches(48)
+const VERTICAL_SPACING_SEISMIC = inches(24)
+
+/** Interior thickened footing (R403.1 bearing-wall footing inside a slab). */
+const INTERIOR_FOOTING_DEPTH = inches(12)
+/**
+ * ASSUMPTION: interior walls longer than 2.4 m are treated as BEARING (they
+ * plausibly stack a girder or a storey above); shorter partitions bear on
+ * the slab itself. Real designs read the load path from the framing plan.
+ */
+const INTERIOR_BEARING_MIN_LENGTH = 2.4
+
+/** 2x mudsill thickness — the plate the R602.11.1 washer bears on. */
+const PLATE_THICKNESS = inches(1.5)
+/** R602.11.1 (SDC D0–D2): 0.229" × 3" × 3" steel plate washers. */
+const PLATE_WASHER_SIDE = inches(3)
+const PLATE_WASHER_THICKNESS = inches(0.229)
+
 /**
  * Anchor bolt centers along a wall (u from `start`, meters).
  *
@@ -68,13 +103,69 @@ export function anchorBoltPositions(
   return out
 }
 
+/** How far a wall's footing/stemwall run extends past each end (meters). */
+type RunExtension = { start: number; end: number }
+
+const endPoint = (wall: WallSlice, which: 'start' | 'end'): readonly [number, number] =>
+  which === 'start' ? wall.start : wall.end
+
 /**
- * Foundation for one level: walls (only `exterior` ones bear on the
- * perimeter foundation) + slabs (presence toggles the thickened slab edge).
+ * Footing CORNER CONTINUITY (rubric 350). Where two exterior walls share an
+ * endpoint, each footing/stemwall run is EXTENDED past the corner by half
+ * the OTHER wall's footing width, so the two pours overlap into one
+ * monolithic corner — no gap, no cold joint. The overlap is intentional:
+ * both runs occupy the SAME course (same y extents), which is exactly how a
+ * poured corner behaves; nothing stacks.
  *
- * Interior walls get NOTHING here — on a slab they bear on the slab itself.
- * // LOD 400: interior thickened footings under bearing walls (R403.1 —
- * // walls stacking a girder or a second floor need their own footing).
+ * Detection mirrors wall-framing.detectCorners: endpoints coincide within
+ * 0.75× the larger wall thickness, and near-parallel walls (a butt splice,
+ * not a corner) are ignored. O(walls²) pairwise — walls, not members, so
+ * the 20-wall perf budget is untouched.
+ */
+export function cornerExtensions(
+  walls: WallSlice[],
+  spec: FramingSpec,
+): Map<string, RunExtension> {
+  const ext = new Map<string, RunExtension>()
+  const bump = (wall: WallSlice, which: 'start' | 'end', by: number) => {
+    let e = ext.get(wall.id)
+    if (!e) {
+      e = { start: 0, end: 0 }
+      ext.set(wall.id, e)
+    }
+    e[which] = Math.max(e[which], by)
+  }
+  for (let i = 0; i < walls.length; i++) {
+    for (let j = i + 1; j < walls.length; j++) {
+      const a = walls[i] as WallSlice
+      const b = walls[j] as WallSlice
+      const tol = Math.max(a.thickness, b.thickness) * 0.75
+      // Parallel walls butting end-to-end are a splice, not a corner.
+      const cross = Math.abs(a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0])
+      if (cross < 0.3) continue
+      for (const ea of ['start', 'end'] as const) {
+        for (const eb of ['start', 'end'] as const) {
+          const pa = endPoint(a, ea)
+          const pb = endPoint(b, eb)
+          if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) > tol) continue
+          // Each run reaches half the OTHER wall's footing width past the
+          // corner point (spec-level width — one value per level today).
+          bump(a, ea, spec.footingWidth / 2)
+          bump(b, eb, spec.footingWidth / 2)
+        }
+      }
+    }
+  }
+  return ext
+}
+
+/**
+ * Foundation for one level.
+ *
+ * Exterior walls bear on the perimeter footing + stemwall. Interior walls
+ * bear on the slab UNLESS long enough to be treated as bearing (see
+ * INTERIOR_BEARING_MIN_LENGTH), in which case they get a thickened footing
+ * at LOD 350+. Slab presence toggles the thickened slab edge.
  */
 export function buildFoundation(
   walls: WallSlice[],
@@ -83,9 +174,15 @@ export function buildFoundation(
 ): Member[] {
   const members: Member[] = []
   const hasSlab = slabs.length > 0
+  const fabDetail = spec.detail !== '200' // LOD 350 gate
+  const lod400 = spec.detail === '400'
+
+  // Corner continuity only pairs EXTERIOR straight walls — the ones that
+  // actually own perimeter runs below.
+  const perimeter = walls.filter((w) => w.exterior && !w.curved)
+  const extensions = fabDetail ? cornerExtensions(perimeter, spec) : new Map<string, RunExtension>()
 
   for (const wall of walls) {
-    if (!wall.exterior) continue
     // Curved walls are framed segment-wise later; skip like wall-framing v1.
     if (wall.curved) continue
 
@@ -109,13 +206,14 @@ export function buildFoundation(
       length: number,
       material: Member['material'],
       label?: string,
+      centerV = 0,
     ) => {
       members.push({
         system: 'foundation',
         role,
         dims,
         length,
-        position: place(centerU, centerY),
+        position: place(centerU, centerY, centerV),
         rotation: [0, yaw, 0],
         material,
         sourceId: wall.id,
@@ -123,40 +221,123 @@ export function buildFoundation(
       })
     }
 
+    /**
+     * 2× #4 continuous bars per footing run (R403.1.3.1 / common SDC D
+     * practice): 3" clear off the footing bottom, set at the third points
+     * of the footing width (v = ±width/6) so cover is equal all around.
+     * ASSUMPTION: laps/hooks at run ends are takeoff data, not geometry.
+     */
+    const emitFootingBars = (
+      runCenterU: number,
+      runLen: number,
+      footingBottomY: number,
+      width: number,
+    ) => {
+      const barY = footingBottomY + REBAR_BOTTOM_COVER + REBAR_SIDE / 2
+      for (const v of [-width / 6, width / 6]) {
+        emit(
+          'rebar',
+          [runLen, REBAR_SIDE, REBAR_SIDE],
+          runCenterU,
+          barY,
+          runLen,
+          'steel',
+          '#4 continuous footing bar',
+          v,
+        )
+      }
+    }
+
+    // ---- interior walls ----
+    if (!wall.exterior) {
+      // Interior thickened footing (LOD 350): R403.1 requires a footing
+      // under bearing walls; on a slab that is a thickened section poured
+      // monolithically with it — 12" deep × footing width, top at the
+      // slab/plate line (y = 0). See INTERIOR_BEARING_MIN_LENGTH ASSUMPTION.
+      if (!fabDetail || len <= INTERIOR_BEARING_MIN_LENGTH) continue
+      emit(
+        'footing',
+        [len, INTERIOR_FOOTING_DEPTH, spec.footingWidth],
+        len / 2,
+        -INTERIOR_FOOTING_DEPTH / 2,
+        len,
+        'concrete',
+        `Interior thickened footing ${formatIn(spec.footingWidth)}×${formatIn(INTERIOR_FOOTING_DEPTH)}`,
+      )
+      // Rebar rides "every footing run" — including interior thickened ones.
+      emitFootingBars(len / 2, len, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
+      continue
+    }
+
+    // Corner continuity (LOD 350): the run grows past each shared corner by
+    // half the meeting wall's footing width — see cornerExtensions.
+    const ext = extensions.get(wall.id) ?? { start: 0, end: 0 }
+    const runLen = len + ext.start + ext.end
+    const runCenterU = (len + ext.end - ext.start) / 2
+
     // ---- footing ----
     // R403.1.4.1: bearing must sit below the frost line → footing BOTTOM at
     // -spec.footingDepth (jurisdiction-resolved). Width from spec (Table
     // R403.1(1) sizing), centered under the wall so the load path is axial.
-    // ASSUMPTION: footing runs exactly the wall length; corner continuity /
-    // mitering where perimeter walls meet is left to the renderer's overlap.
-    // // LOD 400: extend footings past corners + rebar (2× #4 continuous).
     emit(
       'footing',
-      [len, FOOTING_HEIGHT, spec.footingWidth],
-      len / 2,
+      [runLen, FOOTING_HEIGHT, spec.footingWidth],
+      runCenterU,
       -spec.footingDepth + FOOTING_HEIGHT / 2,
-      len,
+      runLen,
       'concrete',
       `Footing ${formatIn(spec.footingWidth)}×${formatIn(FOOTING_HEIGHT)}`,
     )
+
+    // ---- footing rebar (LOD 350) ----
+    if (fabDetail) {
+      emitFootingBars(runCenterU, runLen, -spec.footingDepth, spec.footingWidth)
+    }
 
     // ---- stemwall ----
     // From the footing top up to y = 0 (plate line / top of foundation).
     // With the default 12" frost depth this is a short 4" curb; cold-climate
     // jurisdiction profiles (42"+ frost) grow it into a real stemwall.
-    // ASSUMPTION: grade is not modeled — R404.1.6's 6" stem reveal above
-    // grade is assumed satisfied since y=0 is the framed floor line.
+    // Extended through corners exactly like the footing so the corner is one
+    // continuous pour. ASSUMPTION: grade is not modeled — R404.1.6's 6" stem
+    // reveal above grade is assumed satisfied since y=0 is the framed floor
+    // line.
     const stemHeight = spec.footingDepth - FOOTING_HEIGHT
     if (stemHeight > EPS) {
       emit(
         'stemwall',
-        [len, stemHeight, spec.stemwallThickness],
-        len / 2,
+        [runLen, stemHeight, spec.stemwallThickness],
+        runCenterU,
         -stemHeight / 2,
-        len,
+        runLen,
         'concrete',
         `Stemwall ${formatIn(spec.stemwallThickness)}`,
       )
+
+      // ---- stemwall vertical rebar (LOD 350) ----
+      // R403.1.3.2 / SDC practice: #4 verticals tying footing to stemwall,
+      // 48" o.c. (24" o.c. under seismic specs). Bars stand on the bottom
+      // mat (3" clear off the footing bottom) and stop 2" shy of the
+      // stemwall top so the mudsill seat stays clean.
+      if (fabDetail) {
+        const spacing = spec.seismicHoldDowns ? VERTICAL_SPACING_SEISMIC : VERTICAL_SPACING
+        const barBottom = -spec.footingDepth + REBAR_BOTTOM_COVER
+        const barTop = -REBAR_TOP_COVER
+        const barHeight = barTop - barBottom
+        if (barHeight > EPS) {
+          for (const p of anchorBoltPositions(runLen, spacing, REBAR_END_COVER)) {
+            emit(
+              'rebar',
+              [REBAR_SIDE, barHeight, REBAR_SIDE],
+              p - ext.start, // layout runs over the EXTENDED run incl. corners
+              (barBottom + barTop) / 2,
+              barHeight,
+              'steel',
+              '#4 stemwall vertical',
+            )
+          }
+        }
+      }
     }
 
     // ---- anchor bolts ----
@@ -164,8 +345,8 @@ export function buildFoundation(
     // jurisdiction profile), first/last within 12" of the plate ends, and
     // never fewer than two per plate section. Modeled as a 5/8" square shank
     // embedded 7" into the stemwall and sticking up through the plate line
-    // (nut + washer land on the sill).
-    // // LOD 400: 3"×3" plate washers required in SDC D0–D2 (R602.11.1).
+    // (nut + washer land on the sill). Bolts follow the PLATE (wall length),
+    // not the extended pour.
     const boltCenterY = -BOLT_EMBEDMENT + BOLT_HEIGHT / 2
     for (const u of anchorBoltPositions(len, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
       emit(
@@ -177,6 +358,22 @@ export function buildFoundation(
         'steel',
         '5/8" anchor bolt',
       )
+
+      // ---- plate washers (LOD 400) ----
+      // R602.11.1 (SDC D0–D2): every foundation anchor bolt gets a 0.229" ×
+      // 3" × 3" steel plate washer between the nut and the sill plate. The
+      // washer sits ON TOP of the 1.5" mudsill, centered on its bolt.
+      if (lod400 && spec.seismicHoldDowns) {
+        emit(
+          'plate-washer',
+          [PLATE_WASHER_SIDE, PLATE_WASHER_THICKNESS, PLATE_WASHER_SIDE],
+          u,
+          PLATE_THICKNESS + PLATE_WASHER_THICKNESS / 2,
+          PLATE_WASHER_SIDE,
+          'steel',
+          '3×3×0.229" plate washer (R602.11.1)',
+        )
+      }
     }
 
     // ---- seismic hold-downs ----
@@ -221,10 +418,6 @@ export function buildFoundation(
         'Thickened slab edge',
       )
     }
-
-    // // LOD 400: P.T. mudsill (role 'mudsill', material 'pt-lumber') with
-    // // sill sealer between stemwall top and the framed bottom plate —
-    // // omitted in v1 because wall-framing already seats its plate at y=0.
   }
 
   return members
