@@ -203,6 +203,8 @@ function XraySection({
             ['showRoof', 'Roof'],
             ['showFoundation', 'Foundation'],
             ['showElectrical', 'Electrical'],
+            ['showPlumbing', 'Plumbing'],
+            ['showHvac', 'HVAC'],
             ['seeThrough', 'X-ray vision'],
           ] as const
         ).map(([key, label]) => (

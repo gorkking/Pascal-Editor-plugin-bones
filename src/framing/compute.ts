@@ -8,9 +8,11 @@
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Fixture, Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
-import { extractLevels, extractSlabs, extractWalls } from '../core/wall-model'
+import { extractLevels, extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
 import { cmuWall } from '../engines/cmu'
 import { layoutElectrical } from '../engines/electrical'
+import { layoutHvac } from '../engines/hvac'
+import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
@@ -63,6 +65,7 @@ export function computeLevel(
 
   const walls = extractWalls(nodes, levelId)
   const slabs = extractSlabs(nodes, levelId)
+  const rooms = extractRooms(nodes, levelId)
   const levels = extractLevels(nodes)
   const levelIndex = levels.findIndex((l) => l.id === levelId)
   const isGroundLevel = levelIndex <= 0
@@ -96,7 +99,19 @@ export function computeLevel(
   }
 
   if (config.showElectrical) {
-    fixtures.push(...layoutElectrical(walls))
+    fixtures.push(...layoutElectrical(walls, rooms))
+  }
+
+  if (config.showPlumbing) {
+    const plumbing = layoutPlumbing(walls, rooms, spec)
+    members.push(...plumbing.members)
+    fixtures.push(...plumbing.fixtures)
+  }
+
+  if (config.showHvac) {
+    const hvac = layoutHvac(walls, rooms, spec)
+    members.push(...hvac.members)
+    fixtures.push(...hvac.fixtures)
   }
 
   return { members, fixtures, warnings, jurisdiction: code, spec }

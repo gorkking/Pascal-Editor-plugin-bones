@@ -35,6 +35,12 @@ function colorOf(member: Member): string {
       return '#8b8f96'
     case 'engineered':
       return '#c39b5e'
+    case 'pvc':
+      return '#e9e7df'
+    case 'copper':
+      return '#b0723d'
+    case 'duct':
+      return '#aab3bb'
     default:
       break
   }

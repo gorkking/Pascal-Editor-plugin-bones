@@ -50,8 +50,24 @@ export type MemberRole =
   | 'slab-edge'
   | 'anchor-bolt'
   | 'hold-down'
+  // cmu
+  | 'block'
+  | 'lintel'
+  | 'bond-beam'
+  // mep runs
+  | 'pipe-run'
+  | 'vent-stack'
+  | 'duct-run'
 
-export type MemberMaterial = 'lumber' | 'pt-lumber' | 'engineered' | 'concrete' | 'steel'
+export type MemberMaterial =
+  | 'lumber'
+  | 'pt-lumber'
+  | 'engineered'
+  | 'concrete'
+  | 'steel'
+  | 'pvc'
+  | 'copper'
+  | 'duct'
 
 /**
  * One physical piece the engines generated, in LEVEL-LOCAL coordinates.
@@ -93,6 +109,9 @@ export type FixtureKind =
   | 'register'
   | 'return'
   | 'equipment'
+  | 'water-heater'
+  | 'cleanout'
+  | 'thermostat'
 
 export type Fixture = {
   system: BonesSystem
@@ -148,6 +167,17 @@ export type SlabSlice = {
   holes: readonly (readonly (readonly [number, number])[])[]
   elevation: number
   thickness: number
+}
+
+/** A named room (Pascal zone) — drives GFCI, wet walls, registers. */
+export type RoomSlice = {
+  id: string
+  name: string
+  /** Classified from the name: kitchen/bathroom/bedroom/garage/laundry/other. */
+  category: 'kitchen' | 'bathroom' | 'bedroom' | 'garage' | 'laundry' | 'hallway' | 'other'
+  polygon: readonly (readonly [number, number])[]
+  boundaryWallIds: readonly string[]
+  ceilingHeight: number
 }
 
 /** Bounding info for a roof segment plane set (v1 roof model). */

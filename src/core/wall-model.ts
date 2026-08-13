@@ -7,7 +7,7 @@
  */
 
 import { inches } from './units'
-import type { OpeningSlice, SlabSlice, WallSlice } from './types'
+import type { OpeningSlice, RoomSlice, SlabSlice, WallSlice } from './types'
 
 // Minimal structural views of the host nodes we read — kept local so the
 // extractor compiles against any @pascal-app/core >=0.9 without depending on
@@ -134,4 +134,45 @@ export function extractLevels(
     })
   }
   return levels.sort((a, b) => a.level - b.level)
+}
+
+const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
+  [/kitchen|cuisine/i, 'kitchen'],
+  [/bath|wc|toilet|powder|salle de bain/i, 'bathroom'],
+  [/bed|chambre|master|primary/i, 'bedroom'],
+  [/garage/i, 'garage'],
+  [/laundry|utility|buanderie/i, 'laundry'],
+  [/hall|corridor|couloir/i, 'hallway'],
+]
+
+/** Classify a zone name into the room categories the MEP engines key on. */
+export function classifyRoom(name: string): RoomSlice['category'] {
+  for (const [pattern, category] of ROOM_PATTERNS) {
+    if (pattern.test(name)) return category
+  }
+  return 'other'
+}
+
+/** Extract named rooms (zones) on `levelId`. */
+export function extractRooms(nodes: NodesRecord, levelId: string): RoomSlice[] {
+  const rooms: RoomSlice[] = []
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'zone' || node.parentId !== levelId) continue
+    const polygon = Array.isArray(node.polygon)
+      ? (node.polygon as unknown[]).map(pair).filter((p): p is [number, number] => p !== null)
+      : []
+    if (polygon.length < 3) continue
+    const name = typeof node.name === 'string' ? node.name : ''
+    rooms.push({
+      id: String(node.id ?? ''),
+      name,
+      category: classifyRoom(name),
+      polygon,
+      boundaryWallIds: Array.isArray(node.boundaryWallIds)
+        ? (node.boundaryWallIds as string[])
+        : [],
+      ceilingHeight: num(node.ceilingHeight, 2.7),
+    })
+  }
+  return rooms
 }

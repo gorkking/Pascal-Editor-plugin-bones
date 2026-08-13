@@ -8,8 +8,8 @@
  * Emits `Fixture`s (system 'electrical').
  */
 
-import type { Fixture, WallSlice } from '../core/types'
+import type { Fixture, RoomSlice, WallSlice } from '../core/types'
 
-export function layoutElectrical(_walls: WallSlice[]): Fixture[] {
+export function layoutElectrical(_walls: WallSlice[], _rooms: RoomSlice[]): Fixture[] {
   return []
 }

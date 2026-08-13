@@ -242,7 +242,10 @@
       "residentialCode": "Indiana Residential Code, 2020 edition (2018 IRC with Indiana amendments), effective 2019-12-26",
       "ircBase": 2018,
       "adoptionLevel": "state",
-      "amendmentFlavor": "Statewide, cannot be amended locally; notable deletions (sprinklers) and Indiana-specific administrative chapters"
+      "amendmentFlavor": "Statewide, cannot be amended locally; notable deletions (sprinklers) and Indiana-specific administrative chapters",
+      "specialRegimes": [
+        "Indiana energy code (amended IECC)"
+      ]
     },
     "IA": {
       "name": "Iowa",
