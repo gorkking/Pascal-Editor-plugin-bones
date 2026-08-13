@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, SlabSlice } from '../core/types'
 import { feet, inches } from '../core/units'
-import { frameFloor, joistSizeFor, polygonSpans } from './floor-framing'
+import { frameFloor, joistSizeFor, polygonSpans, validateJoistBearing } from './floor-framing'
 
 const T = inches(1.5)
 
@@ -240,12 +240,17 @@ describe('frameFloor — sistered joists under parallel bearing walls', () => {
   const wall = bearingWall('wall_bearing', [0.5, 3], [3.5, 3])
   const members = frameFloor([slab(rect(4, 6))], [wall])
 
-  test('one extra joist rides beside the wall line, clipped to the wall extent', () => {
+  test('one extra joist rides beside the wall line, extended to the nearest bearings', () => {
     const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
     expect(sisters).toHaveLength(1)
     const s = sisters[0] as Member
     expect(s.position[2] as number).toBeCloseTo(3 + T, 5) // one thickness beside
-    expect(s.length).toBeCloseTo(3, 4) // clipped to the wall run
+    // the wall runs x ∈ [0.5, 3.5]; the nearest bearings are the polygon
+    // edges at 0 and 4 — the sister spans support-to-support (R502.6),
+    // never ending mid-span (round-2 counterexample)
+    expect(s.length).toBeCloseTo(4, 4)
+    expect((s.position[0] as number) - s.dims[0] / 2).toBeCloseTo(0, 5)
+    expect((s.position[0] as number) + s.dims[0] / 2).toBeCloseTo(4, 5)
     expect(s.label).toContain('wall_bearing')
   })
 
@@ -268,5 +273,46 @@ describe('frameFloor — LOD 400 bearing validation', () => {
     expect(flagged).toHaveLength(0)
     // and the kit is present, so the checker had real geometry to verify
     expect(byRole(members, 'hanger').length).toBeGreaterThan(0)
+  })
+})
+
+describe('frameFloor — LOD 400 bearing flag actually FIRES (round-2 gap)', () => {
+  test('an injected joist ending mid-span gets the R502.6 flag', () => {
+    const badJoist: Member = {
+      system: 'floor-framing',
+      role: 'joist',
+      size: '2x8',
+      dims: [1.5, 0.184, T],
+      length: 1.5,
+      position: [1.25, -0.1, 2], // spans x ∈ [0.5, 2.0] — neither end bears
+      rotation: [0, 0, 0],
+      material: 'lumber',
+      sourceId: 'slab_test',
+    }
+    const members = [badJoist]
+    validateJoistBearing(members, rect(4, 6), 'x', [])
+    expect(badJoist.flag).toContain('Unsupported joist end')
+    expect(badJoist.flag).toContain('R502.6')
+    // a joist that bears on both polygon edges stays clean
+    const good: Member = { ...badJoist, dims: [4, 0.184, T], length: 4, position: [2, -0.1, 2], flag: undefined }
+    validateJoistBearing([good], rect(4, 6), 'x', [])
+    expect(good.flag).toBeUndefined()
+  })
+
+  test('sisters over a girder split at it and hang — all at LOD 400 with zero flags', () => {
+    // 6×9 slab needs a girder at x=3; a bearing wall along X crosses it.
+    const wall = bearingWall('w_cross', [1, 4], [5, 4])
+    const members = frameFloor([slab(rect(6, 9))], [wall], { ...DEFAULT_SPEC, detail: '400' })
+    const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
+    expect(sisters.length).toBe(2) // split at the flush girder
+    const gt = 3.5 * 0.0254
+    for (const s of sisters) {
+      const lo = (s.position[0] as number) - s.dims[0] / 2
+      const hi = (s.position[0] as number) + s.dims[0] / 2
+      expect(lo > 3 - gt / 2 - 1e-6 || hi < 3 + gt / 2 + 1e-6).toBe(true)
+      expect(s.flag).toBeUndefined() // both halves bear (edge + girder)
+    }
+    const flagged = byRole(members, 'joist').filter((j) => j.flag)
+    expect(flagged).toHaveLength(0)
   })
 })

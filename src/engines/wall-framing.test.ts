@@ -329,3 +329,17 @@ describe('frameWall — LOD 400 fabrication', () => {
     expect((short.find((m) => m.role === 'top-plate') as Member).label).not.toContain('spliced')
   })
 })
+
+describe('frameWalls — cap-plate lap clears the cap WIDTH on thin walls (round-2)', () => {
+  test('two 6cm walls (thinner than a 2x4 cap) still lap without colliding', () => {
+    const A = makeWall({ id: 'thin_a', start: [0, 0], end: [4, 0], thickness: 0.06 })
+    const B = makeWall({ id: 'thin_b', start: [0, 0], end: [0, 3], thickness: 0.06 })
+    const members = frameWalls([A, B])
+    const capA = members.find((m) => m.role === 'cap-plate' && m.sourceId === 'thin_a') as Member
+    const capB = members.find((m) => m.role === 'cap-plate' && m.sourceId === 'thin_b') as Member
+    expect(overlaps(planAabb(capA), planAabb(capB))).toBe(false)
+    // the butting cap pulls back past the through cap's half-WIDTH (3.5"/2),
+    // not just the drawn half-thickness (0.03)
+    expect(planAabb(capB).minZ).toBeGreaterThanOrEqual((3.5 * 0.0254) / 2 - 1e-9)
+  })
+})

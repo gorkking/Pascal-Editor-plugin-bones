@@ -45,7 +45,28 @@ export function wallConstruction(
   return 'framed'
 }
 
+// 1-deep memo: the panel and the 3D renderer both derive from the same
+// store snapshot on every scene edit — identical (nodes, config) references
+// return the cached result, halving per-edit compute (round-2 advisory).
+// Pascal's stores hand out immutable snapshots, so reference equality is a
+// safe cache key; any new snapshot recomputes.
+let memoNodes: Record<string, Record<string, unknown>> | null = null
+let memoConfig: FramingNode | null = null
+let memoResult: ComputeResult | null = null
+
 export function computeLevel(
+  nodes: Record<string, Record<string, unknown>>,
+  config: FramingNode,
+): ComputeResult {
+  if (memoResult !== null && nodes === memoNodes && config === memoConfig) return memoResult
+  const result = computeLevelUncached(nodes, config)
+  memoNodes = nodes
+  memoConfig = config
+  memoResult = result
+  return result
+}
+
+function computeLevelUncached(
   nodes: Record<string, Record<string, unknown>>,
   config: FramingNode,
 ): ComputeResult {

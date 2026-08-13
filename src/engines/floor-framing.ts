@@ -282,6 +282,10 @@ function frameSlab(
   // ---- sistered joists under parallel bearing walls ----
   // ASSUMPTION: interior walls >= 1.5m running parallel (±10°) to the joists
   // are bearing — real designs check the load path; we sister under all.
+  // Each sister EXTENDS past the wall to the nearest bearing on both sides
+  // (polygon edge, girder face, or stair header) — a sister clipped to the
+  // wall run would end unsupported mid-span, which the LOD-400 checker
+  // below rightly flags (round-2 counterexample).
   if (spec.detail !== '200') {
     const runDir: Pt = runAxis === 'x' ? [1, 0] : [0, 1]
     for (const wall of walls) {
@@ -302,10 +306,28 @@ function frameSlab(
       ]
       const sisterCross = wallCross + t // one thickness beside the wall line
       for (const [s, e] of polygonSpans(polygon, runAxis, sisterCross)) {
-        const cs = Math.max(s, wallRun[0])
-        const ce = Math.min(e, wallRun[1])
-        if (ce - cs > MIN_SEGMENT) {
-          emitJoist(cs, ce, sisterCross, `Sistered joist under bearing wall ${wall.id}`)
+        if (wallRun[1] < s + EPS || wallRun[0] > e - EPS) continue // wall outside this span
+        // Bearing coordinates available along this row.
+        const supports = [s, e]
+        if (needsGirder) supports.push(girderCut[0], girderCut[1])
+        for (const hole of holeFrames) supports.push(hole.run[0], hole.run[1])
+        const starts = supports.filter((u) => u <= wallRun[0] + EPS)
+        const ends = supports.filter((u) => u >= wallRun[1] - EPS)
+        const cs = starts.length > 0 ? Math.max(...starts) : s
+        const ce = ends.length > 0 ? Math.min(...ends) : e
+        // Split at the girder like any row; hang the cut ends.
+        let sisterSpans: [number, number][] = [[cs, ce]]
+        if (needsGirder) {
+          if (cs < girderCut[0] - EPS && ce > girderCut[1] + EPS) {
+            emitHanger(girderCut[0], sisterCross, 'girder')
+            emitHanger(girderCut[1], sisterCross, 'girder')
+          }
+          sisterSpans = subtractInterval(sisterSpans, girderCut)
+        }
+        for (const [ss, se] of sisterSpans) {
+          if (se - ss > MIN_SEGMENT) {
+            emitJoist(ss, se, sisterCross, `Sistered joist under bearing wall ${wall.id}`)
+          }
         }
       }
     }
@@ -394,32 +416,45 @@ function frameSlab(
   }
 
   // ---- LOD 400: bearing validation ----
-  // Every joist end must land on a bearing structure (rim/polygon edge,
-  // girder face, or stair header face) within R502.6 tolerance; anything
-  // else gets flagged. By construction all ends bear — the checker is the
-  // regression net for future geometry changes.
   if (spec.detail === '400') {
     const bearingRuns: number[] = []
     if (needsGirder) bearingRuns.push(girderCut[0], girderCut[1])
     for (const hole of holeFrames) bearingRuns.push(hole.run[0], hole.run[1])
-    for (const m of members) {
-      if (m.role !== 'joist') continue
-      const half = m.dims[runAxis === 'x' ? 0 : 0] / 2
-      const center = runAxis === 'x' ? (m.position[0] as number) : (m.position[2] as number)
-      const cross = runAxis === 'x' ? (m.position[2] as number) : (m.position[0] as number)
-      for (const end of [center - half, center + half]) {
-        const onPolygon = polygonSpans(polygon, runAxis, cross).some(
-          ([s, e]) => Math.abs(end - s) < BEARING_TOLERANCE || Math.abs(end - e) < BEARING_TOLERANCE,
-        )
-        const onStructure = bearingRuns.some((r) => Math.abs(end - r) < BEARING_TOLERANCE + inches(0.1))
-        if (!onPolygon && !onStructure) {
-          m.flag = `Unsupported joist end @ ${(end).toFixed(2)}m — needs bearing (R502.6)`
-        }
-      }
-    }
+    validateJoistBearing(members, polygon, runAxis, bearingRuns)
   }
 
   return members
+}
+
+/**
+ * LOD 400 bearing checker (R502.6): every joist end must land on a bearing
+ * structure — a polygon edge (rim), a girder face, or a stair-header face —
+ * within 1.5" tolerance; anything else gets flagged. By construction all of
+ * frameFloor's ends bear — exported so the flag path itself stays testable
+ * with an injected bad joist (a checker whose only test asserts silence is
+ * no checker at all — round-2 finding).
+ */
+export function validateJoistBearing(
+  members: Member[],
+  polygon: readonly (readonly [number, number])[],
+  runAxis: 'x' | 'z',
+  bearingRuns: number[],
+): void {
+  for (const m of members) {
+    if (m.role !== 'joist') continue
+    const half = m.dims[0] / 2
+    const center = runAxis === 'x' ? (m.position[0] as number) : (m.position[2] as number)
+    const cross = runAxis === 'x' ? (m.position[2] as number) : (m.position[0] as number)
+    for (const end of [center - half, center + half]) {
+      const onPolygon = polygonSpans(polygon, runAxis, cross).some(
+        ([s, e]) => Math.abs(end - s) < BEARING_TOLERANCE || Math.abs(end - e) < BEARING_TOLERANCE,
+      )
+      const onStructure = bearingRuns.some((r) => Math.abs(end - r) < BEARING_TOLERANCE + inches(0.1))
+      if (!onPolygon && !onStructure) {
+        m.flag = `Unsupported joist end @ ${end.toFixed(2)}m — needs bearing (R502.6)`
+      }
+    }
+  }
 }
 
 /**

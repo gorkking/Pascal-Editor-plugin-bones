@@ -466,10 +466,14 @@ export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC)
     })
     // Cap-plate lap: the through wall's cap runs OVER the butting wall's top
     // plate (extend by half the butting thickness past the corner); the
-    // butting wall's cap pulls short by half the through thickness so the
-    // two caps butt instead of colliding — the lap alternates by construction.
+    // butting wall's cap pulls short so the two caps butt instead of
+    // colliding. The pull-back clears whichever is wider — the through
+    // wall's drawn thickness or its CAP PLATE width (a 2x4 cap is 3.5" wide,
+    // so walls drawn thinner than that would otherwise still collide —
+    // round-2 advisory).
+    const [, throughCapW] = LUMBER_CROSS_SECTIONS[studSizeFor(through, spec)]
     const extend = butting.thickness / 2
-    const shorten = -through.thickness / 2
+    const shorten = -Math.max(through.thickness, throughCapW) / 2
     if (throughEnd === 'start') throughHints.capStartDelta = (throughHints.capStartDelta ?? 0) + extend
     else throughHints.capEndDelta = (throughHints.capEndDelta ?? 0) + extend
     const buttingHints = hintFor(butting)

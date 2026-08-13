@@ -360,18 +360,32 @@ export function layoutHvac(
   if (spec.detail === '400') {
     const exit = nearestExteriorPoint(walls, equipAt)
     if (exit) {
-      manhattanDuct(
-        members,
-        equipAt,
-        exit,
-        0.15,
-        inches(0.75),
-        inches(0.75),
-        equipRoom.id,
-        'Condensate ¾" — slope 1/8"/ft to exterior (M1411.3)',
-        'pvc',
-        'pipe-run',
-      )
+      // Condensate falls 1/8" per foot toward the exterior (M1411.3.1) —
+      // rendered with the actual pitch, chaining down across both legs.
+      const CONDENSATE_SLOPE = 1 / 96
+      const condensate = (from: Pt, to: Pt, yHigh: number): number => {
+        const dx = to[0] - from[0]
+        const dz = to[1] - from[1]
+        const plan = Math.hypot(dx, dz)
+        if (plan < 0.05) return yHigh
+        const drop = plan * CONDENSATE_SLOPE
+        const length = Math.hypot(plan, drop)
+        members.push({
+          system: 'hvac',
+          role: 'pipe-run',
+          dims: [length, inches(0.75), inches(0.75)],
+          length,
+          position: [(from[0] + to[0]) / 2, yHigh - drop / 2, (from[1] + to[1]) / 2],
+          // +X points uphill (toward `from`), matching the plumbing slope convention
+          rotation: [0, Math.atan2(-(from[1] - to[1]), from[0] - to[0]), Math.atan2(drop, plan)],
+          material: 'pvc',
+          sourceId: equipRoom.id,
+          label: 'Condensate ¾" — slope 1/8"/ft to exterior (M1411.3.1)',
+        })
+        return yHigh - drop
+      }
+      const elbow: Pt = [exit[0], equipAt[1]]
+      condensate(elbow, exit, condensate(equipAt, elbow, 0.25))
       // Condenser pad just outside the exterior wall.
       const outX = exit[0] - equipAt[0]
       const outZ = exit[1] - equipAt[1]

@@ -430,3 +430,20 @@ describe('hvac — Manhattan trunk, cfm, step-down, exhaust (round-1 gaps)', () 
     expect(byKind(withGarage.fixtures, 'register').some((r) => r.sourceId === 'r_garage')).toBe(false)
   })
 })
+
+describe('hvac — condensate slope rendered (round-2 advisory)', () => {
+  test('both condensate legs pitch 1/8"/ft and chain downhill', () => {
+    const { walls: xwalls } = exteriorPlan()
+    const { members } = layoutHvac(xwalls, rooms, { ...DEFAULT_SPEC, detail: '400' })
+    const legs = byRole(members, 'pipe-run').filter((p) => p.label?.includes('Condensate'))
+    expect(legs.length).toBeGreaterThanOrEqual(1)
+    for (const leg of legs) {
+      expect(leg.rotation[2]).toBeCloseTo(Math.atan(1 / 96), 6)
+    }
+    // chained: no two legs share the same center height unless parallel
+    if (legs.length === 2) {
+      const [a, b] = legs as [Member, Member]
+      expect((a.position[1] as number) !== (b.position[1] as number)).toBe(true)
+    }
+  })
+})
