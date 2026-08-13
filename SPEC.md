@@ -18,10 +18,10 @@ exactly where the next refinement goes.
 
 Pascal models *architecture*: walls, doors, windows, slabs, roofs, levels. Bones infers
 *construction*: the studs inside the walls, the joists under the floors, the rafters
-under the roof, the concrete under it all. North star:
-prior framing tools proved this is computable — its framing is
-deterministic code driven by a parametric model, its takeoffs count the members it
-actually generated. Bones brings that to any Pascal scene.
+under the roof, the concrete under it all. The core principle: framing is
+deterministic code driven by a parametric model, and takeoffs count the members the
+engines actually generated — never a re-estimate. Bones brings that to any Pascal
+scene.
 
 ---
 
@@ -78,7 +78,7 @@ origin at `start`):
 - **Studs** at `studSpacing` o.c. (default 16" = 0.4064 m; 24" configurable), first
   stud at x=0, last stud at wall end regardless of spacing remainder.
 - **Stud size from wall thickness**: wall `thickness` ≥ 0.13 m → 2x6, else 2x4
-  (matches prior framing tools' 2x6-exterior / 2x4-interior catalog; overridable per wall).
+  (the standard 2x6-exterior / 2x4-interior practice; overridable per wall).
 - **Corners**: naive v1 — both walls run their full stud layout (double-count at
   corners is acceptable for v1; California corners are an M6 refinement).
 - **Stud height** = wall height − plate stack thickness.
@@ -89,7 +89,8 @@ For each door/window child of a wall:
 
 - **King studs** flanking the rough opening (full height).
 - **Trimmers (jack studs)** under each header end.
-- **Header** spanning the opening, auto-sized by clear span (prior framing tools' table):
+- **Header** spanning the opening, auto-sized by clear span (IRC R602.7-flavored
+  fallback table):
   ≤ 24" → 4x4 · ≤ 36" → 4x6 · ≤ 60" → 4x8 · ≤ 84" → 4x10 · else 4x12, flagged
   "engineered beam required" past ~10 ft (garage doors). Overridable per opening.
 - **Cripples** above the header (and below the sill for windows) continuing the
@@ -161,7 +162,7 @@ Kinds shipped over time: `bones:lumber` (v0.1), `bones:framing` (M1),
 
 ## 5. Settings & override hierarchy
 
-prior framing tools' hierarchy, adapted: **opening > wall > level > house**. The panel edits
+Override hierarchy: **opening > wall > level > house**. The panel edits
 house/level defaults; the inspector on a selected wall/opening (via the framing
 node's parametrics + `sourceId` picking) edits per-source overrides.
 
@@ -184,8 +185,7 @@ in the panel (`16" o.c.`, `2x4`) because framing vocabulary is imperial.
 ## 7. Non-goals (v1)
 
 - **Not engineering.** No load calcs, no shear/braced-wall design, no stamped
-  anything. Every output is a visualization/drafting aid (prior framing tools wears the same
-  disclaimer).
+  anything. Every output is a visualization/drafting aid.
 - No electrical/plumbing/HVAC (Pascal has native nodes for some of this already).
 - No 2D framing plan sheets (floorplan contribution exists in the API — a later
   milestone once 3D is right).

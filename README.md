@@ -65,8 +65,6 @@ actual dressed sizes) for hand-framing and debugging.
 
 - **Author:** Julien Brissonneau — [@Snoopy147](https://github.com/Snoopy147)
 - **Org:** [pascalorg](https://github.com/pascalorg) · **Support:** [issues](https://github.com/pascalorg/plugin-bones/issues) · **License:** MIT
-- Inspired by the excellent prior framing tools by
-  the framing trade — *plans, not pictures.*
 
 ## Capabilities & data
 

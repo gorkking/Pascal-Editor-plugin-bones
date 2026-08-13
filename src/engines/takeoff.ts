@@ -1,5 +1,5 @@
 /**
- * Takeoff engine — the prior framing tools signature move: quantities are counted
+ * Takeoff engine — quantities are counted
  * from the ACTUAL members the other engines generated, never re-estimated
  * from areas or wall lengths. If the 3D X-ray shows 14 studs, the takeoff
  * says 14 studs. Pure function: `(Member[], Fixture[]) → TakeoffRow[]`,

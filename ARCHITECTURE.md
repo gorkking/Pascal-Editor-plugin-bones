@@ -73,7 +73,7 @@ free because config changes go through the host's `updateNode`.
    `roughOpening*` — standard shim allowance; the host fields win when present.
 3. **Header bearing** = RO + two trimmer thicknesses; sizes from the simplified
    span table (IRC R602.7-flavored, researched in `data/framing-tables.json`).
-   Past 10' → flagged "engineered beam required", mirroring prior framing tools.
+   Past 10' → flagged "engineered beam required" (prescriptive tables end there).
 4. **Corners** are framed naively (both walls run full layouts) — California
    corners are an LOD 400 refinement.
 5. **Curved walls** are skipped with a panel warning (tessellation later).

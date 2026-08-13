@@ -57,16 +57,7 @@ export default function BonesPanel() {
       <LumberSection />
 
       <footer className="-mx-4 -mb-4 sticky bottom-0 mt-1 border-sidebar-border/50 border-t bg-sidebar px-4 py-3 text-[11px] text-sidebar-foreground/50 leading-relaxed">
-        Drafting aid, not engineering — verify with your local building department. Inspired by{' '}
-        <a
-          className="underline decoration-dotted underline-offset-2 hover:text-sidebar-foreground/70"
-          href="https://example.com"
-          rel="noreferrer"
-          target="_blank"
-        >
-          prior framing tools
-        </a>
-        .
+        Drafting aid, not engineering — verify with your local building department.
       </footer>
     </div>
   )
