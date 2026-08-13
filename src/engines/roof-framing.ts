@@ -412,7 +412,9 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
     for (const side of [1, -1] as const) {
       const x = alongX ? u : side * ((run + roof.overhang * cosT) / 2)
       const z = alongX ? side * ((run + roof.overhang * cosT) / 2) : u
-      const psi = alongX ? (side * Math.PI) / 2 : side === 1 ? 0 : Math.PI
+      // Rising axis must point from the ±X eave tip toward the ridge at x=0:
+      // +X side ⇒ horizontal −X ⇒ ψ = π; −X side ⇒ ψ = 0.
+      const psi = alongX ? (side * Math.PI) / 2 : side === 1 ? Math.PI : 0
       emit(
         'rafter',
         spec.rafterSize,

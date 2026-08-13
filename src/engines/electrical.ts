@@ -243,7 +243,10 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
       // would run past the wall end.
       let u = opening.u + halfRo + SWITCH_LATCH_OFFSET
       if (u > wall.length - inches(1)) u = opening.u - halfRo - SWITCH_LATCH_OFFSET
-      if (u < inches(1)) continue // door consumes the whole wall — no wall left for a box
+      // No wall left for a box: the door consumes the whole wall, or the
+      // opening data runs past the wall end (degenerate scene) — never place
+      // a switch off the end of its wall.
+      if (u < inches(1) || u > wall.length - inches(1)) continue
       for (const face of faces) {
         const [x, z] = face.plan(u)
         fixtures.push({

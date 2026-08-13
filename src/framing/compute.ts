@@ -78,6 +78,15 @@ export function computeLevel(
   const activeWalls = walls.filter(
     (wall) => wallConstruction(wall, config, profile.exteriorWallDefault) !== 'skip',
   )
+  // Rooms must not reference skipped walls either: plumbing anchors its wet
+  // wall (and electrical its garage panel) through `boundaryWallIds`, and a
+  // dangling id would starve the engines' nearest-wall fallbacks.
+  const activeWallIds = new Set(activeWalls.map((wall) => wall.id))
+  const activeRooms = rooms.map((room) =>
+    room.boundaryWallIds.every((id) => activeWallIds.has(id))
+      ? room
+      : { ...room, boundaryWallIds: room.boundaryWallIds.filter((id) => activeWallIds.has(id)) },
+  )
 
   if (config.showWalls) {
     for (const wall of activeWalls) {
@@ -104,17 +113,17 @@ export function computeLevel(
   }
 
   if (config.showElectrical) {
-    fixtures.push(...layoutElectrical(activeWalls, rooms))
+    fixtures.push(...layoutElectrical(activeWalls, activeRooms))
   }
 
   if (config.showPlumbing) {
-    const plumbing = layoutPlumbing(activeWalls, rooms, spec)
+    const plumbing = layoutPlumbing(activeWalls, activeRooms, spec)
     members.push(...plumbing.members)
     fixtures.push(...plumbing.fixtures)
   }
 
   if (config.showHvac) {
-    const hvac = layoutHvac(activeWalls, rooms, spec)
+    const hvac = layoutHvac(activeWalls, activeRooms, spec)
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
   }
