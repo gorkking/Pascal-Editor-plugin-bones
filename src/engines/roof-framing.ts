@@ -25,7 +25,7 @@
 import { LUMBER_CROSS_SECTIONS, type LumberSize } from '../lumber'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, WallSlice } from '../core/types'
-import { inches } from '../core/units'
+import { formatIn, inches } from '../core/units'
 
 const EPS = 1e-6
 
@@ -49,7 +49,27 @@ export type RoofSegmentSlice = {
   pitch: number
   overhang: number
   wallHeight: number
+  // Shape ratios for the multi-face types — host schema fields with the
+  // ROOF_SHAPE_DEFAULTS values (roof-segment.ts in @pascal-app/core).
+  gambrelLowerWidthRatio?: number
+  gambrelLowerHeightRatio?: number
+  mansardSteepWidthRatio?: number
+  mansardSteepHeightRatio?: number
+  dutchHipWidthRatio?: number
+  dutchHipHeightRatio?: number
+  dutchWaistLengthRatio?: number
 }
+
+/** Host defaults for the shape ratios (ROOF_SHAPE_DEFAULTS in @pascal-app/core). */
+export const SHAPE_DEFAULTS = {
+  gambrelLowerWidthRatio: 0.5,
+  gambrelLowerHeightRatio: 0.6,
+  mansardSteepWidthRatio: 0.15,
+  mansardSteepHeightRatio: 0.7,
+  dutchHipWidthRatio: 0.25,
+  dutchHipHeightRatio: 0.5,
+  dutchWaistLengthRatio: 0.98,
+} as const
 
 const num = (v: unknown, fallback: number): number =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback
@@ -112,6 +132,13 @@ export function extractRoofs(nodes: NodesRecord, levelId: string): RoofSegmentSl
       pitch: (num(node.pitch, 40) * Math.PI) / 180,
       overhang: num(node.overhang, 0.3),
       wallHeight: num(node.wallHeight, 0.5),
+      gambrelLowerWidthRatio: num(node.gambrelLowerWidthRatio, SHAPE_DEFAULTS.gambrelLowerWidthRatio),
+      gambrelLowerHeightRatio: num(node.gambrelLowerHeightRatio, SHAPE_DEFAULTS.gambrelLowerHeightRatio),
+      mansardSteepWidthRatio: num(node.mansardSteepWidthRatio, SHAPE_DEFAULTS.mansardSteepWidthRatio),
+      mansardSteepHeightRatio: num(node.mansardSteepHeightRatio, SHAPE_DEFAULTS.mansardSteepHeightRatio),
+      dutchHipWidthRatio: num(node.dutchHipWidthRatio, SHAPE_DEFAULTS.dutchHipWidthRatio),
+      dutchHipHeightRatio: num(node.dutchHipHeightRatio, SHAPE_DEFAULTS.dutchHipHeightRatio),
+      dutchWaistLengthRatio: num(node.dutchWaistLengthRatio, SHAPE_DEFAULTS.dutchWaistLengthRatio),
     })
   }
   return slices
@@ -158,8 +185,14 @@ export function frameRoofs(
     if (roof.roofType === 'gable') frameGable(roof, spec, members)
     else if (roof.roofType === 'shed') frameShed(roof, spec, members)
     else if (roof.roofType === 'hip') frameHip(roof, spec, members)
-    // gambrel / dutch / mansard / flat: LOD 400 — upstream shows a warning
-    // via the panel count staying put; we simply emit nothing.
+    else if (roof.roofType === 'flat') frameFlat(roof, spec, members)
+    else if (roof.roofType === 'gambrel') frameGambrel(roof, spec, members)
+    else if (roof.roofType === 'mansard') frameMansard(roof, spec, members)
+    else if (roof.roofType === 'dutch') frameDutch(roof, spec, members)
+  }
+  // Valleys where two gable segments cross (LOD 350).
+  if (spec.detail !== '200') {
+    for (const valley of detectValleys(roofs)) emitValley(valley, spec, members)
   }
   return members
 }
@@ -200,6 +233,27 @@ function emitter(roof: RoofSegmentSlice, members: Member[]): Emit {
   }
 }
 
+/** Outlooker spacing up the rake (4 ft o.c. is the conventional maximum). */
+const OUTLOOKER_SPACING = 1.2
+/** Rake overhangs below this need no outlookers — the sheathing cantilevers. */
+const MIN_RAKE_OVERHANG = 0.15
+/** Sub-fascia stock. */
+const FASCIA_SIZE: LumberSize = '2x6'
+
+/**
+ * LOD 400 fabrication data for a common rafter: plumb-cut angle at the ridge,
+ * birdsmouth seat (capped at the 2x4 plate width) and HAP — the height above
+ * plate that survives after the seat cut (drives fascia lines).
+ */
+function rafterCutData(spec: FramingSpec, theta: number, rafterDepth: number): string {
+  if (spec.detail !== '400') return ''
+  const deg = Math.round((theta * 180) / Math.PI)
+  const seat = inches(3.5)
+  const plumbDepth = rafterDepth / Math.cos(theta)
+  const hap = plumbDepth - seat * Math.tan(theta)
+  return ` — plumb cut ${deg}°, birdsmouth seat 3½", HAP ${formatIn(hap)}`
+}
+
 /** Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path). */
 function tieAt(emit: Emit, x: number, z: number, y: number) {
   emit(
@@ -230,6 +284,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
   // ---- rafters, both slopes ----
   // Slope length includes the overhang measured along the slope.
   const slopeLen = run / cosT + roof.overhang
+  const cuts = rafterCutData(spec, theta, rd)
   const xs = layout(-roof.width / 2, roof.width / 2, spec.rafterSpacing, halfT)
   for (const x of xs) {
     for (const side of [1, -1] as const) {
@@ -250,9 +305,77 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
         theta,
         slopeLen,
         'lumber',
-        `Rafter ${spec.rafterSize}`,
+        `Rafter ${spec.rafterSize}${cuts}`,
       )
       if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
+    }
+  }
+
+  // ---- rake framing: barge rafters + outlookers over the gable ends ----
+  // The roof plane cantilevers `overhang` past the end walls along X; a
+  // barge (verge) rafter carries the rake edge, held by flat 2x4 outlookers
+  // laid over a dropped end rafter, cantilevering 2:1 back to the first
+  // interior rafter (conventional rake detail — R802 has no prescriptive
+  // table for it).
+  if (spec.detail !== '200' && roof.overhang >= MIN_RAKE_OVERHANG) {
+    const [olT, olW] = LUMBER_CROSS_SECTIONS['2x4']
+    const backspan = spec.rafterSpacing
+    const olLen = roof.overhang + backspan
+    for (const sx of [1, -1] as const) {
+      // barge rafters, both slopes, at the rake line
+      for (const side of [1, -1] as const) {
+        const tipZ = side * (run + roof.overhang * cosT)
+        const tipY = eaveY - roof.overhang * Math.sin(theta)
+        emit(
+          'rafter',
+          spec.rafterSize,
+          [slopeLen, rd, t],
+          [sx * (roof.width / 2 + roof.overhang), (tipY + ridgeY) / 2, (tipZ + 0) / 2],
+          (side * Math.PI) / 2,
+          theta,
+          slopeLen,
+          'lumber',
+          `Barge rafter ${spec.rafterSize} (rake)`,
+        )
+      }
+      // outlookers ladder up both slopes at 4' o.c.
+      const cx = sx * (roof.width / 2 + (roof.overhang - backspan) / 2)
+      for (const side of [1, -1] as const) {
+        for (let z = OUTLOOKER_SPACING / 2; z < run - EPS; z += OUTLOOKER_SPACING) {
+          // flat 2x4 (wide face up the slope plane), just under the plane
+          const y = ridgeY - z * tan - olT / 2
+          emit(
+            'outlooker',
+            '2x4',
+            [olLen, olT, olW],
+            [cx, y, side * z],
+            0,
+            0,
+            olLen,
+            'lumber',
+            'Outlooker 2x4 flat @ 4ft (rake)',
+          )
+        }
+      }
+    }
+  }
+
+  // ---- sub-fascia along both eave tips (LOD 400) ----
+  if (spec.detail === '400') {
+    const [fT, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
+    const fasciaLen = roof.width + 2 * roof.overhang
+    for (const side of [1, -1] as const) {
+      emit(
+        'fascia',
+        FASCIA_SIZE,
+        [fasciaLen, fD, fT],
+        [0, eaveY - roof.overhang * Math.sin(theta) + fD / 2, side * (run + roof.overhang * cosT)],
+        0,
+        0,
+        fasciaLen,
+        'lumber',
+        `Sub-fascia ${FASCIA_SIZE}`,
+      )
     }
   }
 
@@ -269,10 +392,13 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     0,
     ridgeLen,
     'lumber',
-    `Ridge ${ridgeSize}`,
+    `Ridge ${ridgeSize}${spec.detail === '400' ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°` : ''}`,
   )
 
   // ---- ceiling joists across the depth at the eave line ----
+  // Running parallel to the rafter span, they double as the RAFTER TIES of
+  // R802.4.2 (thrust) — distinct from the collar ties below (uplift, upper
+  // third, R802.4.6). The 400 label spells that distinction out.
   const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
   for (const x of layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2)) {
     // +X box yawed onto +Z: ψ = -π/2 (three: +X → (cosψ, 0, -sinψ)).
@@ -285,7 +411,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
       0,
       roof.depth,
       'lumber',
-      `Ceiling joist ${spec.ceilingJoistSize}`,
+      `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`,
     )
   }
 
@@ -400,12 +526,17 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         hipTilt,
         hipLen,
         'lumber',
-        `Hip ${spec.rafterSize}`,
+        `Hip ${spec.rafterSize}${
+          spec.detail === '400'
+            ? ` — plumb ${Math.round((hipTilt * 180) / Math.PI)}°, side cuts 45°`
+            : ''
+        }`,
       )
     }
   }
 
   // ---- common rafters on the two long planes, between the hips ----
+  const commonCuts = rafterCutData(spec, theta, rd)
   const commonSlopeLen = run / cosT + roof.overhang
   const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
   for (const u of commons) {
@@ -424,13 +555,581 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         theta,
         commonSlopeLen,
         'lumber',
-        `Rafter ${spec.rafterSize} (hip common)`,
+        `Rafter ${spec.rafterSize} (hip common)${commonCuts}`,
       )
       if (spec.hurricaneTies) {
         tieAt(emit, alongX ? u : side * run, alongX ? side * run : u, eaveY)
       }
     }
   }
-  // // LOD 400: jack rafters on the hip end planes + valley handling when
-  // // segments intersect.
+
+  // ---- jack rafters on the four triangular planes (LOD 350) ----
+  // Side planes: past each ridge end the trapezoid tapers — jacks at o.c.
+  // shorten from the full common run down to nothing at the corner, each
+  // landing on the hip (plan line |cross| = |long| − ridgeHalf).
+  // End planes: mirrored — jacks run along the LONG axis from the end eave
+  // to the hip, with a full-run king common on the plane's centerline.
+  if (spec.detail !== '200') {
+    const cuts = rafterCutData(spec, theta, rd)
+    const jackLabel = (jackRun: number) =>
+      `Jack rafter ${spec.rafterSize}${
+        spec.detail === '400'
+          ? ` — ${formatIn(jackRun / cosT)} slope, cheek 45°`
+          : ''
+      }${cuts}`
+    const emitSloped = (
+      role: Member['role'],
+      long: number,
+      cross: number,
+      longIsX: boolean,
+      psi: number,
+      jackRun: number,
+      label: string,
+    ) => {
+      // Member from eave tip (cross extent run + overhang·cosT) up to the
+      // hip/ridge (cross extent = run − jackRun): geometry mirrors commons.
+      const tipCross = run + roof.overhang * cosT
+      const topCross = run - jackRun
+      const midCross = ((tipCross + topCross) / 2) * Math.sign(cross)
+      const tipY = eaveY - roof.overhang * Math.sin(theta)
+      const topY = eaveY + jackRun * tan
+      const len = jackRun / cosT + roof.overhang
+      emit(
+        role,
+        spec.rafterSize,
+        [len, rd, t],
+        longIsX ? [long, (tipY + topY) / 2, midCross] : [midCross, (tipY + topY) / 2, long],
+        psi,
+        theta,
+        len,
+        'lumber',
+        label,
+      )
+    }
+    for (const se of [1, -1] as const) {
+      // side-plane jacks: stations past the ridge end toward the corner
+      for (let d = spec.rafterSpacing; d < run - halfT; d += spec.rafterSpacing) {
+        const jackRun = run - d
+        for (const sc of [1, -1] as const) {
+          const long = se * (ridgeHalf + d)
+          const psi = alongX ? (sc * Math.PI) / 2 : sc === 1 ? Math.PI : 0
+          emitSloped('jack-rafter', long, sc, alongX, psi, jackRun, jackLabel(jackRun))
+        }
+      }
+      // end-plane: king common on the centerline runs the full hip run…
+      {
+        const psi = alongX ? (se === 1 ? Math.PI : 0) : (se * Math.PI) / 2
+        const tipCross = run + roof.overhang * cosT
+        const midLong = se * (ridgeHalf + tipCross / 2)
+        const tipY = eaveY - roof.overhang * Math.sin(theta)
+        const len = run / cosT + roof.overhang
+        emit(
+          'rafter',
+          spec.rafterSize,
+          [len, rd, t],
+          alongX ? [midLong, (tipY + ridgeY) / 2, 0] : [0, (tipY + ridgeY) / 2, midLong],
+          psi,
+          theta,
+          len,
+          'lumber',
+          `King common ${spec.rafterSize} (hip end)${cuts}`,
+        )
+      }
+      // …and jacks step down each side of it
+      for (let v = spec.rafterSpacing; v < run - halfT; v += spec.rafterSpacing) {
+        const jackRun = run - v
+        for (const sv of [1, -1] as const) {
+          // On the end plane the RUN direction is the long axis: reuse
+          // emitSloped with axes swapped (long ↔ cross).
+          const psi = alongX ? (se === 1 ? Math.PI : 0) : (se * Math.PI) / 2
+          const tipCross = ridgeHalf + run + roof.overhang * cosT
+          const topCross = ridgeHalf + v
+          const midLong = (se * (tipCross + topCross)) / 2
+          const tipY = eaveY - roof.overhang * Math.sin(theta)
+          const topY = eaveY + jackRun * tan
+          const len = jackRun / cosT + roof.overhang
+          emit(
+            'jack-rafter',
+            spec.rafterSize,
+            [len, rd, t],
+            alongX ? [midLong, (tipY + topY) / 2, sv * v] : [sv * v, (tipY + topY) / 2, midLong],
+            psi,
+            theta,
+            len,
+            'lumber',
+            jackLabel(jackRun),
+          )
+        }
+      }
+    }
+  }
+
+  // ---- sub-fascia around all four eaves (LOD 400) ----
+  if (spec.detail === '400') {
+    const [fT, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
+    const tipOut = roof.overhang * cosT
+    const fasciaY = eaveY - roof.overhang * Math.sin(theta) + fD / 2
+    const halfW = roof.width / 2 + tipOut
+    const halfD = roof.depth / 2 + tipOut
+    for (const side of [1, -1] as const) {
+      emit('fascia', FASCIA_SIZE, [2 * halfW, fD, fT], [0, fasciaY, side * halfD], 0, 0, 2 * halfW, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+      emit('fascia', FASCIA_SIZE, [2 * halfD, fD, fT], [side * halfW, fasciaY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Flat / gambrel / mansard / dutch (round-1 gap: these emitted nothing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Flat roof — joist-style platform with a rim, per the rubric ("flat =
+ * joist-style with rim"). The host deck extends `overhang` past the footprint
+ * on every side (cosθ = 1), so the platform covers footprint + overhang.
+ * ASSUMPTION: the drainage slope (min ¼:12, R903.4) is built with tapered
+ * insulation above the deck, not by sloping the joists — labels call it out.
+ */
+function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) {
+  const emit = emitter(roof, members)
+  const [t, rd] = LUMBER_CROSS_SECTIONS[spec.rafterSize]
+  const halfW = roof.width / 2 + roof.overhang
+  const halfD = roof.depth / 2 + roof.overhang
+  const centerY = roof.wallHeight + rd / 2 // resting on the plates, deck above
+  const spansX = halfW <= halfD // joists span the SHORT axis
+  const span = 2 * Math.min(halfW, halfD)
+  const stationHalf = Math.max(halfW, halfD)
+  for (const u of layout(-stationHalf, stationHalf, spec.rafterSpacing, t / 2)) {
+    emit(
+      'rafter',
+      spec.rafterSize,
+      [span, rd, t],
+      spansX ? [0, centerY, u] : [u, centerY, 0],
+      spansX ? 0 : -Math.PI / 2,
+      0,
+      span,
+      'lumber',
+      `Flat roof joist ${spec.rafterSize} — slope to drains with tapered insulation (¼:12 min, R903.4)`,
+    )
+  }
+  for (const side of [1, -1] as const) {
+    emit('rim-joist', spec.rafterSize, [2 * halfW, rd, t], [0, centerY, side * halfD], 0, 0, 2 * halfW, 'lumber', 'Rim / fascia (flat roof)')
+    emit('rim-joist', spec.rafterSize, [2 * halfD, rd, t], [side * halfW, centerY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', 'Rim / fascia (flat roof)')
+  }
+}
+
+/**
+ * Gambrel — two planes per side meeting at a purlin. Host geometry: the
+ * steep LOWER face carries the schema `pitch` and spans
+ * `(depth/2)·gambrelLowerWidthRatio` horizontally, rising
+ * `gambrelLowerHeightRatio` of the way to the peak; the shallow upper face
+ * finishes the run to the ridge (getPrimarySlopeRun/-RiseFraction in
+ * @pascal-app/core).
+ */
+function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) {
+  const emit = emitter(roof, members)
+  const [t, rd] = LUMBER_CROSS_SECTIONS[spec.rafterSize]
+  const halfT = t / 2
+  const theta = roof.pitch
+  const tan = Math.tan(theta)
+  const cosT = Math.cos(theta)
+  const wr = roof.gambrelLowerWidthRatio ?? SHAPE_DEFAULTS.gambrelLowerWidthRatio
+  const hr = roof.gambrelLowerHeightRatio ?? SHAPE_DEFAULTS.gambrelLowerHeightRatio
+  const run = roof.depth / 2
+  const lowerRun = run * wr
+  const lowerRise = lowerRun * tan
+  const activeRh = lowerRise / hr
+  const upperRise = activeRh - lowerRise
+  const upperRun = run - lowerRun
+  const phi = Math.atan2(upperRise, upperRun)
+  const eaveY = roof.wallHeight
+  const breakY = eaveY + lowerRise
+  const ridgeY = eaveY + activeRh
+  const breakZ = upperRun // kink plan line: |z| = run − lowerRun
+  const lowerLen = lowerRun / cosT + roof.overhang
+  const upperLen = Math.hypot(upperRun, upperRise)
+  const cuts = rafterCutData(spec, theta, rd)
+  const phiDeg = Math.round((phi * 180) / Math.PI)
+
+  const xs = layout(-roof.width / 2, roof.width / 2, spec.rafterSpacing, halfT)
+  for (const x of xs) {
+    for (const side of [1, -1] as const) {
+      const tipZ = side * (run + roof.overhang * cosT)
+      const tipY = eaveY - roof.overhang * Math.sin(theta)
+      emit(
+        'rafter',
+        spec.rafterSize,
+        [lowerLen, rd, t],
+        [x, (tipY + breakY) / 2, (tipZ + side * breakZ) / 2],
+        (side * Math.PI) / 2,
+        theta,
+        lowerLen,
+        'lumber',
+        `Rafter ${spec.rafterSize} (gambrel lower)${cuts}`,
+      )
+      emit(
+        'rafter',
+        spec.rafterSize,
+        [upperLen, rd, t],
+        [x, (breakY + ridgeY) / 2, (side * breakZ) / 2],
+        (side * Math.PI) / 2,
+        phi,
+        upperLen,
+        'lumber',
+        `Rafter ${spec.rafterSize} (gambrel upper${spec.detail === '400' ? ` — plumb ${phiDeg}°` : ''})`,
+      )
+      if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
+    }
+  }
+
+  // ridge + a purlin under each kink (the classic gambrel joint support)
+  const ridgeSize = ridgeSizeFor(spec.rafterSize)
+  const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
+  const ridgeLen = roof.width + 2 * roof.overhang
+  emit('ridge', ridgeSize, [ridgeLen, rdd, rt], [0, ridgeY - rdd / 2, 0], 0, 0, ridgeLen, 'lumber', `Ridge ${ridgeSize}`)
+  for (const side of [1, -1] as const) {
+    emit(
+      'ridge',
+      ridgeSize,
+      [roof.width, rdd, rt],
+      [0, breakY - rdd / 2, side * breakZ],
+      0,
+      0,
+      roof.width,
+      'lumber',
+      `Purlin ${ridgeSize} @ gambrel break`,
+    )
+  }
+
+  // ceiling joists at the eave + collar ties in the upper third
+  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  for (const x of layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2)) {
+    emit('ceiling-joist', spec.ceilingJoistSize, [roof.depth, cjD, cjT], [x, eaveY + cjD / 2, 0], -Math.PI / 2, 0, roof.depth, 'lumber', `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`)
+  }
+  const collarY = eaveY + (2 / 3) * activeRh
+  if (collarY > breakY) {
+    const collarLen = (2 * (ridgeY - collarY) * upperRun) / upperRise
+    if (collarLen > 0.3) {
+      const [ctT, ctD] = LUMBER_CROSS_SECTIONS['2x4']
+      xs.forEach((x, i) => {
+        if (i % 2 !== 0) return
+        emit('collar-tie', '2x4', [collarLen, ctD, ctT], [x, collarY, 0], -Math.PI / 2, 0, collarLen, 'lumber', 'Collar tie 2x4')
+      })
+    }
+  }
+
+  // sub-fascia at the two lower eave tips (LOD 400)
+  if (spec.detail === '400') {
+    const [fT, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
+    for (const side of [1, -1] as const) {
+      emit('fascia', FASCIA_SIZE, [ridgeLen, fD, fT], [0, eaveY - roof.overhang * Math.sin(theta) + fD / 2, side * (run + roof.overhang * cosT)], 0, 0, ridgeLen, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+    }
+  }
+}
+
+/** Shared steep-skirt framing for mansard/dutch: perimeter rafters + arris hips. */
+function frameSkirt(
+  roof: RoofSegmentSlice,
+  spec: FramingSpec,
+  members: Member[],
+  opts: {
+    /** Horizontal skirt run on the ±Z (long-face) sides. */
+    sideRun: number
+    /** Horizontal skirt run on the ±X (end-face) sides. */
+    endRun: number
+    /** Vertical rise of the skirt. */
+    rise: number
+    label: string
+  },
+) {
+  const emit = emitter(roof, members)
+  const [t, rd] = LUMBER_CROSS_SECTIONS[spec.rafterSize]
+  const halfT = t / 2
+  const eaveY = roof.wallHeight
+  const { sideRun, endRun, rise, label } = opts
+  const sideTheta = Math.atan2(rise, sideRun)
+  const endTheta = Math.atan2(rise, endRun)
+
+  const face = (
+    stations: number[],
+    stationIsX: boolean,
+    half: number,
+    runH: number,
+    theta: number,
+  ) => {
+    const cosT = Math.cos(theta)
+    const len = runH / cosT + roof.overhang
+    const tipOut = half + roof.overhang * cosT
+    const topOut = half - runH
+    const tipY = eaveY - roof.overhang * Math.sin(theta)
+    const topY = eaveY + rise
+    for (const u of stations) {
+      for (const side of [1, -1] as const) {
+        const cross = (side * (tipOut + topOut)) / 2
+        const psi = stationIsX ? (side * Math.PI) / 2 : side === 1 ? Math.PI : 0
+        emit(
+          'rafter',
+          spec.rafterSize,
+          [len, rd, t],
+          stationIsX ? [u, (tipY + topY) / 2, cross] : [cross, (tipY + topY) / 2, u],
+          psi,
+          theta,
+          len,
+          'lumber',
+          `${label} ${spec.rafterSize}${rafterCutData(spec, theta, rd)}`,
+        )
+        if (spec.hurricaneTies) tieAt(emit, stationIsX ? u : side * half, stationIsX ? side * half : u, eaveY)
+      }
+    }
+  }
+
+  // long faces (slopes facing ±Z), stations along X between the arris lines
+  face(
+    layout(-(roof.width / 2 - endRun), roof.width / 2 - endRun, spec.rafterSpacing, halfT),
+    true,
+    roof.depth / 2,
+    sideRun,
+    sideTheta,
+  )
+  // end faces (slopes facing ±X), stations along Z
+  face(
+    layout(-(roof.depth / 2 - sideRun), roof.depth / 2 - sideRun, spec.rafterSpacing, halfT),
+    false,
+    roof.width / 2,
+    endRun,
+    endTheta,
+  )
+
+  // four arris hips: footprint corner → top corner of the skirt
+  const hipPlan = Math.hypot(endRun, sideRun)
+  const hipLen = Math.hypot(hipPlan, rise)
+  const hipTilt = Math.atan2(rise, hipPlan)
+  for (const sx of [1, -1] as const) {
+    for (const sz of [1, -1] as const) {
+      const corner: [number, number] = [sx * (roof.width / 2), sz * (roof.depth / 2)]
+      const top: [number, number] = [sx * (roof.width / 2 - endRun), sz * (roof.depth / 2 - sideRun)]
+      const yawTo = Math.atan2(-(corner[1] - top[1]), corner[0] - top[0])
+      emit(
+        'hip',
+        spec.rafterSize,
+        [hipLen, rd, t],
+        [(corner[0] + top[0]) / 2, eaveY + rise / 2, (corner[1] + top[1]) / 2],
+        yawTo + Math.PI,
+        hipTilt,
+        hipLen,
+        'lumber',
+        `Hip ${spec.rafterSize} (${label.toLowerCase()} arris)`,
+      )
+    }
+  }
+}
+
+/** Inner sections reuse the primary shapes without doubling 400 trim/ties. */
+function innerSpec(spec: FramingSpec): FramingSpec {
+  return { ...spec, hurricaneTies: false, detail: spec.detail === '200' ? '200' : '300' }
+}
+
+/**
+ * Mansard — steep skirt on all four sides (run = min(width,depth)·
+ * mansardSteepWidthRatio at the schema pitch, rising mansardSteepHeightRatio
+ * of the peak height), finished with a shallow hip over the inset rectangle.
+ */
+function frameMansard(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) {
+  const swr = roof.mansardSteepWidthRatio ?? SHAPE_DEFAULTS.mansardSteepWidthRatio
+  const shr = roof.mansardSteepHeightRatio ?? SHAPE_DEFAULTS.mansardSteepHeightRatio
+  const minSpan = Math.min(roof.width, roof.depth)
+  const inset = minSpan * swr
+  const skirtRise = inset * Math.tan(roof.pitch)
+  const activeRh = skirtRise / shr
+  const upperRise = activeRh - skirtRise
+
+  frameSkirt(roof, spec, members, {
+    sideRun: inset,
+    endRun: inset,
+    rise: skirtRise,
+    label: 'Mansard skirt',
+  })
+
+  // upper deck: a shallow hip over the inset rectangle
+  const innerRun = minSpan / 2 - inset
+  if (innerRun > 0.2 && upperRise > EPS) {
+    frameHip(
+      {
+        ...roof,
+        width: roof.width - 2 * inset,
+        depth: roof.depth - 2 * inset,
+        pitch: Math.atan2(upperRise, innerRun),
+        overhang: 0,
+        wallHeight: roof.wallHeight + skirtRise,
+      },
+      innerSpec(spec),
+      members,
+    )
+  }
+
+  // perimeter sub-fascia (LOD 400)
+  if (spec.detail === '400') {
+    const emit = emitter(roof, members)
+    const [fT, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
+    const cosT = Math.cos(roof.pitch)
+    const tipOut = roof.overhang * cosT
+    const fasciaY = roof.wallHeight - roof.overhang * Math.sin(roof.pitch) + fD / 2
+    const halfW = roof.width / 2 + tipOut
+    const halfD = roof.depth / 2 + tipOut
+    for (const side of [1, -1] as const) {
+      emit('fascia', FASCIA_SIZE, [2 * halfW, fD, fT], [0, fasciaY, side * halfD], 0, 0, 2 * halfW, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+      emit('fascia', FASCIA_SIZE, [2 * halfD, fD, fT], [side * halfW, fasciaY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+    }
+  }
+}
+
+/**
+ * Dutch gable — a hip skirt rising dutchHipHeightRatio of the peak height
+ * (inset = min(width,depth)·dutchHipWidthRatio), topped by a gablet over the
+ * waist rectangle (getDutchRoofMetrics in @pascal-app/core; the gablet barge
+ * rake is treated as 0 — the waist end-walls carry the gablet).
+ */
+function frameDutch(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) {
+  const dwr = roof.dutchHipWidthRatio ?? SHAPE_DEFAULTS.dutchHipWidthRatio
+  const dhr = roof.dutchHipHeightRatio ?? SHAPE_DEFAULTS.dutchHipHeightRatio
+  const waistRatio = roof.dutchWaistLengthRatio ?? SHAPE_DEFAULTS.dutchWaistLengthRatio
+  const alongX = roof.width >= roof.depth
+  const minSpan = Math.min(roof.width, roof.depth)
+  const maxSpan = Math.max(roof.width, roof.depth)
+  const inset = minSpan * dwr
+  const skirtRise = inset * Math.tan(roof.pitch)
+  const activeRh = skirtRise / dhr
+  const upperRise = activeRh - skirtRise
+  const waistHalfLong = Math.max(0, (maxSpan / 2 - inset) * waistRatio)
+  const waistHalfShort = Math.max(0, minSpan / 2 - inset)
+  const endRun = maxSpan / 2 - waistHalfLong
+
+  frameSkirt(roof, spec, members, {
+    sideRun: alongX ? inset : endRun,
+    endRun: alongX ? endRun : inset,
+    rise: skirtRise,
+    label: 'Dutch skirt',
+  })
+
+  // gablet over the waist rectangle
+  if (waistHalfLong > 0.2 && waistHalfShort > 0.1 && upperRise > EPS) {
+    const gablet: RoofSegmentSlice = {
+      ...roof,
+      yaw: alongX ? roof.yaw : roof.yaw + Math.PI / 2,
+      width: 2 * waistHalfLong,
+      depth: 2 * waistHalfShort,
+      pitch: Math.atan2(upperRise, waistHalfShort),
+      overhang: 0,
+      wallHeight: roof.wallHeight + skirtRise,
+    }
+    frameGable(gablet, innerSpec(spec), members)
+  }
+
+  // perimeter sub-fascia (LOD 400)
+  if (spec.detail === '400') {
+    const emit = emitter(roof, members)
+    const [fT, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
+    const cosT = Math.cos(roof.pitch)
+    const tipOut = roof.overhang * cosT
+    const fasciaY = roof.wallHeight - roof.overhang * Math.sin(roof.pitch) + fD / 2
+    const halfW = roof.width / 2 + tipOut
+    const halfD = roof.depth / 2 + tipOut
+    for (const side of [1, -1] as const) {
+      emit('fascia', FASCIA_SIZE, [2 * halfW, fD, fT], [0, fasciaY, side * halfD], 0, 0, 2 * halfW, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+      emit('fascia', FASCIA_SIZE, [2 * halfD, fD, fT], [side * halfW, fasciaY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', `Sub-fascia ${FASCIA_SIZE}`)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Valleys — two gable segments crossing at right angles (LOD 350)
+// ---------------------------------------------------------------------------
+
+export type ValleyLine = {
+  major: RoofSegmentSlice
+  /** Eave foot of the valley, in the MAJOR segment's frame. */
+  foot: readonly [number, number, number]
+  /** Apex where the minor ridge pierces the major slope (major frame). */
+  apex: readonly [number, number, number]
+}
+
+/**
+ * Detect valley lines between pairs of GABLE segments whose ridges cross at
+ * right angles with matching eave heights — the classic L/T roof join. The
+ * valley is the intersection of the two slope planes: it rises from the
+ * point where the minor's eave meets the major's eave edge to the point
+ * where the minor's ridge pierces the major's slope. ASSUMPTIONS: hip/shed
+ * joins and skewed (non-perpendicular) crossings are not detected; the
+ * penetrating segment's rafters overlay the main roof (overlay framing).
+ */
+export function detectValleys(roofs: RoofSegmentSlice[]): ValleyLine[] {
+  const out: ValleyLine[] = []
+  for (const major of roofs) {
+    if (major.roofType !== 'gable') continue
+    for (const minor of roofs) {
+      if (minor === major || minor.roofType !== 'gable') continue
+      const rel = minor.yaw - major.yaw
+      if (Math.abs(Math.abs(Math.sin(rel)) - 1) > 0.01) continue // ⊥ only
+      const eaveMajor = major.position[1] + major.wallHeight
+      const eaveMinor = minor.position[1] + minor.wallHeight
+      if (Math.abs(eaveMajor - eaveMinor) > 0.05) continue
+      // minor center in the major's segment frame (inverse of the emitter Ry)
+      const dxl = minor.position[0] - major.position[0]
+      const dzl = minor.position[2] - major.position[2]
+      const cos = Math.cos(major.yaw)
+      const sin = Math.sin(major.yaw)
+      const cx = dxl * cos - dzl * sin
+      const cz = dxl * sin + dzl * cos
+      const run1 = major.depth / 2
+      const rise1 = run1 * Math.tan(major.pitch)
+      const r2 = minor.depth / 2 // minor slope run — maps onto the major X axis
+      const rise2 = r2 * Math.tan(minor.pitch)
+      if (rise2 > rise1 + EPS) continue // minor tops out above the major ridge
+      const halfAlong = minor.width / 2 // minor ridge half-length, on major Z
+      const near = Math.abs(cz) - halfAlong
+      if (near >= run1 - EPS) continue // never reaches the major slope
+      if (Math.abs(cz) + halfAlong <= run1 + EPS) continue // fully buried
+      if (Math.abs(cx) + r2 > major.width / 2 + EPS) continue // past the gable end
+      const sz = cz >= 0 ? 1 : -1
+      const zApex = run1 - rise2 / Math.tan(major.pitch)
+      for (const s of [1, -1] as const) {
+        out.push({
+          major,
+          foot: [cx + s * r2, major.wallHeight, sz * run1],
+          apex: [cx, major.wallHeight + rise2, sz * zApex],
+        })
+      }
+    }
+  }
+  return out
+}
+
+/** Emit one valley member (one size deeper than the rafters — it carries jacks). */
+function emitValley(valley: ValleyLine, spec: FramingSpec, members: Member[]) {
+  const emit = emitter(valley.major, members)
+  const size = ridgeSizeFor(spec.rafterSize)
+  const [t, rd] = LUMBER_CROSS_SECTIONS[size]
+  const { foot, apex } = valley
+  const ux = apex[0] - foot[0]
+  const uy = apex[1] - foot[1]
+  const uz = apex[2] - foot[2]
+  const plan = Math.hypot(ux, uz)
+  const len = Math.hypot(plan, uy)
+  if (len < 0.2) return
+  const psi = Math.atan2(-uz, ux) // +X toward the uphill direction
+  const tilt = Math.atan2(uy, plan)
+  emit(
+    'valley',
+    size,
+    [len, rd, t],
+    [(foot[0] + apex[0]) / 2, (foot[1] + apex[1]) / 2, (foot[2] + apex[2]) / 2],
+    psi,
+    tilt,
+    len,
+    'lumber',
+    `Valley ${size}${
+      spec.detail === '400'
+        ? ` — plumb ${Math.round((tilt * 180) / Math.PI)}°, cheek cuts 45°`
+        : ''
+    }`,
+  )
 }

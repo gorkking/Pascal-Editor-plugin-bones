@@ -134,7 +134,9 @@ describe('frameRoofs — gable', () => {
     expect(members.some((m) => m.label === 'hurricane tie')).toBe(false)
     const windy = frameRoofs([roof], [], { ...DEFAULT_SPEC, hurricaneTies: true })
     const ties = windy.filter((m) => m.label === 'hurricane tie')
-    expect(ties.length).toBe(byRole(windy, 'rafter').length)
+    // one tie per bearing rafter — barge rafters ride the rake, no plate below
+    const bearing = byRole(windy, 'rafter').filter((r) => !r.label?.includes('Barge'))
+    expect(ties.length).toBe(bearing.length)
   })
 
   test('segment yaw carries into every member', () => {
@@ -182,9 +184,302 @@ describe('frameRoofs — hip', () => {
   })
 })
 
-describe('frameRoofs — unsupported types emit nothing', () => {
-  test('flat / gambrel produce no members (panel warns via count)', () => {
-    expect(frameRoofs([seg({ roofType: 'flat' })], [], DEFAULT_SPEC)).toHaveLength(0)
-    expect(frameRoofs([seg({ roofType: 'gambrel' })], [], DEFAULT_SPEC)).toHaveLength(0)
+// ---------------------------------------------------------------------------
+// Round-1 fabrication features (jacks, new roof types, valleys, rake, fascia)
+// ---------------------------------------------------------------------------
+
+describe('frameRoofs — hip jack rafters (LOD 350)', () => {
+  // 8 × 6, pitch 40 → run 3, ridgeHalf 1; 24" o.c. jacks.
+  const roof = seg({ roofType: 'hip' })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  const jacks = byRole(members, 'jack-rafter')
+  const theta = roof.pitch
+  const spacing = DEFAULT_SPEC.rafterSpacing
+  const baseY = roof.position[1] + roof.wallHeight
+
+  test('jacks populate all four triangular planes', () => {
+    expect(jacks.length).toBeGreaterThanOrEqual(24)
+    // side planes: stations past both ridge ends on both slopes
+    const sidePlane = jacks.filter(
+      (j) => Math.abs(j.position[0] as number) > 1 && Math.abs(j.position[2] as number) > 0.2,
+    )
+    expect(sidePlane.length).toBeGreaterThan(0)
+    // end planes: stations off the centerline near the ±X eaves
+    const endPlane = jacks.filter((j) => Math.abs(j.position[0] as number) > 3)
+    expect(endPlane.length).toBeGreaterThan(0)
+  })
+
+  test('numeric: first side-plane jack lands its top exactly on the hip', () => {
+    // Station d = spacing past the +X ridge end, +Z slope: top must sit at
+    // (1 + d, ridgeY − d·tanθ, d) — the hip plan line |z| = |x| − ridgeHalf.
+    const d = spacing
+    const jackRun = 3 - d
+    const j = jacks.find(
+      (m) =>
+        Math.abs((m.position[0] as number) - (1 + d)) < 1e-4 &&
+        (m.position[2] as number) > 0 &&
+        Math.abs(m.length - (jackRun / Math.cos(theta) + roof.overhang)) < 1e-4,
+    ) as Member
+    expect(j).toBeDefined()
+    const axis = longAxis(j)
+    const top = new Vector3(...j.position).add(axis.clone().multiplyScalar(j.length / 2))
+    const bot = new Vector3(...j.position).sub(axis.clone().multiplyScalar(j.length / 2))
+    const upper = top.y > bot.y ? top : bot
+    const lower = top.y > bot.y ? bot : top
+    expect(upper.z).toBeCloseTo(d, 5) // on the hip plan line
+    expect(upper.y).toBeCloseTo(baseY + jackRun * Math.tan(theta), 5)
+    // lower end at the overhung eave tip
+    expect(lower.z).toBeCloseTo(3 + roof.overhang * Math.cos(theta), 5)
+    expect(lower.y).toBeCloseTo(baseY - roof.overhang * Math.sin(theta), 5)
+  })
+
+  test('jacks shorten as they approach the corner', () => {
+    // side-plane jacks only (long axis on Z); end-plane jacks run along X
+    const plusEnd = jacks
+      .filter(
+        (j) =>
+          Math.abs(longAxis(j).x) < 0.1 &&
+          (j.position[0] as number) > 1 &&
+          (j.position[2] as number) > 0.2,
+      )
+      .sort((a, b) => (a.position[0] as number) - (b.position[0] as number))
+    for (let i = 1; i < plusEnd.length; i++) {
+      expect((plusEnd[i] as Member).length).toBeLessThan((plusEnd[i - 1] as Member).length + 1e-9)
+    }
+  })
+
+  test('king common rafter runs full-length to each ridge end', () => {
+    const kings = byRole(members, 'rafter').filter((r) => r.label?.includes('King common'))
+    expect(kings).toHaveLength(2)
+    for (const k of kings) {
+      expect(k.length).toBeCloseTo(3 / Math.cos(theta) + roof.overhang, 5)
+      expect(Math.abs(k.position[2] as number)).toBeLessThan(1e-6) // centerline
+    }
+  })
+
+  test('LOD 200 skips jacks and kings', () => {
+    const generic = frameRoofs([roof], [], { ...DEFAULT_SPEC, detail: '200' })
+    expect(byRole(generic, 'jack-rafter')).toHaveLength(0)
+  })
+})
+
+describe('frameRoofs — flat roof (joists + rim)', () => {
+  const roof = seg({ roofType: 'flat' })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+
+  test('joists span the short axis over footprint + overhang, dead level', () => {
+    const joists = byRole(members, 'rafter')
+    expect(joists.length).toBeGreaterThanOrEqual(12)
+    for (const j of joists) {
+      expect(j.length).toBeCloseTo(6 + 2 * 0.3, 5) // depth + overhang both sides
+      expect(j.rotation[2]).toBeCloseTo(0, 6) // no tilt
+      expect(j.label).toContain('R903.4') // drainage slope call-out
+    }
+  })
+
+  test('four rim boards close the perimeter', () => {
+    const rims = byRole(members, 'rim-joist')
+    expect(rims).toHaveLength(4)
+    const lengths = rims.map((r) => r.length).sort((a, b) => a - b)
+    expect(lengths[0]).toBeCloseTo(6.6, 5)
+    expect(lengths[3]).toBeCloseTo(8.6, 5)
+  })
+})
+
+describe('frameRoofs — gambrel (host ratios wr=0.5, hr=0.6)', () => {
+  const roof = seg({ roofType: 'gambrel' })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  const theta = roof.pitch
+  // host math: run 3, lowerRun 1.5, lowerRise 1.5·tan40, activeRh = lowerRise/0.6
+  const lowerRise = 1.5 * Math.tan(theta)
+  const activeRh = lowerRise / 0.6
+  const upperRise = activeRh - lowerRise
+  const phi = Math.atan2(upperRise, 1.5)
+  const baseY = roof.position[1] + roof.wallHeight
+
+  test('each station gets a steep lower and a shallow upper rafter per side', () => {
+    const lowers = byRole(members, 'rafter').filter((r) => r.label?.includes('lower'))
+    const uppers = byRole(members, 'rafter').filter((r) => r.label?.includes('upper'))
+    expect(lowers.length).toBeGreaterThan(0)
+    expect(lowers.length).toBe(uppers.length)
+    expect((lowers[0] as Member).rotation[2]).toBeCloseTo(theta, 6)
+    expect((uppers[0] as Member).rotation[2]).toBeCloseTo(phi, 6)
+    expect((uppers[0] as Member).length).toBeCloseTo(Math.hypot(1.5, upperRise), 5)
+  })
+
+  test('ridge at the derived peak; purlins at both kinks', () => {
+    const ridges = byRole(members, 'ridge')
+    const ridge = ridges.find((r) => !r.label?.includes('Purlin')) as Member
+    const rdd = 7.25 * 0.0254
+    expect(ridge.position[1]).toBeCloseTo(baseY + activeRh - rdd / 2, 5)
+    const purlins = ridges.filter((r) => r.label?.includes('Purlin'))
+    expect(purlins).toHaveLength(2)
+    for (const p of purlins) {
+      expect(Math.abs(p.position[2] as number)).toBeCloseTo(1.5, 5) // kink plan line
+      expect(p.position[1]).toBeCloseTo(baseY + lowerRise - rdd / 2, 5)
+    }
+  })
+})
+
+describe('frameRoofs — mansard (skirt + shallow hip top)', () => {
+  const roof = seg({ roofType: 'mansard' })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  // host math: inset = 6·0.15 = 0.9, skirtRise = 0.9·tan40, activeRh = rise/0.7
+  const inset = 0.9
+  const skirtRise = inset * Math.tan(roof.pitch)
+  const baseY = roof.position[1] + roof.wallHeight
+
+  test('steep skirt rafters ring all four faces at the schema pitch', () => {
+    const skirt = byRole(members, 'rafter').filter((r) => r.label?.includes('Mansard skirt'))
+    expect(skirt.length).toBeGreaterThanOrEqual(20)
+    for (const s of skirt) expect(s.rotation[2]).toBeCloseTo(roof.pitch, 6)
+  })
+
+  test('eight hips: four skirt arrises + four on the shallow top', () => {
+    const hips = byRole(members, 'hip')
+    expect(hips).toHaveLength(8)
+    const arris = hips.filter((h) => h.label?.includes('arris'))
+    expect(arris).toHaveLength(4)
+  })
+
+  test('upper deck is a hip over the inset rectangle at the derived pitch', () => {
+    // inner: 6.2 × 4.2, run 2.1 → ridge length 2; upper rise = activeRh − skirtRise
+    const ridge = byRole(members, 'ridge')[0] as Member
+    expect(ridge.length).toBeCloseTo(6.2 - 2 * 2.1, 4)
+    const upperRise = skirtRise / 0.7 - skirtRise
+    const rdd = 7.25 * 0.0254
+    expect(ridge.position[1]).toBeCloseTo(baseY + skirtRise + upperRise - rdd / 2, 5)
+  })
+})
+
+describe('frameRoofs — dutch gable (hip skirt + gablet)', () => {
+  const roof = seg({ roofType: 'dutch' })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  // host metrics: inset = 6·0.25 = 1.5, waistHalfX = (4−1.5)·0.98 = 2.45,
+  // waistHalfZ = 1.5, skirtRise = 1.5·tan40, activeRh = skirtRise/0.5
+  const skirtRise = 1.5 * Math.tan(roof.pitch)
+  const baseY = roof.position[1] + roof.wallHeight
+
+  test('gablet ridge spans the waist at the full derived peak', () => {
+    const ridge = byRole(members, 'ridge')[0] as Member
+    expect(ridge.length).toBeCloseTo(2 * 2.45, 4)
+    const rdd = 7.25 * 0.0254
+    expect(ridge.position[1]).toBeCloseTo(baseY + 2 * skirtRise - rdd / 2, 5)
+    expect(longAxis(ridge).x).toBeCloseTo(1, 5) // along the long axis
+  })
+
+  test('skirt + gablet rafters both present; long-face skirt at the schema pitch', () => {
+    const skirt = byRole(members, 'rafter').filter((r) => r.label?.includes('Dutch skirt'))
+    expect(skirt.length).toBeGreaterThan(0)
+    // the ±Z (long) faces carry the schema pitch; the end faces are slightly
+    // shallower because the 0.98 waist ratio stretches their run
+    const longFaces = skirt.filter((s) => Math.abs(longAxis(s).x) < 0.1)
+    expect(longFaces.length).toBeGreaterThan(0)
+    for (const s of longFaces) expect(s.rotation[2]).toBeCloseTo(roof.pitch, 6)
+    // gablet commons (default ratios make the gablet pitch = the schema pitch)
+    const gablet = byRole(members, 'rafter').filter((r) => !r.label?.includes('skirt'))
+    expect(gablet.length).toBeGreaterThan(0)
+  })
+})
+
+describe('frameRoofs — valleys where two gables cross (LOD 350)', () => {
+  const major = seg() // 8 × 6, ridge on X, run 3
+  const minor = seg({
+    id: 'roofseg_wing',
+    width: 4,
+    depth: 4,
+    yaw: Math.PI / 2, // ridge on level Z — perpendicular
+    position: [1, 2.5, 4], // crosses the major +Z eave (z = 3)
+  })
+  const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+  const valleys = byRole(members, 'valley')
+  const theta = major.pitch
+  const rise2 = 2 * Math.tan(theta)
+
+  test('exactly two valleys, one each side of the wing ridge', () => {
+    expect(valleys).toHaveLength(2)
+  })
+
+  test('numeric endpoints: eave foot → ridge-pierce apex (45° plan for equal pitch)', () => {
+    const baseY = 2.5 + 0.5
+    for (const v of valleys) {
+      const axis = longAxis(v)
+      const e1 = new Vector3(...v.position).add(axis.clone().multiplyScalar(v.length / 2))
+      const e2 = new Vector3(...v.position).sub(axis.clone().multiplyScalar(v.length / 2))
+      const apex = e1.y > e2.y ? e1 : e2
+      const foot = e1.y > e2.y ? e2 : e1
+      expect(apex.x).toBeCloseTo(1, 5) // wing centerline
+      expect(apex.y).toBeCloseTo(baseY + rise2, 5)
+      expect(apex.z).toBeCloseTo(1, 5) // run1 − rise2/tanθ = 3 − 2
+      expect(foot.y).toBeCloseTo(baseY, 5)
+      expect(foot.z).toBeCloseTo(3, 5) // the major eave line
+      expect(Math.abs(foot.x - 1)).toBeCloseTo(2, 5) // ± the wing run
+      // equal pitches → 45° in plan
+      expect(Math.abs(apex.z - foot.z)).toBeCloseTo(Math.abs(apex.x - foot.x), 5)
+    }
+  })
+
+  test('parallel or distant segments produce no valleys', () => {
+    const parallel = seg({ id: 'p', position: [0, 2.5, 8] })
+    expect(byRole(frameRoofs([major, parallel], [], DEFAULT_SPEC), 'valley')).toHaveLength(0)
+  })
+})
+
+describe('frameRoofs — rake framing + fascia (LOD 350/400)', () => {
+  const roof = seg()
+
+  test('outlookers ladder both rakes at 4ft; barge rafters carry the edges', () => {
+    const members = frameRoofs([roof], [], DEFAULT_SPEC)
+    const outlookers = byRole(members, 'outlooker')
+    expect(outlookers.length).toBeGreaterThanOrEqual(8) // ≥2 per slope per end
+    for (const o of outlookers) {
+      expect(o.rotation[2]).toBeCloseTo(0, 6) // laid flat
+      expect(o.length).toBeCloseTo(0.3 + DEFAULT_SPEC.rafterSpacing, 5)
+    }
+    const barges = byRole(members, 'rafter').filter((r) => r.label?.includes('Barge'))
+    expect(barges).toHaveLength(4)
+    for (const b of barges) {
+      expect(Math.abs(b.position[0] as number)).toBeCloseTo(4 + 0.3, 5)
+    }
+  })
+
+  test('LOD 200 has no rake framing; tiny overhangs need none', () => {
+    expect(byRole(frameRoofs([roof], [], { ...DEFAULT_SPEC, detail: '200' }), 'outlooker')).toHaveLength(0)
+    expect(byRole(frameRoofs([seg({ overhang: 0.05 })], [], DEFAULT_SPEC), 'outlooker')).toHaveLength(0)
+  })
+
+  test('sub-fascia at 400 only: 2 on a gable, 4 around a hip', () => {
+    expect(byRole(frameRoofs([roof], [], DEFAULT_SPEC), 'fascia')).toHaveLength(0)
+    const at400 = frameRoofs([roof], [], { ...DEFAULT_SPEC, detail: '400' })
+    const gableFascia = byRole(at400, 'fascia')
+    expect(gableFascia).toHaveLength(2)
+    expect((gableFascia[0] as Member).length).toBeCloseTo(8.6, 5)
+    const hip400 = frameRoofs([seg({ roofType: 'hip' })], [], { ...DEFAULT_SPEC, detail: '400' })
+    expect(byRole(hip400, 'fascia')).toHaveLength(4)
+  })
+})
+
+describe('frameRoofs — spec-driven sizing + cut data (LOD 400)', () => {
+  test('a snow-bumped 2x10 spec sizes every rafter and deepens the ridge', () => {
+    const members = frameRoofs([seg()], [], { ...DEFAULT_SPEC, rafterSize: '2x10' })
+    const rafters = byRole(members, 'rafter')
+    expect(rafters.length).toBeGreaterThan(0)
+    for (const r of rafters) expect(r.size).toBe('2x10')
+    expect((byRole(members, 'ridge')[0] as Member).size).toBe('2x12')
+  })
+
+  test('400 labels carry plumb cut, birdsmouth seat, and HAP; ties distinguished', () => {
+    const at400 = frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '400' })
+    const rafter = byRole(at400, 'rafter').find((r) => !r.label?.includes('Barge')) as Member
+    expect(rafter.label).toContain('plumb cut 40°')
+    expect(rafter.label).toContain('birdsmouth seat 3½"')
+    expect(rafter.label).toContain('HAP')
+    const cj = byRole(at400, 'ceiling-joist')[0] as Member
+    expect(cj.label).toContain('rafter tie (R802.4.2)')
+    const collar = byRole(at400, 'collar-tie')[0] as Member
+    expect(collar.label).toContain('Collar tie')
+    // 300 keeps the labels clean
+    const at300 = frameRoofs([seg()], [], DEFAULT_SPEC)
+    expect((byRole(at300, 'rafter')[0] as Member).label).not.toContain('HAP')
   })
 })

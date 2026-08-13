@@ -123,7 +123,8 @@ describe('verify: hip with width < depth (alongX=false branch)', () => {
   })
 
   test('common rafters rise from the ±X eave tips to the ridge line (x=0)', () => {
-    const commons = members.filter((m) => m.role === 'rafter')
+    // side-plane commons only — end-plane king commons rise from ±Z by design
+    const commons = members.filter((m) => m.role === 'rafter' && !m.label?.includes('hip end'))
     expect(commons.length).toBeGreaterThan(0)
     for (const r of commons) {
       const [e1, e2] = endpoints(r)
