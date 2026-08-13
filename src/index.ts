@@ -1,6 +1,7 @@
 import type { AnyNodeDefinition, Plugin } from '@pascal-app/core'
 import { BONES_ICON } from './art'
 import { lumberDefinition } from './definition'
+import { framingDefinition } from './framing/definition'
 
 type PluginHostPanel = {
   id: string
@@ -26,7 +27,10 @@ type PluginHostPanel = {
 export const bonesPlugin: Plugin = {
   id: 'pascal:bones',
   apiVersion: 1,
-  nodes: [lumberDefinition as unknown as AnyNodeDefinition],
+  nodes: [
+    framingDefinition as unknown as AnyNodeDefinition,
+    lumberDefinition as unknown as AnyNodeDefinition,
+  ],
 }
 
 export const bonesHostPanel: PluginHostPanel = {
@@ -36,7 +40,7 @@ export const bonesHostPanel: PluginHostPanel = {
   component: () => import('./panel'),
   pluginId: bonesPlugin.id,
   description:
-    'Structural framing for Pascal — dimensional lumber today; inferred wall, floor, and roof framing (studs, plates, headers, joists, rafters) next.',
+    'The engineering X-ray for Pascal — see through the finishes to the actual construction: wall framing (studs, plates, headers), floors, roof, foundation, and electrical, derived from your model and sized to your jurisdiction. Rendered in 3D, counted in the takeoff.',
   creator: {
     name: 'Julien Brissonneau',
     url: 'https://github.com/Snoopy147',

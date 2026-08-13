@@ -1,0 +1,163 @@
+/**
+ * The shared vocabulary of every Bones inference engine.
+ *
+ * Engines are PURE functions: `(model slice, spec) → Member[] | Fixture[]`.
+ * No React, no Three.js, no store access — testable with plain objects.
+ * Renderers turn Members into instanced meshes; nothing here is persisted.
+ */
+
+import type { LumberSize } from '../lumber'
+
+/** Which subsystem produced a member/fixture — drives visibility + color. */
+export type BonesSystem =
+  | 'wall-framing'
+  | 'floor-framing'
+  | 'roof-framing'
+  | 'foundation'
+  | 'electrical'
+  | 'plumbing'
+  | 'hvac'
+
+/** Structural role of a framing member — drives takeoff grouping + hover labels. */
+export type MemberRole =
+  // wall framing
+  | 'bottom-plate'
+  | 'top-plate'
+  | 'cap-plate'
+  | 'stud'
+  | 'king-stud'
+  | 'trimmer'
+  | 'header'
+  | 'sill'
+  | 'cripple'
+  | 'blocking'
+  // floor framing
+  | 'joist'
+  | 'rim-joist'
+  | 'girder'
+  | 'post'
+  // roof framing
+  | 'rafter'
+  | 'ridge'
+  | 'hip'
+  | 'valley'
+  | 'ceiling-joist'
+  | 'collar-tie'
+  // foundation
+  | 'mudsill'
+  | 'stemwall'
+  | 'footing'
+  | 'slab-edge'
+  | 'anchor-bolt'
+  | 'hold-down'
+
+export type MemberMaterial = 'lumber' | 'pt-lumber' | 'engineered' | 'concrete' | 'steel'
+
+/**
+ * One physical piece the engines generated, in LEVEL-LOCAL coordinates.
+ * Geometry is a box of size `dims` (member-local XYZ, meters) centered at
+ * `position`, rotated by `rotation` (XYZ euler, radians). `length` is the
+ * lumber cut length for takeoffs (usually the largest dim). `sourceId` ties
+ * the member back to the wall/slab/roof/opening that produced it (hover →
+ * highlight, takeoff by source, incremental recompute).
+ */
+export type Member = {
+  system: BonesSystem
+  role: MemberRole
+  /** Nominal lumber size when applicable — keyed for takeoff. */
+  size?: LumberSize
+  /** Box size in the member's local frame, meters. */
+  dims: readonly [number, number, number]
+  /** Cut length for takeoff, meters. */
+  length: number
+  position: readonly [number, number, number]
+  rotation: readonly [number, number, number]
+  material: MemberMaterial
+  sourceId: string
+  /** Optional human label ("Header 4x8 over D101"). */
+  label?: string
+  /** Set when the prescriptive tables run out (engineered beam required). */
+  flag?: string
+}
+
+/** Electrical / plumbing / HVAC device the engines placed. */
+export type FixtureKind =
+  | 'receptacle'
+  | 'receptacle-gfci'
+  | 'switch'
+  | 'light'
+  | 'smoke-alarm'
+  | 'panel'
+  | 'stub-out'
+  | 'vent-stack'
+  | 'register'
+  | 'return'
+  | 'equipment'
+
+export type Fixture = {
+  system: BonesSystem
+  kind: FixtureKind
+  /** Level-local position of the fixture center. */
+  position: readonly [number, number, number]
+  /** Y rotation so the device faces out of its wall. */
+  rotationY: number
+  sourceId: string
+  label?: string
+  meta?: Record<string, string | number | boolean>
+}
+
+/** A door/window opening extracted from a wall's children, wall-local. */
+export type OpeningSlice = {
+  id: string
+  kind: 'door' | 'window'
+  /** Center distance along the wall from `start`, meters. */
+  u: number
+  width: number
+  height: number
+  /** Bottom of the opening above the floor (0 for doors). */
+  sillHeight: number
+  /** Rough opening — width the framing must clear. */
+  roughWidth: number
+  roughHeight: number
+}
+
+/**
+ * Everything the engines need to know about one wall, extracted once from the
+ * scene (see `wall-model.ts`) so engines never touch the store.
+ */
+export type WallSlice = {
+  id: string
+  start: readonly [number, number]
+  end: readonly [number, number]
+  length: number
+  /** Unit direction start→end. */
+  dir: readonly [number, number]
+  thickness: number
+  height: number
+  /** True when either face is marked exterior (or unknown-but-boundary). */
+  exterior: boolean
+  openings: OpeningSlice[]
+  /** Curved walls are framed segment-wise later; v1 flags them. */
+  curved: boolean
+}
+
+/** A slab outline for floor framing / foundation, level-local. */
+export type SlabSlice = {
+  id: string
+  polygon: readonly (readonly [number, number])[]
+  holes: readonly (readonly (readonly [number, number])[])[]
+  elevation: number
+  thickness: number
+}
+
+/** Bounding info for a roof segment plane set (v1 roof model). */
+export type RoofSlice = {
+  id: string
+  type: 'hip' | 'gable' | 'shed' | 'gambrel' | 'dutch' | 'mansard' | 'flat'
+  position: readonly [number, number, number]
+  rotationY: number
+  width: number
+  depth: number
+  pitch: number
+  overhang: Record<string, number>
+}

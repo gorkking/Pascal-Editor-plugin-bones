@@ -7,7 +7,10 @@ describe('Bones plugin manifest', () => {
   test('exports the stable plugin identity and node kinds', () => {
     expect(bonesPlugin.id).toBe('pascal:bones')
     expect(bonesPlugin.apiVersion).toBe(1)
-    expect(bonesPlugin.nodes?.map((definition) => definition.kind)).toEqual(['bones:lumber'])
+    expect(bonesPlugin.nodes?.map((definition) => definition.kind)).toEqual([
+      'bones:framing',
+      'bones:lumber',
+    ])
   })
 
   test('associates the Bones panel with the plugin', () => {

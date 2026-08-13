@@ -13,6 +13,9 @@ export const LUMBER_SIZES = [
   '2x12',
   '4x4',
   '4x6',
+  '4x8',
+  '4x10',
+  '4x12',
   '6x6',
 ] as const
 
@@ -29,6 +32,9 @@ export const LUMBER_CROSS_SECTIONS: Record<LumberSize, readonly [number, number]
   '2x12': [1.5 * INCH, 11.25 * INCH],
   '4x4': [3.5 * INCH, 3.5 * INCH],
   '4x6': [3.5 * INCH, 5.5 * INCH],
+  '4x8': [3.5 * INCH, 7.25 * INCH],
+  '4x10': [3.5 * INCH, 9.25 * INCH],
+  '4x12': [3.5 * INCH, 11.25 * INCH],
   '6x6': [5.5 * INCH, 5.5 * INCH],
 }
 
