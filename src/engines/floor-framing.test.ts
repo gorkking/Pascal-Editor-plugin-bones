@@ -101,14 +101,38 @@ describe('frameFloor — wide slab needs a girder', () => {
   // 6m x 9m: short span 6m = 19.7ft > 2x12's 17.4ft → girder + halved span.
   const members = frameFloor([slab(rect(6, 9))])
 
-  test('girder at mid-span with posts, joists re-sized for the half span', () => {
+  test('FLUSH girder at mid-span: girder top = joist top, joists hung on hangers', () => {
     const girders = byRole(members, 'girder')
     expect(girders.length).toBeGreaterThanOrEqual(1)
-    expect(girders[0]?.position[0]).toBeCloseTo(3, 5) // mid of 6m span
+    const girder = girders[0] as Member
+    expect(girder.position[0]).toBeCloseTo(3, 5) // mid of 6m span
+    // FLUSH: tops align (girder is deeper, so centers differ by the depth gap)
+    const joist = byRole(members, 'joist')[0] as Member
+    const girderTop = (girder.position[1] as number) + girder.dims[1] / 2
+    const joistTop = (joist.position[1] as number) + joist.dims[1] / 2
+    expect(girderTop).toBeCloseTo(joistTop, 5)
+    // interrupted rows hang on hangers at both girder faces
+    const hangers = byRole(members, 'hanger')
+    expect(hangers.length).toBeGreaterThanOrEqual(20) // 2 per interrupted row
+    expect(hangers.length % 2).toBe(0)
+    // joist rows are SPLIT at the girder line
+    const gt = 3.5 * 0.0254
+    for (const j of byRole(members, 'joist')) {
+      const half = j.dims[0] / 2
+      const lo = (j.position[0] as number) - half
+      const hi = (j.position[0] as number) + half
+      expect(lo > 3 - gt / 2 - 1e-6 || hi < 3 + gt / 2 + 1e-6).toBe(true)
+    }
     expect(byRole(members, 'post').length).toBeGreaterThanOrEqual(2)
-    // halved span 3m = 9.8ft → 2x8
-    expect(byRole(members, 'joist')[0]?.size).toBe('2x8')
-    expect(girders[0]?.flag).toContain('verify')
+    expect(byRole(members, 'joist')[0]?.size).toBe('2x8') // halved span 3m
+    expect(girder.flag).toContain('verify')
+  })
+
+  test('posts descend the storey below (parameterized height)', () => {
+    const tall = frameFloor([slab(rect(6, 9))], [], DEFAULT_SPEC, 3.1)
+    const post = byRole(tall, 'post')[0] as Member
+    expect(post.dims[1]).toBeCloseTo(3.1, 5)
+    expect(post.length).toBeCloseTo(3.1, 5)
   })
 })
 
@@ -123,14 +147,126 @@ describe('frameFloor — L-shaped slab clips joists', () => {
   ]
   const members = frameFloor([slab(L)])
 
-  test('rows past the notch are shorter than rows before it', () => {
+  test('rows past the notch lose their second segment (girder splits the rest)', () => {
     const joists = byRole(members, 'joist')
-    // short axis is a tie (6x6 bbox) → runAxis 'x'; rows along z
+    // 6x6 bbox tie → runAxis 'x'; rows along z. The 6m span needs a flush
+    // girder at x=3, so full-width rows split into two segments; rows past
+    // the notch (z>3) only span x∈[0,3] and keep a single segment.
+    const beforeRows = new Set(
+      joists.filter((j) => (j.position[2] as number) < 3).map((j) => (j.position[2] as number).toFixed(4)),
+    )
     const before = joists.filter((j) => (j.position[2] as number) < 3)
     const after = joists.filter((j) => (j.position[2] as number) > 3)
-    expect(Math.max(...before.map((j) => j.length))).toBeCloseTo(6, 3)
-    expect(Math.max(...after.map((j) => j.length))).toBeCloseTo(3, 3)
+    expect(before.length).toBeGreaterThan(beforeRows.size) // ≥2 segments per full row
+    // after-notch rows: single segment ending at the girder cut (≈3 − gt/2)
+    const gt = 3.5 * 0.0254
+    expect(Math.max(...after.map((j) => j.length))).toBeCloseTo(3 - gt / 2, 2)
     // rims follow all 6 edges
     expect(byRole(members, 'rim-joist')).toHaveLength(6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round-1 fabrication features (stairwells, sistered joists, bearing check)
+// ---------------------------------------------------------------------------
+
+import type { WallSlice } from '../core/types'
+
+function bearingWall(id: string, start: [number, number], end: [number, number]): WallSlice {
+  const dx = end[0] - start[0]
+  const dz = end[1] - start[1]
+  const length = Math.hypot(dx, dz)
+  return {
+    id, start, end, length, dir: [dx / length, dz / length],
+    thickness: 0.1, height: 2.5, exterior: false, openings: [], curved: false,
+  }
+}
+
+describe('frameFloor — stairwell hole framing (R502.10)', () => {
+  // 4m x 6m slab (joists along X), 1x2.4m stair hole centered-ish.
+  const hole: [number, number][] = [
+    [1.5, 2],
+    [2.5, 2],
+    [2.5, 4.4],
+    [1.5, 4.4],
+  ]
+  const members = frameFloor([slab(rect(4, 6), { holes: [hole] })])
+
+  test('no joist crosses the hole; cut ends hang on hangers at the headers', () => {
+    for (const j of byRole(members, 'joist')) {
+      if (j.label?.includes('trimmer')) continue
+      const z = j.position[2] as number
+      if (z > 2 - T / 2 && z < 4.4 + T / 2) {
+        const half = j.dims[0] / 2
+        const lo = (j.position[0] as number) - half
+        const hi = (j.position[0] as number) + half
+        // segment must not overlap the hole run extent [1.5, 2.5]
+        expect(hi <= 1.5 + 1e-6 || lo >= 2.5 - 1e-6).toBe(true)
+      }
+    }
+    const stairHangers = byRole(members, 'hanger').filter((h) => h.label?.includes('stair'))
+    expect(stairHangers.length).toBeGreaterThanOrEqual(4)
+  })
+
+  test('doubled headers at both hole ends, doubled trimmers alongside', () => {
+    const headers = byRole(members, 'header')
+    expect(headers).toHaveLength(4) // 2 plies × 2 ends
+    for (const h of headers) {
+      expect(h.label).toContain('doubled')
+      // headers run ACROSS the joists (along Z) → yaw −π/2
+      expect(Math.abs(Math.abs(h.rotation[1] as number) - Math.PI / 2)).toBeLessThan(1e-6)
+    }
+    const headerXs = headers.map((h) => h.position[0] as number).sort((a, b) => a - b)
+    expect(headerXs[0]).toBeLessThan(1.5) // outside the hole start
+    expect(headerXs[3]).toBeGreaterThan(2.5) // outside the hole end
+    const trimmers = byRole(members, 'joist').filter((j) => j.label?.includes('trimmer'))
+    expect(trimmers.length).toBeGreaterThanOrEqual(4) // 2 plies × 2 sides
+    const trimmerZs = trimmers.map((j) => j.position[2] as number)
+    expect(Math.min(...trimmerZs)).toBeLessThan(2)
+    expect(Math.max(...trimmerZs)).toBeGreaterThan(4.4)
+  })
+
+  test('LOD 200 skips the stair kit (generic members only)', () => {
+    const generic = frameFloor([slab(rect(4, 6), { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '200',
+    })
+    expect(byRole(generic, 'header')).toHaveLength(0)
+  })
+})
+
+describe('frameFloor — sistered joists under parallel bearing walls', () => {
+  // Joists run along X (4m span); a 3m interior wall also along X.
+  const wall = bearingWall('wall_bearing', [0.5, 3], [3.5, 3])
+  const members = frameFloor([slab(rect(4, 6))], [wall])
+
+  test('one extra joist rides beside the wall line, clipped to the wall extent', () => {
+    const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
+    expect(sisters).toHaveLength(1)
+    const s = sisters[0] as Member
+    expect(s.position[2] as number).toBeCloseTo(3 + T, 5) // one thickness beside
+    expect(s.length).toBeCloseTo(3, 4) // clipped to the wall run
+    expect(s.label).toContain('wall_bearing')
+  })
+
+  test('perpendicular and short walls get no sister', () => {
+    const perp = bearingWall('w_perp', [2, 1], [2, 5])
+    const short = bearingWall('w_short', [1, 2], [2.2, 2])
+    const none = frameFloor([slab(rect(4, 6))], [perp, short])
+    expect(byRole(none, 'joist').filter((j) => j.label?.includes('Sistered'))).toHaveLength(0)
+  })
+})
+
+describe('frameFloor — LOD 400 bearing validation', () => {
+  test('a well-framed floor produces zero unsupported-end flags', () => {
+    const members = frameFloor(
+      [slab(rect(6, 9), { holes: [[[2, 3], [3, 3], [3, 5], [2, 5]]] })],
+      [],
+      { ...DEFAULT_SPEC, detail: '400' },
+    )
+    const flagged = byRole(members, 'joist').filter((j) => j.flag?.includes('Unsupported'))
+    expect(flagged).toHaveLength(0)
+    // and the kit is present, so the checker had real geometry to verify
+    expect(byRole(members, 'hanger').length).toBeGreaterThan(0)
   })
 })
