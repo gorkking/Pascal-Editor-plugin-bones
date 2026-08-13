@@ -313,25 +313,31 @@ describe('buildFoundation — LOD 350 corner continuity', () => {
   const footA = byRole(members, 'footing').find((m) => m.sourceId === 'wall_a') as Member
   const footB = byRole(members, 'footing').find((m) => m.sourceId === 'wall_b') as Member
 
-  test("each footing run extends past the corner by HALF the other wall's footing width", () => {
-    // extension length asserted numerically: run − wall length = footingWidth/2
+  test('the LONGER wall lays through the corner; the other butts flush', () => {
+    // A (4 m) is the through wall: its run extends footingWidth/2 past the
+    // corner, out to B's far footing face. B (3 m) retreats the same amount
+    // and butts against A's side face — no overlap, no jutting ends.
     expect(footA.dims[0] - wallA.length).toBeCloseTo(halfOtherFooting, 6)
-    expect(footB.dims[0] - wallB.length).toBeCloseTo(halfOtherFooting, 6)
-    expect(footA.length).toBeCloseTo(4 + halfOtherFooting, 6)
-    // A extends only at its corner end: world x span [0, 4 + 8"]
+    expect(footB.dims[0] - wallB.length).toBeCloseTo(-halfOtherFooting, 6)
     const { near: aNear, far: aFar } = runEnds(footA)
     expect(aNear.x).toBeCloseTo(0, 6) // free end untouched
     expect(aFar.x).toBeCloseTo(4 + halfOtherFooting, 6)
-    // B extends only backwards past its start: world z span [-8", 3]
     const { near: bNear, far: bFar } = runEnds(footB)
-    expect(bNear.z).toBeCloseTo(-halfOtherFooting, 6)
+    expect(bNear.z).toBeCloseTo(halfOtherFooting, 6) // flush against A's face
     expect(bFar.z).toBeCloseTo(3, 6)
   })
 
-  test('both extended footing runs COVER the corner point in plan', () => {
+  test('the corner is covered exactly ONCE — no overlapping pour boxes', () => {
+    // through run covers the corner point…
     expect(coversInPlan(footA, [4, 0])).toBe(true)
-    expect(coversInPlan(footB, [4, 0])).toBe(true)
-    // the overlap starts a full 8" before the corner along each run
+    // …the butting run stops at the through run's face (flush, not inside)
+    expect(coversInPlan(footB, [4, 0])).toBe(false)
+    // zero plan overlap between the two boxes (the round-2 visual bug:
+    // overlapping translucent boxes z-fight and read as corner seams)
+    const { near: bNear } = runEnds(footB)
+    const aFaceZ = DEFAULT_SPEC.footingWidth / 2
+    expect(bNear.z).toBeGreaterThanOrEqual(aFaceZ - 1e-9)
+    // and the through run reaches B's far face exactly (flush outer corner)
     const { far: aFar } = runEnds(footA)
     expect(aFar.x - 4).toBeCloseTo(halfOtherFooting, 6)
   })
@@ -346,13 +352,16 @@ describe('buildFoundation — LOD 350 corner continuity', () => {
     expect(topA).toBeCloseTo(topB, 6)
   })
 
-  test('stemwall runs extend and cover the corner exactly like the footings', () => {
+  test('stemwalls interlock with their OWN width — narrow runs stay flush too', () => {
     const stemA = byRole(members, 'stemwall').find((m) => m.sourceId === 'wall_a') as Member
     const stemB = byRole(members, 'stemwall').find((m) => m.sourceId === 'wall_b') as Member
-    expect(stemA.dims[0] - wallA.length).toBeCloseTo(halfOtherFooting, 6)
-    expect(stemB.dims[0] - wallB.length).toBeCloseTo(halfOtherFooting, 6)
+    const halfStem = DEFAULT_SPEC.stemwallThickness / 2
+    expect(stemA.dims[0] - wallA.length).toBeCloseTo(halfStem, 6)
+    expect(stemB.dims[0] - wallB.length).toBeCloseTo(-halfStem, 6)
     expect(coversInPlan(stemA, [4, 0])).toBe(true)
-    expect(coversInPlan(stemB, [4, 0])).toBe(true)
+    // flush: B's stem starts exactly at A's stem face — never past it
+    const { near: bNear } = runEnds(stemB)
+    expect(bNear.z).toBeCloseTo(halfStem, 6)
   })
 
   test('anchor bolts stay on the PLATE (never march into the extended pour)', () => {
@@ -363,18 +372,20 @@ describe('buildFoundation — LOD 350 corner continuity', () => {
     }
   })
 
-  test('diagonal corner: extension measured along the run is still footingWidth/2', () => {
-    // corner at (3,3) between two 45° walls
+  test('diagonal corner: through/butt measured along the run, tie broken by id', () => {
+    // corner at (3,3) between two 45° walls of EQUAL length → 'diag_a' through
     const diagA = makeWall({ id: 'diag_a', start: [0, 0], end: [3, 3] })
     const diagB = makeWall({ id: 'diag_b', start: [3, 3], end: [6, 0] })
     const foots = byRole(buildFoundation([diagA, diagB], []), 'footing')
     const fA = foots.find((m) => m.sourceId === 'diag_a') as Member
+    const fB = foots.find((m) => m.sourceId === 'diag_b') as Member
     expect(fA.dims[0] - diagA.length).toBeCloseTo(halfOtherFooting, 6)
-    // far end of the run sits exactly 8" past the corner point in plan
+    expect(fB.dims[0] - diagB.length).toBeCloseTo(-halfOtherFooting, 6)
+    // far end of the through run sits exactly 8" past the corner in plan
     const { far } = runEnds(fA)
     expect(Math.hypot(far.x - 3, far.z - 3)).toBeCloseTo(halfOtherFooting, 6)
     expect(coversInPlan(fA, [3, 3])).toBe(true)
-    expect(coversInPlan(foots.find((m) => m.sourceId === 'diag_b') as Member, [3, 3])).toBe(true)
+    expect(coversInPlan(fB, [3, 3])).toBe(false)
   })
 
   test('LOD 200 keeps plain wall-length runs (350 gate)', () => {

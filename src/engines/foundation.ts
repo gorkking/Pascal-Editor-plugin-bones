@@ -104,6 +104,7 @@ export function anchorBoltPositions(
 }
 
 /** How far a wall's footing/stemwall run extends past each end (meters). */
+/** Corner role per wall end: +1 through, −1 butt, 0 free (see cornerExtensions). */
 type RunExtension = { start: number; end: number }
 
 const endPoint = (wall: WallSlice, which: 'start' | 'end'): readonly [number, number] =>
@@ -111,29 +112,33 @@ const endPoint = (wall: WallSlice, which: 'start' | 'end'): readonly [number, nu
 
 /**
  * Footing CORNER CONTINUITY (rubric 350). Where two exterior walls share an
- * endpoint, each footing/stemwall run is EXTENDED past the corner by half
- * the OTHER wall's footing width, so the two pours overlap into one
- * monolithic corner — no gap, no cold joint. The overlap is intentional:
- * both runs occupy the SAME course (same y extents), which is exactly how a
- * poured corner behaves; nothing stacks.
+ * endpoint, the LONGER wall's runs lay THROUGH the corner (extending half
+ * the meeting element's width past the corner point, out to the neighbor's
+ * far face) and the other wall's runs BUTT flush against them — the same
+ * through/butt convention the stud framing and CMU coursing use. The corner
+ * is covered exactly once: no overlapping boxes (which z-fight and read as
+ * seams in the translucent X-ray), no ends jutting past the neighbor.
+ *
+ * The map stores a SIGN per wall end: +1 = through (extend by element
+ * width/2), −1 = butt (retreat by element width/2), 0 = free end. Each
+ * element (footing vs stemwall) applies its OWN width to the sign, so the
+ * wide footing and the narrow stemwall both land flush.
  *
  * Detection mirrors wall-framing.detectCorners: endpoints coincide within
  * 0.75× the larger wall thickness, and near-parallel walls (a butt splice,
  * not a corner) are ignored. O(walls²) pairwise — walls, not members, so
  * the 20-wall perf budget is untouched.
  */
-export function cornerExtensions(
-  walls: WallSlice[],
-  spec: FramingSpec,
-): Map<string, RunExtension> {
+export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> {
   const ext = new Map<string, RunExtension>()
-  const bump = (wall: WallSlice, which: 'start' | 'end', by: number) => {
+  const mark = (wall: WallSlice, which: 'start' | 'end', sign: number) => {
     let e = ext.get(wall.id)
     if (!e) {
       e = { start: 0, end: 0 }
       ext.set(wall.id, e)
     }
-    e[which] = Math.max(e[which], by)
+    // An end shared by two corners keeps the through role if it has one.
+    e[which] = e[which] === 0 ? sign : Math.max(e[which], sign)
   }
   for (let i = 0; i < walls.length; i++) {
     for (let j = i + 1; j < walls.length; j++) {
@@ -148,10 +153,10 @@ export function cornerExtensions(
           const pa = endPoint(a, ea)
           const pb = endPoint(b, eb)
           if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) > tol) continue
-          // Each run reaches half the OTHER wall's footing width past the
-          // corner point (spec-level width — one value per level today).
-          bump(a, ea, spec.footingWidth / 2)
-          bump(b, eb, spec.footingWidth / 2)
+          // Longer wall through (tie: lower id) — deterministic, testable.
+          const aThrough = a.length > b.length || (a.length === b.length && a.id <= b.id)
+          mark(a, ea, aThrough ? 1 : -1)
+          mark(b, eb, aThrough ? -1 : 1)
         }
       }
     }
@@ -180,7 +185,7 @@ export function buildFoundation(
   // Corner continuity only pairs EXTERIOR straight walls — the ones that
   // actually own perimeter runs below.
   const perimeter = walls.filter((w) => w.exterior && !w.curved)
-  const extensions = fabDetail ? cornerExtensions(perimeter, spec) : new Map<string, RunExtension>()
+  const extensions = fabDetail ? cornerExtensions(perimeter) : new Map<string, RunExtension>()
 
   for (const wall of walls) {
     // Curved walls are framed segment-wise later; skip like wall-framing v1.
@@ -269,11 +274,19 @@ export function buildFoundation(
       continue
     }
 
-    // Corner continuity (LOD 350): the run grows past each shared corner by
-    // half the meeting wall's footing width — see cornerExtensions.
-    const ext = extensions.get(wall.id) ?? { start: 0, end: 0 }
-    const runLen = len + ext.start + ext.end
-    const runCenterU = (len + ext.end - ext.start) / 2
+    // Corner continuity (LOD 350): through ends lay past the corner by half
+    // the meeting element's width; butt ends retreat the same amount and
+    // land flush — see cornerExtensions. Footing and stemwall each apply
+    // their OWN width so both read as one mitered pour with no overlap.
+    const sign = extensions.get(wall.id) ?? { start: 0, end: 0 }
+    const runFor = (width: number) => {
+      const s = (sign.start * width) / 2
+      const e = (sign.end * width) / 2
+      return { len: len + s + e, center: (len + e - s) / 2 }
+    }
+    const footRun = runFor(spec.footingWidth)
+    const runLen = footRun.len
+    const runCenterU = footRun.center
 
     // ---- footing ----
     // R403.1.4.1: bearing must sit below the frost line → footing BOTTOM at
@@ -303,13 +316,14 @@ export function buildFoundation(
     // reveal above grade is assumed satisfied since y=0 is the framed floor
     // line.
     const stemHeight = spec.footingDepth - FOOTING_HEIGHT
+    const stemRun = runFor(spec.stemwallThickness)
     if (stemHeight > EPS) {
       emit(
         'stemwall',
-        [runLen, stemHeight, spec.stemwallThickness],
-        runCenterU,
+        [stemRun.len, stemHeight, spec.stemwallThickness],
+        stemRun.center,
         -stemHeight / 2,
-        runLen,
+        stemRun.len,
         'concrete',
         `Stemwall ${formatIn(spec.stemwallThickness)}`,
       )
@@ -325,11 +339,14 @@ export function buildFoundation(
         const barTop = -REBAR_TOP_COVER
         const barHeight = barTop - barBottom
         if (barHeight > EPS) {
-          for (const p of anchorBoltPositions(runLen, spacing, REBAR_END_COVER)) {
+          // Layout runs over the stemwall's interlocked extent (incl. the
+          // through-corner reach), mapped back to wall-local u.
+          const stemStartDelta = (sign.start * spec.stemwallThickness) / 2
+          for (const p of anchorBoltPositions(stemRun.len, spacing, REBAR_END_COVER)) {
             emit(
               'rebar',
               [REBAR_SIDE, barHeight, REBAR_SIDE],
-              p - ext.start, // layout runs over the EXTENDED run incl. corners
+              p - stemStartDelta,
               (barBottom + barTop) / 2,
               barHeight,
               'steel',

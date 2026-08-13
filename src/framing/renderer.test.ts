@@ -54,16 +54,20 @@ function synthesizeFixtures(count: number): Fixture[] {
 }
 
 describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
-  test('10,000 members + 500 fixtures across every role/material stay under 24 draw calls', () => {
+  test('10,000 members + 500 fixtures across every role/material stay under 48 draw calls', () => {
+    // X-ray renders TWO passes per bucket (solid + ghost) — still O(buckets).
     const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), true)
-    expect(group.children.length).toBeLessThanOrEqual(24)
+    expect(group.children.length).toBeLessThanOrEqual(48)
     expect(group.children.length).toBeGreaterThan(4) // sanity: buckets exist
-    // Instance counts add up to the full population — nothing dropped.
+    // Each pass carries the full population — nothing dropped.
     const instances = group.children.reduce(
       (sum, child) => sum + ((child as { count?: number }).count ?? 0),
       0,
     )
-    expect(instances).toBe(10_500)
+    expect(instances).toBe(2 * 10_500)
+    // Without X-ray there is a single pass with half the meshes.
+    const solidOnly = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), false)
+    expect(solidOnly.children.length).toBe(group.children.length / 2)
   })
 
   test('bucket count saturates — growing the population adds zero draw calls', () => {
@@ -72,5 +76,32 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     const saturated = buildGroup(synthesizeMembers(5_000), [], true).children.length
     const doubled = buildGroup(synthesizeMembers(10_000), [], true).children.length
     expect(doubled).toBe(saturated)
+  })
+
+  test('X-ray keeps a depth-tested solid pass — occlusion order stays correct', () => {
+    // Round-2 user-reported bug: a single depthTest:false pass let the
+    // foundation paint over nearer studs. The solid pass must depth-test;
+    // only the faint ghost pass may ignore depth (and never write it).
+    const group = buildGroup(synthesizeMembers(100), [], true)
+    type MeshLike = { material: { depthTest: boolean; depthWrite: boolean; opacity: number; transparent: boolean }; renderOrder: number }
+    const meshes = group.children as unknown as MeshLike[]
+    const solids = meshes.filter((m) => m.material.depthTest)
+    const ghosts = meshes.filter((m) => !m.material.depthTest)
+    expect(solids.length).toBe(ghosts.length)
+    expect(solids.length).toBeGreaterThan(0)
+    for (const s of solids) {
+      expect(s.material.transparent).toBe(false)
+      expect(s.renderOrder).toBe(0)
+    }
+    for (const g of ghosts) {
+      expect(g.material.depthWrite).toBe(false)
+      expect(g.material.opacity).toBeLessThan(0.5)
+      expect(g.renderOrder).toBe(999)
+    }
+    // no ghosts at all when X-ray is off
+    const off = buildGroup(synthesizeMembers(100), [], false)
+    for (const m of off.children as unknown as MeshLike[]) {
+      expect(m.material.depthTest).toBe(true)
+    }
   })
 })

@@ -112,15 +112,12 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   const euler = new Euler()
 
   for (const bucket of buckets.values()) {
-    // X-ray vision: skip the depth test and draw late so the skeleton reads
-    // through walls and finishes — the whole point of an engineering view.
-    const material = new MeshStandardMaterial({
-      color: bucket.color,
-      roughness: 0.82,
-      ...(seeThrough ? { depthTest: false, transparent: true, opacity: 0.92 } : {}),
-    })
+    // Solid pass: normal depth-tested draw, so members occlude each other
+    // correctly (a footing can never paint over a stud that is nearer the
+    // camera — the round-2 user-reported artifact of the old depthTest:false
+    // single pass).
+    const material = new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 })
     const mesh = new InstancedMesh(unitBox, material, bucket.entries.length)
-    if (seeThrough) mesh.renderOrder = 999
     bucket.entries.forEach((entry, i) => {
       euler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
       quaternion.setFromEuler(euler)
@@ -138,6 +135,28 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     mesh.receiveShadow = true
     mesh.frustumCulled = false
     group.add(mesh)
+
+    // X-ray ghost pass: a faint depth-ignoring copy drawn late, so members
+    // hidden inside host walls/floors still read — while everything directly
+    // visible keeps the solid pass's true occlusion. Shares the solid pass's
+    // instance buffer (zero extra matrix work; draw calls stay O(buckets)).
+    if (seeThrough) {
+      const ghostMaterial = new MeshStandardMaterial({
+        color: bucket.color,
+        roughness: 0.82,
+        transparent: true,
+        opacity: 0.22,
+        depthTest: false,
+        depthWrite: false,
+      })
+      const ghost = new InstancedMesh(unitBox, ghostMaterial, bucket.entries.length)
+      ghost.instanceMatrix = mesh.instanceMatrix
+      ghost.renderOrder = 999
+      ghost.castShadow = false
+      ghost.receiveShadow = false
+      ghost.frustumCulled = false
+      group.add(ghost)
+    }
   }
   return group
 }
