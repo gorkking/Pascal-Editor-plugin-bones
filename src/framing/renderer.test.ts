@@ -54,20 +54,25 @@ function synthesizeFixtures(count: number): Fixture[] {
 }
 
 describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
-  test('10,000 members + 500 fixtures across every role/material stay under 48 draw calls', () => {
-    // X-ray renders TWO passes per bucket (solid + ghost) — still O(buckets).
+  test('10,000 members + 500 fixtures across every role/material stay under 25 draw calls', () => {
+    // One InstancedMesh per color bucket + the X-ray depth-clear sentinel.
     const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), true)
-    expect(group.children.length).toBeLessThanOrEqual(48)
+    expect(group.children.length).toBeLessThanOrEqual(25)
     expect(group.children.length).toBeGreaterThan(4) // sanity: buckets exist
-    // Each pass carries the full population — nothing dropped.
+    // Instance counts add up to the full population — nothing dropped.
+    // (The sentinel is a plain Mesh, not an instanced batch — excluded.)
     const instances = group.children.reduce(
-      (sum, child) => sum + ((child as { count?: number }).count ?? 0),
+      (sum, child) =>
+        sum +
+        ((child as { isInstancedMesh?: boolean; count?: number }).isInstancedMesh
+          ? ((child as { count?: number }).count ?? 0)
+          : 0),
       0,
     )
-    expect(instances).toBe(2 * 10_500)
-    // Without X-ray there is a single pass with half the meshes.
+    expect(instances).toBe(10_500)
+    // Without X-ray the sentinel disappears — nothing else changes.
     const solidOnly = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), false)
-    expect(solidOnly.children.length).toBe(group.children.length / 2)
+    expect(solidOnly.children.length).toBe(group.children.length - 1)
   })
 
   test('bucket count saturates — growing the population adds zero draw calls', () => {
@@ -78,30 +83,39 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(doubled).toBe(saturated)
   })
 
-  test('X-ray keeps a depth-tested solid pass — occlusion order stays correct', () => {
-    // Round-2 user-reported bug: a single depthTest:false pass let the
-    // foundation paint over nearer studs. The solid pass must depth-test;
-    // only the faint ghost pass may ignore depth (and never write it).
-    const group = buildGroup(synthesizeMembers(100), [], true)
-    type MeshLike = { material: { depthTest: boolean; depthWrite: boolean; opacity: number; transparent: boolean }; renderOrder: number }
-    const meshes = group.children as unknown as MeshLike[]
-    const solids = meshes.filter((m) => m.material.depthTest)
-    const ghosts = meshes.filter((m) => !m.material.depthTest)
-    expect(solids.length).toBe(ghosts.length)
-    expect(solids.length).toBeGreaterThan(0)
-    for (const s of solids) {
-      expect(s.material.transparent).toBe(false)
-      expect(s.renderOrder).toBe(0)
+  test('members ALWAYS depth-test — X-ray clears host depth via a sentinel instead', () => {
+    // Round-2 user reports: with depth tricks on the members themselves, a
+    // footing painted over nearer studs, then far stud tops read through the
+    // top plate. Members must occlude each other naturally in BOTH modes;
+    // the X-ray effect lives in one depth-clearing sentinel drawn before
+    // them (renderOrder 998 vs 999), which only defeats HOST occlusion.
+    type MeshLike = {
+      isInstancedMesh?: boolean
+      material: { depthTest: boolean; depthWrite: boolean; transparent: boolean; colorWrite: boolean }
+      renderOrder: number
+      onBeforeRender?: unknown
     }
-    for (const g of ghosts) {
-      expect(g.material.depthWrite).toBe(false)
-      expect(g.material.opacity).toBeLessThan(0.5)
-      expect(g.renderOrder).toBe(999)
+    const xray = buildGroup(synthesizeMembers(100), [], true)
+    const meshes = xray.children as unknown as MeshLike[]
+    const memberMeshes = meshes.filter((m) => m.isInstancedMesh)
+    const sentinels = meshes.filter((m) => !m.isInstancedMesh)
+    expect(memberMeshes.length).toBeGreaterThan(0)
+    for (const m of memberMeshes) {
+      expect(m.material.depthTest).toBe(true) // natural near-hides-far
+      expect(m.material.transparent).toBe(false)
+      expect(m.renderOrder).toBe(999) // drawn after the host scene
     }
-    // no ghosts at all when X-ray is off
+    expect(sentinels).toHaveLength(1)
+    const sentinel = sentinels[0] as MeshLike
+    expect(sentinel.renderOrder).toBe(998) // clears depth BEFORE the members
+    expect(sentinel.material.colorWrite).toBe(false) // draws no pixels
+    expect(typeof sentinel.onBeforeRender).toBe('function')
+    // X-ray off: no sentinel, members depth-test in the normal pass order
     const off = buildGroup(synthesizeMembers(100), [], false)
     for (const m of off.children as unknown as MeshLike[]) {
+      expect(m.isInstancedMesh).toBe(true)
       expect(m.material.depthTest).toBe(true)
+      expect(m.renderOrder).toBe(0)
     }
   })
 })

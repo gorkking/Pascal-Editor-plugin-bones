@@ -8,6 +8,8 @@ import {
   Group,
   InstancedMesh,
   Matrix4,
+  Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Quaternion,
   Vector3,
@@ -111,13 +113,33 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   const translation = new Vector3()
   const euler = new Euler()
 
+  // X-ray = depth-buffer overlay: every member mesh draws AFTER the host
+  // scene (renderOrder 999) with normal depth testing, and a zero-pixel
+  // sentinel drawn just before them (renderOrder 998) clears the depth
+  // buffer. Members therefore depth-test only against EACH OTHER — the top
+  // plate hides the stud tops behind it, the footing never paints over a
+  // nearer stud — while the host's walls/floors can no longer occlude the
+  // skeleton. Exactly the editor's natural camera behavior, applied to the
+  // members, with the X-ray effect confined to host geometry.
+  if (seeThrough) {
+    const sentinel = new Mesh(
+      new BoxGeometry(0.0001, 0.0001, 0.0001),
+      new MeshBasicMaterial({ colorWrite: false, depthWrite: false, depthTest: false }),
+    )
+    sentinel.frustumCulled = false
+    sentinel.renderOrder = 998
+    sentinel.onBeforeRender = (renderer) => renderer.clearDepth()
+    group.add(sentinel)
+  }
+
   for (const bucket of buckets.values()) {
-    // Solid pass: normal depth-tested draw, so members occlude each other
-    // correctly (a footing can never paint over a stud that is nearer the
-    // camera — the round-2 user-reported artifact of the old depthTest:false
-    // single pass).
+    // Normal depth-tested draw, so members occlude each other correctly —
+    // the round-2 user-reported artifacts (footing over nearer studs, far
+    // stud tops reading through the top plate) came from bypassing the
+    // depth test; the sentinel above handles seeing through the HOST only.
     const material = new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 })
     const mesh = new InstancedMesh(unitBox, material, bucket.entries.length)
+    if (seeThrough) mesh.renderOrder = 999
     bucket.entries.forEach((entry, i) => {
       euler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
       quaternion.setFromEuler(euler)
@@ -135,41 +157,21 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     mesh.receiveShadow = true
     mesh.frustumCulled = false
     group.add(mesh)
-
-    // X-ray ghost pass: a faint depth-ignoring copy drawn late, so members
-    // hidden inside host walls/floors still read — while everything directly
-    // visible keeps the solid pass's true occlusion. Shares the solid pass's
-    // instance buffer (zero extra matrix work; draw calls stay O(buckets)).
-    if (seeThrough) {
-      const ghostMaterial = new MeshStandardMaterial({
-        color: bucket.color,
-        roughness: 0.82,
-        transparent: true,
-        opacity: 0.22,
-        depthTest: false,
-        depthWrite: false,
-      })
-      const ghost = new InstancedMesh(unitBox, ghostMaterial, bucket.entries.length)
-      ghost.instanceMatrix = mesh.instanceMatrix
-      ghost.renderOrder = 999
-      ghost.castShadow = false
-      ghost.receiveShadow = false
-      ghost.frustumCulled = false
-      group.add(ghost)
-    }
   }
   return group
 }
 
 function disposeGroup(group: Group) {
+  // Geometries are shared (one unit box) except the X-ray sentinel's own —
+  // dispose each UNIQUE geometry exactly once.
+  const geometries = new Set<BoxGeometry>()
   for (const child of group.children) {
     const mesh = child as InstancedMesh
     mesh.dispose?.()
     ;(mesh.material as MeshStandardMaterial | undefined)?.dispose?.()
+    if (mesh.geometry) geometries.add(mesh.geometry as BoxGeometry)
   }
-  // The unit BoxGeometry is shared across meshes — dispose once via any child.
-  const first = group.children[0] as InstancedMesh | undefined
-  first?.geometry?.dispose?.()
+  for (const geometry of geometries) geometry.dispose()
 }
 
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
