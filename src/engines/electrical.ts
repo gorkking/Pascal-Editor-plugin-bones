@@ -307,6 +307,44 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
     // photoelectric) + one alarm per story; CO alarm per R315 near bedrooms.
   }
 
+  // ---- door-less hallways still need a switched light (210.70(A)(2)) ----
+  // The per-door pass above only serves rooms with doors; a hallway drawn
+  // without door openings would get a light but no control.
+  for (const room of rooms) {
+    if (room.category !== 'hallway') continue
+    const hasSwitch = fixtures.some(
+      (f) => f.kind === 'switch' && pointInPolygon([f.position[0], f.position[2]], room.polygon),
+    )
+    if (hasSwitch) continue
+    const [hx, hz] = polygonCentroid(room.polygon)
+    let best: { face: WallFace; u: number; d: number } | null = null
+    for (const wall of walls) {
+      if (wall.curved) continue
+      for (const face of interiorFaces(wall, rooms)) {
+        const [ax, az] = wall.start
+        const u = Math.max(
+          inches(4),
+          Math.min(wall.length - inches(4), (hx - ax) * wall.dir[0] + (hz - az) * wall.dir[1]),
+        )
+        const [px, pz] = face.plan(u)
+        if (!pointInPolygon([px, pz], room.polygon)) continue
+        const d = Math.hypot(px - hx, pz - hz)
+        if (!best || d < best.d) best = { face, u, d }
+      }
+    }
+    if (best) {
+      const [x, z] = best.face.plan(best.u)
+      fixtures.push({
+        system: 'electrical',
+        kind: 'switch',
+        position: [x, SWITCH_AFF, z],
+        rotationY: best.face.rotationY,
+        sourceId: room.id,
+        label: 'Switch — hallway lighting (210.70(A)(2))',
+      })
+    }
+  }
+
   // ---- service panel ----
   const panel = placePanel(walls, rooms)
   if (panel) fixtures.push(panel)
@@ -550,27 +588,137 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
 }
 
 // ---------------------------------------------------------------------------
-// Wire routing (LOD 400): homeruns + branch chains as geometry
+// Wire routing (LOD 400): homeruns + branch chains following the WALLS
 // ---------------------------------------------------------------------------
 
 /** Horizontal runs bore through the studs at ~18" AFF (receptacle line). */
 const WIRE_RUN_Y = inches(18)
 /** Rendered NM sheath section — oversized so runs read at house scale. */
 const WIRE_SECTION = inches(0.5)
+/** Two wall ends within this distance share a junction (corner/tee). */
+const JUNCTION_TOL = 0.25
+
+type WallPoint = { wall: WallSlice; u: number }
+/** One junction on a wall: at `u`, you can hop onto `to.wall` at `to.u`. */
+type Junction = { u: number; to: WallPoint }
+
+/** Plan point of a wall-centerline coordinate. */
+const wallPlan = (p: WallPoint): Pt => [
+  p.wall.start[0] + p.wall.dir[0] * p.u,
+  p.wall.start[1] + p.wall.dir[1] * p.u,
+]
+
+/** Nearest wall-centerline point to a plan position. */
+function nearestWallPoint(walls: WallSlice[], p: Pt): WallPoint | null {
+  let best: WallPoint | null = null
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const wall of walls) {
+    if (wall.curved || wall.length < 0.1) continue
+    const [ax, az] = wall.start
+    const u = Math.max(0, Math.min(wall.length, (p[0] - ax) * wall.dir[0] + (p[1] - az) * wall.dir[1]))
+    const q = wallPlan({ wall, u })
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1])
+    if (d < bestDist) {
+      bestDist = d
+      best = { wall, u }
+    }
+  }
+  return best
+}
 
 /**
- * Route every circuit as geometry: one homerun drop at the panel, then a
- * greedy nearest-neighbor chain through the circuit's devices — each hop is
- * two Manhattan legs at drill height plus a vertical leg up/down to the
- * device (schematic-straight, no diagonal air-crossing). Returns 'wire-run'
- * Members; lengths summed by gauge feed the takeoff's NM cable lines.
- * ASSUMPTION: legs run point-to-point at drill height rather than hugging
- * each wall's centerline — acceptable schematic straightness per the rubric.
+ * The wall graph: every wall endpoint that lands on another wall (corner or
+ * tee, within JUNCTION_TOL) becomes a two-way junction. Wiring travels only
+ * along wall centerlines and hops walls at junctions.
  */
-export function routeWiring(fixtures: Fixture[]): Member[] {
+export function buildWallGraph(walls: WallSlice[]): Map<string, Junction[]> {
+  const graph = new Map<string, Junction[]>()
+  const add = (from: WallPoint, to: WallPoint) => {
+    const list = graph.get(from.wall.id) ?? []
+    list.push({ u: from.u, to })
+    graph.set(from.wall.id, list)
+  }
+  const usable = walls.filter((w) => !w.curved && w.length >= 0.1)
+  for (const wall of usable) {
+    for (const endU of [0, wall.length]) {
+      const p = wallPlan({ wall, u: endU })
+      for (const other of usable) {
+        if (other.id === wall.id) continue
+        const [ax, az] = other.start
+        const proj = Math.max(
+          0,
+          Math.min(other.length, (p[0] - ax) * other.dir[0] + (p[1] - az) * other.dir[1]),
+        )
+        const q = wallPlan({ wall: other, u: proj })
+        if (Math.hypot(q[0] - p[0], q[1] - p[1]) > JUNCTION_TOL) continue
+        add({ wall, u: endU }, { wall: other, u: proj })
+        add({ wall: other, u: proj }, { wall, u: endU })
+      }
+    }
+  }
+  return graph
+}
+
+/**
+ * BFS a leg list from one wall point to another, travelling only along
+ * walls: [{wall, u0, u1}, …]. Null when the walls are disconnected.
+ */
+function wallPath(
+  graph: Map<string, Junction[]>,
+  from: WallPoint,
+  to: WallPoint,
+): { wall: WallSlice; u0: number; u1: number }[] | null {
+  if (from.wall.id === to.wall.id) return [{ wall: from.wall, u0: from.u, u1: to.u }]
+  type Visit = { point: WallPoint; prev: Visit | null; enteredAt: number }
+  const visited = new Set<string>([from.wall.id])
+  let frontier: Visit[] = [{ point: from, prev: null, enteredAt: from.u }]
+  for (let hop = 0; hop < 32 && frontier.length > 0; hop++) {
+    const next: Visit[] = []
+    for (const visit of frontier) {
+      for (const junction of graph.get(visit.point.wall.id) ?? []) {
+        const targetId = junction.to.wall.id
+        if (visited.has(targetId)) continue
+        visited.add(targetId)
+        const arrival: Visit = {
+          point: junction.to,
+          prev: { ...visit, point: { wall: visit.point.wall, u: junction.u } },
+          enteredAt: junction.to.u,
+        }
+        if (targetId === to.wall.id) {
+          // reconstruct: walk back through the junctions
+          const legs: { wall: WallSlice; u0: number; u1: number }[] = [
+            { wall: to.wall, u0: arrival.enteredAt, u1: to.u },
+          ]
+          let cursor: Visit | null = arrival.prev
+          while (cursor) {
+            legs.unshift({ wall: cursor.point.wall, u0: cursor.enteredAt, u1: cursor.point.u })
+            cursor = cursor.prev
+          }
+          return legs
+        }
+        next.push(arrival)
+      }
+    }
+    frontier = next
+  }
+  return null
+}
+
+/**
+ * Route every circuit as geometry that FOLLOWS THE WALLS: one homerun drop
+ * at the panel, then a greedy nearest-neighbor chain through the circuit's
+ * devices — each hop travels along wall centerlines at drill height,
+ * hopping walls at corner/tee junctions, with a vertical leg at the
+ * device's wall anchor. Ceiling devices (lights, smoke alarms) rise at
+ * their nearest wall and cross the CEILING in two Manhattan legs (through
+ * the joist bays). Disconnected islands fall back to Manhattan air legs,
+ * flagged in the label. Lengths by gauge feed the takeoff's NM lines.
+ */
+export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Member[] {
   const members: Member[] = []
   const panel = fixtures.find((f) => f.kind === 'panel')
   if (!panel) return members
+  const graph = buildWallGraph(walls)
 
   const byCircuit = new Map<string, Fixture[]>()
   for (const f of fixtures) {
@@ -582,45 +730,70 @@ export function routeWiring(fixtures: Fixture[]): Member[] {
     byCircuit.set(circuit, list)
   }
 
-  const wire = (
+  const emitWire = (
     circuit: string,
     gauge: number,
-    axis: 'x' | 'y' | 'z',
     from: readonly [number, number, number],
-    length: number,
+    to: readonly [number, number, number],
+    note = '',
   ): void => {
-    if (Math.abs(length) < 0.02) return
-    const len = Math.abs(length)
-    const mid: [number, number, number] = [...from] as [number, number, number]
-    const axisIndex = axis === 'x' ? 0 : axis === 'y' ? 1 : 2
-    mid[axisIndex] += length / 2
+    const dx = to[0] - from[0]
+    const dy = to[1] - from[1]
+    const dz = to[2] - from[2]
+    const len = Math.hypot(dx, dy, dz)
+    if (len < 0.02) return
+    const vertical = Math.abs(dy) > Math.hypot(dx, dz)
     members.push({
       system: 'electrical',
       role: 'wire-run',
-      dims: axis === 'y' ? [WIRE_SECTION, len, WIRE_SECTION] : [len, WIRE_SECTION, WIRE_SECTION],
+      dims: vertical ? [WIRE_SECTION, len, WIRE_SECTION] : [len, WIRE_SECTION, WIRE_SECTION],
       length: len,
-      position: mid,
-      rotation: [0, axis === 'z' ? -Math.PI / 2 : 0, 0],
+      position: [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2],
+      rotation: [0, vertical ? 0 : Math.atan2(-dz, dx), 0],
       material: 'copper',
       sourceId: circuit,
-      label: `NM-B ${gauge}/2 w/G — ${circuit}`,
+      label: `NM-B ${gauge}/2 w/G — ${circuit}${note}`,
     })
   }
 
-  const [px, py, pz] = panel.position
+  /** Wall-following legs between two anchors at drill height. */
+  const routeHop = (circuit: string, gauge: number, from: WallPoint, to: WallPoint): void => {
+    const legs = wallPath(graph, from, to)
+    if (legs) {
+      for (const leg of legs) {
+        const a = wallPlan({ wall: leg.wall, u: leg.u0 })
+        const b = wallPlan({ wall: leg.wall, u: leg.u1 })
+        emitWire(circuit, gauge, [a[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, b[1]])
+      }
+      return
+    }
+    // Disconnected wall islands: Manhattan air legs, called out in the label.
+    const a = wallPlan(from)
+    const b = wallPlan(to)
+    emitWire(circuit, gauge, [a[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, a[1]], ' (air run — no wall path)')
+    emitWire(circuit, gauge, [b[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, b[1]], ' (air run — no wall path)')
+  }
+
+  const panelPlan: Pt = [panel.position[0], panel.position[2]]
+  const panelAnchor = nearestWallPoint(walls, panelPlan)
   for (const [circuit, devices] of byCircuit) {
     const gauge = Number(devices[0]?.meta?.gaugeAwg ?? 14)
-    // homerun drop from the panel to drill height
-    wire(circuit, gauge, 'y', [px, py, pz], WIRE_RUN_Y - py)
+    // homerun drop from the panel to drill height at its wall anchor
+    const start = panelAnchor ?? null
+    if (start) {
+      const sp = wallPlan(start)
+      emitWire(circuit, gauge, [sp[0], panel.position[1], sp[1]], [sp[0], WIRE_RUN_Y, sp[1]])
+    }
     const remaining = [...devices]
-    let cx = px
-    let cz = pz
+    let cursor: WallPoint | null = start
+    let cursorPlan: Pt = start ? wallPlan(start) : panelPlan
     while (remaining.length > 0) {
       let best = 0
       let bestDist = Number.POSITIVE_INFINITY
       for (let i = 0; i < remaining.length; i++) {
         const d = remaining[i] as Fixture
-        const dist = Math.abs(d.position[0] - cx) + Math.abs(d.position[2] - cz)
+        const dist =
+          Math.abs(d.position[0] - cursorPlan[0]) + Math.abs(d.position[2] - cursorPlan[1])
         if (dist < bestDist) {
           bestDist = dist
           best = i
@@ -628,11 +801,29 @@ export function routeWiring(fixtures: Fixture[]): Member[] {
       }
       const device = remaining.splice(best, 1)[0] as Fixture
       const [x, y, z] = device.position
-      wire(circuit, gauge, 'x', [cx, WIRE_RUN_Y, cz], x - cx)
-      wire(circuit, gauge, 'z', [x, WIRE_RUN_Y, cz], z - cz)
-      wire(circuit, gauge, 'y', [x, WIRE_RUN_Y, z], y - WIRE_RUN_Y)
-      cx = x
-      cz = z
+      const ceilingDevice = device.kind === 'light' || device.kind === 'smoke-alarm'
+      const anchor = nearestWallPoint(walls, [x, z])
+      if (anchor && cursor) {
+        routeHop(circuit, gauge, cursor, anchor)
+        const ap = wallPlan(anchor)
+        if (ceilingDevice) {
+          // rise inside the wall, then cross the ceiling through joist bays
+          emitWire(circuit, gauge, [ap[0], WIRE_RUN_Y, ap[1]], [ap[0], y, ap[1]])
+          emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, ap[1]])
+          emitWire(circuit, gauge, [x, y, ap[1]], [x, y, z])
+        } else {
+          // drop/rise at the device's stud bay
+          emitWire(circuit, gauge, [ap[0], WIRE_RUN_Y, ap[1]], [ap[0], y, ap[1]])
+        }
+        cursor = anchor
+        cursorPlan = ap
+      } else {
+        // No walls at all — degenerate scene: straight legs to the device.
+        emitWire(circuit, gauge, [cursorPlan[0], WIRE_RUN_Y, cursorPlan[1]], [x, WIRE_RUN_Y, cursorPlan[1]], ' (air run — no wall path)')
+        emitWire(circuit, gauge, [x, WIRE_RUN_Y, cursorPlan[1]], [x, WIRE_RUN_Y, z], ' (air run — no wall path)')
+        emitWire(circuit, gauge, [x, WIRE_RUN_Y, z], [x, y, z])
+        cursorPlan = [x, z]
+      }
     }
   }
   return members

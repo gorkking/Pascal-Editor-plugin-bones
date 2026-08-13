@@ -153,8 +153,8 @@ function computeLevelUncached(
   if (config.showElectrical) {
     const electrical = layoutElectrical(activeWalls, activeRooms)
     fixtures.push(...electrical)
-    // LOD 400: homerun + branch wiring as geometry, converging on the panel.
-    if (spec.detail === '400') members.push(...routeWiring(electrical))
+    // LOD 400: homerun + branch wiring following the walls to the panel.
+    if (spec.detail === '400') members.push(...routeWiring(electrical, activeWalls))
   }
 
   if (config.showPlumbing) {

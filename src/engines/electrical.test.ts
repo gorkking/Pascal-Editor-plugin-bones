@@ -788,24 +788,67 @@ describe('3-way switching — rooms with 2+ entries', () => {
   })
 })
 
-describe('routeWiring — LOD 400 homerun + branch geometry', () => {
-  const { fixtures } = circuitPlan()
-  const wires = routeWiring(fixtures)
+describe('routeWiring — LOD 400 wall-following homeruns + chains', () => {
+  const plan = circuitPlan()
+  const { fixtures } = plan
+  const wires = routeWiring(fixtures, plan.walls)
   const panel = ofKind(fixtures, 'panel')[0] as Fixture
 
-  test('every run is an axis-aligned wire-run member in copper', () => {
-    expect(wires.length).toBeGreaterThan(10)
-    for (const w of wires) {
-      expect(w.role).toBe('wire-run')
-      expect(w.system).toBe('electrical')
-      expect(w.material).toBe('copper')
-      expect(w.rotation[2]).toBe(0) // never tilted
-      const yaw = Math.abs(w.rotation[1] as number)
-      expect(yaw === 0 || Math.abs(yaw - Math.PI / 2) < 1e-9).toBe(true)
+  /** Distance from a plan point to the nearest wall centerline. */
+  function wallDistance(x: number, z: number): number {
+    let best = Number.POSITIVE_INFINITY
+    for (const w of plan.walls) {
+      const [ax, az] = w.start
+      const t = Math.max(0, Math.min(w.length, (x - ax) * w.dir[0] + (z - az) * w.dir[1]))
+      best = Math.min(best, Math.hypot(ax + w.dir[0] * t - x, az + w.dir[1] * t - z))
+    }
+    return best
+  }
+
+  test('every drill-height leg hugs a wall — zero air-crossing (round-2 blocker)', () => {
+    const drillLegs = wires.filter(
+      (w) => w.dims[0] > w.dims[1] && Math.abs((w.position[1] as number) - 18 * 0.0254) < 1e-6,
+    )
+    expect(drillLegs.length).toBeGreaterThan(5)
+    for (const leg of drillLegs) {
+      // center AND both ends stay inside a wall corridor
+      const yaw = leg.rotation[1] as number
+      const dx = Math.cos(yaw)
+      const dz = -Math.sin(yaw)
+      const half = leg.length / 2
+      for (const t of [-half, 0, half]) {
+        const x = (leg.position[0] as number) + dx * t
+        const z = (leg.position[2] as number) + dz * t
+        expect(wallDistance(x, z)).toBeLessThan(0.11) // ≤ half thickness + tol
+      }
+      expect(leg.label).not.toContain('air run')
     }
   })
 
-  test('every circuit drops a homerun at the panel plan position', () => {
+  test('ceiling devices rise inside a wall and cross the ceiling through joist bays', () => {
+    const light = ofKind(fixtures, 'light')[0] as Fixture
+    const ceilingLegs = wires.filter(
+      (w) =>
+        w.dims[0] > w.dims[1] &&
+        Math.abs((w.position[1] as number) - light.position[1]) < 1e-6,
+    )
+    expect(ceilingLegs.length).toBeGreaterThanOrEqual(1)
+    // a ceiling leg ends at the light's plan position
+    const reaches = ceilingLegs.some((w) => {
+      const yaw = w.rotation[1] as number
+      const dx = Math.cos(yaw)
+      const dz = -Math.sin(yaw)
+      const half = w.length / 2
+      return [1, -1].some(
+        (s) =>
+          Math.abs((w.position[0] as number) + s * dx * half - light.position[0]) < 1e-4 &&
+          Math.abs((w.position[2] as number) + s * dz * half - light.position[2]) < 1e-4,
+      )
+    })
+    expect(reaches).toBe(true)
+  })
+
+  test('every circuit drops a homerun at the panel wall anchor', () => {
     const circuits = new Set(
       fixtures.filter((f) => f.kind !== 'panel' && f.meta?.circuit).map((f) => String(f.meta?.circuit)),
     )
@@ -814,8 +857,10 @@ describe('routeWiring — LOD 400 homerun + branch geometry', () => {
         (w) =>
           w.sourceId === circuit &&
           w.dims[1] > w.dims[0] && // vertical leg
-          Math.abs((w.position[0] as number) - panel.position[0]) < 1e-6 &&
-          Math.abs((w.position[2] as number) - panel.position[2]) < 1e-6,
+          Math.hypot(
+            (w.position[0] as number) - panel.position[0],
+            (w.position[2] as number) - panel.position[2],
+          ) < 0.12, // the anchor sits on the wall centerline behind the panel face
       )
       expect(drop).toBeDefined()
     }
@@ -826,20 +871,30 @@ describe('routeWiring — LOD 400 homerun + branch geometry', () => {
     expect(wires.some((w) => w.sourceId === 'GEN-1' && w.label?.includes('14/2'))).toBe(true)
   })
 
-  test('chains touch every device: a vertical leg lands at each fixture plan point', () => {
+  test('wall devices get a vertical leg at their stud bay', () => {
     for (const f of fixtures) {
       if (f.kind === 'panel' || typeof f.meta?.circuit !== 'string') continue
+      if (f.kind === 'light' || f.kind === 'smoke-alarm') continue
       const leg = wires.find(
         (w) =>
           w.dims[1] > w.dims[0] &&
-          Math.abs((w.position[0] as number) - f.position[0]) < 1e-6 &&
-          Math.abs((w.position[2] as number) - f.position[2]) < 1e-6,
+          Math.hypot(
+            (w.position[0] as number) - f.position[0],
+            (w.position[2] as number) - f.position[2],
+          ) < 0.12,
       )
       expect(leg).toBeDefined()
     }
   })
 
+  test('disconnected islands fall back to labeled air runs instead of vanishing', () => {
+    const island = makeWall({ id: 'w_island', start: [20, 20], end: [24, 20] })
+    const islandFixtures = layoutElectrical([...plan.walls, island], plan.rooms)
+    const routed = routeWiring(islandFixtures, [...plan.walls, island])
+    expect(routed.some((w) => w.label?.includes('air run'))).toBe(true)
+  })
+
   test('no panel → no wiring', () => {
-    expect(routeWiring(fixtures.filter((f) => f.kind !== 'panel'))).toHaveLength(0)
+    expect(routeWiring(fixtures.filter((f) => f.kind !== 'panel'), plan.walls)).toHaveLength(0)
   })
 })
