@@ -6,11 +6,16 @@ import { inches } from '../core/units'
 import {
   BLOCK_DEPTH_ACTUAL,
   BLOCK_LENGTH,
+  CELL_CENTER,
   COURSE_HEIGHT,
   LINTEL_BEARING,
   MORTAR_JOINT,
+  REBAR_SIZE,
+  VERT_BAR_SPACING,
   cmuWall,
+  cmuWalls,
   courseIntervals,
+  verticalBarPositions,
 } from './cmu'
 
 // The 8" module in meters — spelled out so the assertions read as numbers.
@@ -110,11 +115,11 @@ describe('cmuWall — solid 4m × 2.4m wall', () => {
   const members = cmuWall(wall, DEFAULT_SPEC)
   const blocks = byRole(members, 'block')
 
-  test('everything is concrete unit masonry on the wall-framing system', () => {
+  test('masonry is concrete, reinforcing is steel — all on the wall-framing system', () => {
     expect(members.length).toBeGreaterThan(0)
     for (const m of members) {
       expect(m.system).toBe('wall-framing')
-      expect(m.material).toBe('concrete')
+      expect(m.material).toBe(m.role === 'rebar' ? 'steel' : 'concrete')
       expect(m.sourceId).toBe('wall_cmu')
     }
     for (const b of blocks) expect(b.size).toBeUndefined() // blocks are not lumber
@@ -180,14 +185,15 @@ describe('cmuWall — solid 4m × 2.4m wall', () => {
     for (const b of blocks) expect(b.position[1] ?? 0).toBeLessThan(10 * H)
   })
 
-  test('end cells are labeled grouted + rebar (2 per course, 20 total)', () => {
+  test('cells holding a vertical bar are labeled grouted (4 per course, 40 total)', () => {
+    // Bars land at 0.1016 / 1.3208 / 2.54 / 3.8984 → 4 grouted cells a course.
     const grouted = blocks.filter((b) => b.label === 'grouted cell + vertical rebar')
-    expect(grouted).toHaveLength(20)
+    expect(grouted).toHaveLength(40)
     for (let c = 0; c < 10; c++) {
       const row = course(members, c)
       expect(row[0]?.label).toBe('grouted cell + vertical rebar')
       expect(row[row.length - 1]?.label).toBe('grouted cell + vertical rebar')
-      // interior blocks stay unlabeled — takeoff counts grouted cells by label
+      // barless cells stay unlabeled — takeoff counts grouted cells by label
       expect(row[1]?.label).toBeUndefined()
     }
   })
@@ -342,5 +348,186 @@ describe('cmuWall — guards', () => {
 
   test('curved walls return no members (flagged upstream)', () => {
     expect(cmuWall(makeWall({ curved: true }), DEFAULT_SPEC)).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round-1 fabrication features (vertical rebar, bond-beam bars, interlock)
+// ---------------------------------------------------------------------------
+
+describe('verticalBarPositions — layout math', () => {
+  test('solid 4m wall: end cells + 48" field grid, colliding grid bar dropped', () => {
+    const us = verticalBarPositions(4, [])
+    // ends at 4" in; field at 4" + k·48"; the k=3 bar (3.7592) sits within
+    // 8" of the end bar (3.8984) and is dropped — one bar per corner core.
+    expect(us).toHaveLength(4)
+    expect(us[0]).toBeCloseTo(CELL_CENTER, 6) // 0.1016
+    expect(us[1]).toBeCloseTo(CELL_CENTER + VERT_BAR_SPACING, 6) // 1.3208
+    expect(us[2]).toBeCloseTo(CELL_CENTER + 2 * VERT_BAR_SPACING, 6) // 2.5400
+    expect(us[3]).toBeCloseTo(4 - CELL_CENTER, 6) // 3.8984
+  })
+
+  test('opening: jamb bars in the first cell each side, grid bars inside the RO dropped', () => {
+    // Window RO u ∈ [1.381, 2.619] (the standard test window at u=2).
+    const us = verticalBarPositions(4, [{ u0: 1.381, u1: 2.619 }])
+    expect(us).toHaveLength(4)
+    expect(us[1]).toBeCloseTo(1.381 - CELL_CENTER, 6) // left jamb (grid 1.3208 merged)
+    expect(us[2]).toBeCloseTo(2.619 + CELL_CENTER, 6) // right jamb (grid 2.54 was in RO)
+  })
+
+  test('skip flags drop only the corner-end bar', () => {
+    const us = verticalBarPositions(3, [], true, false)
+    expect(us.every((u) => u > inches(8))).toBe(true)
+    expect(us[us.length - 1]).toBeCloseTo(3 - CELL_CENTER, 6)
+  })
+})
+
+describe('cmuWall — vertical rebar in grouted cells (LOD 350+)', () => {
+  const wall = makeWall()
+  const members = cmuWall(wall, DEFAULT_SPEC)
+  const bars = byRole(members, 'rebar').filter((m) => m.dims[1] > 1) // verticals
+
+  test('4 steel #5 bars at the computed cell positions, hooked into the beam', () => {
+    expect(bars).toHaveLength(4)
+    const us = bars.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
+    expect(us[0]).toBeCloseTo(0.1016, 4)
+    expect(us[1]).toBeCloseTo(1.3208, 4)
+    expect(us[2]).toBeCloseTo(2.54, 4)
+    expect(us[3]).toBeCloseTo(3.8984, 4)
+    for (const bar of bars) {
+      expect(bar.material).toBe('steel')
+      expect(bar.dims[0]).toBeCloseTo(REBAR_SIZE, 6)
+      // runs from the slab to mid-bond-beam: top = 10·H + H/2 = 2.1336
+      const top = (bar.position[1] ?? 0) + bar.dims[1] / 2
+      expect(top).toBeCloseTo(10 * H + H / 2, 6)
+      expect(bar.position[1] ?? 0).toBeCloseTo(top / 2, 6) // bottom at 0
+      expect(bar.label).toContain('R606.12')
+    }
+  })
+
+  test('LOD 200 emits no reinforcing steel', () => {
+    const generic = cmuWall(wall, { ...DEFAULT_SPEC, detail: '200' })
+    expect(byRole(generic, 'rebar')).toHaveLength(0)
+    // …and falls back to the schematic end-cell grout call-out
+    const grouted = byRole(generic, 'block').filter((b) => b.label?.includes('grouted'))
+    expect(grouted).toHaveLength(20)
+  })
+
+  test('window jamb cells hold a bar and grout solid', () => {
+    const opening = window_(2)
+    const u0 = 2 - opening.roughWidth / 2 // 1.38095
+    const u1 = 2 + opening.roughWidth / 2 // 2.61905
+    const withWin = cmuWall(makeWall({ openings: [opening] }), DEFAULT_SPEC)
+    const vbars = byRole(withWin, 'rebar').filter((m) => m.dims[1] > 1)
+    const us = vbars.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
+    expect(us).toHaveLength(4)
+    expect(us[1]).toBeCloseTo(u0 - CELL_CENTER, 6) // left jamb bar
+    expect(us[2]).toBeCloseTo(u1 + CELL_CENTER, 6) // right jamb bar
+    // the jamb block beside the RO (course 4 is fully in the RO band) grouts
+    const row = course(withWin, 4)
+    const leftJamb = row.filter((b) => (b.position[0] ?? 0) < u0).pop() as Member
+    expect(leftJamb.label).toBe('grouted cell + vertical rebar')
+    const rightJamb = row.find((b) => (b.position[0] ?? 0) > u1) as Member
+    expect(rightJamb.label).toBe('grouted cell + vertical rebar')
+  })
+})
+
+describe('cmuWall — bond-beam horizontal bars (LOD 350+)', () => {
+  const members = cmuWall(makeWall(), DEFAULT_SPEC)
+  const beamBars = byRole(members, 'rebar').filter((m) => m.dims[0] > 1) // horizontals
+
+  test('two #5 bars run the full beam, 2" clear off each face', () => {
+    expect(beamBars).toHaveLength(2)
+    const offs = beamBars.map((b) => b.position[2] ?? 0).sort((a, b) => a - b)
+    const expected = BLOCK_DEPTH_ACTUAL / 2 - inches(2) // 0.19/2 − 0.0508
+    expect(offs[0]).toBeCloseTo(-expected, 6)
+    expect(offs[1]).toBeCloseTo(expected, 6)
+    for (const bar of beamBars) {
+      expect(bar.material).toBe('steel')
+      expect(bar.dims[0]).toBeCloseTo(4, 6) // continuous, wall length
+      expect(bar.position[1]).toBeCloseTo(10 * H + H / 2, 6) // beam mid-height
+      expect(bar.position[0]).toBeCloseTo(2, 6)
+      expect(bar.label).toContain('bond beam')
+    }
+  })
+
+  test('a wall too thin for two bars carries one on center', () => {
+    const thin = cmuWall(makeWall({ thickness: 0.1 }), DEFAULT_SPEC)
+    const bars = byRole(thin, 'rebar').filter((m) => m.dims[0] > 1)
+    expect(bars).toHaveLength(1)
+    expect(bars[0]?.position[2]).toBeCloseTo(0, 6)
+  })
+})
+
+describe('cmuWalls — corner interlock (courses alternate through the corner)', () => {
+  // Two perpendicular 0.2m walls sharing the corner at the origin — the
+  // round-1 reviewer's exact spot check, which found 9 overlapping pairs.
+  const A = makeWall({ id: 'wall_A', start: [0, 0], end: [4, 0] })
+  const B = makeWall({ id: 'wall_B', start: [0, 0], end: [0, 3] })
+  const members = cmuWalls([A, B], DEFAULT_SPEC)
+  const masonry = members.filter((m) => m.role !== 'rebar') // blocks/beams/lintels
+
+  /** World-space AABB — walls here are axis-aligned (yaw 0 or −π/2). */
+  function aabb(m: Member) {
+    const alongX = Math.abs(Math.cos(m.rotation[1] ?? 0)) > 0.5
+    const hx = alongX ? m.dims[0] / 2 : m.dims[2] / 2
+    const hz = alongX ? m.dims[2] / 2 : m.dims[0] / 2
+    return {
+      minX: (m.position[0] ?? 0) - hx,
+      maxX: (m.position[0] ?? 0) + hx,
+      minY: (m.position[1] ?? 0) - m.dims[1] / 2,
+      maxY: (m.position[1] ?? 0) + m.dims[1] / 2,
+      minZ: (m.position[2] ?? 0) - hz,
+      maxZ: (m.position[2] ?? 0) + hz,
+    }
+  }
+
+  test('ZERO masonry volumes from the two walls intersect', () => {
+    const ours = masonry.filter((m) => m.sourceId === 'wall_A').map(aabb)
+    const theirs = masonry.filter((m) => m.sourceId === 'wall_B').map(aabb)
+    let overlapping = 0
+    for (const a of ours) {
+      for (const b of theirs) {
+        const hit =
+          a.minX < b.maxX - 1e-9 && b.minX < a.maxX - 1e-9 &&
+          a.minY < b.maxY - 1e-9 && b.minY < a.maxY - 1e-9 &&
+          a.minZ < b.maxZ - 1e-9 && b.minZ < a.maxZ - 1e-9
+        if (hit) overlapping += 1
+      }
+    }
+    expect(overlapping).toBe(0)
+  })
+
+  test('even courses: the longer wall lays through, the other stops short', () => {
+    // A (through) claims even courses: its first block reaches x = −0.1
+    // (B's far face); B starts at z = +0.1 (clear of A's face).
+    const a0 = course(members.filter((m) => m.sourceId === 'wall_A'), 0)[0] as Member
+    expect((a0.position[0] ?? 0) - a0.dims[0] / 2).toBeCloseTo(-0.1 + M / 2, 4)
+    const b0 = course(members.filter((m) => m.sourceId === 'wall_B'), 0)[0] as Member
+    expect((b0.position[2] ?? 0) - b0.dims[0] / 2).toBeCloseTo(0.1 + M / 2, 4)
+  })
+
+  test('odd courses swap: the butting wall lays through', () => {
+    const a1 = course(members.filter((m) => m.sourceId === 'wall_A'), 1)[0] as Member
+    expect((a1.position[0] ?? 0) - a1.dims[0] / 2).toBeCloseTo(0.1 + M / 2, 4)
+    const b1 = course(members.filter((m) => m.sourceId === 'wall_B'), 1)[0] as Member
+    expect((b1.position[2] ?? 0) - b1.dims[0] / 2).toBeCloseTo(-0.1 + M / 2, 4)
+  })
+
+  test('the shared corner core holds exactly ONE vertical bar (the through wall’s)', () => {
+    const verticals = byRole(members, 'rebar').filter((m) => m.dims[1] > 1)
+    const nearCorner = verticals.filter(
+      (b) => Math.hypot(b.position[0] ?? 0, b.position[2] ?? 0) < inches(8),
+    )
+    expect(nearCorner).toHaveLength(1)
+    expect(nearCorner[0]?.sourceId).toBe('wall_A')
+  })
+
+  test('bond beams interlock too — the yielding beam pulls short', () => {
+    const beamA = members.find((m) => m.role === 'bond-beam' && m.sourceId === 'wall_A') as Member
+    const beamB = members.find((m) => m.role === 'bond-beam' && m.sourceId === 'wall_B') as Member
+    // beam course index 10 is even → A claims (extends to −0.1), B yields
+    expect((beamA.position[0] ?? 0) - beamA.dims[0] / 2).toBeCloseTo(-0.1, 4)
+    expect((beamB.position[2] ?? 0) - beamB.dims[0] / 2).toBeCloseTo(0.1, 4)
   })
 })

@@ -23,11 +23,15 @@
  *    horizontal rebar to collect uplift/diaphragm loads.
  *  - Precast concrete lintels over openings with ≥8" bearing each side
  *    (manufacturer minimum, FBC R606.10 / ACI 530 bearing practice).
- *  - Vertical reinforcing in grouted cells at wall ends/corners
- *    (IRC R606.12 / FBC wind provisions). Roles stay 'block' so the takeoff
- *    counts them as purchasable units; the label marks them as grouted so a
- *    grout/rebar line can be derived. // LOD 400: grout jamb cells at
- *    openings and intermediate cells at 48" o.c. per design wind speed.
+ *  - Vertical reinforcing in grouted cells (IRC R606.12 / FBC wind
+ *    provisions): #5 bars at wall ends/corners, at opening jambs, and in the
+ *    field at 48" o.c., each hooked into the bond beam. Cells a bar passes
+ *    through are grouted solid — blocks keep role 'block' (purchasable
+ *    units); the label marks the grout so a grout/rebar line can be derived.
+ *  - Corner interlock (running bond THROUGH corners, TMS 402): at a shared
+ *    corner the two walls alternate per course — one lays through to the
+ *    neighbor's far face, the other stops short of the through wall's face —
+ *    so no two blocks ever occupy the same corner volume.
  *
  * Geometry convention copied from wall-framing.ts: wall-local frame with X
  * along the wall from `start`, Y up, Z across the thickness; every member is
@@ -37,6 +41,7 @@
 import type { FramingSpec } from '../core/spec'
 import type { Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
+import { detectCorners } from './wall-framing'
 
 const EPS = 1e-6
 
@@ -55,6 +60,14 @@ export const MORTAR_JOINT = inches(0.375)
 /** Precast lintel: nominal 8" tall (one course), bears 8" past each jamb. */
 export const LINTEL_HEIGHT = inches(8)
 export const LINTEL_BEARING = inches(8)
+/** #5 vertical / bond-beam bar — 5/8" diameter, drawn as a square section. */
+export const REBAR_SIZE = inches(0.625)
+/** Field spacing for vertical bars in grouted cells (FBC high-wind typical). */
+export const VERT_BAR_SPACING = inches(48)
+/** Center of the first cell in from a wall end / opening jamb (8" cell). */
+export const CELL_CENTER = inches(4)
+/** Clear cover for bond-beam bars off the block faces. */
+const BAR_CLEAR = inches(2)
 
 /**
  * Smallest piece a mason will cut and lay. Slivers below this are dropped
@@ -142,6 +155,63 @@ function subtractKeepOuts(piece: BlockInterval, cuts: BlockInterval[]): BlockInt
 }
 
 // ---------------------------------------------------------------------------
+// Vertical reinforcing layout (exported for direct unit testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Wall-local u positions of the vertical #5 bars: both end cells first (they
+ * anchor the corner cores), then a bar in the first cell beside every opening
+ * jamb (R606.12 opening reinforcement), then the 48" o.c. field grid. Later
+ * candidates are dropped when they land within 6" of an accepted bar (one bar
+ * per cell) or inside an opening's rough width.
+ */
+export function verticalBarPositions(
+  length: number,
+  openings: { u0: number; u1: number }[],
+  skipStartBar = false,
+  skipEndBar = false,
+): number[] {
+  const MIN_GAP = inches(6)
+  const accepted: number[] = []
+  const consider = (u: number): void => {
+    if (u < CELL_CENTER - EPS || u > length - CELL_CENTER + EPS) return
+    // A shared corner core holds ONE bar — the wall that lays through on
+    // even courses owns it; the yielding wall skips its end bar.
+    if (skipStartBar && u < inches(8)) return
+    if (skipEndBar && u > length - inches(8)) return
+    if (openings.some((o) => u > o.u0 - EPS && u < o.u1 + EPS)) return
+    if (accepted.some((v) => Math.abs(v - u) < MIN_GAP)) return
+    accepted.push(u)
+  }
+  consider(CELL_CENTER)
+  consider(length - CELL_CENTER)
+  for (const o of openings) {
+    consider(o.u0 - CELL_CENTER)
+    consider(o.u1 + CELL_CENTER)
+  }
+  for (let u = CELL_CENTER + VERT_BAR_SPACING; u < length - CELL_CENTER - inches(8); u += VERT_BAR_SPACING) {
+    consider(u)
+  }
+  return accepted.sort((a, b) => a - b)
+}
+
+// ---------------------------------------------------------------------------
+// Corner interlock hints (computed across walls by cmuWalls)
+// ---------------------------------------------------------------------------
+
+/** One corner this wall participates in, as seen from this wall. */
+export type CmuCorner = {
+  /** Which end of THIS wall meets the corner. */
+  end: 'start' | 'end'
+  /** The abutting wall's thickness — sets how far to lay through / stop short. */
+  otherThickness: number
+  /** True: this wall lays THROUGH the corner on even courses (else on odd). */
+  claimEven: boolean
+}
+
+export type CmuHints = { corners?: CmuCorner[] }
+
+// ---------------------------------------------------------------------------
 // The engine
 // ---------------------------------------------------------------------------
 
@@ -154,7 +224,7 @@ function subtractKeepOuts(piece: BlockInterval, cuts: BlockInterval[]): BlockInt
  * the grouted bond beam ("tie beam") so the wall never exceeds its
  * architectural height.
  */
-export function cmuWall(wall: WallSlice, _spec: FramingSpec): Member[] {
+export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}): Member[] {
   if (wall.curved) return []
   const members: Member[] = []
   const { yaw, place } = frameOf(wall)
@@ -170,6 +240,35 @@ export function cmuWall(wall: WallSlice, _spec: FramingSpec): Member[] {
   if (totalCourses < 1) return [] // shorter than one course — nothing to lay
   const bodyCourses = totalCourses - 1 // top course is the bond beam
   const bondBeamBottom = bodyCourses * COURSE_HEIGHT
+
+  // ---- corner interlock: per-course extents along the wall ----
+  // At a shared corner the claiming course lays THROUGH to the neighbor's far
+  // face (extends otherThickness/2 past the corner point); the yielding
+  // course stops short of the through wall's face (retreats otherThickness/2)
+  // — so the corner volume is filled exactly once per course.
+  const cornerAt = (end: 'start' | 'end'): CmuCorner | undefined =>
+    hints.corners?.find((c) => c.end === end)
+  const courseSpan = (c: number): [number, number] => {
+    let lo = 0
+    let hi = len
+    const cs = cornerAt('start')
+    if (cs) lo = (c % 2 === 0) === cs.claimEven ? -cs.otherThickness / 2 : cs.otherThickness / 2
+    const ce = cornerAt('end')
+    if (ce) hi = len + ((c % 2 === 0) === ce.claimEven ? ce.otherThickness / 2 : -ce.otherThickness / 2)
+    return [lo, hi]
+  }
+  /** Extend the terminal units through a claimed corner / clip to a yielded one. */
+  const interlock = (intervals: BlockInterval[], lo: number, hi: number): BlockInterval[] => {
+    const out: BlockInterval[] = []
+    for (const iv of intervals) {
+      let a = Math.max(iv.a, lo)
+      let b = Math.min(iv.b, hi)
+      if (iv.a < EPS && lo < 0) a = lo // first unit reaches through the corner
+      if (iv.b > len - EPS && hi > len) b = hi // last unit reaches through
+      if (b - a >= MIN_PIECE - EPS) out.push({ a, b })
+    }
+    return out
+  }
 
   const emit = (
     role: Member['role'],
@@ -198,6 +297,22 @@ export function cmuWall(wall: WallSlice, _spec: FramingSpec): Member[] {
       label,
     })
   }
+
+  // ---- vertical reinforcing layout (bars drive which cells grout solid) ----
+  const fab = spec.detail !== '200' // LOD 350 gate, matching the foundation engine
+  const roRanges = wall.openings.map((o) => ({
+    u0: o.u - o.roughWidth / 2,
+    u1: o.u + o.roughWidth / 2,
+  }))
+  const barUs =
+    fab && bodyCourses >= 1
+      ? verticalBarPositions(
+          len,
+          roRanges,
+          cornerAt('start') ? !cornerAt('start')?.claimEven : false,
+          cornerAt('end') ? !cornerAt('end')?.claimEven : false,
+        )
+      : []
 
   // ---- openings: keep-outs + precast lintels ----
   const keepOuts: KeepOut[] = []
@@ -240,21 +355,25 @@ export function cmuWall(wall: WallSlice, _spec: FramingSpec): Member[] {
     }
   }
 
-  // ---- body coursing: running bond, cut at openings ----
+  // ---- body coursing: running bond, interlocked corners, cut at openings ----
   for (let c = 0; c < bodyCourses; c++) {
     const y0 = c * COURSE_HEIGHT
     const y1 = y0 + COURSE_HEIGHT
+    const [lo, hi] = courseSpan(c)
     // Keep-outs that touch this course cell vertically.
     const cuts: BlockInterval[] = []
     for (const k of keepOuts) {
       if (k.y0 < y1 - EPS && k.y1 > y0 + EPS) cuts.push({ a: k.u0, b: k.u1 })
     }
-    for (const unit of courseIntervals(len, c % 2 === 1)) {
+    for (const unit of interlock(courseIntervals(len, c % 2 === 1), lo, hi)) {
       for (const piece of subtractKeepOuts(unit, cuts)) {
         if (piece.b - piece.a < MIN_PIECE - EPS) continue
-        // End cells run vertical rebar and grout solid (IRC R606.12 wind
-        // reinforcing at ends/corners) — label so takeoff can count them.
-        const grouted = piece.a < EPS || piece.b > len - EPS
+        // Cells a vertical bar passes through grout solid (IRC R606.12 wind
+        // reinforcing) — label so takeoff can derive a grout/rebar line. At
+        // LOD 200 (no bars) the end cells keep the schematic call-out.
+        const grouted = fab
+          ? barUs.some((u) => u > piece.a + EPS && u < piece.b - EPS)
+          : piece.a <= lo + EPS || piece.b >= hi - EPS
         emit('block', piece, y0, COURSE_HEIGHT, grouted ? 'grouted cell + vertical rebar' : undefined)
       }
     }
@@ -264,32 +383,92 @@ export function cmuWall(wall: WallSlice, _spec: FramingSpec): Member[] {
   // One continuous member (not unit blocks): once grouted, the tie beam acts
   // as a monolithic reinforced element, and the takeoff prices it as poured
   // concrete rather than unit masonry. Runs over openings — it is the
-  // structural head where lintels merge into it.
+  // structural head where lintels merge into it. The beam course interlocks
+  // corners like any other course (its bars lap into the neighbor's beam).
   // ASSUMPTION: continuous across the full wall even over a full-height
-  // opening. // LOD 400: interrupt at openings taller than the bond beam
-  // bottom and splice rebar per FBC tie-beam details.
+  // opening — real FBC tie-beam details splice, not interrupt, there.
+  const [beamLo, beamHi] = courseSpan(bodyCourses)
   emit(
     'bond-beam',
-    // Padded half a joint each side so the emitted box spans exactly `len`
-    // after the mortar shrink — a poured beam has no head joints to show.
-    { a: -MORTAR_JOINT / 2, b: len + MORTAR_JOINT / 2 },
+    // Padded half a joint each side so the emitted box spans the exact
+    // course extent after the mortar shrink — a poured beam shows no joints.
+    { a: beamLo - MORTAR_JOINT / 2, b: beamHi + MORTAR_JOINT / 2 },
     bondBeamBottom,
     COURSE_HEIGHT,
     'bond beam — grouted + rebar',
   )
 
+  // ---- reinforcing steel (LOD 350+) ----
+  if (fab) {
+    // Two horizontal #5 bars centered in the beam, 2" clear off each face
+    // (FBC tie-beam detail). Walls too thin for two bars carry one on center.
+    const beamBarY = bondBeamBottom + COURSE_HEIGHT / 2
+    const offset = depth / 2 - BAR_CLEAR
+    const beamBarLen = beamHi - beamLo
+    for (const side of offset > REBAR_SIZE ? [-1, 1] : [0]) {
+      members.push({
+        system: 'wall-framing',
+        role: 'rebar',
+        dims: [beamBarLen, REBAR_SIZE, REBAR_SIZE],
+        length: beamBarLen,
+        position: place((beamLo + beamHi) / 2, beamBarY, side * Math.max(offset, 0)),
+        rotation: [0, yaw, 0],
+        material: 'steel',
+        sourceId: wall.id,
+        label: '#5 horizontal — bond beam, lap corners',
+      })
+    }
+    // Vertical #5 bars in the grouted cells, hooked into the bond beam: from
+    // the slab (foundation dowels lap below) up to the beam's mid-height.
+    const barTop = bondBeamBottom + COURSE_HEIGHT / 2
+    for (const u of barUs) {
+      members.push({
+        system: 'wall-framing',
+        role: 'rebar',
+        dims: [REBAR_SIZE, barTop, REBAR_SIZE],
+        length: barTop,
+        position: place(u, barTop / 2),
+        rotation: [0, yaw, 0],
+        material: 'steel',
+        sourceId: wall.id,
+        label: '#5 vertical — grouted cell, hooked into bond beam (R606.12)',
+      })
+    }
+  }
+
   return members
 }
 
 /**
- * Lay up a SET of CMU walls. Group-aware entry point so corner interlock
- * (courses alternating through shared corners) can be computed across walls
- * — currently a plain per-wall loop; the LOD 400 interlock lands here.
+ * Lay up a SET of CMU walls with cross-wall fabrication: shared corners are
+ * detected (same convention as the framing engine — the longer wall is the
+ * "through" wall) and the two walls interlock, alternating which one lays
+ * through the corner per course; the through wall owns the single corner
+ * bar. ASSUMPTION: corners between a CMU wall and a FRAMED wall get no
+ * interlock — the engines run on disjoint wall groups.
  */
 export function cmuWalls(walls: WallSlice[], spec: FramingSpec): Member[] {
+  const hints = new Map<string, CmuHints>()
+  const add = (id: string, corner: CmuCorner): void => {
+    const h = hints.get(id) ?? {}
+    h.corners = [...(h.corners ?? []), corner]
+    hints.set(id, h)
+  }
+  for (const corner of detectCorners(walls)) {
+    add(corner.through.id, {
+      end: corner.throughEnd,
+      otherThickness: corner.butting.thickness,
+      claimEven: true,
+    })
+    add(corner.butting.id, {
+      end: corner.buttingEnd,
+      otherThickness: corner.through.thickness,
+      claimEven: false,
+    })
+  }
   const members: Member[] = []
   for (const wall of walls) {
-    members.push(...cmuWall(wall, spec))
+    members.push(...cmuWall(wall, spec, hints.get(wall.id)))
   }
   return members
 }
