@@ -322,7 +322,10 @@ function frameSlab(
         const ends = supports.filter((u) => u >= wallRun[1] - EPS)
         const cs = starts.length > 0 ? Math.max(...starts) : s
         const ce = ends.length > 0 ? Math.min(...ends) : e
-        // Split at the girder like any row; hang the cut ends.
+        // Split at the girder AND at stair holes like any row; hang the cut
+        // ends. Round-4 counterexample: a bearing wall flanking a stairwell
+        // put an unsplit sister straight across the opening — both ends
+        // bore, so the validator was structurally blind to it.
         let sisterSpans: [number, number][] = [[cs, ce]]
         if (needsGirder) {
           if (cs < girderCut[0] - EPS && ce > girderCut[1] + EPS) {
@@ -330,6 +333,20 @@ function frameSlab(
             emitHanger(girderCut[1], sisterCross, 'girder')
           }
           sisterSpans = subtractInterval(sisterSpans, girderCut)
+        }
+        for (const hole of holeFrames) {
+          if (sisterCross > hole.cross[0] - t / 2 && sisterCross < hole.cross[1] + t / 2) {
+            const before = sisterSpans
+            sisterSpans = subtractInterval(sisterSpans, hole.run)
+            for (const [ss, se] of before) {
+              if (ss < hole.run[0] - EPS && se > hole.run[0] + EPS) {
+                emitHanger(hole.run[0], sisterCross, 'stair header')
+              }
+              if (ss < hole.run[1] - EPS && se > hole.run[1] + EPS) {
+                emitHanger(hole.run[1], sisterCross, 'stair header')
+              }
+            }
+          }
         }
         for (const [ss, se] of sisterSpans) {
           if (se - ss > MIN_SEGMENT) {
@@ -431,7 +448,7 @@ function frameSlab(
     for (const hole of holeFrames) {
       bearings.push({ u: hole.run[0], cross: hole.cross }, { u: hole.run[1], cross: hole.cross })
     }
-    validateJoistBearing(members, polygon, runAxis, bearings)
+    validateJoistBearing(members, polygon, runAxis, bearings, holeFrames)
   }
 
   return members
@@ -456,6 +473,7 @@ export function validateJoistBearing(
   polygon: readonly (readonly [number, number])[],
   runAxis: 'x' | 'z',
   bearings: BearingLine[],
+  holes: { run: readonly [number, number]; cross: readonly [number, number] }[] = [],
 ): void {
   for (const m of members) {
     if (m.role !== 'joist') continue
@@ -474,6 +492,17 @@ export function validateJoistBearing(
       )
       if (!onPolygon && !onStructure) {
         m.flag = `Unsupported joist end @ ${end.toFixed(2)}m — needs bearing (R502.6)`
+      }
+    }
+    // A joist BODY may never cross a floor opening — well-supported ends do
+    // not excuse spanning the stairwell (round-4 counterexample: an unsplit
+    // sister bridged the hole with both ends bearing, invisible to the
+    // end-check above).
+    for (const hole of holes) {
+      const inBand = cross > hole.cross[0] + BEARING_TOLERANCE && cross < hole.cross[1] - BEARING_TOLERANCE
+      const crossesRun = center - half < hole.run[0] - BEARING_TOLERANCE && center + half > hole.run[1] + BEARING_TOLERANCE
+      if (inBand && crossesRun) {
+        m.flag = `Joist crosses a floor opening @ ${hole.run[0].toFixed(2)}–${hole.run[1].toFixed(2)}m — split and hang on headers (R502.10)`
       }
     }
   }

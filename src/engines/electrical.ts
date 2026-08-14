@@ -608,14 +608,32 @@ const wallPlan = (p: WallPoint): Pt => [
   p.wall.start[1] + p.wall.dir[1] * p.u,
 ]
 
-/** Nearest wall-centerline point to a plan position. */
+/** Snap a wall coordinate out of any door rough opening — cable can't drop
+ * through a doorway; it lands in the first stud bay past the king studs. */
+function clearOfDoors(wall: WallSlice, u: number): number {
+  const margin = inches(2)
+  for (const o of wall.openings) {
+    if (o.kind !== 'door') continue
+    const lo = o.u - o.roughWidth / 2
+    const hi = o.u + o.roughWidth / 2
+    if (u > lo && u < hi) {
+      const snapLo = Math.max(margin, lo - margin)
+      const snapHi = Math.min(wall.length - margin, hi + margin)
+      return u - lo < hi - u ? snapLo : snapHi
+    }
+  }
+  return u
+}
+
+/** Nearest wall-centerline point to a plan position (never inside a door RO). */
 function nearestWallPoint(walls: WallSlice[], p: Pt): WallPoint | null {
   let best: WallPoint | null = null
   let bestDist = Number.POSITIVE_INFINITY
   for (const wall of walls) {
     if (wall.curved || wall.length < 0.1) continue
     const [ax, az] = wall.start
-    const u = Math.max(0, Math.min(wall.length, (p[0] - ax) * wall.dir[0] + (p[1] - az) * wall.dir[1]))
+    const raw = Math.max(0, Math.min(wall.length, (p[0] - ax) * wall.dir[0] + (p[1] - az) * wall.dir[1]))
+    const u = clearOfDoors(wall, raw)
     const q = wallPlan({ wall, u })
     const d = Math.hypot(q[0] - p[0], q[1] - p[1])
     if (d < bestDist) {
@@ -756,14 +774,52 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     })
   }
 
+  /**
+   * One drill-height leg along a wall — DETOURING over any door rough
+   * opening it would cross: rise inside the king-stud bay, cross above the
+   * header, drop back to drill height (round-4 advisory: legs used to drill
+   * straight through door ROs).
+   */
+  const emitWallLeg = (
+    circuit: string,
+    gauge: number,
+    wall: WallSlice,
+    u0: number,
+    u1: number,
+  ): void => {
+    const dir = Math.sign(u1 - u0) || 1
+    const doors = wall.openings
+      .filter((o) => {
+        if (o.kind !== 'door') return false
+        const lo = o.u - o.roughWidth / 2
+        const hi = o.u + o.roughWidth / 2
+        return Math.min(u0, u1) < lo && Math.max(u0, u1) > hi
+      })
+      .sort((a, b) => (a.u - b.u) * dir)
+    const at = (u: number, y: number): [number, number, number] => {
+      const p = wallPlan({ wall, u })
+      return [p[0], y, p[1]]
+    }
+    let cursor = u0
+    for (const door of doors) {
+      const near = door.u - (door.roughWidth / 2) * dir
+      const far = door.u + (door.roughWidth / 2) * dir
+      const overY = Math.min(door.sillHeight + door.roughHeight + inches(4), wall.height - 0.05)
+      emitWire(circuit, gauge, at(cursor, WIRE_RUN_Y), at(near, WIRE_RUN_Y))
+      emitWire(circuit, gauge, at(near, WIRE_RUN_Y), at(near, overY))
+      emitWire(circuit, gauge, at(near, overY), at(far, overY))
+      emitWire(circuit, gauge, at(far, overY), at(far, WIRE_RUN_Y))
+      cursor = far
+    }
+    emitWire(circuit, gauge, at(cursor, WIRE_RUN_Y), at(u1, WIRE_RUN_Y))
+  }
+
   /** Wall-following legs between two anchors at drill height. */
   const routeHop = (circuit: string, gauge: number, from: WallPoint, to: WallPoint): void => {
     const legs = wallPath(graph, from, to)
     if (legs) {
       for (const leg of legs) {
-        const a = wallPlan({ wall: leg.wall, u: leg.u0 })
-        const b = wallPlan({ wall: leg.wall, u: leg.u1 })
-        emitWire(circuit, gauge, [a[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, b[1]])
+        emitWallLeg(circuit, gauge, leg.wall, leg.u0, leg.u1)
       }
       return
     }

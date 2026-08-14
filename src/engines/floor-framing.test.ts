@@ -367,3 +367,69 @@ describe('frameFloor — hole bearings are confined to the hole cross band (roun
     expect(outside.flag).toContain('Unsupported') // no header out here
   })
 })
+
+describe('frameFloor — sisters split at stair holes (round-4 counterexample)', () => {
+  // Bearing wall flanking the stairwell by 1 cm of modeling slop: the sister
+  // row (wall cross + t) lands INSIDE the hole cross band and must split.
+  const hole: [number, number][] = [
+    [1.5, 2],
+    [2.5, 2],
+    [2.5, 3],
+    [1.5, 3],
+  ]
+  const wall = bearingWall('w_flank', [0, 1.99], [4, 1.99])
+  const members = frameFloor([slab(rect(4, 6), { holes: [hole] })], [wall], {
+    ...DEFAULT_SPEC,
+    detail: '400',
+  })
+  const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
+
+  test('the sister never bridges the stairwell — split at the hole run', () => {
+    expect(sisters.length).toBe(2)
+    for (const s of sisters) {
+      const lo = (s.position[0] as number) - s.dims[0] / 2
+      const hi = (s.position[0] as number) + s.dims[0] / 2
+      expect(hi <= 1.5 + 1e-6 || lo >= 2.5 - 1e-6).toBe(true)
+    }
+    // cut ends hang on the stair headers
+    const hangers = byRole(members, 'hanger').filter(
+      (h) => h.label?.includes('stair') && Math.abs((h.position[2] as number) - (1.99 + T)) < 1e-6,
+    )
+    expect(hangers.length).toBe(2)
+  })
+
+  test('zero flags on the fixed geometry; wall fully over the hole also splits', () => {
+    expect(byRole(members, 'joist').filter((j) => j.flag)).toHaveLength(0)
+    const over = frameFloor(
+      [slab(rect(4, 6), { holes: [hole] })],
+      [bearingWall('w_over', [0, 2.5], [4, 2.5])],
+      { ...DEFAULT_SPEC, detail: '400' },
+    )
+    const overSisters = byRole(over, 'joist').filter((j) => j.label?.includes('Sistered'))
+    for (const s of overSisters) {
+      const lo = (s.position[0] as number) - s.dims[0] / 2
+      const hi = (s.position[0] as number) + s.dims[0] / 2
+      expect(hi <= 1.5 + 1e-6 || lo >= 2.5 - 1e-6).toBe(true)
+    }
+    expect(byRole(over, 'joist').filter((j) => j.flag)).toHaveLength(0)
+  })
+
+  test('the validator now FLAGS a hole-bridging joist (falsifiable forever)', () => {
+    const bridging: Member = {
+      system: 'floor-framing',
+      role: 'joist',
+      size: '2x8',
+      dims: [4, 0.184, T],
+      length: 4,
+      position: [2, -0.1, 2.5], // spans x ∈ [0,4] straight across the hole band
+      rotation: [0, 0, 0],
+      material: 'lumber',
+      sourceId: 'slab_test',
+    }
+    validateJoistBearing([bridging], rect(4, 6), 'x', [], [
+      { run: [1.5, 2.5], cross: [2, 3] },
+    ])
+    expect(bridging.flag).toContain('crosses a floor opening')
+    expect(bridging.flag).toContain('R502.10')
+  })
+})

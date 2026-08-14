@@ -767,3 +767,25 @@ describe('fastener gauges split per the R602.3(1) schedule', () => {
     expect(find(rows, 'Nails 10d common')?.detail).toContain('3 nails')
   })
 })
+
+describe('trunk reducers pinned (round-4 advisory: deletable row)', () => {
+  test('a stepped trunk chain books one reducer per size change', () => {
+    const trunkLeg = (w: number) =>
+      mem({
+        system: 'hvac' as const,
+        role: 'duct-run' as const,
+        material: 'duct' as const,
+        size: undefined,
+        dims: [2, 0.2032, w * 0.0254],
+        length: 2,
+        sourceId: 'r_equip',
+      })
+    const rows = computeTakeoff(
+      [trunkLeg(14), trunkLeg(12), trunkLeg(8)], // 14×8 → 12×8 → 8×8… wait 8×8 is square
+      [fixture('register', { system: 'hvac' })],
+    )
+    // 14×8 and 12×8 are rect; 8×8 counts as a round branch — 2 rect sizes → 1 reducer
+    expect(find(rows, 'Trunk reducers')?.quantity).toBe(1)
+    expect(find(rows, 'Trunk reducers')?.section).toBe('HVAC')
+  })
+})

@@ -921,3 +921,44 @@ describe('door-less hallways get a switched control (round-3 advisory: untested)
     expect(switches[0]?.meta?.circuit).toBe(light?.meta?.circuit)
   })
 })
+
+describe('wire runs detour OVER door openings (round-4 advisory)', () => {
+  test('no drill-height leg crosses a door RO; the detour rides above the header', () => {
+    const wall = makeWall({
+      id: 'w_door',
+      start: [0, 0],
+      end: [8, 0],
+      exterior: true,
+      openings: [door(4, 0.9, 'door_mid')],
+    })
+    const den = room('other', [
+      [0, 0],
+      [8, 0],
+      [8, 4],
+      [0, 4],
+    ], { id: 'room_den' })
+    const fixtures = layoutElectrical([wall], [den])
+    const wires = routeWiring(fixtures, [wall])
+    const roLo = 4 - (0.9 + RO_PAD) / 2
+    const roHi = 4 + (0.9 + RO_PAD) / 2
+    const drill = 18 * 0.0254
+    for (const w of wires) {
+      if (w.dims[1] > w.dims[0]) continue // risers
+      if (Math.abs((w.position[1] as number) - drill) > 1e-6) continue
+      const half = w.dims[0] / 2
+      const lo = (w.position[0] as number) - half
+      const hi = (w.position[0] as number) + half
+      // a drill-height leg may touch the RO edges but never cross into it
+      expect(lo >= roHi - 1e-6 || hi <= roLo + 1e-6).toBe(true)
+    }
+    // and the over-header crossing exists: a horizontal leg above the door
+    const overY = 2.1 + RO_PAD + 4 * 0.0254
+    const over = wires.find(
+      (w) =>
+        w.dims[0] > w.dims[1] &&
+        Math.abs((w.position[1] as number) - overY) < 1e-6 &&
+        Math.abs((w.position[0] as number) - 4) < 0.01,
+    )
+    expect(over).toBeDefined()
+  })
+})
