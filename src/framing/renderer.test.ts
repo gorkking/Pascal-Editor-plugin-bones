@@ -113,7 +113,7 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(memberMeshes.length).toBeGreaterThan(0)
     for (const m of memberMeshes) {
       expect(m.material.depthTest).toBe(true) // natural near-hides-far
-      // Transparent-LIST membership at FULL opacity: the host's cutaway wall
+      // Members join the transparent list at FULL opacity: the host cutaway
       // faces fade with transparent materials, and three.js draws the whole
       // transparent list after every opaque object. An opaque overlay gets
       // painted over the moment a face re-appears on camera change (the
@@ -127,7 +127,10 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(wipes).toHaveLength(1)
     const wipe = wipes[0] as MeshLike
     expect(wipe.renderOrder).toBe(998) // wipes depth BEFORE the members
-    expect(wipe.material.transparent).toBe(true) // same list as the members
+    // The wipe must stay in the OPAQUE list: live A/B on the WebGPU host
+    // showed its depthWrite never lands inside the transparent pass — a
+    // transparent wipe leaves members depth-testing against host walls.
+    expect(wipe.material.transparent).toBe(false)
     expect(wipe.material.colorWrite).toBe(false) // paints nothing
     expect(wipe.material.depthTest).toBe(false) // always passes…
     expect(wipe.material.depthWrite).toBe(true) // …and overwrites depth

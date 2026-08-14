@@ -126,16 +126,19 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   // occlude the skeleton. Pure pipeline state, no renderer API: the
   // WebGL-only `renderer.clearDepth()` sentinel this replaces poisoned the
   // host's WebGPU render pass and killed every draw after it.
-  // The whole overlay lives in the TRANSPARENT render list (transparent:
-  // true, opacity 1). The host's camera-facing wall faces fade via
-  // transparent materials, and three.js draws the transparent list after
-  // every opaque object — so an opaque overlay gets painted over the moment
-  // the host re-shows a face (the "walls closed off after orbiting" bug:
-  // cutaway faces re-appear on camera change and cover the skeleton).
-  // Inside one list, renderOrder outranks distance sorting, so host faces
-  // (renderOrder 0) draw first, the wipe (998) then flattens the depth
-  // buffer, and members (999) paint on top with member-vs-member depth
-  // testing intact.
+  // Split-list X-ray (pinned by live A/B on the WebGPU host):
+  //  - The WIPE stays OPAQUE at renderOrder 998 — the end of the opaque
+  //    pass, the only place its depthWrite reliably lands. In the WebGPU
+  //    transparent pass the depth write never took effect, so a transparent
+  //    wipe left members depth-testing against the host's walls and they
+  //    vanished inside them.
+  //  - The MEMBERS render TRANSPARENT (opacity 1) at renderOrder 999. The
+  //    host's cutaway wall faces fade via transparent materials, and the
+  //    transparent list draws after every opaque object — opaque members
+  //    got painted over the moment a face re-appeared on camera change
+  //    (the "walls closed off after orbiting" bug). renderOrder outranks
+  //    the list's distance sort, so host faces (0) blend first and members
+  //    still paint on top, depth-testing only against each other.
   if (seeThrough) {
     const wipe = new Mesh(
       new BoxGeometry(500, 500, 500),
@@ -144,7 +147,6 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
         depthTest: false,
         depthWrite: true,
         side: BackSide,
-        transparent: true,
       }),
     )
     wipe.frustumCulled = false
