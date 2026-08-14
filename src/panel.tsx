@@ -6,6 +6,7 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
 import { FramingNode, type WallConstruction } from './framing/schema'
+import { buildPlanSet, planSetHtml } from './plans/plan-set'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
@@ -63,8 +64,15 @@ export default function BonesPanel() {
 
       <LumberSection />
 
-      <footer className="-mx-4 -mb-4 sticky bottom-0 mt-1 border-sidebar-border/50 border-t bg-sidebar px-4 py-3 text-[11px] text-sidebar-foreground/50 leading-relaxed">
-        Drafting aid, not engineering — verify with your local building department.
+      <footer className="-mx-4 -mb-4 sticky bottom-0 mt-1 flex flex-col gap-2 border-sidebar-border/50 border-t bg-sidebar px-4 py-3 text-[11px] text-sidebar-foreground/50 leading-relaxed">
+        <span>Drafting aid, not engineering — verify with your local building department.</span>
+        {framingNode && result && result.members.length > 0 && (
+          <ExportPlansButton
+            result={result}
+            framingNode={framingNode}
+            activeLevelId={activeLevelId ?? null}
+          />
+        )}
       </footer>
     </div>
   )
@@ -419,5 +427,47 @@ function LumberSection() {
         />
       </div>
     </details>
+  )
+}
+
+/**
+ * "Save full plans" — the LOD 400 plan set as a printable document: one
+ * SVG sheet per system (foundation / floor / wall / roof framing plans,
+ * electrical rough-in, MEP) plus schedules + takeoff, paginated for the
+ * browser's Print → Save as PDF. Pure client-side, nothing persisted.
+ */
+function ExportPlansButton({
+  result,
+  framingNode,
+  activeLevelId,
+}: {
+  result: NonNullable<ReturnType<typeof computeLevel>>
+  framingNode: FramingNode
+  activeLevelId: AnyNodeId | null
+}) {
+  const levelName = useScene((s) =>
+    activeLevelId ? ((s.nodes[activeLevelId] as { name?: string } | undefined)?.name ?? 'Level') : 'Level',
+  )
+  return (
+    <button
+      type="button"
+      className="rounded-md border border-sidebar-border bg-sidebar-accent/60 px-3 py-2 font-medium text-sidebar-foreground/90 text-xs transition-colors hover:bg-sidebar-accent"
+      onClick={() => {
+        const sheets = buildPlanSet(result.members, result.fixtures, {
+          projectName: document.title.split('—')[0]?.trim() || 'Pascal project',
+          levelName,
+          jurisdiction: framingNode.jurisdiction,
+          date: new Date().toLocaleDateString(),
+        })
+        if (sheets.length === 0) return
+        const html = planSetHtml(sheets, { projectName: levelName })
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+        window.open(url, '_blank', 'noopener')
+        // The tab owns the blob from here; revoke after it had time to load.
+        setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      }}
+    >
+      📐 Save full plans (print-ready LOD 400 sheets)
+    </button>
   )
 }

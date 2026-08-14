@@ -40,7 +40,7 @@ export const bonesHostPanel: PluginHostPanel = {
   component: () => import('./panel'),
   pluginId: bonesPlugin.id,
   description:
-    'The engineering X-ray for Pascal — see through the finishes to the actual construction: wall framing (studs, plates, headers), floors, roof, foundation, and electrical, derived from your model and sized to your jurisdiction. Rendered in 3D, counted in the takeoff.',
+    'Engineering X-ray for Pascal — see through the finishes to the actual construction: wall framing, floors, roof, foundation, and electrical, derived from your model and sized to your jurisdiction.',
   creator: {
     name: 'Julien Brissonneau',
     url: 'https://github.com/Snoopy147',
