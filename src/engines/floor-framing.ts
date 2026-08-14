@@ -157,13 +157,17 @@ function frameSlab(
   const layoutStart = runAxis === 'x' ? box.minZ : box.minX
   const runStart = runAxis === 'x' ? box.minX : box.minZ
 
-  // Size from the span table; girder at mid-span when it runs out.
+  // Size from the span table; N girder lines split the span when it runs
+  // out (round-9: a 12x12 slab got ONE girder and 62 over-span flags — it
+  // needs however many lines make the table fit).
   let size = joistSizeFor(clearSpan, spec)
-  let needsGirder = false
-  if (!size) {
-    needsGirder = true
-    size = joistSizeFor(clearSpan / 2, spec) ?? spec.joistSizes[spec.joistSizes.length - 1] ?? '2x12'
+  let girderCount = 0
+  while (!size && girderCount < 3) {
+    girderCount += 1
+    size = joistSizeFor(clearSpan / (girderCount + 1), spec)
   }
+  if (!size) size = spec.joistSizes[spec.joistSizes.length - 1] ?? '2x12'
+  const needsGirder = girderCount > 0
   const [t, depth] = LUMBER_CROSS_SECTIONS[size]
   const topY = slab.elevation - slab.thickness
   const centerY = topY - depth / 2
@@ -199,10 +203,8 @@ function frameSlab(
     })
   }
 
-  // ---- girder line (flush) ----
+  // ---- girder lines (flush) ----
   const [gt, gd] = LUMBER_CROSS_SECTIONS['4x10']
-  const girderCross = runStart + clearSpan / 2
-  const girderCut: [number, number] = [girderCross - gt / 2, girderCross + gt / 2]
 
   // ---- stairwell holes → framing extents ----
   // ASSUMPTION: holes are treated by their bounding box (stair openings are
@@ -222,32 +224,41 @@ function frameSlab(
 
   // ---- girder PRESENCE (round-6): where along the cross axis the girder
   // actually exists — its polygon spans minus any hole straddling its line.
-  // Every consumer (rows, sisters, trimmers, validator) asks this FIRST, so
-  // nothing is ever cut back to a girder face where no girder runs (the
+  // Every consumer (rows, sisters, trimmers, validator) asks presence FIRST,
+  // so nothing is ever cut back to a girder face where no girder runs (the
   // round-6 L-shape counterexample: wing rows floated 44.5mm off the notch
   // rim, hung on an absent girder).
-  let girderPresence: [number, number][] = []
-  if (needsGirder) {
-    // Sample a hair to EACH side of the girder line and intersect: a girder
-    // only exists where slab lies on BOTH sides (its joists hang on both
-    // faces). Winding-invariant by construction — the round-7 counterexample
-    // reversed the polygon winding and flipped an even-odd scan that was
-    // collinear with a notch edge; interior samples cannot be collinear.
-    const crossAxis = runAxis === 'x' ? 'z' : 'x'
-    girderPresence = intersectIntervals(
-      polygonSpans(polygon, crossAxis, girderCross - gt),
-      polygonSpans(polygon, crossAxis, girderCross + gt),
+  type Girder = { cross: number; cut: [number, number]; presence: [number, number][] }
+  const girders: Girder[] = []
+  const crossAxis = runAxis === 'x' ? 'z' : 'x'
+  for (let i = 1; i <= girderCount; i++) {
+    const cross = runStart + (clearSpan * i) / (girderCount + 1)
+    // Sample a hair to EACH side of the line and intersect: a girder only
+    // exists where slab lies on BOTH sides (its joists hang on both faces).
+    // Winding-invariant by construction — round-7 reversed the polygon
+    // winding and flipped an even-odd scan collinear with a notch edge;
+    // interior samples cannot be collinear.
+    let presence = intersectIntervals(
+      polygonSpans(polygon, crossAxis, cross - gt),
+      polygonSpans(polygon, crossAxis, cross + gt),
     )
+      // ends pocket at the rim's inner face, like every joist (round-9 gate:
+      // the girder ran through the inset rim band)
+      .map(([ps, pe]) => [ps + t, pe - t] as [number, number])
+      .filter(([ps, pe]) => pe - ps > MIN_SEGMENT)
     for (const hole of holeFrames) {
-      // Straddling OR touching within a header ply pack (2t) — a touching
-      // hole's headers otherwise embed inside the girder body (round-8).
-      if (hole.run[0] < girderCross + gt / 2 + 2 * t && hole.run[1] > girderCross - gt / 2 - 2 * t) {
-        girderPresence = subtractInterval(girderPresence, hole.cross)
+      // Straddling OR touching within a header ply pack (2t) — and the
+      // carve removes the FULL header band (hole.cross ± 2t), not just the
+      // hole, so header bearing extensions never embed inside the 4x10
+      // body (round-9: 76mm interpenetration at both header ends).
+      if (hole.run[0] < cross + gt / 2 + 2 * t && hole.run[1] > cross - gt / 2 - 2 * t) {
+        presence = subtractInterval(presence, [hole.cross[0] - 2 * t, hole.cross[1] + 2 * t])
       }
     }
+    girders.push({ cross, cut: [cross - gt / 2, cross + gt / 2], presence })
   }
-  const girderAt = (c: number): boolean =>
-    girderPresence.some(([gs, ge]) => c >= gs - EPS && c <= ge + EPS)
+  const girderAt = (g: Girder, c: number): boolean =>
+    g.presence.some(([gs, ge]) => c >= gs - EPS && c <= ge + EPS)
 
   // ---- joist rows ----
   const rows: number[] = []
@@ -256,6 +267,24 @@ function frameSlab(
   }
   const lastRow = layoutStart + layoutLength - t / 2
   if ((rows[rows.length - 1] ?? Number.NEGATIVE_INFINITY) < lastRow - t) rows.push(lastRow)
+  // Edge rows shift inward one rim thickness — the rim occupies the edge
+  // itself; the edge joist butts its inner face (round-9 gate: they were
+  // coincident, interpenetrating boxes).
+  if (rows.length > 0) {
+    rows[0] = Math.max(rows[0] as number, layoutStart + t + t / 2)
+    rows[rows.length - 1] = Math.min(
+      rows[rows.length - 1] as number,
+      layoutStart + layoutLength - t - t / 2,
+    )
+  }
+
+  /** Joists END at the rim's inner face — polygon-derived span ends pull
+   * in one rim thickness (round-9 gate: joist ends interpenetrated the
+   * inset rims). Interior cut faces (girder/header) are NOT inset. */
+  const insetSpans = (spansIn: [number, number][]): [number, number][] =>
+    spansIn
+      .map(([ss, se]) => [ss + t, se - t] as [number, number])
+      .filter(([ss, se]) => se - ss > MIN_SEGMENT)
 
   const emitJoist = (s: number, e: number, cross: number, label?: string) => {
     const len = e - s
@@ -303,13 +332,18 @@ function frameSlab(
       // trimmers ran straight across hole B).
       if (hole === ownHole) continue
       if (c > hole.cross[0] - band && c < hole.cross[1] + band) {
-        spans = subtractInterval(spans, hole.run)
-        faces.push({ u: hole.run[0], host: 'stair header' }, { u: hole.run[1], host: 'stair header' })
+        // Tail joists end at the header PACK's outer face (2 plies past the
+        // hole edge) — cut at the hole line they interpenetrated both plies
+        // by 76mm and fed wrong lengths to the cut list (round-9).
+        const packCut: [number, number] = [hole.run[0] - 2 * t, hole.run[1] + 2 * t]
+        spans = subtractInterval(spans, packCut)
+        faces.push({ u: packCut[0], host: 'stair header' }, { u: packCut[1], host: 'stair header' })
       }
     }
-    if (needsGirder && girderAt(c)) {
-      spans = subtractInterval(spans, girderCut)
-      faces.push({ u: girderCut[0], host: 'girder' }, { u: girderCut[1], host: 'girder' })
+    for (const girder of girders) {
+      if (!girderAt(girder, c)) continue
+      spans = subtractInterval(spans, girder.cut)
+      faces.push({ u: girder.cut[0], host: 'girder' }, { u: girder.cut[1], host: 'girder' })
     }
     // A surviving piece end sitting on a cut face hangs there — one-sided
     // cuts included, dropped slivers can never leave an orphan.
@@ -331,7 +365,7 @@ function frameSlab(
   }
 
   for (const c of rows) {
-    const spans = splitRow(c, polygonSpans(polygon, runAxis, c), null)
+    const spans = splitRow(c, insetSpans(polygonSpans(polygon, runAxis, c)), null)
     for (const [s, e] of spans) emitJoist(s, e, c)
   }
 
@@ -341,7 +375,9 @@ function frameSlab(
   // joists running alongside the opening.
   if (spec.detail !== '200') {
     for (const hole of holeFrames) {
-      const headerLen = hole.cross[1] - hole.cross[0] + 4 * t // bears on the trimmer pairs
+      // Header spans BETWEEN the trimmer packs, end-nailed through them —
+      // extending over them interpenetrated the plies (round-9 gate).
+      const headerLen = hole.cross[1] - hole.cross[0]
       const headerCenterCross = (hole.cross[0] + hole.cross[1]) / 2
       for (const runEnd of [hole.run[0], hole.run[1]]) {
         for (const ply of [0, 1]) {
@@ -358,7 +394,7 @@ function frameSlab(
           emit(
             'header',
             size,
-            [headerLen, depth, inches(0.1) + t],
+            [headerLen, depth, t],
             placeRun(runEnd + offset, headerCenterCross),
             crossYaw,
             headerLen,
@@ -376,7 +412,7 @@ function frameSlab(
           // plies of 38mm stock overlapped).
           if ([...trimmerLines].some((v) => Math.abs(v - cc) < t - 1e-9)) continue
           trimmerLines.add(cc)
-          for (const [s, e] of splitRow(cc, polygonSpans(polygon, runAxis, cc), hole)) {
+          for (const [s, e] of splitRow(cc, insetSpans(polygonSpans(polygon, runAxis, cc)), hole)) {
             emitJoist(s, e, cc, 'Stair trimmer (doubled)')
           }
         }
@@ -414,14 +450,19 @@ function frameSlab(
       // pack — which IS already the doubling the wall needs. Emitting one
       // anyway interpenetrated a ply (round-8); the trimmers carry it.
       if ([...trimmerLines].some((v) => Math.abs(v - sisterCross) < t - 1e-9)) continue
-      for (const [s, e] of polygonSpans(polygon, runAxis, sisterCross)) {
+      for (const [rawS, rawE] of polygonSpans(polygon, runAxis, sisterCross)) {
+        const s = rawS + t // rim inner face (round-9)
+        const e = rawE - t
+        if (e - s < MIN_SEGMENT) continue
         if (wallRun[1] < s + EPS || wallRun[0] > e - EPS) continue // wall outside this span
         // Bearing coordinates available along this row. A stair hole's
         // headers only exist inside the hole's CROSS band — a hole elsewhere
         // in the slab is no bearing for this sister (round-3 counterexample:
         // a sister clipped to a distant hole's run coordinate hung mid-air).
         const supports = [s, e]
-        if (needsGirder && girderAt(sisterCross)) supports.push(girderCut[0], girderCut[1])
+        for (const girder of girders) {
+          if (girderAt(girder, sisterCross)) supports.push(girder.cut[0], girder.cut[1])
+        }
         for (const hole of holeFrames) {
           if (sisterCross > hole.cross[0] - t && sisterCross < hole.cross[1] + t) {
             supports.push(hole.run[0], hole.run[1])
@@ -457,39 +498,47 @@ function frameSlab(
     // Rims sit INSIDE the slab, outer face flush with the edge — centered on
     // the edge line they poked t/2 past the deck (round-8 world-AABB gate).
     // Inward is winding-agnostic: test which normal offset lands inside.
-    const mid: Pt = [a[0] + dx / 2, a[1] + dz / 2]
-    const nx = -dz / len
-    const nz = dx / len
+    // Each rim starts one thickness past its first vertex so consecutive
+    // rims BUTT at corners instead of overlapping t×t (round-9 gate).
+    const ux = dx / len
+    const uz = dz / len
+    const rimLen = len - t
+    if (rimLen < MIN_SEGMENT) continue
+    const mid: Pt = [a[0] + ux * (t + rimLen / 2), a[1] + uz * (t + rimLen / 2)]
+    const nx = -uz
+    const nz = ux
     const inward = pointInPoly([mid[0] + (nx * t) / 2, mid[1] + (nz * t) / 2], polygon) ? 1 : -1
     emit(
       'rim-joist',
       size,
-      [len, depth, t],
+      [rimLen, depth, t],
       [mid[0] + (inward * nx * t) / 2, centerY, mid[1] + (inward * nz * t) / 2],
       yaw,
-      len,
+      rimLen,
       'lumber',
       `Rim joist ${size}`,
     )
   }
 
-  // ---- flush girder + posts ----
-  if (needsGirder) {
-    // Presence already carved holes out (round-5 blocker); hang the cut
-    // ends that face a stair opening on the stair trimmers.
+  // ---- flush girders + posts ----
+  for (const girder of girders) {
+    // Presence already carved the full header band out of each hole zone
+    // (round-9); hang the cut ends that face a stair opening on the
+    // trimmers at the carved faces.
     for (const hole of holeFrames) {
-      if (hole.run[0] < girderCross + gt / 2 && hole.run[1] > girderCross - gt / 2) {
-        for (const [s, e] of girderPresence) {
-          if (Math.abs(e - hole.cross[0]) < EPS * 10 && e - s > MIN_SEGMENT) {
-            emitHanger(girderCross, hole.cross[0], 'stair trimmers (girder)')
+      if (hole.run[0] < girder.cross + gt / 2 + 2 * t && hole.run[1] > girder.cross - gt / 2 - 2 * t) {
+        const carve: [number, number] = [hole.cross[0] - 2 * t, hole.cross[1] + 2 * t]
+        for (const [s, e] of girder.presence) {
+          if (Math.abs(e - carve[0]) < EPS * 10 && e - s > MIN_SEGMENT) {
+            emitHanger(girder.cross, carve[0], 'stair trimmers (girder)')
           }
-          if (Math.abs(s - hole.cross[1]) < EPS * 10 && e - s > MIN_SEGMENT) {
-            emitHanger(girderCross, hole.cross[1], 'stair trimmers (girder)')
+          if (Math.abs(s - carve[1]) < EPS * 10 && e - s > MIN_SEGMENT) {
+            emitHanger(girder.cross, carve[1], 'stair trimmers (girder)')
           }
         }
       }
     }
-    for (const [s, e] of girderPresence) {
+    for (const [s, e] of girder.presence) {
       const len = e - s
       // FLUSH: girder top aligns with joist tops; interrupted joists hang on
       // its faces (hangers emitted with the rows above).
@@ -498,7 +547,7 @@ function frameSlab(
         'girder',
         '4x10',
         [len, gd, gt],
-        placeRun(girderCross, (s + e) / 2, girderCenterY),
+        placeRun(girder.cross, (s + e) / 2, girderCenterY),
         crossYaw,
         len,
         'engineered',
@@ -511,7 +560,7 @@ function frameSlab(
           'post',
           '4x4',
           [pt, storeyBelowHeight, pw],
-          placeRun(girderCross, p, girderCenterY - gd / 2 - storeyBelowHeight / 2),
+          placeRun(girder.cross, p, girderCenterY - gd / 2 - storeyBelowHeight / 2),
           0,
           storeyBelowHeight,
           'lumber',
@@ -553,13 +602,23 @@ function frameSlab(
   // ---- LOD 400: bearing validation ----
   if (spec.detail === '400') {
     const bearings: BearingLine[] = []
-    for (const [gs, ge] of girderPresence) {
-      // The girder only bears where it EXISTS (round-6: wing rows cut at an
-      // absent girder passed silently with extent-less bearing lines).
-      bearings.push({ u: girderCut[0], cross: [gs, ge] }, { u: girderCut[1], cross: [gs, ge] })
+    for (const girder of girders) {
+      for (const [gs, ge] of girder.presence) {
+        // A girder only bears where it EXISTS (round-6: wing rows cut at an
+        // absent girder passed silently with extent-less bearing lines).
+        bearings.push(
+          { u: girder.cut[0], cross: [gs, ge] },
+          { u: girder.cut[1], cross: [gs, ge] },
+        )
+      }
     }
     for (const hole of holeFrames) {
-      bearings.push({ u: hole.run[0], cross: hole.cross }, { u: hole.run[1], cross: hole.cross })
+      // Tails end at the header PACK's outer faces (round-9) — that is
+      // where the bearing (hanger on the outer ply) actually is.
+      bearings.push(
+        { u: hole.run[0] - 2 * t, cross: hole.cross },
+        { u: hole.run[1] + 2 * t, cross: hole.cross },
+      )
     }
     validateJoistBearing(members, polygon, runAxis, bearings, holeFrames)
     // Safety net: no joist-family member may exceed its size's table span —
@@ -607,8 +666,12 @@ export function validateJoistBearing(
     const center = runAxis === 'x' ? (m.position[0] as number) : (m.position[2] as number)
     const cross = runAxis === 'x' ? (m.position[2] as number) : (m.position[0] as number)
     for (const end of [center - half, center + half]) {
+      // Joist ends bear at the rim inner face — one rim thickness inside
+      // the polygon line (round-9), so the tolerance covers t + seat.
       const onPolygon = polygonSpans(polygon, runAxis, cross).some(
-        ([s, e]) => Math.abs(end - s) < BEARING_TOLERANCE || Math.abs(end - e) < BEARING_TOLERANCE,
+        ([s, e]) =>
+          Math.abs(end - s) < BEARING_TOLERANCE * 2 + inches(0.1) ||
+          Math.abs(end - e) < BEARING_TOLERANCE * 2 + inches(0.1),
       )
       const onStructure = bearings.some(
         (b) =>
@@ -639,6 +702,8 @@ export function validateJoistBearing(
   // Girders run PERPENDICULAR to the joists — same opening rule, axes
   // swapped: the girder's line must not pass through a hole's run extent
   // while its body overlaps the hole's cross extent (round-5 blocker).
+  // Round-9 adds END bearing: each girder end must land on the polygon
+  // boundary (a bearing wall/rim pocket) or on a stair-trimmer carve face.
   for (const m of members) {
     if (m.role !== 'girder') continue
     const half = m.length / 2
@@ -651,6 +716,21 @@ export function validateJoistBearing(
         Math.max(center - half, hole.cross[0] + BEARING_TOLERANCE)
       if (lineInHole && intrusion > inches(0.5)) {
         m.flag = `Girder crosses a floor opening @ ${hole.cross[0].toFixed(2)}–${hole.cross[1].toFixed(2)}m — interrupt at the stair framing (R502.10)`
+      }
+    }
+    const crossAxis = runAxis === 'x' ? 'z' : 'x'
+    const lineSpans = polygonSpans(polygon, crossAxis, line)
+    for (const end of [center - half, center + half]) {
+      const onPolygon = lineSpans.some(
+        ([s, e]) => Math.abs(end - s) < BEARING_TOLERANCE || Math.abs(end - e) < BEARING_TOLERANCE,
+      )
+      const onCarve = holes.some(
+        (hole) =>
+          Math.abs(end - (hole.cross[0] - 2 * BEARING_TOLERANCE)) < BEARING_TOLERANCE ||
+          Math.abs(end - (hole.cross[1] + 2 * BEARING_TOLERANCE)) < BEARING_TOLERANCE,
+      )
+      if (!onPolygon && !onCarve && !m.flag) {
+        m.flag = `Unsupported girder end @ ${end.toFixed(2)}m — needs a pocket, post, or hanger (R502.6)`
       }
     }
   }
