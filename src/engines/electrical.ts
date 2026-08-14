@@ -362,6 +362,35 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
  * // LOD 400: enforce NEC 110.26 working clearance (30" wide x 36" deep) and
  * // 240.24(D)/(E) (not in bathrooms / over steps) against the room geometry.
  */
+/**
+ * Mount coordinate for the panel on its wall: the midpoint when clear, else
+ * the center of the WIDEST door-free segment (panels need 30in of working
+ * space — NEC 110.26 — and can never live inside a rough opening).
+ */
+export function panelMountU(wall: WallSlice): number {
+  const mid = wall.length / 2
+  const doors = wall.openings
+    .filter((o) => o.kind === 'door')
+    .map((o) => [o.u - o.roughWidth / 2, o.u + o.roughWidth / 2] as const)
+    .sort((a, b) => a[0] - b[0])
+  if (!doors.some(([lo, hi]) => mid > lo && mid < hi)) return mid
+  let bestLo = 0
+  let bestLen = -1
+  let cursor = 0
+  for (const [lo, hi] of doors) {
+    if (lo - cursor > bestLen) {
+      bestLen = lo - cursor
+      bestLo = cursor
+    }
+    cursor = Math.max(cursor, hi)
+  }
+  if (wall.length - cursor > bestLen) {
+    bestLen = wall.length - cursor
+    bestLo = cursor
+  }
+  return bestLo + bestLen / 2
+}
+
 function placePanel(walls: WallSlice[], rooms: RoomSlice[]): Fixture | null {
   const straight = walls.filter((w) => !w.curved && w.length > 0)
   if (straight.length === 0) return null
@@ -395,7 +424,11 @@ function placePanel(walls: WallSlice[], rooms: RoomSlice[]): Fixture | null {
     }
   }
 
-  const [x, z] = face.plan(wall.length / 2)
+  // Round-12 B1: a door spanning the wall midpoint used to swallow the
+  // panel — every homerun then started from inside the RO and never
+  // reached its anchor. Mount in the widest door-free segment instead.
+  const mountU = panelMountU(wall)
+  const [x, z] = face.plan(mountU)
   return {
     system: 'electrical',
     kind: 'panel',
@@ -821,8 +854,21 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   const routeHop = (circuit: string, gauge: number, from: WallPoint, to: WallPoint): void => {
     const legs = wallPath(graph, from, to)
     if (legs) {
-      for (const leg of legs) {
+      for (let i = 0; i < legs.length; i++) {
+        const leg = legs[i] as { wall: WallSlice; u0: number; u1: number }
         emitWallLeg(circuit, gauge, leg.wall, leg.u0, leg.u1)
+        // Round-12 B2/M1: junctions accepted within JUNCTION_TOL (or
+        // snapped out of a door RO) leave the two walls' legs ending at
+        // DIFFERENT plan points. Bridge every inter-leg gap explicitly —
+        // a circuit is continuous cable, not adjacent segments.
+        const next = legs[i + 1]
+        if (next) {
+          const a = wallPlan({ wall: leg.wall, u: leg.u1 })
+          const b = wallPlan({ wall: next.wall, u: next.u0 })
+          if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.02) {
+            emitWire(circuit, gauge, [a[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, b[1]], ' (junction jumper)')
+          }
+        }
       }
       return
     }
@@ -841,6 +887,16 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     const start = panelAnchor ?? null
     if (start) {
       const sp = wallPlan(start)
+      // Round-12 B1/M8: the cable ENTERS the panel enclosure — bridge from
+      // the panel's face-mounted position to the centerline anchor before
+      // dropping to drill height. Without it every homerun floated
+      // thickness/2 + FACE_OFFSET away from the panel.
+      emitWire(
+        circuit,
+        gauge,
+        [panel.position[0], panel.position[1], panel.position[2]],
+        [sp[0], panel.position[1], sp[1]],
+      )
       emitWire(circuit, gauge, [sp[0], panel.position[1], sp[1]], [sp[0], WIRE_RUN_Y, sp[1]])
     }
     const remaining = [...devices]
@@ -871,8 +927,11 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
           emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, ap[1]])
           emitWire(circuit, gauge, [x, y, ap[1]], [x, y, z])
         } else {
-          // drop/rise at the device's stud bay
+          // drop/rise at the device's stud bay…
           emitWire(circuit, gauge, [ap[0], WIRE_RUN_Y, ap[1]], [ap[0], y, ap[1]])
+          // …then the box stub: centerline → the face-mounted box (round-12
+          // M8 — no wire ever reached a box; the ~2.7in jog was implied).
+          emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, z])
         }
         cursor = anchor
         cursorPlan = ap
