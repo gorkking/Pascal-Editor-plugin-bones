@@ -130,7 +130,7 @@ describe('frameFloor — wide slab needs a girder', () => {
     }
     expect(byRole(members, 'post').length).toBeGreaterThanOrEqual(2)
     expect(byRole(members, 'joist')[0]?.size).toBe('2x8') // halved span 3m
-    expect(girder.flag).toContain('verify')
+    expect(girder.advisory).toContain('verify') // schematic note is advisory, not a flag
   })
 
   test('posts descend the storey below (parameterized height)', () => {

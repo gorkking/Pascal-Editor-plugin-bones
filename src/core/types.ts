@@ -105,6 +105,13 @@ export type Member = {
   /** Set when the prescriptive tables run out (engineered beam required). */
   flag?: string
   /**
+   * Informational note that is NOT a problem (e.g. "sized schematically —
+   * verify with span/load design"). Kept apart from `flag` so advisory
+   * text never masks real validation errors (round-10: girders born with a
+   * schematic-sizing flag made the end-bearing check dead code).
+   */
+  advisory?: string
+  /**
    * Masonry unit whose cell is grouted solid (vertical rebar, R606.12).
    * Dedicated field so the grout takeoff never keys off label strings.
    */

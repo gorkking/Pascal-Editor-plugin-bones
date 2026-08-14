@@ -187,6 +187,7 @@ function frameSlab(
     material: Member['material'],
     label?: string,
     flag?: string,
+    advisory?: string,
   ) => {
     members.push({
       system: 'floor-framing',
@@ -200,6 +201,7 @@ function frameSlab(
       sourceId: slab.id,
       label,
       flag,
+      advisory,
     })
   }
 
@@ -552,6 +554,7 @@ function frameSlab(
         len,
         'engineered',
         'Girder 4x10 (flush, joists hung)',
+        undefined,
         'Girder sized schematically — verify with span/load design',
       )
       const [pt, pw] = LUMBER_CROSS_SECTIONS['4x4']
@@ -719,10 +722,27 @@ export function validateJoistBearing(
       }
     }
     const crossAxis = runAxis === 'x' ? 'z' : 'x'
-    const lineSpans = polygonSpans(polygon, crossAxis, line)
+    // Mirror the generator's TWO-SIDED presence sampling (round-7): the run
+    // ends where spans at line±gt intersect, so on a notched rim the end
+    // matches a boundary of one of the SAMPLED spans, not necessarily of
+    // the span at the exact centerline.
+    const [gtv] = LUMBER_CROSS_SECTIONS['4x10']
+    const sampled = [
+      polygonSpans(polygon, crossAxis, line - gtv),
+      polygonSpans(polygon, crossAxis, line),
+      polygonSpans(polygon, crossAxis, line + gtv),
+    ]
     for (const end of [center - half, center + half]) {
-      const onPolygon = lineSpans.some(
-        ([s, e]) => Math.abs(end - s) < BEARING_TOLERANCE || Math.abs(end - e) < BEARING_TOLERANCE,
+      // A girder end bears either ON the boundary line or POCKETED at the
+      // rim's inner face — one 2x thickness inside it (the run is inset so
+      // the rim band stays continuous).
+      const rimT = inches(1.5)
+      const near = (a: number, b: number) => Math.abs(a - b) < BEARING_TOLERANCE
+      const onPolygon = sampled.some((spans) =>
+        spans.some(
+          ([s, e]) =>
+            near(end, s) || near(end, e) || near(end, s + rimT) || near(end, e - rimT),
+        ),
       )
       const onCarve = holes.some(
         (hole) =>
