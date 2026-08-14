@@ -318,6 +318,16 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(buildFoundation(rectWalls(), [slab(rect(6, 4))], spec400))).toEqual([])
   })
 
+  test('foundation: oblique 45° chamfer corner (round-10)', () => {
+    const c = 2 * Math.SQRT1_2
+    const chamfered = [
+      wall({ id: 'w_a', start: [0, 0], end: [4, 0] }),
+      wall({ id: 'w_c', start: [4, 0], end: [4 + c, c] }),
+      wall({ id: 'w_b', start: [4 + c, c], end: [4 + c, 5] }),
+    ]
+    expect(violations(buildFoundation(chamfered, [], spec400))).toEqual([])
+  })
+
   test('CMU: wall with a window', () => {
     expect(violations(cmuWall(wall({ height: 2.4, openings: [window_(2)] }), spec400))).toEqual([])
   })

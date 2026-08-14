@@ -125,9 +125,13 @@ const endPoint = (wall: WallSlice, which: 'start' | 'end'): readonly [number, nu
  * is covered exactly once: no overlapping boxes (which z-fight and read as
  * seams in the translucent X-ray), no ends jutting past the neighbor.
  *
- * The map stores a SIGN per wall end: +1 = through (extend by element
- * width/2), −1 = butt (retreat by element width/2), 0 = free end. Each
- * element (footing vs stemwall) applies its OWN width to the sign, so the
+ * The map stores a signed MULTIPLIER per wall end: +k = through (extend by
+ * k·width/2), −k = butt (retreat by k·width/2), 0 = free end. Perpendicular
+ * corners give k = 1 (the classic half-width lap); OBLIQUE corners scale by
+ * k = (1 + |cosθ|)/sinθ — the retreat that clears the through run's sloped
+ * face with a square-cut box, and the matching through extension that
+ * covers the joint (round-10: ±width/2 only works at 90°). Each element
+ * (footing vs stemwall) applies its OWN width to the multiplier, so the
  * wide footing and the narrow stemwall both land flush.
  *
  * Detection mirrors wall-framing.detectCorners: endpoints coincide within
@@ -154,6 +158,11 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
       // Parallel walls butting end-to-end are a splice, not a corner.
       const cross = Math.abs(a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0])
       if (cross < 0.3) continue
+      // Oblique multiplier from the angle between the run axes: sinθ is the
+      // |cross| above, |cosθ| the |dot|. k = 1 at 90°, grows as the corner
+      // sharpens/flattens.
+      const dot = Math.abs(a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1])
+      const k = (1 + dot) / cross
       for (const ea of ['start', 'end'] as const) {
         for (const eb of ['start', 'end'] as const) {
           const pa = endPoint(a, ea)
@@ -161,8 +170,8 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
           if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) > tol) continue
           // Longer wall through (tie: lower id) — deterministic, testable.
           const aThrough = a.length > b.length || (a.length === b.length && a.id <= b.id)
-          mark(a, ea, aThrough ? 1 : -1)
-          mark(b, eb, aThrough ? -1 : 1)
+          mark(a, ea, aThrough ? k : -k)
+          mark(b, eb, aThrough ? -k : k)
         }
       }
     }

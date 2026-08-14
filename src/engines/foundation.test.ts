@@ -3,7 +3,7 @@ import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
-import { anchorBoltPositions, buildFoundation } from './foundation'
+import { anchorBoltPositions, buildFoundation, cornerExtensions } from './foundation'
 
 const FOOTING_HEIGHT = inches(8)
 
@@ -590,5 +590,23 @@ describe('buildFoundation — plate washers (LOD 400, R602.11.1)', () => {
   test('washers vanish below detail 400, even with the seismic trigger', () => {
     const seismic300: FramingSpec = { ...DEFAULT_SPEC, detail: '300', seismicHoldDowns: true }
     expect(byRole(buildFoundation([wall], [], seismic300), 'plate-washer')).toHaveLength(0)
+  })
+})
+
+describe('cornerExtensions — oblique corners (round-10)', () => {
+  test('45° corner scales the lap by (1+|cosθ|)/sinθ; 90° keeps ±1', () => {
+    // Horizontal run meeting a 45° chamfer: through = the longer wall.
+    const a = makeWall({ id: 'w_long', start: [0, 0], end: [4, 0] })
+    const c = Math.SQRT1_2
+    const b = makeWall({ id: 'w_chamfer', start: [4, 0], end: [4 + c, c] })
+    const ext = cornerExtensions([a, b])
+    const expected = (1 + c) / c // (1+cos45°)/sin45° ≈ 2.414
+    expect(ext.get('w_long')?.end).toBeCloseTo(expected, 6) // through extends
+    expect(ext.get('w_chamfer')?.start).toBeCloseTo(-expected, 6) // butt retreats
+    // Perpendicular corners keep the classic ±1 (regression).
+    const d = makeWall({ id: 'w_perp', start: [4, 0], end: [4, 3] })
+    const ext2 = cornerExtensions([a, d])
+    expect(ext2.get('w_long')?.end).toBeCloseTo(1, 6)
+    expect(ext2.get('w_perp')?.start).toBeCloseTo(-1, 6)
   })
 })
