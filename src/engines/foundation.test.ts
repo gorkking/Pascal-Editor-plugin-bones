@@ -189,17 +189,15 @@ describe('buildFoundation — slab edge', () => {
   const wall = makeWall()
   const edges = byRole(buildFoundation([wall], [slab]), 'slab-edge')
 
-  test('one 12"-deep concrete thickened edge tucked just below y = 0', () => {
-    expect(edges).toHaveLength(1)
-    const e = edges[0] as Member
-    expect(e.material).toBe('concrete')
-    expect(e.dims[0]).toBeCloseTo(4, 6) // runs the wall
-    expect(e.dims[1]).toBeCloseTo(inches(12), 6)
-    // subtle: barely wider than the stemwall
-    expect(e.dims[2]).toBeCloseTo(DEFAULT_SPEC.stemwallThickness + inches(3), 6)
-    const top = (e.position[1] ?? 0) + e.dims[1] / 2
-    expect(top).toBeLessThan(0)
-    expect(top).toBeGreaterThan(-inches(1)) // "just" below the slab line
+  test('NO thickened edge where a footing + stemwall already run (round-10)', () => {
+    // The slab pours AGAINST the stemwall (R403.1); a turned-down
+    // monolithic edge is the alternative detail. Emitting both doubled the
+    // perimeter concrete inside one volume — the interpenetration gate
+    // pinned it. Footing + stemwall remain the perimeter elements.
+    expect(edges).toHaveLength(0)
+    const members = buildFoundation([wall], [slab])
+    expect(byRole(members, 'footing').length).toBeGreaterThan(0)
+    expect(byRole(members, 'stemwall').length).toBeGreaterThan(0)
   })
 })
 

@@ -35,7 +35,7 @@ function seg(overrides: Partial<RoofSegmentSlice> = {}): RoofSegmentSlice {
   }
 }
 
-describe('verify: gable rafter endpoints land on eave tip and ridge', () => {
+describe('verify: gable rafter endpoints land on the tail cut and the ridge face', () => {
   const roof = seg()
   const theta = roof.pitch
   const run = roof.depth / 2
@@ -43,18 +43,35 @@ describe('verify: gable rafter endpoints land on eave tip and ridge', () => {
   const ridgeY = baseY + run * Math.tan(theta)
   const tipY = baseY - roof.overhang * Math.sin(theta)
   const tipZ = run + roof.overhang * Math.cos(theta)
-  const rafters = frameRoofs([roof], [], DEFAULT_SPEC).filter((m) => m.role === 'rafter')
+  // 2x6 rafters bear on the 2x8 ridge FACE (half thickness off center) and
+  // the box is inscribed between its plumb cuts: each end pulls back
+  // (rd/2)·tanθ along the slope (round-10 interpenetration fixes).
+  const rt = 1.5 * 0.0254
+  const rd = 5.5 * 0.0254
+  const inset = (rd / 2) * Math.tan(theta)
+  const faceZ = rt / 2
+  const faceY = ridgeY - faceZ * Math.tan(theta)
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  const rafters = members.filter(
+    (m) => m.role === 'rafter' && !m.label?.includes('Barge'),
+  )
 
-  test('every rafter on both slopes spans exactly tip → ridge', () => {
+  test('every common on both slopes spans tail cut → ridge face, inscribed', () => {
     expect(rafters.length).toBeGreaterThan(0)
+    // the two dropped gable-end rafters sit one outlooker thickness lower
+    const olT = 1.5 * 0.0254
+    const xs = rafters.map((r) => r.position[0])
+    const xMax = Math.max(...xs.map(Math.abs))
     for (const r of rafters) {
+      const dropped = Math.abs(Math.abs(r.position[0]) - xMax) < 1e-9
+      const drop = dropped ? olT / Math.cos(theta) : 0
       const [e1, e2] = endpoints(r)
       const ridgeEnd = e1.y > e2.y ? e1 : e2
       const tipEnd = e1.y > e2.y ? e2 : e1
-      expect(ridgeEnd.y).toBeCloseTo(ridgeY, 6)
-      expect(ridgeEnd.z).toBeCloseTo(0, 6)
-      expect(tipEnd.y).toBeCloseTo(tipY, 6)
-      expect(Math.abs(tipEnd.z)).toBeCloseTo(tipZ, 6)
+      expect(ridgeEnd.y).toBeCloseTo(faceY - inset * Math.sin(theta) - drop, 6)
+      expect(Math.abs(ridgeEnd.z)).toBeCloseTo(faceZ + inset * Math.cos(theta), 6)
+      expect(tipEnd.y).toBeCloseTo(tipY + inset * Math.sin(theta) - drop, 6)
+      expect(Math.abs(tipEnd.z)).toBeCloseTo(tipZ - inset * Math.cos(theta), 6)
     }
   })
 })
@@ -68,18 +85,26 @@ describe('verify: hip geometry (alongX = width >= depth)', () => {
   const members = frameRoofs([roof], [], DEFAULT_SPEC)
   const hips = members.filter((m) => m.role === 'hip')
 
-  test('hip endpoints meet the ridge ends and the footprint corners', () => {
+  test('hip endpoints: corner exact, top pulled clear of the ridge body', () => {
     expect(hips).toHaveLength(4)
+    // The top cut bears on the ridge END: pulled down-slope by
+    // √2·(ridgeT/2 + hipT/2) + (rd/2)·tan(hipTilt) (round-10 gate).
+    const t = 1.5 * 0.0254
+    const rd = 5.5 * 0.0254
+    const rt = 1.5 * 0.0254
+    const hipTilt = Math.atan2(run * Math.tan(theta), run * Math.SQRT2)
+    const hipInset = Math.SQRT2 * (rt / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
+    const planPull = (hipInset * Math.cos(hipTilt)) / Math.SQRT2 // per plan axis
     const cornersSeen = new Set<string>()
     for (const h of hips) {
       const [e1, e2] = endpoints(h)
       const top = e1.y > e2.y ? e1 : e2
       const bot = e1.y > e2.y ? e2 : e1
-      // top at a ridge end (±ridgeHalf, ridgeY, 0)
-      expect(top.y).toBeCloseTo(ridgeY, 6)
-      expect(Math.abs(top.x)).toBeCloseTo(1, 6)
-      expect(top.z).toBeCloseTo(0, 6)
-      // bottom at a corner (±4, eaveY, ±3)
+      // top slid down the 45° diagonal from the ridge end (±1, ridgeY, 0)
+      expect(top.y).toBeCloseTo(ridgeY - hipInset * Math.sin(hipTilt), 6)
+      expect(Math.abs(top.x)).toBeCloseTo(1 + planPull, 6)
+      expect(Math.abs(top.z)).toBeCloseTo(planPull, 6)
+      // bottom still lands exactly on its corner (±4, eaveY, ±3)
       expect(bot.y).toBeCloseTo(baseY, 6)
       expect(Math.abs(bot.x)).toBeCloseTo(4, 6)
       expect(Math.abs(bot.z)).toBeCloseTo(3, 6)
@@ -106,36 +131,47 @@ describe('verify: hip with width < depth (alongX=false branch)', () => {
     expect(Math.abs(a.z)).toBeCloseTo(1, 6)
   })
 
-  test('hip endpoints meet ridge ends (on Z) and corners', () => {
+  test('hip endpoints: corners exact, tops pulled clear of the ridge (on Z)', () => {
     const hips = members.filter((m) => m.role === 'hip')
     expect(hips).toHaveLength(4)
+    const t = 1.5 * 0.0254
+    const rd = 5.5 * 0.0254
+    const rt = 1.5 * 0.0254
+    const hipTilt = Math.atan2(run * Math.tan(theta), run * Math.SQRT2)
+    const hipInset = Math.SQRT2 * (rt / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
+    const planPull = (hipInset * Math.cos(hipTilt)) / Math.SQRT2
     for (const h of hips) {
       const [e1, e2] = endpoints(h)
       const top = e1.y > e2.y ? e1 : e2
       const bot = e1.y > e2.y ? e2 : e1
-      expect(top.y).toBeCloseTo(ridgeY, 6)
-      expect(top.x).toBeCloseTo(0, 6)
-      expect(Math.abs(top.z)).toBeCloseTo(1, 6)
+      expect(top.y).toBeCloseTo(ridgeY - hipInset * Math.sin(hipTilt), 6)
+      expect(Math.abs(top.x)).toBeCloseTo(planPull, 6)
+      expect(Math.abs(top.z)).toBeCloseTo(1 + planPull, 6)
       expect(bot.y).toBeCloseTo(baseY, 6)
       expect(Math.abs(bot.x)).toBeCloseTo(3, 6)
       expect(Math.abs(bot.z)).toBeCloseTo(4, 6)
     }
   })
 
-  test('common rafters rise from the ±X eave tips to the ridge line (x=0)', () => {
+  test('common rafters rise from the ±X tail cuts to the ridge face', () => {
     // side-plane commons only — end-plane king commons rise from ±Z by design
     const commons = members.filter((m) => m.role === 'rafter' && !m.label?.includes('hip end'))
     expect(commons.length).toBeGreaterThan(0)
+    const rd = 5.5 * 0.0254
+    const rt = 1.5 * 0.0254
+    const inset = (rd / 2) * Math.tan(theta)
+    const faceX = rt / 2
+    const faceY = ridgeY - faceX * Math.tan(theta)
     for (const r of commons) {
       const [e1, e2] = endpoints(r)
       const top = e1.y > e2.y ? e1 : e2
       const bot = e1.y > e2.y ? e2 : e1
-      // high end on the ridge line at ridge height
-      expect(top.y).toBeCloseTo(ridgeY, 6)
-      expect(top.x).toBeCloseTo(0, 6)
-      // low end at the overhung eave tip on ±X
-      expect(bot.y).toBeCloseTo(tipY, 6)
-      expect(Math.abs(bot.x)).toBeCloseTo(tipX, 6)
+      // high end inscribed against the ridge face
+      expect(top.y).toBeCloseTo(faceY - inset * Math.sin(theta), 6)
+      expect(Math.abs(top.x)).toBeCloseTo(faceX + inset * Math.cos(theta), 6)
+      // low end at the inscribed tail cut on ±X
+      expect(bot.y).toBeCloseTo(tipY + inset * Math.sin(theta), 6)
+      expect(Math.abs(bot.x)).toBeCloseTo(tipX - inset * Math.cos(theta), 6)
     }
   })
 })

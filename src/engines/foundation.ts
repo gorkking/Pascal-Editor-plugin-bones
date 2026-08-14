@@ -421,26 +421,11 @@ export function buildFoundation(
       }
     }
 
-    // ---- thickened slab edge ----
-    // When the level has a slab, the perimeter pour thickens into a 12"
-    // turned-down edge under the slab line (R403.1.3.1 monolithic edge).
-    // Kept subtle: barely wider than the stemwall (1.5" reveal each side)
-    // and tucked 1/2" below y = 0 so it never fights the slab or plates.
-    // ASSUMPTION: interior side of the wall is unknown, so the haunch is
-    // centered on the wall line rather than tucked inboard.
-    if (hasSlab) {
-      const edgeWidth = spec.stemwallThickness + inches(3)
-      const edgeTop = -inches(0.5)
-      emit(
-        'slab-edge',
-        [len, SLAB_EDGE_DEPTH, edgeWidth],
-        len / 2,
-        edgeTop - SLAB_EDGE_DEPTH / 2,
-        len,
-        'concrete',
-        'Thickened slab edge',
-      )
-    }
+    // NO separate "thickened slab edge" here: this run already carries a
+    // frost footing + stemwall, and the slab pours AGAINST the stemwall
+    // (R403.1). A turned-down monolithic edge is the ALTERNATIVE detail —
+    // emitting both doubled the perimeter concrete inside one volume
+    // (round-10 interpenetration gate).
   }
 
   return members
