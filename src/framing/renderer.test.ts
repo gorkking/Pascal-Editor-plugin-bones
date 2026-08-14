@@ -99,6 +99,7 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
         depthTest: boolean
         depthWrite: boolean
         transparent: boolean
+        opacity: number
         colorWrite: boolean
         side: number
       }
@@ -112,23 +113,33 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(memberMeshes.length).toBeGreaterThan(0)
     for (const m of memberMeshes) {
       expect(m.material.depthTest).toBe(true) // natural near-hides-far
-      expect(m.material.transparent).toBe(false)
+      // Transparent-LIST membership at FULL opacity: the host's cutaway wall
+      // faces fade with transparent materials, and three.js draws the whole
+      // transparent list after every opaque object. An opaque overlay gets
+      // painted over the moment a face re-appears on camera change (the
+      // "walls closed off after orbiting" bug). renderOrder outranks the
+      // list's distance sort, so 999 still draws after host faces (0).
+      expect(m.material.transparent).toBe(true)
+      expect(m.material.opacity).toBe(1)
+      expect(m.material.depthWrite).toBe(true) // member-vs-member occlusion
       expect(m.renderOrder).toBe(999) // drawn after the host scene
     }
     expect(wipes).toHaveLength(1)
     const wipe = wipes[0] as MeshLike
     expect(wipe.renderOrder).toBe(998) // wipes depth BEFORE the members
+    expect(wipe.material.transparent).toBe(true) // same list as the members
     expect(wipe.material.colorWrite).toBe(false) // paints nothing
     expect(wipe.material.depthTest).toBe(false) // always passes…
     expect(wipe.material.depthWrite).toBe(true) // …and overwrites depth
     expect(wipe.material.side).toBe(BackSide) // seen from inside the box
     // no custom render hooks — WebGPU-safe pure pipeline state
     expect(wipe.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
-    // X-ray off: no wipe, members depth-test in the normal pass order
+    // X-ray off: no wipe, members opaque and depth-tested in the normal pass
     const off = buildGroup(synthesizeMembers(100), [], false)
     for (const m of off.children as unknown as MeshLike[]) {
       expect(m.isInstancedMesh).toBe(true)
       expect(m.material.depthTest).toBe(true)
+      expect(m.material.transparent).toBe(false)
       expect(m.renderOrder).toBe(0)
     }
   })

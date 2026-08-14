@@ -126,6 +126,16 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   // occlude the skeleton. Pure pipeline state, no renderer API: the
   // WebGL-only `renderer.clearDepth()` sentinel this replaces poisoned the
   // host's WebGPU render pass and killed every draw after it.
+  // The whole overlay lives in the TRANSPARENT render list (transparent:
+  // true, opacity 1). The host's camera-facing wall faces fade via
+  // transparent materials, and three.js draws the transparent list after
+  // every opaque object — so an opaque overlay gets painted over the moment
+  // the host re-shows a face (the "walls closed off after orbiting" bug:
+  // cutaway faces re-appear on camera change and cover the skeleton).
+  // Inside one list, renderOrder outranks distance sorting, so host faces
+  // (renderOrder 0) draw first, the wipe (998) then flattens the depth
+  // buffer, and members (999) paint on top with member-vs-member depth
+  // testing intact.
   if (seeThrough) {
     const wipe = new Mesh(
       new BoxGeometry(500, 500, 500),
@@ -134,6 +144,7 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
         depthTest: false,
         depthWrite: true,
         side: BackSide,
+        transparent: true,
       }),
     )
     wipe.frustumCulled = false
@@ -147,6 +158,13 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     // stud tops reading through the top plate) came from bypassing the
     // depth test; the sentinel above handles seeing through the HOST only.
     const material = new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 })
+    if (seeThrough) {
+      // Transparent-pass membership (see the wipe comment) — full opacity
+      // and explicit depthWrite keep member-vs-member occlusion exact.
+      material.transparent = true
+      material.opacity = 1
+      material.depthWrite = true
+    }
     const mesh = new InstancedMesh(unitBox, material, bucket.entries.length)
     if (seeThrough) mesh.renderOrder = 999
     bucket.entries.forEach((entry, i) => {
