@@ -575,7 +575,7 @@ describe('count sanity — two-room plan (living + kitchen)', () => {
 // Round-1 fabrication features (circuits, panel schedule, 3-way, wiring)
 // ---------------------------------------------------------------------------
 
-import { assignCircuits, circuitSchedule, polygonArea, routeWiring } from './electrical'
+import { assignCircuits, buildWallGraph, circuitSchedule, polygonArea, routeWiring } from './electrical'
 
 /** The two-room shell again, plus a bathroom strip — enough category variety. */
 function circuitPlan() {
@@ -960,5 +960,25 @@ describe('wire runs detour OVER door openings (round-4 advisory)', () => {
         Math.abs((w.position[0] as number) - 4) < 0.01,
     )
     expect(over).toBeDefined()
+  })
+})
+
+describe('wall-graph junctions snap out of door ROs (round-6 pin)', () => {
+  test('a tee landing inside a doorway moves to the adjacent stud bay', () => {
+    const through = makeWall({
+      id: 'w_through',
+      start: [0, 0],
+      end: [8, 0],
+      openings: [door(4, 0.9, 'door_tee')],
+    })
+    const tee = makeWall({ id: 'w_tee', start: [4, 0], end: [4, 3] })
+    const graph = buildWallGraph([through, tee])
+    const roLo = 4 - (0.9 + RO_PAD) / 2
+    const roHi = 4 + (0.9 + RO_PAD) / 2
+    const junctions = graph.get('w_through') ?? []
+    expect(junctions.length).toBeGreaterThan(0)
+    for (const j of junctions) {
+      expect(j.u <= roLo + 1e-9 || j.u >= roHi - 1e-9).toBe(true)
+    }
   })
 })

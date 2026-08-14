@@ -213,7 +213,9 @@ function riser(
   y1: number,
 ): void {
   const length = Math.abs(y1 - y0)
-  if (length < 0.03) return
+  // Only true no-ops are dropped — a kitchen hot stub 1.8cm above the hot
+  // plane still deserves its riser (round-6 advisory).
+  if (length < 0.008) return
   members.push({
     system: 'plumbing',
     role: spec.role,

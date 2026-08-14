@@ -555,3 +555,153 @@ describe('frameFloor — round-5 seam cases (hanger window, orphan hangers)', ()
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Round-6: girder presence — the hole-interaction matrix closed
+// ---------------------------------------------------------------------------
+
+describe('frameFloor — girder presence (round-6 counterexamples)', () => {
+  // The reviewer's L: full width for z<5, wing x∈[3,6] for z∈[5,9].
+  const L: [number, number][] = [
+    [0, 0],
+    [6, 0],
+    [6, 9],
+    [3, 9],
+    [3, 5],
+    [0, 5],
+  ]
+
+  test('wing rows land ON the notch rim — never cut at an absent girder', () => {
+    const members = frameFloor([slab(L)], [], { ...DEFAULT_SPEC, detail: '400' })
+    const gt = 3.5 * 0.0254
+    const wingRows = byRole(members, 'joist').filter(
+      (j) => (j.position[2] as number) > 5 && !j.label?.includes('trimmer'),
+    )
+    expect(wingRows.length).toBeGreaterThan(0)
+    for (const j of wingRows) {
+      const lo = (j.position[0] as number) - j.dims[0] / 2
+      // ends exactly at the notch rim x=3, NOT at the girder face 3+gt/2
+      expect(lo).toBeCloseTo(3, 5)
+    }
+    // the girder itself only spans where the polygon has full width
+    for (const g of byRole(members, 'girder')) {
+      const half = g.length / 2
+      expect((g.position[2] as number) + half).toBeLessThanOrEqual(5 + 1e-6)
+    }
+    expect(members.filter((m) => m.flag?.includes('Unsupported'))).toHaveLength(0)
+  })
+
+  test('no orphan girder hangers inside a stairwell straddling the girder', () => {
+    const hole: [number, number][] = [
+      [2.5, 4],
+      [3.5, 4],
+      [3.5, 6],
+      [2.5, 6],
+    ]
+    const members = frameFloor([slab(rect(6, 9), { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    // every girder-face hanger must sit where the girder EXISTS (z ∉ (4,6))
+    const girderHangers = byRole(members, 'hanger').filter((h) => h.label?.includes('girder'))
+    expect(girderHangers.length).toBeGreaterThan(0)
+    for (const h of girderHangers) {
+      const z = h.position[2] as number
+      expect(z <= 4 + 1e-6 || z >= 6 - 1e-6).toBe(true)
+    }
+    // and every hanger overall has a joist/girder end within reach
+    const joistEnds: [number, number][] = []
+    for (const j of members.filter((m) => m.role === 'joist' || m.role === 'girder')) {
+      const half = j.length / 2
+      if (Math.abs(Math.cos(j.rotation[1] as number)) > 0.5) {
+        joistEnds.push(
+          [(j.position[0] as number) - half, j.position[2] as number],
+          [(j.position[0] as number) + half, j.position[2] as number],
+        )
+      } else {
+        joistEnds.push(
+          [j.position[0] as number, (j.position[2] as number) - half],
+          [j.position[0] as number, (j.position[2] as number) + half],
+        )
+      }
+    }
+    for (const h of byRole(members, 'hanger')) {
+      const hx = h.position[0] as number
+      const hz = h.position[2] as number
+      const attached = joistEnds.some(([ex, ez]) => Math.hypot(ex - hx, ez - hz) < 0.15)
+      expect(attached).toBe(true)
+    }
+  })
+
+  test('stair trimmers split at the girder — no ply passes through the 4x10', () => {
+    const hole: [number, number][] = [
+      [2.5, 4],
+      [3.5, 4],
+      [3.5, 6],
+      [2.5, 6],
+    ]
+    const members = frameFloor([slab(rect(6, 9), { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const gt = 3.5 * 0.0254
+    const trimmers = byRole(members, 'joist').filter((j) => j.label?.includes('trimmer'))
+    expect(trimmers.length).toBeGreaterThan(0)
+    for (const tr of trimmers) {
+      const half = tr.dims[0] / 2
+      const lo = (tr.position[0] as number) - half
+      const hi = (tr.position[0] as number) + half
+      expect(lo > 3 - gt / 2 - 1e-6 || hi < 3 + gt / 2 + 1e-6).toBe(true)
+    }
+  })
+
+  test('header plies clamp against the POLYGON — L-shape notch stays empty', () => {
+    // hole in the wing, 5cm from the notch line: no ply may land at x < 3
+    // within the wing band (that is the notch — outside the slab).
+    const hole: [number, number][] = [
+      [3.05, 6],
+      [4, 6],
+      [4, 7.5],
+      [3.05, 7.5],
+    ]
+    const members = frameFloor([slab(L, { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    for (const h of byRole(members, 'header')) {
+      const x = h.position[0] as number
+      const z = h.position[2] as number
+      if (z > 5) expect(x).toBeGreaterThanOrEqual(3 - 1e-6)
+    }
+  })
+
+  test('twin holes sharing a cross band emit ONE trimmer per line', () => {
+    const holes: [number, number][][] = [
+      [
+        [0.8, 2],
+        [1.6, 2],
+        [1.6, 3.2],
+        [0.8, 3.2],
+      ],
+      [
+        [2.4, 2],
+        [3.2, 2],
+        [3.2, 3.2],
+        [2.4, 3.2],
+      ],
+    ]
+    const members = frameFloor([slab(rect(4, 9), { holes })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const trimmers = byRole(members, 'joist').filter((j) => j.label?.includes('trimmer'))
+    const lines = trimmers.map((tr) => (tr.position[2] as number).toFixed(6))
+    expect(new Set(lines).size).toBe(lines.length) // no coincident duplicates
+  })
+
+  test('no blocking row embedded inside the girder body', () => {
+    const members = frameFloor([slab(rect(6, 9))], [], { ...DEFAULT_SPEC, detail: '400' })
+    expect(byRole(members, 'girder').length).toBeGreaterThan(0)
+    expect(byRole(members, 'blocking')).toHaveLength(0)
+  })
+})
