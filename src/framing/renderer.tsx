@@ -14,6 +14,7 @@ import {
 } from 'three'
 import type { Fixture, Member } from '../core/types'
 import { inches } from '../core/units'
+import { circuitColor } from '../plans/circuit-colors'
 import { computeLevel } from './compute'
 import type { FramingNode } from './schema'
 
@@ -26,6 +27,11 @@ import type { FramingNode } from './schema'
 
 /** Color buckets — material first, with structural roles popped for reading. */
 function colorOf(member: Member): string {
+  // Wires color by CIRCUIT (sourceId carries the circuit id) so a run reads
+  // as its zone in the building exactly like on the exported plan.
+  if (member.system === 'electrical' && member.role === 'wire-run') {
+    return circuitColor(member.sourceId)
+  }
   switch (member.material) {
     case 'concrete':
       return '#9aa0a5'

@@ -32,9 +32,20 @@ describe('buildPlanSet', () => {
       member({ system: 'wall-framing', role: 'stud', size: '2x4', dims: [0.038, 2.3, 0.089], rotation: [0, Math.PI / 4, 0] }),
       member({ system: 'foundation', role: 'footing', size: undefined, material: 'concrete', dims: [4, 0.2, 0.4] }),
       member({ system: 'roof-framing', role: 'rafter', dims: [3.5, 0.14, 0.038], rotation: [0, Math.PI / 2, 0.7] }),
-      member({ system: 'electrical', role: 'wire-run', size: undefined, material: 'copper', dims: [2, 0.013, 0.013], label: 'NM-B 12/2 w/G — SA-1' }),
+      member({
+        system: 'electrical',
+        role: 'wire-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.013, 0.013],
+        label: 'NM-B 12/2 w/G — SA-1',
+        sourceId: 'SA-1',
+      }),
     ]
-    const fixtures = [fixture({}), fixture({ kind: 'switch' })]
+    const fixtures = [
+      fixture({ meta: { circuit: 'SA-1', breakerA: 20, gaugeAwg: 12 } }),
+      fixture({ kind: 'switch' }),
+    ]
     const sheets = buildPlanSet(members, fixtures, {
       projectName: 'Demo House',
       levelName: 'Ground Floor',
@@ -66,6 +77,10 @@ describe('buildPlanSet', () => {
     const elec = sheets.find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
     expect(elec).toContain('>R</text>')
     expect(elec).toContain('>S</text>')
+    // wires carry their CIRCUIT color (SA-1 terracotta) + the zone legend
+    expect(elec).toContain('#e2703a')
+    expect(elec).toContain('SA-1')
+    expect(elec).toContain('kitchen small-appliance')
     // rotated stud carries its yaw into the plan transform (−45°)
     const wall = sheets.find((s) => s.title.startsWith('Wall'))?.svg ?? ''
     expect(wall).toContain('rotate(-45.00)')

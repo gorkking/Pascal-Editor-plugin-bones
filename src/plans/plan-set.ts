@@ -12,6 +12,7 @@
 
 import type { Fixture, Member } from '../core/types'
 import { computeTakeoff } from '../engines/takeoff'
+import { circuitColor, circuitZoneHint } from './circuit-colors'
 
 export type PlanSheet = { title: string; svg: string }
 
@@ -176,7 +177,10 @@ function planSheet(
     const planLen = Math.max(0.02, m.dims[0] * Math.abs(Math.cos(tilt)))
     const w = planLen * scale
     const h = Math.max(1.2, m.dims[2] * scale)
-    const fill = def.fill[m.role] ?? def.fill.default ?? '#ddd'
+    const fill =
+      m.system === 'electrical' && m.role === 'wire-run'
+        ? circuitColor(m.sourceId)
+        : (def.fill[m.role] ?? def.fill.default ?? '#ddd')
     shapes.push(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="#444" stroke-width="0.6" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
@@ -188,18 +192,43 @@ function planSheet(
     )
   }
 
-  // Callouts: most common size per role, top-left legend.
+  // Callouts: most common size per role, top-left legend — and on the
+  // electrical sheet, the CIRCUIT legend (color swatch, id, breaker/gauge,
+  // zone) so wires on paper match the 3D X-ray colors.
   const roleSizes = new Map<string, string>()
   for (const m of mine) {
     if (m.size && !roleSizes.has(m.role)) roleSizes.set(m.role, m.size)
   }
-  const legend = [...roleSizes.entries()]
+  const legendLines: string[] = [...roleSizes.entries()]
     .slice(0, 8)
     .map(
       ([role, size], i) =>
         `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
     )
-    .join('')
+  if (def.key === 'electrical') {
+    const circuits = new Map<string, Fixture | undefined>()
+    for (const m of mine) {
+      if (m.role === 'wire-run' && !circuits.has(m.sourceId)) {
+        circuits.set(
+          m.sourceId,
+          devs.find((f) => f.meta?.circuit === m.sourceId),
+        )
+      }
+    }
+    let row = legendLines.length
+    for (const [circuit, sample] of [...circuits.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const y = MARGIN + 14 + row * 14
+      const amps = sample?.meta?.breakerA ?? '—'
+      const awg = sample?.meta?.gaugeAwg ?? '—'
+      legendLines.push(
+        `<rect x="${MARGIN + 2}" y="${y - 8}" width="10" height="10" fill="${circuitColor(circuit)}" stroke="#444" stroke-width="0.5"/>` +
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`${circuit} — ${amps}A/${awg}AWG · ${circuitZoneHint(circuit)}`)}</text>`,
+      )
+      row++
+      if (row > 22) break
+    }
+  }
+  const legend = legendLines.join('')
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${shapes.join('')}${chrome(def.title, opts, scale, legend)}</svg>`
   return { title: def.title, svg }
