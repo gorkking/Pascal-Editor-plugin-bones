@@ -91,3 +91,46 @@
 - A hydration warning fires during scripted wall-drawing in the dev editor —
   reproduced without Bones loaded during interaction sequences; not plugin-caused
   on plain load (0 errors).
+
+## Night of 2026-08-13 → 14 (round-10 backlog + rendering root-cause)
+
+Prod shipped opt-in earlier tonight (private-editor #340, squash bdcb0f51);
+everything below is LOCAL ONLY until approved — hosts' package.json pins
+bumped on the local branches, prod untouched.
+
+- **README hero replaced** (830deef): fresh LOD-400 capture on the demo
+  house, correct near-hides-far occlusion, JPEG at web weight.
+- **X-ray rendering root-caused and fixed for good** (50bd690): the host
+  renders through a TSL RenderPipeline (MRT scene pass + separate overlay
+  pass). Every in-scene depth trick fails there — clearDepth() poisons the
+  WebGPU pass, an inverted depth-wipe box never lands its depthWrite, and
+  transparent-list membership loses to the MRT pass when cutaway wall faces
+  re-appear on camera change ("walls closed off after orbiting"). The fix:
+  seeThrough members ride the host's own OVERLAY layer (layers.set(1)) —
+  fresh depth buffer, composited on top, member-vs-member occlusion intact.
+  Verified live: survives load, zoom, and orbit on fresh clones.
+- **Repo-wide interpenetration gate** (858e5fb): 15-axis OBB SAT over a
+  per-engine scenario matrix, 2mm skin, design-intent pairs allow-listed.
+  It caught five real geometry bugs, all fixed with updated numeric pins:
+  rafters buried in the ridge/each other (now ridge-face bearing with
+  inscribed plumb cuts), fascia centered on tail cuts (now outside), flat
+  outlookers crossing the sloped plane (now rolled into it over dropped
+  gable-end rafters), coplanar ceiling joists/collar ties (now sistered),
+  and the foundation's thickened slab edge doubling the stemwall volume
+  (removed — slab pours against the stemwall).
+- **Round-10 demotions all addressed**: wall corner/tee run insets (butting
+  frames stop at the through wall's FACE; detectTees knows its stem), fire
+  blocking every ≤10 ft, splice arithmetic (ceil sticks, n−1 laps),
+  RO-shift flag, bay-clipped partition backing; girder end-bearing
+  validation un-deadened via the new Member.advisory channel (rim pockets
+  + notch rims recognized as bearing); oblique foundation corners scale
+  laps by (1+|cosθ|)/sinθ with a 45° pin; birdsmouth seat capped at d/4
+  (R802.7.1) with numeric HAP pins; 1x8 finish fascia purchasable; CMU
+  grout counts a dedicated grouted flag with yd³ numeric pins; HVAC square
+  trunks price as rectangular duct; LA-1/GA-1 circuit pins.
+- **Known open**: intersecting roof segments still interpenetrate at the
+  valley (overframe clipping — documented test.todo); autosave wrecks
+  server scene drafts after the first browser session on a clone (host
+  bug, documented in memory; clone-per-session workaround).
+- Suite: **408 tests / ~24.8k assertions green**. Round-10 scorecard
+  archived; round-11 independent review launched at 7d3f986.
