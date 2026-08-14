@@ -11,7 +11,7 @@ plumbing, ductwork — derived from your model, sized to your jurisdiction, rend
 ---
 
 <p align="center">
-  <img src="assets/xray-hero.png" alt="The Bones X-ray in the Pascal editor — studs, headers, and foundation visible through the finished walls, with the live takeoff" width="820" />
+  <img src="assets/xray-hero.jpg" alt="The Bones X-ray in the Pascal editor — wall framing, headers, HVAC trunks, and electrical wiring visible in place of the finished walls" width="820" />
 </p>
 
 ## What it does
