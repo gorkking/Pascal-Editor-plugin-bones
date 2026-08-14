@@ -134,3 +134,24 @@ bumped on the local branches, prod untouched.
   bug, documented in memory; clone-per-session workaround).
 - Suite: **408 tests / ~24.8k assertions green**. Round-10 scorecard
   archived; round-11 independent review launched at 7d3f986.
+
+## Round 11 (dawn, 2026-08-14)
+
+Independent reviewer at 7d3f986: strict 3/10 — it found the new gate's
+slab fixture had a type error (y vs elevation) that composed floor
+members at NaN and made two scenarios pass vacuously (tsc was red).
+Fixed immediately (7248c57): non-finite geometry is now itself a gate
+violation, and the un-vacuous gate drove per-bay floor blocking sizing
+(constant nominal-bay blocks overran joists/rims in narrow bays).
+Electrical PROMOTED to 400 (LA-1/GA-1 pins + rotation-agnostic wall
+routing verified 0.0000 m at 0/17/30/45°); takeoff + ui-ux-perf hold
+400; inscribed rafter geometry verified exactly tangent at 5°–60°.
+
+**Round-12 backlog (reviewer's counterexample matrix)**: sweep plan
+ROTATION (17/30/45°), ROOF TYPES (flat/gambrel/mansard/dutch, pitches
+5/10/60/80°, square hip), and JUNCTION topology (oblique wall + CMU
+corners — port the foundation multiplier; interior-tee footings;
+Y-junctions; 15° foundation corners; rebar×anchor-bolt dedupe in SDC-D;
+non-axis-aligned slab rims; trimmer×joist dedupe; sister offsets;
+hanger stacking). Biggest structural item: plumbing/HVAC route on WORLD
+axes, not wall-relative (electrical's wall-graph is the model).
