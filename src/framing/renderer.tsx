@@ -3,14 +3,11 @@
 import { useRegistry, useScene } from '@pascal-app/core'
 import { useEffect, useMemo, useRef } from 'react'
 import {
-  BackSide,
   BoxGeometry,
   Euler,
   Group,
   InstancedMesh,
   Matrix4,
-  Mesh,
-  MeshBasicMaterial,
   MeshStandardMaterial,
   Quaternion,
   Vector3,
@@ -114,61 +111,36 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   const translation = new Vector3()
   const euler = new Euler()
 
-  // X-ray = depth-buffer overlay: every member mesh draws AFTER the host
-  // scene (renderOrder 999) with normal depth testing, right after a
-  // depth-WIPE box (renderOrder 998). The wipe is an inverted 500 m box
-  // around the level whose back faces cover the whole viewport from any
-  // camera inside it: colorWrite off (paints nothing), depthTest off
-  // (always passes), depthWrite ON — so it overwrites the host's depth
-  // with "very far" everywhere. Members then depth-test only against EACH
-  // OTHER — the top plate hides the stud tops behind it, the footing never
-  // paints over a nearer stud — while the host's walls/floors can no longer
-  // occlude the skeleton. Pure pipeline state, no renderer API: the
-  // WebGL-only `renderer.clearDepth()` sentinel this replaces poisoned the
-  // host's WebGPU render pass and killed every draw after it.
-  // Split-list X-ray (pinned by live A/B on the WebGPU host):
-  //  - The WIPE stays OPAQUE at renderOrder 998 — the end of the opaque
-  //    pass, the only place its depthWrite reliably lands. In the WebGPU
-  //    transparent pass the depth write never took effect, so a transparent
-  //    wipe left members depth-testing against the host's walls and they
-  //    vanished inside them.
-  //  - The MEMBERS render TRANSPARENT (opacity 1) at renderOrder 999. The
-  //    host's cutaway wall faces fade via transparent materials, and the
-  //    transparent list draws after every opaque object — opaque members
-  //    got painted over the moment a face re-appeared on camera change
-  //    (the "walls closed off after orbiting" bug). renderOrder outranks
-  //    the list's distance sort, so host faces (0) blend first and members
-  //    still paint on top, depth-testing only against each other.
-  if (seeThrough) {
-    const wipe = new Mesh(
-      new BoxGeometry(500, 500, 500),
-      new MeshBasicMaterial({
-        colorWrite: false,
-        depthTest: false,
-        depthWrite: true,
-        side: BackSide,
-      }),
-    )
-    wipe.frustumCulled = false
-    wipe.renderOrder = 998
-    group.add(wipe)
-  }
+  // X-ray = the host's own OVERLAY pass. The editor's post-processing
+  // pipeline (packages/viewer post-processing.tsx) renders layer 1
+  // (OVERLAY_LAYER — gizmos, handles, tool previews) as a SEPARATE pass
+  // with its own freshly cleared depth buffer, composited on top of the
+  // finished scene by alpha. Members on that layer therefore depth-test
+  // ONLY against each other (near member hides far member — the round-2
+  // requirement) while compositing over every host wall, floor and roof.
+  //
+  // Every in-scene trick failed on this pipeline and is pinned in tests:
+  // renderer.clearDepth() poisoned the WebGPU pass; an inverted depth-wipe
+  // box never landed its depthWrite (members stayed depth-occluded inside
+  // walls); transparent-list membership lost to the host's MRT scene pass.
+  // The overlay layer is the mechanism the host itself uses for "crisp,
+  // always on top, internally depth-tested" — plugins get it for free.
+  //
+  // Degraded-but-visible fallback: when post-processing is off (WebGL2
+  // fallback, ?disable=postFx) the camera mask still includes layer 1, so
+  // members render in the main pass with shared depth — no see-through,
+  // but nothing disappears.
+  const OVERLAY_LAYER = 1
 
   for (const bucket of buckets.values()) {
     // Normal depth-tested draw, so members occlude each other correctly —
     // the round-2 user-reported artifacts (footing over nearer studs, far
     // stud tops reading through the top plate) came from bypassing the
-    // depth test; the sentinel above handles seeing through the HOST only.
+    // depth test; the overlay pass's own depth buffer handles seeing
+    // through the HOST only.
     const material = new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 })
-    if (seeThrough) {
-      // Transparent-pass membership (see the wipe comment) — full opacity
-      // and explicit depthWrite keep member-vs-member occlusion exact.
-      material.transparent = true
-      material.opacity = 1
-      material.depthWrite = true
-    }
     const mesh = new InstancedMesh(unitBox, material, bucket.entries.length)
-    if (seeThrough) mesh.renderOrder = 999
+    if (seeThrough) mesh.layers.set(OVERLAY_LAYER)
     bucket.entries.forEach((entry, i) => {
       euler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
       quaternion.setFromEuler(euler)
@@ -191,8 +163,8 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
 }
 
 function disposeGroup(group: Group) {
-  // Geometries are shared (one unit box) except the X-ray sentinel's own —
-  // dispose each UNIQUE geometry exactly once.
+  // All meshes share one unit-box geometry — dispose each UNIQUE geometry
+  // exactly once.
   const geometries = new Set<BoxGeometry>()
   for (const child of group.children) {
     const mesh = child as InstancedMesh

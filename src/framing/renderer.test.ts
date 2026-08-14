@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import { Mesh } from 'three'
-import { BackSide } from 'three'
 import type { Fixture, Member, MemberMaterial, MemberRole } from '../core/types'
 import { buildGroup } from './renderer'
 
@@ -57,12 +56,11 @@ function synthesizeFixtures(count: number): Fixture[] {
 
 describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
   test('10,000 members + 500 fixtures across every role/material stay under 25 draw calls', () => {
-    // One InstancedMesh per color bucket + the X-ray depth-clear sentinel.
+    // One InstancedMesh per color bucket — nothing else in the group.
     const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), true)
     expect(group.children.length).toBeLessThanOrEqual(25)
     expect(group.children.length).toBeGreaterThan(4) // sanity: buckets exist
     // Instance counts add up to the full population — nothing dropped.
-    // (The sentinel is a plain Mesh, not an instanced batch — excluded.)
     const instances = group.children.reduce(
       (sum, child) =>
         sum +
@@ -72,9 +70,9 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
       0,
     )
     expect(instances).toBe(10_500)
-    // Without X-ray the sentinel disappears — nothing else changes.
+    // X-ray mode only moves layers — the mesh census is identical.
     const solidOnly = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), false)
-    expect(solidOnly.children.length).toBe(group.children.length - 1)
+    expect(solidOnly.children.length).toBe(group.children.length)
   })
 
   test('bucket count saturates — growing the population adds zero draw calls', () => {
@@ -85,62 +83,52 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(doubled).toBe(saturated)
   })
 
-  test('members ALWAYS depth-test — X-ray wipes host depth via material state only', () => {
+  test('X-ray rides the host OVERLAY layer — members always depth-test, no render hacks', () => {
     // Round-2 user reports: with depth tricks on the members themselves, a
     // footing painted over nearer studs, then far stud tops read through the
     // top plate. Members must occlude each other naturally in BOTH modes.
-    // The X-ray effect lives in one inverted depth-wipe box drawn before
-    // them (renderOrder 998 vs 999) that only defeats HOST occlusion — and
-    // it must be pure pipeline state (no renderer.clearDepth(): that WebGL
-    // call poisoned the host's WebGPU render pass and hid every member).
+    //
+    // See-through comes from the host's own overlay pass (layer 1): the
+    // editor's post-processing pipeline renders that layer into a separate
+    // target with a freshly cleared depth buffer and composites it on top of
+    // the finished scene. Everything else was tried against the WebGPU
+    // pipeline and failed — renderer.clearDepth() poisoned the pass, an
+    // inverted depth-wipe box never landed its depthWrite (members stayed
+    // hidden inside walls), and transparent-list membership lost to the MRT
+    // scene pass. No sentinel meshes, no material tricks: layer only.
     type MeshLike = {
       isInstancedMesh?: boolean
+      layers: { mask: number }
       material: {
         depthTest: boolean
         depthWrite: boolean
         transparent: boolean
-        opacity: number
         colorWrite: boolean
-        side: number
       }
       renderOrder: number
       onBeforeRender?: { toString(): string }
     }
+    const OVERLAY_MASK = 1 << 1 // host OVERLAY_LAYER = 1
+    const SCENE_MASK = 1 << 0 // default layer 0
     const xray = buildGroup(synthesizeMembers(100), [], true)
     const meshes = xray.children as unknown as MeshLike[]
-    const memberMeshes = meshes.filter((m) => m.isInstancedMesh)
-    const wipes = meshes.filter((m) => !m.isInstancedMesh)
-    expect(memberMeshes.length).toBeGreaterThan(0)
-    for (const m of memberMeshes) {
+    expect(meshes.length).toBeGreaterThan(0)
+    for (const m of meshes) {
+      expect(m.isInstancedMesh).toBe(true) // members only — no sentinels
+      expect(m.layers.mask).toBe(OVERLAY_MASK) // the host overlay pass
       expect(m.material.depthTest).toBe(true) // natural near-hides-far
-      // Members join the transparent list at FULL opacity: the host cutaway
-      // faces fade with transparent materials, and three.js draws the whole
-      // transparent list after every opaque object. An opaque overlay gets
-      // painted over the moment a face re-appears on camera change (the
-      // "walls closed off after orbiting" bug). renderOrder outranks the
-      // list's distance sort, so 999 still draws after host faces (0).
-      expect(m.material.transparent).toBe(true)
-      expect(m.material.opacity).toBe(1)
       expect(m.material.depthWrite).toBe(true) // member-vs-member occlusion
-      expect(m.renderOrder).toBe(999) // drawn after the host scene
+      expect(m.material.transparent).toBe(false) // plain opaque draw
+      expect(m.material.colorWrite).toBe(true)
+      expect(m.renderOrder).toBe(0) // gizmos/handles keep drawing above
+      // no custom render hooks — WebGPU-safe
+      expect(m.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
     }
-    expect(wipes).toHaveLength(1)
-    const wipe = wipes[0] as MeshLike
-    expect(wipe.renderOrder).toBe(998) // wipes depth BEFORE the members
-    // The wipe must stay in the OPAQUE list: live A/B on the WebGPU host
-    // showed its depthWrite never lands inside the transparent pass — a
-    // transparent wipe leaves members depth-testing against host walls.
-    expect(wipe.material.transparent).toBe(false)
-    expect(wipe.material.colorWrite).toBe(false) // paints nothing
-    expect(wipe.material.depthTest).toBe(false) // always passes…
-    expect(wipe.material.depthWrite).toBe(true) // …and overwrites depth
-    expect(wipe.material.side).toBe(BackSide) // seen from inside the box
-    // no custom render hooks — WebGPU-safe pure pipeline state
-    expect(wipe.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
-    // X-ray off: no wipe, members opaque and depth-tested in the normal pass
+    // X-ray off: members are ordinary scene-layer geometry
     const off = buildGroup(synthesizeMembers(100), [], false)
     for (const m of off.children as unknown as MeshLike[]) {
       expect(m.isInstancedMesh).toBe(true)
+      expect(m.layers.mask).toBe(SCENE_MASK)
       expect(m.material.depthTest).toBe(true)
       expect(m.material.transparent).toBe(false)
       expect(m.renderOrder).toBe(0)
