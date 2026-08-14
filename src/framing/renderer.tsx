@@ -111,36 +111,61 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   const translation = new Vector3()
   const euler = new Euler()
 
-  // X-ray = the host's own OVERLAY pass. The editor's post-processing
-  // pipeline (packages/viewer post-processing.tsx) renders layer 1
-  // (OVERLAY_LAYER — gizmos, handles, tool previews) as a SEPARATE pass
-  // with its own freshly cleared depth buffer, composited on top of the
-  // finished scene by alpha. Members on that layer therefore depth-test
-  // ONLY against each other (near member hides far member — the round-2
-  // requirement) while compositing over every host wall, floor and roof.
+  // X-ray = TWO passes per bucket (round-11 regression: overlay-only
+  // members painted over a TREE standing in front of the house — the
+  // host's overlay pass composites over the finished scene with no
+  // scene-depth test).
   //
-  // Every in-scene trick failed on this pipeline and is pinned in tests:
-  // renderer.clearDepth() poisoned the WebGPU pass; an inverted depth-wipe
-  // box never landed its depthWrite (members stayed depth-occluded inside
-  // walls); transparent-list membership lost to the host's MRT scene pass.
-  // The overlay layer is the mechanism the host itself uses for "crisp,
-  // always on top, internally depth-tested" — plugins get it for free.
+  //  - A SOLID copy on the SCENE layer (0): normal depth against the whole
+  //    scene, so anything nearer the camera — a tree, a neighboring house —
+  //    occludes the skeleton exactly like real geometry. Inside walls it is
+  //    hidden, which is fine: that is what the ghost is for.
+  //  - A GHOST copy on the host OVERLAY layer (1) at partial opacity: the
+  //    editor's post-processing pipeline (packages/viewer
+  //    post-processing.tsx) renders that layer into its own freshly cleared
+  //    depth buffer and composites it on top by alpha. The ghost therefore
+  //    shows THROUGH walls/roofs/occluders (near member still hides far
+  //    member — the round-2 requirement), while wherever the solid copy is
+  //    directly visible the ghost blends member-color onto member-color and
+  //    changes nothing.
+  //
+  // Every in-scene depth trick failed on this pipeline and is pinned in
+  // tests: renderer.clearDepth() poisoned the WebGPU pass; an inverted
+  // depth-wipe box never landed its depthWrite; transparent-list membership
+  // lost to the host's MRT scene pass on camera change.
   //
   // Degraded-but-visible fallback: when post-processing is off (WebGL2
   // fallback, ?disable=postFx) the camera mask still includes layer 1, so
-  // members render in the main pass with shared depth — no see-through,
+  // both copies render in the main pass with shared depth — no see-through,
   // but nothing disappears.
   const OVERLAY_LAYER = 1
+  const GHOST_OPACITY = 0.45
 
   for (const bucket of buckets.values()) {
-    // Normal depth-tested draw, so members occlude each other correctly —
+    // Normal depth-tested draws, so members occlude each other correctly —
     // the round-2 user-reported artifacts (footing over nearer studs, far
     // stud tops reading through the top plate) came from bypassing the
-    // depth test; the overlay pass's own depth buffer handles seeing
-    // through the HOST only.
-    const material = new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 })
-    const mesh = new InstancedMesh(unitBox, material, bucket.entries.length)
-    if (seeThrough) mesh.layers.set(OVERLAY_LAYER)
+    // depth test.
+    const solid = new InstancedMesh(
+      unitBox,
+      new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 }),
+      bucket.entries.length,
+    )
+    const meshes = [solid]
+    if (seeThrough) {
+      const ghostMaterial = new MeshStandardMaterial({
+        color: bucket.color,
+        roughness: 0.82,
+        transparent: true,
+        opacity: GHOST_OPACITY,
+      })
+      // Self-occlusion inside the overlay pass needs the depth write that
+      // transparent materials normally skip.
+      ghostMaterial.depthWrite = true
+      const ghost = new InstancedMesh(unitBox, ghostMaterial, bucket.entries.length)
+      ghost.layers.set(OVERLAY_LAYER)
+      meshes.push(ghost)
+    }
     bucket.entries.forEach((entry, i) => {
       euler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
       quaternion.setFromEuler(euler)
@@ -151,13 +176,15 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
         Math.max(entry.dims[2], 0.001),
       )
       matrix.compose(translation, quaternion, scale)
-      mesh.setMatrixAt(i, matrix)
+      for (const mesh of meshes) mesh.setMatrixAt(i, matrix)
     })
-    mesh.instanceMatrix.needsUpdate = true
-    mesh.castShadow = true
-    mesh.receiveShadow = true
-    mesh.frustumCulled = false
-    group.add(mesh)
+    for (const mesh of meshes) {
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.castShadow = mesh === solid
+      mesh.receiveShadow = mesh === solid
+      mesh.frustumCulled = false
+      group.add(mesh)
+    }
   }
   return group
 }

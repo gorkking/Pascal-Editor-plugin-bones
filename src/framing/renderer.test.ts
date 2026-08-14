@@ -55,12 +55,13 @@ function synthesizeFixtures(count: number): Fixture[] {
 }
 
 describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
-  test('10,000 members + 500 fixtures across every role/material stay under 25 draw calls', () => {
-    // One InstancedMesh per color bucket — nothing else in the group.
+  test('10,000 members + 500 fixtures across every role/material stay under 50 draw calls', () => {
+    // X-ray: TWO InstancedMeshes per color bucket (solid scene copy + ghost
+    // overlay copy) — still O(buckets), never O(members).
     const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), true)
-    expect(group.children.length).toBeLessThanOrEqual(25)
-    expect(group.children.length).toBeGreaterThan(4) // sanity: buckets exist
-    // Instance counts add up to the full population — nothing dropped.
+    expect(group.children.length).toBeLessThanOrEqual(50)
+    expect(group.children.length).toBeGreaterThan(8) // sanity: buckets exist
+    // Instance counts add up to TWICE the population (both copies carry all).
     const instances = group.children.reduce(
       (sum, child) =>
         sum +
@@ -69,10 +70,10 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
           : 0),
       0,
     )
-    expect(instances).toBe(10_500)
-    // X-ray mode only moves layers — the mesh census is identical.
+    expect(instances).toBe(2 * 10_500)
+    // Solid mode: one mesh per bucket, exactly half the X-ray census.
     const solidOnly = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), false)
-    expect(solidOnly.children.length).toBe(group.children.length)
+    expect(solidOnly.children.length).toBe(group.children.length / 2)
   })
 
   test('bucket count saturates — growing the population adds zero draw calls', () => {
@@ -83,26 +84,30 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(doubled).toBe(saturated)
   })
 
-  test('X-ray rides the host OVERLAY layer — members always depth-test, no render hacks', () => {
+  test('X-ray = solid scene copy + ghost overlay copy — always depth-tested, no render hacks', () => {
     // Round-2 user reports: with depth tricks on the members themselves, a
     // footing painted over nearer studs, then far stud tops read through the
     // top plate. Members must occlude each other naturally in BOTH modes.
     //
-    // See-through comes from the host's own overlay pass (layer 1): the
-    // editor's post-processing pipeline renders that layer into a separate
-    // target with a freshly cleared depth buffer and composites it on top of
-    // the finished scene. Everything else was tried against the WebGPU
-    // pipeline and failed — renderer.clearDepth() poisoned the pass, an
-    // inverted depth-wipe box never landed its depthWrite (members stayed
-    // hidden inside walls), and transparent-list membership lost to the MRT
-    // scene pass. No sentinel meshes, no material tricks: layer only.
+    // Round-11 regression: overlay-ONLY members painted over a tree standing
+    // in front of the house (the overlay pass composites over the finished
+    // scene with no scene-depth test). The X-ray is therefore two copies:
+    //  - SOLID on the scene layer (0): occluded by trees like real geometry;
+    //  - GHOST on the host overlay layer (1) at partial opacity: shows
+    //    through walls, blends invisibly where the solid copy already shows.
+    // Everything else was tried against the WebGPU pipeline and failed —
+    // clearDepth() poisoned the pass, an inverted depth-wipe box never
+    // landed its depthWrite, transparent-list membership lost to the MRT
+    // scene pass. No sentinel meshes: layers + opacity only.
     type MeshLike = {
       isInstancedMesh?: boolean
+      castShadow: boolean
       layers: { mask: number }
       material: {
         depthTest: boolean
         depthWrite: boolean
         transparent: boolean
+        opacity: number
         colorWrite: boolean
       }
       renderOrder: number
@@ -112,19 +117,30 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     const SCENE_MASK = 1 << 0 // default layer 0
     const xray = buildGroup(synthesizeMembers(100), [], true)
     const meshes = xray.children as unknown as MeshLike[]
-    expect(meshes.length).toBeGreaterThan(0)
+    const solids = meshes.filter((m) => m.layers.mask === SCENE_MASK)
+    const ghosts = meshes.filter((m) => m.layers.mask === OVERLAY_MASK)
+    expect(solids.length).toBeGreaterThan(0)
+    expect(ghosts.length).toBe(solids.length) // one ghost per bucket
     for (const m of meshes) {
       expect(m.isInstancedMesh).toBe(true) // members only — no sentinels
-      expect(m.layers.mask).toBe(OVERLAY_MASK) // the host overlay pass
       expect(m.material.depthTest).toBe(true) // natural near-hides-far
       expect(m.material.depthWrite).toBe(true) // member-vs-member occlusion
-      expect(m.material.transparent).toBe(false) // plain opaque draw
       expect(m.material.colorWrite).toBe(true)
       expect(m.renderOrder).toBe(0) // gizmos/handles keep drawing above
       // no custom render hooks — WebGPU-safe
       expect(m.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
     }
-    // X-ray off: members are ordinary scene-layer geometry
+    for (const m of solids) {
+      expect(m.material.transparent).toBe(false) // plain opaque draw
+      expect(m.castShadow).toBe(true)
+    }
+    for (const m of ghosts) {
+      expect(m.material.transparent).toBe(true) // partial-opacity ghost
+      expect(m.material.opacity).toBeGreaterThan(0.2)
+      expect(m.material.opacity).toBeLessThan(0.8)
+      expect(m.castShadow).toBe(false) // one shadow per member, not two
+    }
+    // X-ray off: members are ordinary scene-layer geometry, no ghosts
     const off = buildGroup(synthesizeMembers(100), [], false)
     for (const m of off.children as unknown as MeshLike[]) {
       expect(m.isInstancedMesh).toBe(true)
