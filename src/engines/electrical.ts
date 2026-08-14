@@ -669,8 +669,11 @@ export function buildWallGraph(walls: WallSlice[]): Map<string, Junction[]> {
         )
         const q = wallPlan({ wall: other, u: proj })
         if (Math.hypot(q[0] - p[0], q[1] - p[1]) > JUNCTION_TOL) continue
-        add({ wall, u: endU }, { wall: other, u: proj })
-        add({ wall: other, u: proj }, { wall, u: endU })
+        // A tee landing inside a door RO would end a drill leg in the
+        // doorway — snap the junction into the adjacent stud bay.
+        const safeProj = clearOfDoors(other, proj)
+        add({ wall, u: endU }, { wall: other, u: safeProj })
+        add({ wall: other, u: safeProj }, { wall, u: endU })
       }
     }
   }

@@ -433,3 +433,125 @@ describe('frameFloor — sisters split at stair holes (round-4 counterexample)',
     expect(bridging.flag).toContain('R502.10')
   })
 })
+
+describe('frameFloor — girders respect stair holes (round-5 counterexample)', () => {
+  // 6×9 slab needs the mid-span girder at x=3; the stairwell straddles it.
+  const hole: [number, number][] = [
+    [2.5, 4],
+    [3.5, 4],
+    [3.5, 6],
+    [2.5, 6],
+  ]
+  const members = frameFloor([slab(rect(6, 9), { holes: [hole] })], [], {
+    ...DEFAULT_SPEC,
+    detail: '400',
+  })
+
+  test('the girder is split at the hole — no segment crosses the opening', () => {
+    const girders = byRole(members, 'girder')
+    expect(girders.length).toBeGreaterThanOrEqual(2)
+    for (const g of girders) {
+      const half = g.length / 2
+      const lo = (g.position[2] as number) - half
+      const hi = (g.position[2] as number) + half
+      expect(hi <= 4 + 1e-6 || lo >= 6 - 1e-6).toBe(true)
+    }
+    // cut ends hang at the stair trimmers
+    const gHangers = byRole(members, 'hanger').filter((h) => h.label?.includes('girder'))
+    expect(gHangers.length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('no posts land inside the opening; zero flags on the fixed geometry', () => {
+    for (const p of byRole(members, 'post')) {
+      const z = p.position[2] as number
+      expect(z <= 4 + 1e-6 || z >= 6 - 1e-6).toBe(true)
+    }
+    expect(members.filter((m) => m.flag?.includes('crosses a floor opening'))).toHaveLength(0)
+  })
+
+  test('the validator FLAGS an injected hole-crossing girder (falsifiable)', () => {
+    const bad: Member = {
+      system: 'floor-framing',
+      role: 'girder',
+      size: '4x10',
+      dims: [0.089, 0.235, 9],
+      length: 9,
+      position: [3, -0.15, 4.5],
+      rotation: [0, -Math.PI / 2, 0],
+      material: 'engineered',
+      sourceId: 'slab_test',
+    }
+    validateJoistBearing([bad], rect(6, 9), 'x', [], [{ run: [2.5, 3.5], cross: [4, 6] }])
+    expect(bad.flag).toContain('Girder crosses a floor opening')
+  })
+
+  test('PARTIAL joist overlap is flagged too (end at the header face)', () => {
+    const partial: Member = {
+      system: 'floor-framing',
+      role: 'joist',
+      size: '2x8',
+      dims: [2.5, 0.184, T],
+      length: 2.5,
+      position: [2.75, -0.1, 5], // spans x ∈ [1.5, 4.0] over hole run [2.5, 3.5]
+      rotation: [0, 0, 0],
+      material: 'lumber',
+      sourceId: 'slab_test',
+    }
+    validateJoistBearing([partial], rect(6, 9), 'x', [], [{ run: [2.5, 3.5], cross: [4, 6] }])
+    expect(partial.flag).toContain('crosses a floor opening')
+  })
+})
+
+describe('frameFloor — round-5 seam cases (hanger window, orphan hangers)', () => {
+  test('a wall 1cm below the hole high edge still splits WITH hangers', () => {
+    // 5×7 slab, hole x[1,3]×z[2,3]; wall at z = 3 - 0.01 → sister at 3.028,
+    // inside the widened ±t band → split + hangers (was the 19mm window).
+    const hole: [number, number][] = [
+      [1, 2],
+      [3, 2],
+      [3, 3],
+      [1, 3],
+    ]
+    const wall = bearingWall('w_seam', [0.5, 2.99], [4.5, 2.99])
+    const members = frameFloor([slab(rect(5, 7), { holes: [hole] })], [wall], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
+    for (const s of sisters) {
+      const lo = (s.position[0] as number) - s.dims[0] / 2
+      const hi = (s.position[0] as number) + s.dims[0] / 2
+      expect(hi <= 1 + 1e-6 || lo >= 3 - 1e-6).toBe(true)
+    }
+    const sisterHangers = byRole(members, 'hanger').filter(
+      (h) => Math.abs((h.position[2] as number) - (2.99 + T)) < 1e-6,
+    )
+    expect(sisterHangers.length).toBe(2)
+    expect(members.filter((m) => m.flag)).toHaveLength(0)
+  })
+
+  test('a hole hugging the rim leaves no orphan hangers and no header outside the slab', () => {
+    // hole 10cm from the x=0 edge: the left joist sliver is dropped — the
+    // left-side hangers and any header ply past the polygon must vanish.
+    const hole: [number, number][] = [
+      [0.1, 2],
+      [1.1, 2],
+      [1.1, 3.4],
+      [0.1, 3.4],
+    ]
+    const members = frameFloor([slab(rect(4, 6), { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    // no hanger at the left cut line (sliver side), hangers remain on the right
+    const leftHangers = byRole(members, 'hanger').filter(
+      (h) => Math.abs((h.position[0] as number) - 0.1) < 1e-6,
+    )
+    expect(leftHangers).toHaveLength(0)
+    // every header ply sits inside the slab
+    for (const h of byRole(members, 'header')) {
+      expect(h.position[0] as number).toBeGreaterThanOrEqual(0)
+      expect(h.position[0] as number).toBeLessThanOrEqual(4)
+    }
+  })
+})

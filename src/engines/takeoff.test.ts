@@ -705,6 +705,7 @@ describe('MEP fittings — elbows at each bend, boots, collars', () => {
         dims: [2, 0.2032, 0.3556], // 14×8
         length: 2,
         sourceId: 'r_equip',
+        label: 'Trunk 14×8" — 1000 cfm',
       })
     const branchLeg = (room: string) =>
       mem({
@@ -715,6 +716,7 @@ describe('MEP fittings — elbows at each bend, boots, collars', () => {
         dims: [1.5, 0.1524, 0.1524], // 6" round
         length: 1.5,
         sourceId: room,
+        label: '6" branch — 120 cfm',
       })
     const rows = computeTakeoff(
       [trunkLeg(0), trunkLeg(1), branchLeg('r_bed'), branchLeg('r_kitchen')],
@@ -768,8 +770,8 @@ describe('fastener gauges split per the R602.3(1) schedule', () => {
   })
 })
 
-describe('trunk reducers pinned (round-4 advisory: deletable row)', () => {
-  test('a stepped trunk chain books one reducer per size change', () => {
+describe('trunk reducers pinned (round-4/5: label-contract classification)', () => {
+  test('a stepped trunk books one reducer per size change — even at the square 8" tail', () => {
     const trunkLeg = (w: number) =>
       mem({
         system: 'hvac' as const,
@@ -779,13 +781,15 @@ describe('trunk reducers pinned (round-4 advisory: deletable row)', () => {
         dims: [2, 0.2032, w * 0.0254],
         length: 2,
         sourceId: 'r_equip',
+        label: `Trunk ${w}×8" — cfm`,
       })
     const rows = computeTakeoff(
-      [trunkLeg(14), trunkLeg(12), trunkLeg(8)], // 14×8 → 12×8 → 8×8… wait 8×8 is square
+      // 14×8 → 12×8 → 8×8: the square tail is STILL a trunk (round-5 —
+      // shape-based classification misread it as a round branch)
+      [trunkLeg(14), trunkLeg(12), trunkLeg(8)],
       [fixture('register', { system: 'hvac' })],
     )
-    // 14×8 and 12×8 are rect; 8×8 counts as a round branch — 2 rect sizes → 1 reducer
-    expect(find(rows, 'Trunk reducers')?.quantity).toBe(1)
+    expect(find(rows, 'Trunk reducers')?.quantity).toBe(2)
     expect(find(rows, 'Trunk reducers')?.section).toBe('HVAC')
   })
 })

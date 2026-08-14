@@ -506,33 +506,30 @@ export function computeTakeoff(
     push(row.section, row.item, 'elbows at bends (est.)', row.count, 'pcs')
   }
   // Register boots (one per supply register) + takeoff collars (one per
-  // branch tap = per distinct round-duct chain) — counted from fixtures and
-  // chain topology, never labels.
+  // branch tap) + trunk reducers. Trunk vs branch is decided by the hvac
+  // engine's own member-naming contract ('Trunk…' / '…branch…' label
+  // prefixes) rather than cross-section shape — a trunk stepping down to
+  // the square 8" minimum is still a trunk (round-5 finding: shape-based
+  // classification booked it as a branch, undercounting reducers).
   const registerCount = fixtures.filter((f) => f.kind === 'register').length
   if (registerCount > 0) {
     push('HVAC', 'Register boots', 'one per supply register', registerCount, 'pcs')
     const branchChains = new Set<string>()
-    for (const m of members) {
-      if (m.role !== 'duct-run') continue
-      const w = Math.round(m.dims[2] / 0.0254)
-      const h = Math.round(m.dims[1] / 0.0254)
-      if (w === h) branchChains.add(m.sourceId) // round duct = branch run
-    }
-    if (branchChains.size > 0) {
-      push('HVAC', 'Takeoff collars', 'one per trunk branch tap', branchChains.size, 'pcs')
-    }
-    // Trunk reducers: the trunk steps its cross-section down after each
-    // takeoff — every distinct rectangular size beyond the first within one
-    // trunk chain is a reducer fitting (round-3 advisory: never counted).
     const trunkSizes = new Map<string, Set<string>>()
     for (const m of members) {
       if (m.role !== 'duct-run') continue
       const w = Math.round(m.dims[2] / 0.0254)
       const h = Math.round(m.dims[1] / 0.0254)
-      if (w === h) continue // round branch, not trunk
-      const sizes = trunkSizes.get(m.sourceId) ?? new Set<string>()
-      sizes.add(`${w}x${h}`)
-      trunkSizes.set(m.sourceId, sizes)
+      if (m.label?.startsWith('Trunk')) {
+        const sizes = trunkSizes.get(m.sourceId) ?? new Set<string>()
+        sizes.add(`${w}x${h}`)
+        trunkSizes.set(m.sourceId, sizes)
+      } else if (m.label?.includes('branch')) {
+        branchChains.add(m.sourceId)
+      }
+    }
+    if (branchChains.size > 0) {
+      push('HVAC', 'Takeoff collars', 'one per trunk branch tap', branchChains.size, 'pcs')
     }
     let reducers = 0
     for (const sizes of trunkSizes.values()) reducers += Math.max(0, sizes.size - 1)
