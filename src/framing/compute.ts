@@ -10,6 +10,7 @@ import type { Fixture, Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { extractLevels, extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
 import { cmuWalls } from '../engines/cmu'
+import { layoutWallLayers } from '../engines/wall-layers'
 import { layoutElectrical, routeWiring } from '../engines/electrical'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
@@ -133,6 +134,10 @@ function computeLevelUncached(
       else framed.push(wall)
     }
     members.push(...frameWalls(framed, spec))
+    // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
+    // face, jurisdiction-defaulted cladding + climate labels. The renderer's
+    // dollhouse cut hides the camera-facing stacks.
+    members.push(...layoutWallLayers(framed, activeRooms, spec, code))
     members.push(...cmuWalls(masonry, spec))
   }
 

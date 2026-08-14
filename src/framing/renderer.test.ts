@@ -61,7 +61,10 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), true)
     expect(group.children.length).toBeLessThanOrEqual(50)
     expect(group.children.length).toBeGreaterThan(8) // sanity: buckets exist
-    // Instance counts add up to TWICE the population (both copies carry all).
+    // Round 13: ghosts exist ONLY for below-grade systems (foundation,
+    // floor framing) — the dollhouse cut reveals everything else through
+    // the opened near faces. The synthetic mix is wall-framing, so every
+    // instance is a single solid copy.
     const instances = group.children.reduce(
       (sum, child) =>
         sum +
@@ -70,10 +73,10 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
           : 0),
       0,
     )
-    expect(instances).toBe(2 * 10_500)
-    // Solid mode: one mesh per bucket, exactly half the X-ray census.
+    expect(instances).toBe(10_500)
+    // Solid mode: identical census for an above-grade population.
     const solidOnly = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), false)
-    expect(solidOnly.children.length).toBe(group.children.length / 2)
+    expect(solidOnly.children.length).toBe(group.children.length)
   })
 
   test('bucket count saturates — growing the population adds zero draw calls', () => {
@@ -115,12 +118,37 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     }
     const OVERLAY_MASK = 1 << 1 // host OVERLAY_LAYER = 1
     const SCENE_MASK = 1 << 0 // default layer 0
-    const xray = buildGroup(synthesizeMembers(100), [], true)
+    // Below-grade members ghost; above-grade members are dollhouse-solid.
+    const belowGrade = synthesizeMembers(100).map((m) => ({
+      ...m,
+      system: 'foundation' as const,
+    }))
+    const xray = buildGroup(belowGrade, [], true)
     const meshes = xray.children as unknown as MeshLike[]
     const solids = meshes.filter((m) => m.layers.mask === SCENE_MASK)
     const ghosts = meshes.filter((m) => m.layers.mask === OVERLAY_MASK)
     expect(solids.length).toBeGreaterThan(0)
-    expect(ghosts.length).toBe(solids.length) // one ghost per bucket
+    expect(ghosts.length).toBe(solids.length) // one ghost per below-grade bucket
+    // Above-grade (wall framing) buckets never ghost — the near faces OPEN.
+    const aboveGrade = buildGroup(synthesizeMembers(100), [], true)
+    const aboveGhosts = (aboveGrade.children as unknown as MeshLike[]).filter(
+      (m) => m.layers.mask === OVERLAY_MASK,
+    )
+    expect(aboveGhosts).toHaveLength(0)
+    // Assembly layers carry their face normal for the dollhouse cut.
+    const layered = buildGroup(
+      [
+        {
+          ...synthesizeMembers(1)[0]!,
+          role: 'drywall' as const,
+          face: [0, 1] as const,
+        },
+      ],
+      [],
+      true,
+    )
+    const faceMesh = layered.children[0] as unknown as { userData: { face?: readonly [number, number] } }
+    expect(faceMesh.userData.face).toEqual([0, 1])
     for (const m of meshes) {
       expect(m.isInstancedMesh).toBe(true) // members only — no sentinels
       expect(m.material.depthTest).toBe(true) // natural near-hides-far

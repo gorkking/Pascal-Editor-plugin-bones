@@ -68,6 +68,12 @@ export type MemberRole =
   | 'fascia'
   | 'fire-blocking'
   | 'backing'
+  // wall assembly layers (round 13)
+  | 'drywall'
+  | 'sheathing'
+  | 'wrb'
+  | 'cladding'
+  | 'insulation'
 
 export type MemberMaterial =
   | 'lumber'
@@ -116,6 +122,12 @@ export type Member = {
    * Dedicated field so the grout takeoff never keys off label strings.
    */
   grouted?: boolean
+  /**
+   * Outward plan normal of the wall FACE a finish layer belongs to —
+   * drives the dollhouse cut (camera-facing layers hide). Only assembly
+   * layers carry it.
+   */
+  face?: readonly [number, number]
 }
 
 /** Electrical / plumbing / HVAC device the engines placed. */

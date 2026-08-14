@@ -1,6 +1,7 @@
 'use client'
 
 import { useRegistry, useScene } from '@pascal-app/core'
+import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
   BoxGeometry,
@@ -31,6 +32,18 @@ function colorOf(member: Member): string {
   // as its zone in the building exactly like on the exported plan.
   if (member.system === 'electrical' && member.role === 'wire-run') {
     return circuitColor(member.sourceId)
+  }
+  switch (member.role) {
+    case 'drywall':
+      return '#ece7de'
+    case 'sheathing':
+      return '#c8a262'
+    case 'wrb':
+      return '#4f7d8c'
+    case 'cladding':
+      return '#aebfc7'
+    default:
+      break
   }
   switch (member.material) {
     case 'concrete':
@@ -83,30 +96,57 @@ function fixtureBox(fixture: Fixture): { dims: [number, number, number]; color: 
   return { dims: [inches(3), inches(4.5), inches(2.5)], color }
 }
 
-type Bucket = { color: string; entries: { dims: readonly [number, number, number]; position: readonly [number, number, number]; rotation: readonly [number, number, number] }[] }
+type Bucket = {
+  color: string
+  entries: {
+    dims: readonly [number, number, number]
+    position: readonly [number, number, number]
+    rotation: readonly [number, number, number]
+  }[]
+  /** Assembly-layer face normal — the dollhouse cut hides camera-facing buckets. */
+  face?: readonly [number, number]
+  /** No overlay ghost for this bucket. */
+  ghostless?: boolean
+}
 
 export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: boolean): Group {
   const buckets = new Map<string, Bucket>()
   const push = (
+    key: string,
     color: string,
     dims: readonly [number, number, number],
     position: readonly [number, number, number],
     rotation: readonly [number, number, number],
+    face?: readonly [number, number],
+    ghostless?: boolean,
   ) => {
-    let bucket = buckets.get(color)
+    let bucket = buckets.get(key)
     if (!bucket) {
-      bucket = { color, entries: [] }
-      buckets.set(color, bucket)
+      bucket = { color, entries: [], face, ghostless }
+      buckets.set(key, bucket)
     }
     bucket.entries.push({ dims, position, rotation })
   }
 
   for (const member of members) {
-    push(colorOf(member), member.dims, member.position, member.rotation)
+    const color = colorOf(member)
+    if (member.face) {
+      // Assembly layers: bucket PER FACE NORMAL (quantized) so the
+      // dollhouse cut can hide camera-facing stacks as whole meshes.
+      const key = `${color}|${member.face[0].toFixed(2)},${member.face[1].toFixed(2)}`
+      push(key, color, member.dims, member.position, member.rotation, member.face, true)
+      continue
+    }
+    // Ghost copies only make sense where no dollhouse opening can reveal
+    // the members: below grade / under the floor. Wall, roof and MEP
+    // members read through the OPENED near faces instead — ghosting them
+    // made every wall look transparent (round-13 user report).
+    const ghostless = member.system !== 'foundation' && member.system !== 'floor-framing'
+    push(`${color}|${ghostless ? 'solid' : 'ghosted'}`, color, member.dims, member.position, member.rotation, undefined, ghostless)
   }
   for (const fixture of fixtures) {
     const { dims, color } = fixtureBox(fixture)
-    push(color, dims, fixture.position, [0, fixture.rotationY, 0])
+    push(`${color}|fixture`, color, dims, fixture.position, [0, fixture.rotationY, 0], undefined, true)
   }
 
   const group = new Group()
@@ -157,8 +197,9 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
       new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 }),
       bucket.entries.length,
     )
+    if (bucket.face) solid.userData.face = bucket.face
     const meshes = [solid]
-    if (seeThrough) {
+    if (seeThrough && !bucket.ghostless) {
       const ghostMaterial = new MeshStandardMaterial({
         color: bucket.color,
         roughness: 0.82,
@@ -210,6 +251,7 @@ function disposeGroup(group: Group) {
 
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   const ref = useRef<Group>(null!)
+  const viewDir = useRef(new Vector3())
   useRegistry(node.id, node.type, ref)
 
   // Any scene edit re-derives the skeleton — that's the contract (never stale).
@@ -224,6 +266,21 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     [result, node.seeThrough],
   )
   useEffect(() => () => disposeGroup(group), [group])
+
+  // Dollhouse cut (round 13): assembly-layer buckets carry their face
+  // normal — hide the stacks whose face points TOWARD the camera so you
+  // look INTO the cavity and see the far side's drywall as the backdrop.
+  // The wall is never transparent; the near face is simply removed.
+  useFrame(({ camera }) => {
+    if (node.seeThrough === false) return
+    const dir = camera.getWorldDirection(viewDir.current)
+    for (const child of group.children) {
+      const face = (child.userData as { face?: readonly [number, number] }).face
+      if (!face) continue
+      // face normal · view direction > 0 → face points away → keep it
+      child.visible = face[0] * dir.x + face[1] * dir.z > 0.02
+    }
+  })
 
   if (!node.visible) return null
   return (
