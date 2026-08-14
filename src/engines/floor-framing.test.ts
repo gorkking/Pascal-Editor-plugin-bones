@@ -147,20 +147,31 @@ describe('frameFloor — L-shaped slab clips joists', () => {
   ]
   const members = frameFloor([slab(L)])
 
-  test('rows past the notch lose their second segment (girder splits the rest)', () => {
+  test('rows past the notch land ON the notch rim; the girder stops at the notch', () => {
     const joists = byRole(members, 'joist')
     // 6x6 bbox tie → runAxis 'x'; rows along z. The 6m span needs a flush
-    // girder at x=3, so full-width rows split into two segments; rows past
-    // the notch (z>3) only span x∈[0,3] and keep a single segment.
+    // girder at x=3 — but the girder line is COLLINEAR with the notch edge,
+    // so the girder only exists where slab lies on BOTH sides (z<3). Rows
+    // past the notch (z>3) span x∈[0,3] untouched, bearing on the rim —
+    // never cut back to a girder that is not there (round-7: the old
+    // version of this test pinned the buggy winding-dependent behavior).
     const beforeRows = new Set(
       joists.filter((j) => (j.position[2] as number) < 3).map((j) => (j.position[2] as number).toFixed(4)),
     )
     const before = joists.filter((j) => (j.position[2] as number) < 3)
-    const after = joists.filter((j) => (j.position[2] as number) > 3)
+    const after = joists.filter(
+      (j) => (j.position[2] as number) > 3 && !j.label?.includes('trimmer'),
+    )
     expect(before.length).toBeGreaterThan(beforeRows.size) // ≥2 segments per full row
-    // after-notch rows: single segment ending at the girder cut (≈3 − gt/2)
-    const gt = 3.5 * 0.0254
-    expect(Math.max(...after.map((j) => j.length))).toBeCloseTo(3 - gt / 2, 2)
+    // after-notch rows: single full segment ending exactly at the rim x=3
+    expect(Math.max(...after.map((j) => j.length))).toBeCloseTo(3, 5)
+    for (const j of after) {
+      expect((j.position[0] as number) + j.dims[0] / 2).toBeLessThanOrEqual(3 + 1e-6)
+    }
+    // the girder never protrudes into the notch band
+    for (const g of byRole(members, 'girder')) {
+      expect((g.position[2] as number) + g.length / 2).toBeLessThanOrEqual(3 + 1e-6)
+    }
     // rims follow all 6 edges
     expect(byRole(members, 'rim-joist')).toHaveLength(6)
   })
@@ -628,7 +639,9 @@ describe('frameFloor — girder presence (round-6 counterexamples)', () => {
     for (const h of byRole(members, 'hanger')) {
       const hx = h.position[0] as number
       const hz = h.position[2] as number
-      const attached = joistEnds.some(([ex, ez]) => Math.hypot(ex - hx, ez - hz) < 0.15)
+      // 2.5cm radius: face-adjacent orphans must FAIL this (round-7 found a
+      // header hanger 94mm from any end hiding inside the old 15cm radius)
+      const attached = joistEnds.some(([ex, ez]) => Math.hypot(ex - hx, ez - hz) < 0.025)
       expect(attached).toBe(true)
     }
   })
@@ -703,5 +716,176 @@ describe('frameFloor — girder presence (round-6 counterexamples)', () => {
     const members = frameFloor([slab(rect(6, 9))], [], { ...DEFAULT_SPEC, detail: '400' })
     expect(byRole(members, 'girder').length).toBeGreaterThan(0)
     expect(byRole(members, 'blocking')).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round-7: winding invariance + hole-matrix edges
+// ---------------------------------------------------------------------------
+
+describe('frameFloor — winding-invariant girder presence (round-7)', () => {
+  const L: [number, number][] = [
+    [0, 0],
+    [6, 0],
+    [6, 9],
+    [3, 9],
+    [3, 5],
+    [0, 5],
+  ]
+
+  test('reversing the polygon winding changes NOTHING', () => {
+    const spec400 = { ...DEFAULT_SPEC, detail: '400' as const }
+    const a = frameFloor([slab(L)], [], spec400)
+    const b = frameFloor([slab([...L].reverse() as [number, number][])], [], spec400)
+    // same member population, same girder extents, zero flags both ways
+    expect(b.length).toBe(a.length)
+    const girderExtent = (ms: Member[]) =>
+      byRole(ms, 'girder')
+        .map((g) => `${((g.position[2] as number) - g.length / 2).toFixed(4)}:${((g.position[2] as number) + g.length / 2).toFixed(4)}`)
+        .sort()
+    expect(girderExtent(b)).toEqual(girderExtent(a))
+    // (the girder's own 'verify with span/load design' advisory is by design)
+    const defects = (ms: Member[]) =>
+      ms.filter((m) => m.flag && !m.flag.includes('verify with span/load'))
+    expect(defects(a)).toHaveLength(0)
+    expect(defects(b)).toHaveLength(0)
+    // wing rows land on the rim under BOTH windings
+    for (const ms of [a, b]) {
+      const wing = byRole(ms, 'joist').filter(
+        (j) => (j.position[2] as number) > 5 && !j.label?.includes('trimmer') && !j.label?.includes('Sistered'),
+      )
+      for (const j of wing) {
+        expect((j.position[0] as number) - j.dims[0] / 2).toBeCloseTo(3, 5)
+      }
+    }
+  })
+})
+
+describe('frameFloor — hole-matrix edge cases (round-7)', () => {
+  test('a hole starting 6mm past the girder face: hanger at the face, no orphans', () => {
+    // 6×9 slab, girder faces at 3±0.0445; hole run starts at 3.05.
+    const hole: [number, number][] = [
+      [3.05, 4],
+      [4.2, 4],
+      [4.2, 5.5],
+      [3.05, 5.5],
+    ]
+    const members = frameFloor([slab(rect(6, 9), { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const gt = 3.5 * 0.0254
+    // rows in the hole band: the piece between girder face and hole is a
+    // dropped sliver — the left piece must end at the girder face WITH a
+    // hanger, and there must be NO hanger at the hole's near face
+    const bandHangers = byRole(members, 'hanger').filter(
+      (h) => (h.position[2] as number) > 4 && (h.position[2] as number) < 5.5,
+    )
+    expect(bandHangers.length).toBeGreaterThan(0)
+    for (const h of bandHangers) {
+      const x = h.position[0] as number
+      expect(Math.abs(x - 3.05) > 1e-6).toBe(true) // no orphan at the near face
+    }
+    // and every hanger attaches to a member end within 2.5cm
+    const ends: [number, number][] = []
+    for (const j of members.filter((m) => m.role === 'joist' || m.role === 'girder')) {
+      const half = j.length / 2
+      if (Math.abs(Math.cos(j.rotation[1] as number)) > 0.5) {
+        ends.push(
+          [(j.position[0] as number) - half, j.position[2] as number],
+          [(j.position[0] as number) + half, j.position[2] as number],
+        )
+      } else {
+        ends.push(
+          [j.position[0] as number, (j.position[2] as number) - half],
+          [j.position[0] as number, (j.position[2] as number) + half],
+        )
+      }
+    }
+    for (const h of byRole(members, 'hanger')) {
+      const attached = ends.some(
+        ([ex, ez]) =>
+          Math.hypot(ex - (h.position[0] as number), ez - (h.position[2] as number)) < 0.025,
+      )
+      expect(attached).toBe(true)
+    }
+  })
+
+  test('twin girder-straddling holes 10cm apart: no over-span lumber, no interpenetrating plies', () => {
+    const holes: [number, number][][] = [
+      [
+        [2.5, 3],
+        [3.5, 3],
+        [3.5, 4],
+        [2.5, 4],
+      ],
+      [
+        [2.5, 4.1],
+        [3.5, 4.1],
+        [3.5, 5.1],
+        [2.5, 5.1],
+      ],
+    ]
+    const members = frameFloor([slab(rect(6, 9), { holes })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    // no unflagged member may exceed its table span (the round-7 6m trimmers)
+    const allowable = DEFAULT_SPEC.joistSpans['2x8'] ?? 0
+    for (const j of byRole(members, 'joist')) {
+      if (j.dims[0] > allowable + 0.03) {
+        expect(j.flag).toBeDefined()
+      }
+    }
+    // trimmer lines at least one stud thickness apart
+    const T2 = 1.5 * 0.0254
+    const lines = [
+      ...new Set(
+        byRole(members, 'joist')
+          .filter((j) => j.label?.includes('trimmer'))
+          .map((j) => Number((j.position[2] as number).toFixed(6))),
+      ),
+    ].sort((a, b) => a - b)
+    for (let i = 1; i < lines.length; i++) {
+      expect((lines[i] as number) - (lines[i - 1] as number)).toBeGreaterThanOrEqual(T2 - 1e-9)
+    }
+  })
+
+  test('diagonally-adjacent holes: trimmers of one never cross the other', () => {
+    const holes: [number, number][][] = [
+      [
+        [1, 2],
+        [2, 2],
+        [2, 3],
+        [1, 3],
+      ],
+      [
+        [2.1, 3.1],
+        [3.1, 3.1],
+        [3.1, 4.1],
+        [2.1, 4.1],
+      ],
+    ]
+    const members = frameFloor([slab(rect(4, 9), { holes })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    for (const tr of byRole(members, 'joist').filter((j) => j.label?.includes('trimmer'))) {
+      const z = tr.position[2] as number
+      const half = tr.dims[0] / 2
+      const lo = (tr.position[0] as number) - half
+      const hi = (tr.position[0] as number) + half
+      for (const hole of holes) {
+        const [x0, z0] = hole[0] as [number, number]
+        const [x1] = hole[1] as [number, number]
+        const z1 = (hole[2] as [number, number])[1]
+        if (z > z0 && z < z1) {
+          // inside this hole's cross band: must not overlap its run interior
+          const intrusion = Math.min(hi, x1 - 0.01) - Math.max(lo, x0 + 0.01)
+          expect(intrusion).toBeLessThanOrEqual(0.01)
+        }
+      }
+    }
+    expect(members.filter((m) => m.flag?.includes('crosses a floor opening'))).toHaveLength(0)
   })
 })
