@@ -340,7 +340,7 @@ export function computeTakeoff(
     if (m.material !== 'concrete') continue
     if (m.role === 'block') {
       blockCount += 1
-      if (m.label?.includes('grouted')) groutedCells += 1
+      if (m.grouted) groutedCells += 1
       continue
     }
     const section = SECTION_OF[m.system]

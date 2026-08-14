@@ -185,15 +185,19 @@ describe('cmuWall — solid 4m × 2.4m wall', () => {
     for (const b of blocks) expect(b.position[1] ?? 0).toBeLessThan(10 * H)
   })
 
-  test('cells holding a vertical bar are labeled grouted (4 per course, 40 total)', () => {
+  test('cells holding a vertical bar are marked grouted (4 per course, 40 total)', () => {
     // Bars land at 0.1016 / 1.3208 / 2.54 / 3.8984 → 4 grouted cells a course.
-    const grouted = blocks.filter((b) => b.label === 'grouted cell + vertical rebar')
+    const grouted = blocks.filter((b) => b.grouted)
     expect(grouted).toHaveLength(40)
+    // The dedicated field and the human label always travel together —
+    // takeoff keys off `grouted`, never the label string (round-10).
+    for (const b of grouted) expect(b.label).toBe('grouted cell + vertical rebar')
     for (let c = 0; c < 10; c++) {
       const row = course(members, c)
-      expect(row[0]?.label).toBe('grouted cell + vertical rebar')
-      expect(row[row.length - 1]?.label).toBe('grouted cell + vertical rebar')
-      // barless cells stay unlabeled — takeoff counts grouted cells by label
+      expect(row[0]?.grouted).toBe(true)
+      expect(row[row.length - 1]?.grouted).toBe(true)
+      // barless cells stay unmarked
+      expect(row[1]?.grouted).toBeUndefined()
       expect(row[1]?.label).toBeUndefined()
     }
   })

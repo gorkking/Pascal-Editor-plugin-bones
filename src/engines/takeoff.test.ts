@@ -610,13 +610,27 @@ describe('MEP linear feet + rebar/grout/mortar', () => {
       system: 'wall-framing',
       role: 'block',
       label: 'grouted cell + vertical rebar',
+      grouted: true,
     })
-    const rows = computeTakeoff([bar, bar, block, grouted], [])
+    // Label-only decoy: grout must key off the dedicated `grouted` field,
+    // never off label strings (round-10: label coupling broke on rewording).
+    const decoy = concrete([0.397, 0.194, 0.194], {
+      system: 'wall-framing',
+      role: 'block',
+      label: 'mentions grouted but is not',
+    })
+    const rows = computeTakeoff([bar, bar, block, grouted, decoy], [])
     const rebar = find(rows, 'Rebar')
     expect(rebar?.quantity).toBeCloseTo(14, 1)
     expect(rebar?.section).toBe('Wall framing')
-    expect(find(rows, 'Mortar (Type S)')?.quantity).toBe(1) // 2 blocks → 1 bag
+    expect(find(rows, 'Mortar (Type S)')?.quantity).toBe(1) // 3 blocks → 1 bag
     expect(find(rows, 'Grout')?.detail).toContain('1 reinforced cells')
+    // Numeric pin: 1 cell × 0.0085 m³ × 1.30795 yd³/m³ = 0.011 → floors at 0.1.
+    expect(find(rows, 'Grout')?.quantity).toBe(0.1)
+    expect(find(rows, 'Grout')?.unit).toBe('yd³')
+    // 100 cells: 100 × 0.0085 × 1.30795 = 1.11175 → rounds to 1.1 yd³.
+    const many = computeTakeoff(Array.from({ length: 100 }, () => grouted), [])
+    expect(find(many, 'Grout')?.quantity).toBeCloseTo(1.1, 5)
   })
 })
 

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member } from '../core/types'
-import { extractRoofs, frameRoofs, type RoofSegmentSlice } from './roof-framing'
+import { birdsmouthSeat, extractRoofs, frameRoofs, type RoofSegmentSlice } from './roof-framing'
 
 const byRole = (members: Member[], role: string): Member[] => members.filter((m) => m.role === role)
 
@@ -483,8 +483,10 @@ describe('frameRoofs — spec-driven sizing + cut data (LOD 400)', () => {
     const at400 = frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '400' })
     const rafter = byRole(at400, 'rafter').find((r) => !r.label?.includes('Barge')) as Member
     expect(rafter.label).toContain('plumb cut 40°')
-    expect(rafter.label).toContain('birdsmouth seat 3½"')
-    expect(rafter.label).toContain('HAP')
+    // 40° on a 2x6: the R802.7.1 d/4 cap governs the seat. Numeric pin:
+    // seat = (5.5/4)/tan40° = 1.64"; HAP = 5.5/cos40° − seat·tan40° = 5.8".
+    expect(rafter.label).toContain('birdsmouth seat 1.64"')
+    expect(rafter.label).toContain('HAP 5.8"')
     const cj = byRole(at400, 'ceiling-joist')[0] as Member
     expect(cj.label).toContain('rafter tie (R802.4.2)')
     const collar = byRole(at400, 'collar-tie')[0] as Member
@@ -492,6 +494,22 @@ describe('frameRoofs — spec-driven sizing + cut data (LOD 400)', () => {
     // 300 keeps the labels clean
     const at300 = frameRoofs([seg()], [], DEFAULT_SPEC)
     expect((byRole(at300, 'rafter')[0] as Member).label).not.toContain('HAP')
+  })
+
+  test('birdsmouth seat: full 3½" plate on shallow pitches, d/4-capped on steep (R802.7.1)', () => {
+    const d26 = 5.5 * 0.0254
+    // 15° on a 2x6: (d/4)/tanθ = 5.13" > 3.5" — the plate governs.
+    expect(birdsmouthSeat((15 * Math.PI) / 180, d26)).toBeCloseTo(3.5 * 0.0254, 6)
+    // Steep pitches: the vertical bite seat·tanθ never exceeds d/4.
+    for (const deg of [22, 30, 40, 50, 60]) {
+      const theta = (deg * Math.PI) / 180
+      const seat = birdsmouthSeat(theta, d26)
+      expect(seat * Math.tan(theta)).toBeLessThanOrEqual(d26 / 4 + 1e-12)
+      expect(seat).toBeGreaterThan(0)
+    }
+    // Continuity at the crossover (~21.5° for a 2x6): cap ≈ plate.
+    const cross = Math.atan(d26 / 4 / (3.5 * 0.0254))
+    expect(birdsmouthSeat(cross, d26)).toBeCloseTo(3.5 * 0.0254, 6)
   })
 })
 

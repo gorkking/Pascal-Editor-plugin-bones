@@ -104,6 +104,11 @@ export type Member = {
   label?: string
   /** Set when the prescriptive tables run out (engineered beam required). */
   flag?: string
+  /**
+   * Masonry unit whose cell is grouted solid (vertical rebar, R606.12).
+   * Dedicated field so the grout takeoff never keys off label strings.
+   */
+  grouted?: boolean
 }
 
 /** Electrical / plumbing / HVAC device the engines placed. */

@@ -6,6 +6,7 @@
  */
 
 export const LUMBER_SIZES = [
+  '1x8',
   '2x4',
   '2x6',
   '2x8',
@@ -25,6 +26,7 @@ const INCH = 0.0254
 
 /** Actual (dressed) cross-section per nominal size: [thickness, width] in meters. */
 export const LUMBER_CROSS_SECTIONS: Record<LumberSize, readonly [number, number]> = {
+  '1x8': [0.75 * INCH, 7.25 * INCH],
   '2x4': [1.5 * INCH, 3.5 * INCH],
   '2x6': [1.5 * INCH, 5.5 * INCH],
   '2x8': [1.5 * INCH, 7.25 * INCH],

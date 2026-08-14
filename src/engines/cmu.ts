@@ -276,6 +276,7 @@ export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}
     cellBottom: number,
     cellHeight: number,
     label?: string,
+    grouted?: boolean,
   ): void => {
     // Shrink 3/8" in length and height, centered in the nominal cell, so a
     // half-joint of visual gap surrounds every unit (reads as mortar).
@@ -295,6 +296,7 @@ export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}
       material: 'concrete',
       sourceId: wall.id,
       label,
+      grouted: grouted || undefined,
     })
   }
 
@@ -374,7 +376,14 @@ export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}
         const grouted = fab
           ? barUs.some((u) => u > piece.a + EPS && u < piece.b - EPS)
           : piece.a <= lo + EPS || piece.b >= hi - EPS
-        emit('block', piece, y0, COURSE_HEIGHT, grouted ? 'grouted cell + vertical rebar' : undefined)
+        emit(
+          'block',
+          piece,
+          y0,
+          COURSE_HEIGHT,
+          grouted ? 'grouted cell + vertical rebar' : undefined,
+          grouted,
+        )
       }
     }
   }

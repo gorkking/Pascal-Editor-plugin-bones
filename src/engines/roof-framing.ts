@@ -240,8 +240,7 @@ const MIN_RAKE_OVERHANG = 0.15
 /** Sub-fascia stock. */
 const FASCIA_SIZE: LumberSize = '2x6'
 /** Finish fascia board — 1x8 (3/4" × 7-1/4" actual), face-nailed over the sub. */
-const FINISH_FASCIA_T = inches(0.75)
-const FINISH_FASCIA_D = inches(7.25)
+const FINISH_FASCIA_SIZE: LumberSize = '1x8'
 
 /**
  * One eave edge = a 2x6 sub-fascia + a 1x8 FINISH fascia proud of its face
@@ -271,11 +270,12 @@ function fasciaPair(
     'lumber',
     `Sub-fascia ${FASCIA_SIZE}`,
   )
-  const out = Math.sign(cross) * (fT / 2 + FINISH_FASCIA_T / 2)
+  const [nT, nD] = LUMBER_CROSS_SECTIONS[FINISH_FASCIA_SIZE]
+  const out = Math.sign(cross) * (fT / 2 + nT / 2)
   emit(
     'fascia',
-    undefined,
-    [length, FINISH_FASCIA_D, FINISH_FASCIA_T],
+    FINISH_FASCIA_SIZE,
+    [length, nD, nT],
     at(cross + out),
     yaw,
     0,
@@ -287,16 +287,28 @@ function fasciaPair(
 
 /**
  * LOD 400 fabrication data for a common rafter: plumb-cut angle at the ridge,
- * birdsmouth seat (capped at the 2x4 plate width) and HAP — the height above
- * plate that survives after the seat cut (drives fascia lines).
+ * birdsmouth seat and HAP — the height above plate that survives after the
+ * seat cut (drives fascia lines).
+ *
+ * The seat wants the full 3½" plate, but R802.7.1 caps the notch: the
+ * heel's vertical bite (seat × tanθ) must not exceed d/4 of the rafter.
+ * Above ~21° on a 2x6 (or ~27° on a 2x8) the cap governs and the seat
+ * narrows — a fixed 3½" seat over-notched every steep roof.
  */
+export function birdsmouthSeat(theta: number, rafterDepth: number): number {
+  const full = inches(3.5)
+  const tan = Math.tan(theta)
+  if (tan <= 0) return full
+  return Math.min(full, rafterDepth / 4 / tan)
+}
+
 function rafterCutData(spec: FramingSpec, theta: number, rafterDepth: number): string {
   if (spec.detail !== '400') return ''
   const deg = Math.round((theta * 180) / Math.PI)
-  const seat = inches(3.5)
+  const seat = birdsmouthSeat(theta, rafterDepth)
   const plumbDepth = rafterDepth / Math.cos(theta)
   const hap = plumbDepth - seat * Math.tan(theta)
-  return ` — plumb cut ${deg}°, birdsmouth seat 3½", HAP ${formatIn(hap)}`
+  return ` — plumb cut ${deg}°, birdsmouth seat ${formatIn(seat)}, HAP ${formatIn(hap)}`
 }
 
 /** Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path). */
