@@ -316,3 +316,54 @@ describe('frameFloor — LOD 400 bearing flag actually FIRES (round-2 gap)', () 
     expect(flagged).toHaveLength(0)
   })
 })
+
+describe('frameFloor — hole bearings are confined to the hole cross band (round-3)', () => {
+  // The round-3 counterexample: a stair hole near one corner, a bearing
+  // wall far away. The old code treated the hole's run coordinates as
+  // bearing EVERYWHERE, clipping the sister to mid-air at x=1.5.
+  const hole: [number, number][] = [
+    [0.5, 0.5],
+    [1.5, 0.5],
+    [1.5, 1.5],
+    [0.5, 1.5],
+  ]
+  const wall = bearingWall('w_far', [0, 4], [4, 4])
+  const members = frameFloor([slab(rect(4, 6), { holes: [hole] })], [wall], {
+    ...DEFAULT_SPEC,
+    detail: '400',
+  })
+
+  test('the sister ignores the distant hole and spans edge to edge', () => {
+    const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
+    expect(sisters).toHaveLength(1)
+    const s = sisters[0] as Member
+    expect((s.position[0] as number) - s.dims[0] / 2).toBeCloseTo(0, 5)
+    expect((s.position[0] as number) + s.dims[0] / 2).toBeCloseTo(4, 5)
+  })
+
+  test('no joist anywhere carries an unsupported-end flag', () => {
+    expect(byRole(members, 'joist').filter((j) => j.flag)).toHaveLength(0)
+  })
+
+  test('the validator still accepts hole bearings INSIDE the band and rejects them outside', () => {
+    const mk = (cross: number): Member => ({
+      system: 'floor-framing',
+      role: 'joist',
+      size: '2x8',
+      dims: [1, 0.184, T],
+      length: 1,
+      position: [2, -0.1, cross], // spans x ∈ [1.5, 2.5]: left end at the hole run line
+      rotation: [0, 0, 0],
+      material: 'lumber',
+      sourceId: 'slab_test',
+    })
+    const inside = mk(1.0) // within the hole cross band [0.5, 1.5]
+    const outside = mk(4.0) // far outside
+    validateJoistBearing([inside, outside], rect(4, 6), 'x', [
+      { u: 1.5, cross: [0.5, 1.5] },
+      { u: 2.5, cross: [0.5, 1.5] },
+    ])
+    expect(inside.flag).toBeUndefined() // header bears it
+    expect(outside.flag).toContain('Unsupported') // no header out here
+  })
+})

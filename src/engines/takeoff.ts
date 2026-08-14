@@ -521,6 +521,24 @@ export function computeTakeoff(
     if (branchChains.size > 0) {
       push('HVAC', 'Takeoff collars', 'one per trunk branch tap', branchChains.size, 'pcs')
     }
+    // Trunk reducers: the trunk steps its cross-section down after each
+    // takeoff — every distinct rectangular size beyond the first within one
+    // trunk chain is a reducer fitting (round-3 advisory: never counted).
+    const trunkSizes = new Map<string, Set<string>>()
+    for (const m of members) {
+      if (m.role !== 'duct-run') continue
+      const w = Math.round(m.dims[2] / 0.0254)
+      const h = Math.round(m.dims[1] / 0.0254)
+      if (w === h) continue // round branch, not trunk
+      const sizes = trunkSizes.get(m.sourceId) ?? new Set<string>()
+      sizes.add(`${w}x${h}`)
+      trunkSizes.set(m.sourceId, sizes)
+    }
+    let reducers = 0
+    for (const sizes of trunkSizes.values()) reducers += Math.max(0, sizes.size - 1)
+    if (reducers > 0) {
+      push('HVAC', 'Trunk reducers', 'one per step-down in a trunk chain', reducers, 'pcs')
+    }
   }
 
   // ---- Electrical boxes by type (LOD 400) — derived from fixture kinds ----

@@ -447,3 +447,32 @@ describe('hvac — condensate slope rendered (round-2 advisory)', () => {
     }
   })
 })
+
+describe('hvac — return balance flag can FIRE (round-3: dead branch)', () => {
+  test('a big system outgrows the largest stock grille and gets flagged', () => {
+    // Two 30×8 halls: 480 m² ≈ 5166 ft² → 10.5 tons → 4200 cfm supply.
+    // The biggest stock grille (800 in²) only returns ~1600 cfm.
+    const big = [
+      room('r_h1', 'Hall A', 'other', [
+        [0, 0],
+        [30, 0],
+        [30, 8],
+        [0, 8],
+      ]),
+      room('r_h2', 'Hall B', 'other', [
+        [30, 0],
+        [60, 0],
+        [60, 8],
+        [30, 8],
+      ]),
+    ]
+    const { fixtures } = layoutHvac(exteriorPlan().walls, big)
+    const ret = byKind(fixtures, 'return')[0] as Fixture
+    expect(ret.meta?.grilleIn2).toBe(800) // capped at the catalog top
+    expect(ret.label).toContain('UNDERSIZED')
+    expect(ret.label).toContain('add a second return')
+    // and the normal-size plan stays clean
+    const normal = layoutHvac(exteriorPlan().walls, rooms)
+    expect((byKind(normal.fixtures, 'return')[0] as Fixture).label).not.toContain('UNDERSIZED')
+  })
+})

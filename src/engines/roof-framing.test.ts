@@ -549,3 +549,33 @@ describe('frameRoofs — hip jacks carry hurricane ties in high-wind specs', () 
     expect(ties.length).toBe(bearing)
   })
 })
+
+describe('frameRoofs — 400 cut-angle labels are pinned (round-3: deletable text)', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+
+  test('hip carries plumb + 45° side cuts; ridge lists the rafter plumb cut', () => {
+    const members = frameRoofs([seg({ roofType: 'hip' })], [], at400)
+    const hip = byRole(members, 'hip')[0] as Member
+    expect(hip.label).toContain('side cuts 45°')
+    expect(hip.label).toMatch(/plumb \d+°/)
+    const ridge = byRole(members, 'ridge')[0] as Member
+    expect(ridge.label).toContain('rafter plumb cuts 40°')
+  })
+
+  test('valley + valley jacks carry their cheek-cut call-outs', () => {
+    const major = seg()
+    const minor = seg({ id: 'wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const members = frameRoofs([major, minor], [], at400)
+    const valley = byRole(members, 'valley')[0] as Member
+    expect(valley.label).toContain('cheek cuts 45°')
+    expect(valley.label).toMatch(/plumb \d+°/)
+    const vjack = byRole(members, 'jack-rafter').find((j) => j.label?.includes('Valley jack')) as Member
+    expect(vjack.label).toContain('cheek 45°')
+  })
+
+  test('at 300 the fabrication cut data stays out of the labels', () => {
+    const members = frameRoofs([seg({ roofType: 'hip' })], [], DEFAULT_SPEC)
+    expect((byRole(members, 'hip')[0] as Member).label).not.toContain('side cuts')
+    expect((byRole(members, 'ridge')[0] as Member).label).not.toContain('plumb')
+  })
+})

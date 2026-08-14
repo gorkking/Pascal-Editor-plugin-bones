@@ -898,3 +898,26 @@ describe('routeWiring — LOD 400 wall-following homeruns + chains', () => {
     expect(routeWiring(fixtures.filter((f) => f.kind !== 'panel'), plan.walls)).toHaveLength(0)
   })
 })
+
+describe('door-less hallways get a switched control (round-3 advisory: untested)', () => {
+  test('a corridor without doors gains exactly one switch inside, on the lighting circuit', () => {
+    const north = makeWall({ id: 'w_n', start: [0, 2], end: [8, 2] })
+    const south = makeWall({ id: 'w_s', start: [0, 0], end: [8, 0], exterior: true })
+    const corridor = room('hallway', [
+      [0, 0],
+      [8, 0],
+      [8, 2],
+      [0, 2],
+    ], { id: 'room_corridor' })
+    const fixtures = layoutElectrical([north, south], [corridor])
+    const switches = ofKind(fixtures, 'switch').filter((s) =>
+      pointInPolygon([s.position[0], s.position[2]], corridor.polygon),
+    )
+    expect(switches).toHaveLength(1)
+    expect(switches[0]?.label).toContain('210.70(A)(2)')
+    expect(switches[0]?.position[1]).toBeCloseTo(48 * 0.0254, 6)
+    // rides the hallway's lighting circuit like the light it controls
+    const light = ofKind(fixtures, 'light').find((l) => l.sourceId === 'room_corridor')
+    expect(switches[0]?.meta?.circuit).toBe(light?.meta?.circuit)
+  })
+})

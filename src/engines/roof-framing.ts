@@ -533,7 +533,11 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
       0,
       ridgeHalf * 2,
       'lumber',
-      `Ridge ${ridgeSize} (hip)`,
+      `Ridge ${ridgeSize} (hip)${
+        spec.detail === '400'
+          ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°`
+          : ''
+      }`,
     )
   }
 

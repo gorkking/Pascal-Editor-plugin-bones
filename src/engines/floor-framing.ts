@@ -307,10 +307,17 @@ function frameSlab(
       const sisterCross = wallCross + t // one thickness beside the wall line
       for (const [s, e] of polygonSpans(polygon, runAxis, sisterCross)) {
         if (wallRun[1] < s + EPS || wallRun[0] > e - EPS) continue // wall outside this span
-        // Bearing coordinates available along this row.
+        // Bearing coordinates available along this row. A stair hole's
+        // headers only exist inside the hole's CROSS band — a hole elsewhere
+        // in the slab is no bearing for this sister (round-3 counterexample:
+        // a sister clipped to a distant hole's run coordinate hung mid-air).
         const supports = [s, e]
         if (needsGirder) supports.push(girderCut[0], girderCut[1])
-        for (const hole of holeFrames) supports.push(hole.run[0], hole.run[1])
+        for (const hole of holeFrames) {
+          if (sisterCross > hole.cross[0] - t && sisterCross < hole.cross[1] + t) {
+            supports.push(hole.run[0], hole.run[1])
+          }
+        }
         const starts = supports.filter((u) => u <= wallRun[0] + EPS)
         const ends = supports.filter((u) => u >= wallRun[1] - EPS)
         const cs = starts.length > 0 ? Math.max(...starts) : s
@@ -417,28 +424,38 @@ function frameSlab(
 
   // ---- LOD 400: bearing validation ----
   if (spec.detail === '400') {
-    const bearingRuns: number[] = []
-    if (needsGirder) bearingRuns.push(girderCut[0], girderCut[1])
-    for (const hole of holeFrames) bearingRuns.push(hole.run[0], hole.run[1])
-    validateJoistBearing(members, polygon, runAxis, bearingRuns)
+    const bearings: BearingLine[] = []
+    if (needsGirder) {
+      bearings.push({ u: girderCut[0] }, { u: girderCut[1] })
+    }
+    for (const hole of holeFrames) {
+      bearings.push({ u: hole.run[0], cross: hole.cross }, { u: hole.run[1], cross: hole.cross })
+    }
+    validateJoistBearing(members, polygon, runAxis, bearings)
   }
 
   return members
 }
 
 /**
+ * A bearing line along the run axis. Stair-header bearings only exist
+ * inside the hole's cross band (`cross`); girder faces bear everywhere.
+ */
+export type BearingLine = { u: number; cross?: readonly [number, number] }
+
+/**
  * LOD 400 bearing checker (R502.6): every joist end must land on a bearing
- * structure — a polygon edge (rim), a girder face, or a stair-header face —
- * within 1.5" tolerance; anything else gets flagged. By construction all of
- * frameFloor's ends bear — exported so the flag path itself stays testable
- * with an injected bad joist (a checker whose only test asserts silence is
- * no checker at all — round-2 finding).
+ * structure — a polygon edge (rim), a girder face, or a stair-header face
+ * WITHIN the hole's cross band — within 1.5" tolerance; anything else gets
+ * flagged. Exported so the flag path itself stays testable with an injected
+ * bad joist (a checker whose only test asserts silence is no checker at all
+ * — round-2 finding; the cross-band condition is the round-3 finding).
  */
 export function validateJoistBearing(
   members: Member[],
   polygon: readonly (readonly [number, number])[],
   runAxis: 'x' | 'z',
-  bearingRuns: number[],
+  bearings: BearingLine[],
 ): void {
   for (const m of members) {
     if (m.role !== 'joist') continue
@@ -449,7 +466,12 @@ export function validateJoistBearing(
       const onPolygon = polygonSpans(polygon, runAxis, cross).some(
         ([s, e]) => Math.abs(end - s) < BEARING_TOLERANCE || Math.abs(end - e) < BEARING_TOLERANCE,
       )
-      const onStructure = bearingRuns.some((r) => Math.abs(end - r) < BEARING_TOLERANCE + inches(0.1))
+      const onStructure = bearings.some(
+        (b) =>
+          Math.abs(end - b.u) < BEARING_TOLERANCE + inches(0.1) &&
+          (b.cross === undefined ||
+            (cross > b.cross[0] - BEARING_TOLERANCE && cross < b.cross[1] + BEARING_TOLERANCE)),
+      )
       if (!onPolygon && !onStructure) {
         m.flag = `Unsupported joist end @ ${end.toFixed(2)}m — needs bearing (R502.6)`
       }

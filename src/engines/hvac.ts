@@ -47,6 +47,13 @@ const EXHAUST_SIDE = inches(4)
 export const CFM_PER_TON = 400
 /** Return grille sizing: ~200 in² per ton keeps face velocity near 2 cfm/in². */
 export const RETURN_IN2_PER_TON = 200
+/**
+ * Stock return-grille free areas (in², 10x10 → 20x40 nominal). A single
+ * central return tops out at the biggest stock grille — larger systems
+ * genuinely need a second return, which is exactly what the balance flag
+ * calls out (a flag that can never fire is no flag — round-3 finding).
+ */
+export const RETURN_GRILLE_CATALOG_IN2 = [100, 144, 216, 288, 400, 600, 800] as const
 
 /** Shoelace polygon area (m²). */
 export function polygonArea(polygon: readonly Pt[]): number {
@@ -77,9 +84,13 @@ export function tonsFor(conditionedAreaM2: number): number {
   return Math.max(1.5, Math.ceil(raw * 2) / 2)
 }
 
-/** Return grille free area (in²) for a tonnage. */
+/** Smallest stock grille covering the tonnage — capped at the catalog top. */
 export function returnGrilleIn2(tons: number): number {
-  return Math.round(tons * RETURN_IN2_PER_TON)
+  const need = tons * RETURN_IN2_PER_TON
+  for (const size of RETURN_GRILLE_CATALOG_IN2) {
+    if (size >= need) return size
+  }
+  return RETURN_GRILLE_CATALOG_IN2[RETURN_GRILLE_CATALOG_IN2.length - 1] as number
 }
 
 /** A straight horizontal duct run between two plan points. */
@@ -224,7 +235,9 @@ export function layoutHvac(
     sourceId: equipRoom.id,
     label:
       `Central return — ${grilleIn2} in² grille` +
-      (returnCapacityCfm < totalCfm ? ' — UNDERSIZED vs supply cfm' : ''),
+      (returnCapacityCfm < totalCfm
+        ? ` — UNDERSIZED vs ${totalCfm} cfm supply (add a second return)`
+        : ''),
     meta: { grilleIn2, capacityCfm: returnCapacityCfm },
   })
 

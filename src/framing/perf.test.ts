@@ -128,13 +128,28 @@ function benchmark(wallCount: number, runs: number): { p95ms: number; members: n
   const samples: number[] = []
   let members = 0
   for (let i = 0; i < runs; i++) {
+    // computeLevel memoizes on (nodes, config) REFERENCE identity — a fresh
+    // config object per iteration defeats the cache so the timer measures a
+    // real recompute, not a map lookup (round-3 finding: the gate had gone
+    // vacuous, timing 0.0005 ms cache hits).
+    const freshConfig = { ...config }
     const t0 = performance.now()
-    const result = computeLevel(nodes, config)
+    const result = computeLevel(nodes, freshConfig)
     samples.push(performance.now() - t0)
     members = result.members.length
   }
   return { p95ms: p95(samples), members }
 }
+
+describe('compute memo (the perf fix that almost broke this gate)', () => {
+  test('identical references hit the cache; any fresh object recomputes', () => {
+    const nodes = synthesizeHouse(8)
+    const config = allOnConfig()
+    const first = computeLevel(nodes, config)
+    expect(computeLevel(nodes, config)).toBe(first) // same reference = cached
+    expect(computeLevel(nodes, { ...config })).not.toBe(first) // fresh = recomputed
+  })
+})
 
 describe('performance gate (rubric: UI/UX/Performance)', () => {
   test('20-wall house, all systems, LOD 400: p95 < 50ms', () => {
