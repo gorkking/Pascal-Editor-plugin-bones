@@ -528,16 +528,13 @@ describe('frameFloor — round-5 seam cases (hanger window, orphan hangers)', ()
       ...DEFAULT_SPEC,
       detail: '400',
     })
+    // The wall hugs the stairwell: its sister line lands ON the trimmer
+    // pack, which IS the doubling — no separate sister is emitted (round-8:
+    // emitting one interpenetrated a trimmer ply)
     const sisters = byRole(members, 'joist').filter((j) => j.label?.includes('Sistered'))
-    for (const s of sisters) {
-      const lo = (s.position[0] as number) - s.dims[0] / 2
-      const hi = (s.position[0] as number) + s.dims[0] / 2
-      expect(hi <= 1 + 1e-6 || lo >= 3 - 1e-6).toBe(true)
-    }
-    const sisterHangers = byRole(members, 'hanger').filter(
-      (h) => Math.abs((h.position[2] as number) - (2.99 + T)) < 1e-6,
-    )
-    expect(sisterHangers.length).toBe(2)
+    expect(sisters).toHaveLength(0)
+    const trimmers = byRole(members, 'joist').filter((j) => j.label?.includes('trimmer'))
+    expect(trimmers.length).toBeGreaterThanOrEqual(4)
     expect(members.filter((m) => m.flag)).toHaveLength(0)
   })
 
@@ -762,8 +759,11 @@ describe('frameFloor — winding-invariant girder presence (round-7)', () => {
 })
 
 describe('frameFloor — hole-matrix edge cases (round-7)', () => {
-  test('a hole starting 6mm past the girder face: hanger at the face, no orphans', () => {
-    // 6×9 slab, girder faces at 3±0.0445; hole run starts at 3.05.
+  test('a hole starting 6mm past the girder face: header takes over, no orphans', () => {
+    // 6×9 slab, girder faces at 3±0.0445; hole run starts at 3.05 — within
+    // a header ply pack of the girder face, so the girder YIELDS the hole's
+    // cross band entirely (round-8: its header plies would otherwise embed
+    // inside the 4x10 body) and rows land on the headers.
     const hole: [number, number][] = [
       [3.05, 4],
       [4.2, 4],
@@ -774,18 +774,18 @@ describe('frameFloor — hole-matrix edge cases (round-7)', () => {
       ...DEFAULT_SPEC,
       detail: '400',
     })
-    const gt = 3.5 * 0.0254
-    // rows in the hole band: the piece between girder face and hole is a
-    // dropped sliver — the left piece must end at the girder face WITH a
-    // hanger, and there must be NO hanger at the hole's near face
+    // the girder is absent across the hole's cross band…
+    for (const g of byRole(members, 'girder')) {
+      const half = g.length / 2
+      const lo = (g.position[2] as number) - half
+      const hi = (g.position[2] as number) + half
+      expect(hi <= 4 + 1e-6 || lo >= 5.5 - 1e-6).toBe(true)
+    }
+    // …and the in-band rows hang on the header faces
     const bandHangers = byRole(members, 'hanger').filter(
       (h) => (h.position[2] as number) > 4 && (h.position[2] as number) < 5.5,
     )
     expect(bandHangers.length).toBeGreaterThan(0)
-    for (const h of bandHangers) {
-      const x = h.position[0] as number
-      expect(Math.abs(x - 3.05) > 1e-6).toBe(true) // no orphan at the near face
-    }
     // and every hanger attaches to a member end within 2.5cm
     const ends: [number, number][] = []
     for (const j of members.filter((m) => m.role === 'joist' || m.role === 'girder')) {
@@ -887,5 +887,115 @@ describe('frameFloor — hole-matrix edge cases (round-7)', () => {
       }
     }
     expect(members.filter((m) => m.flag?.includes('crosses a floor opening'))).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round-8: WORLD-composed geometry — the gate that caught the 90° girder
+// ---------------------------------------------------------------------------
+
+import { Euler, Vector3 } from 'three'
+
+/** Member long axis in world space (renderer composes T·R·S). */
+function worldAxis(m: Member): Vector3 {
+  return new Vector3(1, 0, 0).applyEuler(new Euler(m.rotation[0], m.rotation[1], m.rotation[2], 'XYZ'))
+}
+
+/** World AABB of a member (axis-aligned members only — yaw multiples of π/2). */
+function worldBox(m: Member) {
+  const alongX = Math.abs(Math.cos(m.rotation[1] as number)) > 0.5
+  const hx = alongX ? m.dims[0] / 2 : m.dims[2] / 2
+  const hz = alongX ? m.dims[2] / 2 : m.dims[0] / 2
+  return {
+    minX: (m.position[0] as number) - hx,
+    maxX: (m.position[0] as number) + hx,
+    minZ: (m.position[2] as number) - hz,
+    maxZ: (m.position[2] as number) + hz,
+  }
+}
+
+describe('frameFloor — world-composed orientation (round-8: double-encoding class)', () => {
+  test('runAxis=x slab: the girder RENDERS along the cross axis, inside the slab', () => {
+    // rect(6,9) → joists along X, girder line at x=3 running along Z. The
+    // round-8 reviewer composed this through the real renderer and found a
+    // 9m beam lying ACROSS the joists, overhanging 1.5m per side.
+    const members = frameFloor([slab(rect(6, 9))], [], { ...DEFAULT_SPEC, detail: '400' })
+    const girders = byRole(members, 'girder')
+    expect(girders.length).toBeGreaterThan(0)
+    for (const g of girders) {
+      const axis = worldAxis(g)
+      expect(Math.abs(axis.z)).toBeCloseTo(1, 5) // long axis along Z
+      const box = worldBox(g)
+      expect(box.minX).toBeGreaterThanOrEqual(-1e-6)
+      expect(box.maxX).toBeLessThanOrEqual(6 + 1e-6)
+      expect(box.minZ).toBeGreaterThanOrEqual(-1e-6)
+      expect(box.maxZ).toBeLessThanOrEqual(9 + 1e-6)
+      // the girder body straddles its line at x=3
+      expect(box.minX).toBeCloseTo(3 - (3.5 * 0.0254) / 2, 5)
+      expect(box.maxX).toBeCloseTo(3 + (3.5 * 0.0254) / 2, 5)
+    }
+    // and the mirrored slab (runAxis=z) must produce the SAME physics
+    const mirrored = frameFloor([slab(rect(9, 6))], [], { ...DEFAULT_SPEC, detail: '400' })
+    for (const g of byRole(mirrored, 'girder')) {
+      const axis = worldAxis(g)
+      expect(Math.abs(axis.x)).toBeCloseTo(1, 5) // long axis along X this time
+      const box = worldBox(g)
+      expect(box.minZ).toBeCloseTo(3 - (3.5 * 0.0254) / 2, 5)
+      expect(box.maxZ).toBeCloseTo(3 + (3.5 * 0.0254) / 2, 5)
+    }
+  })
+
+  test('stair headers RENDER across the joists, spanning the hole cross band', () => {
+    const hole: [number, number][] = [
+      [1.5, 2],
+      [2.5, 2],
+      [2.5, 4.4],
+      [1.5, 4.4],
+    ]
+    const members = frameFloor([slab(rect(4, 6), { holes: [hole] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const headers = byRole(members, 'header')
+    expect(headers.length).toBeGreaterThan(0)
+    for (const h of headers) {
+      const axis = worldAxis(h)
+      expect(Math.abs(axis.z)).toBeCloseTo(1, 5) // across the X-running joists
+      const box = worldBox(h)
+      // spans the hole cross band (+ trimmer bearing), nowhere near 2.55m of X
+      expect(box.maxX - box.minX).toBeLessThan(0.2)
+      expect(box.minZ).toBeLessThan(2 + 1e-6)
+      expect(box.maxZ).toBeGreaterThan(4.4 - 1e-6)
+    }
+  })
+
+  test('EVERY floor member on a plain slab stays inside the slab in world space', () => {
+    const members = frameFloor([slab(rect(6, 9))], [], { ...DEFAULT_SPEC, detail: '400' })
+    for (const m of members) {
+      if (m.role === 'post') continue // posts drop below; plan check only
+      // symbolic hardware (3" hanger boxes) may straddle an edge row by a
+      // few cm; structural lumber must be strictly inside
+      const tol = m.role === 'hanger' ? 0.05 : 1e-6
+      const box = worldBox(m)
+      expect(box.minX).toBeGreaterThanOrEqual(-tol)
+      expect(box.maxX).toBeLessThanOrEqual(6 + tol)
+      expect(box.minZ).toBeGreaterThanOrEqual(-tol)
+      expect(box.maxZ).toBeLessThanOrEqual(9 + tol)
+    }
+  })
+
+  test('degenerate holes are ignored — no phantom framing', () => {
+    const line: [number, number][] = [
+      [2, 3],
+      [3, 3],
+      [3, 3],
+      [2, 3],
+    ]
+    const members = frameFloor([slab(rect(4, 6), { holes: [line] })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    expect(byRole(members, 'header')).toHaveLength(0)
+    expect(byRole(members, 'joist').filter((j) => j.label?.includes('trimmer'))).toHaveLength(0)
   })
 })

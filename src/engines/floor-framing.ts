@@ -211,6 +211,9 @@ function frameSlab(
   for (const hole of slab.holes) {
     if (hole.length < 3) continue
     const hb = bounds(hole as Pt[])
+    // Degenerate holes (zero-area lines/points) framed 4 phantom headers —
+    // a hole must be at least a sliver in BOTH directions (round-8).
+    if (hb.maxX - hb.minX < MIN_SEGMENT || hb.maxZ - hb.minZ < MIN_SEGMENT) continue
     holeFrames.push({
       run: runAxis === 'x' ? [hb.minX, hb.maxX] : [hb.minZ, hb.maxZ],
       cross: runAxis === 'x' ? [hb.minZ, hb.maxZ] : [hb.minX, hb.maxX],
@@ -236,7 +239,9 @@ function frameSlab(
       polygonSpans(polygon, crossAxis, girderCross + gt),
     )
     for (const hole of holeFrames) {
-      if (hole.run[0] < girderCross + gt / 2 && hole.run[1] > girderCross - gt / 2) {
+      // Straddling OR touching within a header ply pack (2t) — a touching
+      // hole's headers otherwise embed inside the girder body (round-8).
+      if (hole.run[0] < girderCross + gt / 2 + 2 * t && hole.run[1] > girderCross - gt / 2 - 2 * t) {
         girderPresence = subtractInterval(girderPresence, hole.cross)
       }
     }
@@ -257,6 +262,9 @@ function frameSlab(
     if (len < MIN_SEGMENT) return
     emit('joist', size, [len, depth, t], placeRun((s + e) / 2, cross), runYaw, len, 'lumber', label)
   }
+
+  /** Trimmer cross-lines already emitted — sisters must not coincide. */
+  const trimmerLines = new Set<number>()
 
   const emitHanger = (runPos: number, cross: number, host: string) => {
     emit(
@@ -332,7 +340,6 @@ function frameSlab(
   // joist direction at both ends of the hole, carried by doubled trimmer
   // joists running alongside the opening.
   if (spec.detail !== '200') {
-    const trimmerLines = new Set<number>()
     for (const hole of holeFrames) {
       const headerLen = hole.cross[1] - hole.cross[0] + 4 * t // bears on the trimmer pairs
       const headerCenterCross = (hole.cross[0] + hole.cross[1]) / 2
@@ -351,7 +358,7 @@ function frameSlab(
           emit(
             'header',
             size,
-            runAxis === 'x' ? [inches(0.1) + t, depth, headerLen] : [headerLen, depth, inches(0.1) + t],
+            [headerLen, depth, inches(0.1) + t],
             placeRun(runEnd + offset, headerCenterCross),
             crossYaw,
             headerLen,
@@ -403,6 +410,10 @@ function frameSlab(
         ),
       ]
       const sisterCross = wallCross + t // one thickness beside the wall line
+      // A bearing wall hugging a stairwell lands its sister on the trimmer
+      // pack — which IS already the doubling the wall needs. Emitting one
+      // anyway interpenetrated a ply (round-8); the trimmers carry it.
+      if ([...trimmerLines].some((v) => Math.abs(v - sisterCross) < t - 1e-9)) continue
       for (const [s, e] of polygonSpans(polygon, runAxis, sisterCross)) {
         if (wallRun[1] < s + EPS || wallRun[0] > e - EPS) continue // wall outside this span
         // Bearing coordinates available along this row. A stair hole's
@@ -443,11 +454,18 @@ function frameSlab(
     const len = Math.hypot(dx, dz)
     if (len < MIN_SEGMENT) continue
     const yaw = Math.atan2(-dz, dx)
+    // Rims sit INSIDE the slab, outer face flush with the edge — centered on
+    // the edge line they poked t/2 past the deck (round-8 world-AABB gate).
+    // Inward is winding-agnostic: test which normal offset lands inside.
+    const mid: Pt = [a[0] + dx / 2, a[1] + dz / 2]
+    const nx = -dz / len
+    const nz = dx / len
+    const inward = pointInPoly([mid[0] + (nx * t) / 2, mid[1] + (nz * t) / 2], polygon) ? 1 : -1
     emit(
       'rim-joist',
       size,
       [len, depth, t],
-      [a[0] + dx / 2, centerY, a[1] + dz / 2],
+      [mid[0] + (inward * nx * t) / 2, centerY, mid[1] + (inward * nz * t) / 2],
       yaw,
       len,
       'lumber',
@@ -479,7 +497,7 @@ function frameSlab(
       emit(
         'girder',
         '4x10',
-        runAxis === 'x' ? [gt, gd, len] : [len, gd, gt],
+        [len, gd, gt],
         placeRun(girderCross, (s + e) / 2, girderCenterY),
         crossYaw,
         len,
