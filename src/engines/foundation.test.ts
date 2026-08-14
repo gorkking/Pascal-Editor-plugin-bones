@@ -484,15 +484,25 @@ describe('buildFoundation — rebar (LOD 350)', () => {
     expect(zs[1]).toBeCloseTo(DEFAULT_SPEC.footingWidth / 6, 6)
   })
 
-  test('stemwall verticals at 48" o.c. — 5 bars on a 4 m run, even gaps', () => {
+  test('stemwall verticals at 48" o.c. — 5 bars, ≤48" gaps, clear of every bolt', () => {
     expect(verts).toHaveLength(5)
     const us = verts.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
     expect(us[0]).toBeCloseTo(inches(4), 6) // end cover
     expect(us[us.length - 1]).toBeCloseTo(4 - inches(4), 6)
     for (let i = 1; i < us.length; i++) {
       const gap = (us[i] ?? 0) - (us[i - 1] ?? 0)
-      expect(gap).toBeLessThanOrEqual(inches(48) + 1e-9)
-      expect(gap).toBeCloseTo((4 - 2 * inches(4)) / 4, 6) // even layout
+      // Bars near an anchor bolt nudge one hand-width aside (round-12:
+      // both layouts anchor to the run ends, so shared multiples used to
+      // COINCIDE — a #4 bar inside a 5/8" bolt). Gaps stay ≤ 48" + nudge.
+      expect(gap).toBeLessThanOrEqual(inches(48) + inches(4) + 1e-9)
+    }
+    const boltUs = members
+      .filter((m) => m.role === 'anchor-bolt')
+      .map((b) => b.position[0] ?? 0)
+    for (const u of us) {
+      for (const b of boltUs) {
+        expect(Math.abs(u - b)).toBeGreaterThanOrEqual(inches(3) - 1e-9)
+      }
     }
   })
 

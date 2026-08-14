@@ -353,6 +353,46 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(buildFoundation(chamfered, [], spec400))).toEqual([])
   })
 
+  test('foundation: Y-junction — three runs sharing one endpoint (round-12)', () => {
+    // The crossed-boxes artifact on exported plans: pairwise corner marks
+    // let several walls extend through the same point. One through wall,
+    // everyone else butts.
+    const y = [
+      wall({ id: 'w_long', start: [0, 0], end: [6, 0] }),
+      wall({ id: 'w_up', start: [6, 0], end: [8, -3] }),
+      wall({ id: 'w_down', start: [6, 0], end: [8, 3] }),
+    ]
+    expect(violations(buildFoundation(y, [], spec400))).toEqual([])
+  })
+
+  test('foundation: interior bearing tee stops at the exterior run (round-12)', () => {
+    const tee = [
+      wall({ id: 'w_s', start: [0, 0], end: [8, 0] }),
+      wall({ id: 'w_e', start: [8, 0], end: [8, 6] }),
+      wall({ id: 'w_n', start: [8, 6], end: [0, 6] }),
+      wall({ id: 'w_w', start: [0, 6], end: [0, 0] }),
+      // long interior bearing wall teeing into both perimeter runs
+      wall({ id: 'w_int', start: [4, 0], end: [4, 6], exterior: false }),
+    ]
+    expect(violations(buildFoundation(tee, [], spec400))).toEqual([])
+  })
+
+  test('foundation: gabled-plan composite — peaks, oblique runs, interior tee (round-12)', () => {
+    // Shaped like the user's exported plan: two non-rectangular loops
+    // sharing a spine, with roofline-angled top runs meeting at peaks.
+    const plan = [
+      wall({ id: 'p_w', start: [0, 4], end: [0, 10] }),
+      wall({ id: 'p_s', start: [0, 10], end: [7, 10] }),
+      wall({ id: 'p_spine', start: [7, 10], end: [7, 1] }),
+      wall({ id: 'p_roofL', start: [0, 4], end: [7, 1] }),
+      wall({ id: 'p_roofR', start: [7, 1], end: [14, 3] }),
+      wall({ id: 'p_e', start: [14, 3], end: [14, 11] }),
+      wall({ id: 'p_s2', start: [14, 11], end: [7, 11] }),
+      wall({ id: 'p_link', start: [7, 11], end: [7, 10], exterior: false }),
+    ]
+    expect(violations(buildFoundation(plan, [], spec400))).toEqual([])
+  })
+
   test('CMU: wall with a window', () => {
     expect(violations(cmuWall(wall({ height: 2.4, openings: [window_(2)] }), spec400))).toEqual([])
   })

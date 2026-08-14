@@ -150,30 +150,85 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
     // An end shared by two corners keeps the through role if it has one.
     e[which] = e[which] === 0 ? sign : Math.max(e[which], sign)
   }
-  for (let i = 0; i < walls.length; i++) {
-    for (let j = i + 1; j < walls.length; j++) {
-      const a = walls[i] as WallSlice
-      const b = walls[j] as WallSlice
-      const tol = Math.max(a.thickness, b.thickness) * 0.75
-      // Parallel walls butting end-to-end are a splice, not a corner.
-      const cross = Math.abs(a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0])
-      if (cross < 0.3) continue
-      // Oblique multiplier from the angle between the run axes: sinθ is the
-      // |cross| above, |cosθ| the |dot|. k = 1 at 90°, grows as the corner
-      // sharpens/flattens.
-      const dot = Math.abs(a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1])
-      const k = (1 + dot) / cross
-      for (const ea of ['start', 'end'] as const) {
-        for (const eb of ['start', 'end'] as const) {
-          const pa = endPoint(a, ea)
-          const pb = endPoint(b, eb)
-          if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) > tol) continue
-          // Longer wall through (tie: lower id) — deterministic, testable.
-          const aThrough = a.length > b.length || (a.length === b.length && a.id <= b.id)
-          mark(a, ea, aThrough ? k : -k)
-          mark(b, eb, aThrough ? -k : k)
-        }
-      }
+  // --- 1. cluster endpoint-coincident wall ends (round-12: Y-junctions) ---
+  // Pairwise marking let SEVERAL walls claim 'through' at one shared point
+  // (each pair judged independently) — the crossed-boxes artifact on plans
+  // where three runs meet. A junction cluster elects exactly ONE through
+  // wall (longest, tie by id); every other member butts against it.
+  type EndRef = { wall: WallSlice; which: 'start' | 'end' }
+  const ends: EndRef[] = walls.flatMap((wall) => [
+    { wall, which: 'start' as const },
+    { wall, which: 'end' as const },
+  ])
+  const clustered = new Set<number>()
+  const clusters: EndRef[][] = []
+  for (let i = 0; i < ends.length; i++) {
+    if (clustered.has(i)) continue
+    const seed = ends[i] as EndRef
+    const cluster = [seed]
+    clustered.add(i)
+    const p = endPoint(seed.wall, seed.which)
+    for (let j = i + 1; j < ends.length; j++) {
+      if (clustered.has(j)) continue
+      const cand = ends[j] as EndRef
+      if (cand.wall.id === seed.wall.id) continue
+      const tol = Math.max(seed.wall.thickness, cand.wall.thickness) * 0.75
+      const q = endPoint(cand.wall, cand.which)
+      if (Math.hypot(p[0] - q[0], p[1] - q[1]) > tol) continue
+      cluster.push(cand)
+      clustered.add(j)
+    }
+    if (cluster.length >= 2) clusters.push(cluster)
+  }
+
+  const obliqueK = (a: WallSlice, b: WallSlice): number | null => {
+    // Parallel walls butting end-to-end are a splice, not a corner.
+    const cross = Math.abs(a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0])
+    if (cross < 0.3) return null
+    // sinθ is |cross|, |cosθ| the |dot|: k = 1 at 90°, grows as the corner
+    // sharpens/flattens.
+    const dot = Math.abs(a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1])
+    return (1 + dot) / cross
+  }
+
+  for (const cluster of clusters) {
+    const through = cluster.reduce((best, c) =>
+      c.wall.length > best.wall.length ||
+      (c.wall.length === best.wall.length && c.wall.id < best.wall.id)
+        ? c
+        : best,
+    )
+    let throughK = 0
+    for (const member of cluster) {
+      if (member === through) continue
+      const k = obliqueK(through.wall, member.wall)
+      if (k === null) continue // collinear splice partner — leave both flush
+      mark(member.wall, member.which, -k)
+      throughK = Math.max(throughK, k)
+    }
+    if (throughK > 0) mark(through.wall, through.which, throughK)
+  }
+
+  // --- 2. tee retreats: an end landing on another wall's BODY stops at
+  // that wall's face (round-12: interior thickened footings used to run
+  // straight through the exterior footing + stemwall) ---
+  for (const end of ends) {
+    const p = endPoint(end.wall, end.which)
+    for (const other of walls) {
+      if (other.id === end.wall.id) continue
+      const proj = (p[0] - other.start[0]) * other.dir[0] + (p[1] - other.start[1]) * other.dir[1]
+      // interior of the run only — cluster logic owns shared endpoints
+      const margin = Math.max(end.wall.thickness, other.thickness) * 0.75
+      if (proj < margin || proj > other.length - margin) continue
+      const foot: [number, number] = [
+        other.start[0] + other.dir[0] * proj,
+        other.start[1] + other.dir[1] * proj,
+      ]
+      const dist = Math.hypot(p[0] - foot[0], p[1] - foot[1])
+      if (dist > margin) continue
+      const k = obliqueK(other, end.wall)
+      if (k === null) continue
+      mark(end.wall, end.which, -k)
     }
   }
   return ext
@@ -199,8 +254,10 @@ export function buildFoundation(
 
   // Corner continuity only pairs EXTERIOR straight walls — the ones that
   // actually own perimeter runs below.
-  const perimeter = walls.filter((w) => w.exterior && !w.curved)
-  const extensions = fabDetail ? cornerExtensions(perimeter) : new Map<string, RunExtension>()
+  // ALL straight walls participate: interior bearing walls need their tee
+  // retreats against the exterior runs (round-12).
+  const straightWalls = walls.filter((w) => !w.curved)
+  const extensions = fabDetail ? cornerExtensions(straightWalls) : new Map<string, RunExtension>()
 
   for (const wall of walls) {
     // Curved walls are framed segment-wise later; skip like wall-framing v1.
@@ -275,17 +332,25 @@ export function buildFoundation(
       // monolithically with it — 12" deep × footing width, top at the
       // slab/plate line (y = 0). See INTERIOR_BEARING_MIN_LENGTH ASSUMPTION.
       if (!fabDetail || len <= INTERIOR_BEARING_MIN_LENGTH) continue
+      // Tee retreats apply here too: an interior bearing wall meeting the
+      // exterior run stops at ITS footing face instead of pouring through
+      // it (round-12, visible on exported plans).
+      const iSign = extensions.get(wall.id) ?? { start: 0, end: 0 }
+      const iS = (iSign.start * spec.footingWidth) / 2
+      const iE = (iSign.end * spec.footingWidth) / 2
+      const iLen = Math.max(0.3, len + iS + iE)
+      const iCenter = (len + iE - iS) / 2
       emit(
         'footing',
-        [len, INTERIOR_FOOTING_DEPTH, spec.footingWidth],
-        len / 2,
+        [iLen, INTERIOR_FOOTING_DEPTH, spec.footingWidth],
+        iCenter,
         -INTERIOR_FOOTING_DEPTH / 2,
-        len,
+        iLen,
         'concrete',
         `Interior thickened footing ${formatIn(spec.footingWidth)}×${formatIn(INTERIOR_FOOTING_DEPTH)}`,
       )
       // Rebar rides "every footing run" — including interior thickened ones.
-      emitFootingBars(len / 2, len, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
+      emitFootingBars(iCenter, iLen, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
       continue
     }
 
@@ -357,11 +422,23 @@ export function buildFoundation(
           // Layout runs over the stemwall's interlocked extent (incl. the
           // through-corner reach), mapped back to wall-local u.
           const stemStartDelta = (sign.start * spec.stemwallThickness) / 2
+          // Verticals share the stemwall with the anchor bolts and both
+          // layouts anchor to the run ends — wherever the two spacings
+          // share a multiple they landed at the SAME (x,z) with ~5in of
+          // coincident volume (round-11/12). Nudge any bar within 3in of a
+          // bolt one hand-width down the run.
+          const boltUs = anchorBoltPositions(len, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)
+          const clearOfBolts = (u: number): number => {
+            const clash = boltUs.find((b) => Math.abs(b - u) < inches(3))
+            if (clash === undefined) return u
+            const shifted = u + inches(4) * (u <= clash ? -1 : 1)
+            return Math.max(inches(2), Math.min(len - inches(2), shifted))
+          }
           for (const p of anchorBoltPositions(stemRun.len, spacing, REBAR_END_COVER)) {
             emit(
               'rebar',
               [REBAR_SIDE, barHeight, REBAR_SIDE],
-              p - stemStartDelta,
+              clearOfBolts(p - stemStartDelta),
               (barBottom + barTop) / 2,
               barHeight,
               'steel',
