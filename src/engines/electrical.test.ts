@@ -673,6 +673,44 @@ describe('circuiting — NEC 210.11 required circuits in fixture.meta', () => {
     }
   })
 
+  test('laundry receptacles land on the dedicated 20A LA-1 (AFCI + GFCI, 210.11(C)(2))', () => {
+    const laundry = room('laundry', [
+      [0, 0],
+      [3, 0],
+      [3, 2.5],
+      [0, 2.5],
+    ], { id: 'room_laundry' })
+    const wall = makeWall({ id: 'w_l', start: [0, 0], end: [3, 0], exterior: true })
+    const recs = receptaclesOf(layoutElectrical([wall], [laundry]))
+    expect(recs.length).toBeGreaterThan(0)
+    for (const r of recs) {
+      expect(r.meta?.circuit).toBe('LA-1')
+      expect(r.meta?.breakerA).toBe(20)
+      expect(r.meta?.gaugeAwg).toBe(12)
+      expect(r.meta?.afci).toBe(true) // 210.12(A) — laundry areas
+      expect(r.meta?.gfci).toBe(true) // 210.8(A)(10)
+    }
+  })
+
+  test('garage receptacles land on the dedicated 20A GA-1 (GFCI, no AFCI, 210.52(G)(1))', () => {
+    const garage = room('garage', [
+      [0, 0],
+      [6, 0],
+      [6, 6],
+      [0, 6],
+    ], { id: 'room_garage' })
+    const wall = makeWall({ id: 'w_g', start: [0, 0], end: [6, 0], exterior: true })
+    const recs = receptaclesOf(layoutElectrical([wall], [garage]))
+    expect(recs.length).toBeGreaterThan(0)
+    for (const r of recs) {
+      expect(r.meta?.circuit).toBe('GA-1')
+      expect(r.meta?.breakerA).toBe(20)
+      expect(r.meta?.gaugeAwg).toBe(12)
+      expect(r.meta?.afci).toBeUndefined() // garages are not 210.12 areas
+      expect(r.meta?.gfci).toBe(true) // 210.8(A)(2)
+    }
+  })
+
   test('lights and their switches share the room lighting circuit; VA from 3VA/sqft', () => {
     const { fixtures, rooms } = circuitPlan()
     const light = ofKind(fixtures, 'light').find((l) => l.sourceId === 'room_kitchen')

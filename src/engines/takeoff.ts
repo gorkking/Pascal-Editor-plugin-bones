@@ -448,7 +448,11 @@ export function computeTakeoff(
     } else if (m.role === 'duct-run') {
       const w = Math.round(m.dims[2] / 0.0254)
       const h = Math.round(m.dims[1] / 0.0254)
-      const item = w === h ? `Duct ${w}" round` : `Duct ${w}×${h}"`
+      // Trunks are rectangular sheet metal by the hvac naming contract
+      // ('Trunk…' label prefix) — a trunk stepped down to the square 8×8
+      // minimum is still square duct, not 8" round (round-10 finding).
+      const isTrunk = m.label?.startsWith('Trunk') === true
+      const item = w === h && !isTrunk ? `Duct ${w}" round` : `Duct ${w}×${h}"`
       const key = `${m.system}|${item}`
       const tally = ductTallies.get(key) ?? { section: SECTION_OF[m.system], item, lf: 0 }
       tally.lf += toFeet(m.length)

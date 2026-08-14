@@ -583,12 +583,36 @@ describe('MEP linear feet + rebar/grout/mortar', () => {
       length: 3.048,
       label: 'NM-B 12/2 w/G — SA-1',
     })
-    const rows = computeTakeoff([pipe, supply, trunk, wire], [])
+    // Square-section members: a step-down TRUNK stays rectangular sheet
+    // metal ('Trunk…' label contract); an unlabeled branch of equal sides
+    // is round flex (round-10: shape alone can't tell 8×8 square from 8" ø).
+    const squareTrunk = mem({
+      system: 'hvac',
+      role: 'duct-run',
+      material: 'duct',
+      size: undefined,
+      dims: [3.048, 0.2032, 0.2032], // 10 ft of 8×8
+      length: 3.048,
+      label: 'Trunk 8"×8"',
+    })
+    const roundBranch = mem({
+      system: 'hvac',
+      role: 'duct-run',
+      material: 'duct',
+      size: undefined,
+      dims: [1.524, 0.1524, 0.1524], // 5 ft of 6" round
+      length: 1.524,
+      label: 'Supply branch — bedroom',
+    })
+    const rows = computeTakeoff([pipe, supply, trunk, wire, squareTrunk, roundBranch], [])
     expect(find(rows, 'PVC 3"')?.quantity).toBeCloseTo(10, 1)
     expect(find(rows, 'PVC 3"')?.section).toBe('Plumbing')
     expect(find(rows, 'Copper 0.5"')?.quantity).toBeCloseTo(5, 1)
     expect(find(rows, 'Duct 14×8"')?.quantity).toBeCloseTo(20, 1)
     expect(find(rows, 'Duct 14×8"')?.section).toBe('HVAC')
+    expect(find(rows, 'Duct 8×8"')?.quantity).toBeCloseTo(10, 1)
+    expect(find(rows, 'Duct 8" round')).toBeUndefined()
+    expect(find(rows, 'Duct 6" round')?.quantity).toBeCloseTo(5, 1)
     expect(find(rows, 'NM-B 12/2 w/G')?.quantity).toBeCloseTo(10, 1)
     expect(find(rows, 'NM-B 12/2 w/G')?.section).toBe('Electrical')
     for (const item of ['PVC 3"', 'Copper 0.5"', 'Duct 14×8"', 'NM-B 12/2 w/G']) {
