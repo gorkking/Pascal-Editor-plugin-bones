@@ -257,9 +257,16 @@ describe('frameWalls — partition backing at tees', () => {
     expect(ys[0]).toBeCloseTo(0.6, 5)
     expect(ys[1]).toBeCloseTo(1.2, 5)
     expect(ys[2]).toBeCloseTo(1.8, 5)
+    // Clipped to the REAL stud bay containing the tee (round-10): between
+    // the grid studs flanking u=3, not a nominal bay centered on it.
+    const studUs = members
+      .filter((m) => m.role === 'stud' && m.sourceId === 'wall_T')
+      .map((m) => m.position[0] as number)
+    const left = Math.max(...studUs.filter((su) => su < 3))
+    const right = Math.min(...studUs.filter((su) => su > 3))
     for (const block of backing) {
-      expect(block.position[0] as number).toBeCloseTo(3, 4)
-      expect(block.dims[0]).toBeCloseTo(inches(16) - T, 5) // one stud bay
+      expect(block.position[0] as number).toBeCloseTo((left + right) / 2, 4)
+      expect(block.dims[0]).toBeCloseTo(right - left - T, 5) // clear bay span
     }
   })
 

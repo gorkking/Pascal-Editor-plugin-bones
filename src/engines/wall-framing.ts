@@ -61,6 +61,13 @@ export function studSizeFor(wall: WallSlice, spec: FramingSpec): LumberSize {
  * All distances in meters, u measured from the wall's `start`.
  */
 export type FrameHints = {
+  /**
+   * Trim the whole framing RUN (plates + stud layout) at an end: a butting
+   * wall's frame stops at the through wall's near FACE instead of running
+   * to the centerline corner point (round-10 gate). Meters, ≥ 0.
+   */
+  startInset?: number
+  endInset?: number
   /** Cap-plate length delta at the start end (+ extends past, − shortens). */
   capStartDelta?: number
   /** Cap-plate length delta at the end end. */
@@ -104,6 +111,13 @@ export function frameWall(
   const len = wall.length
   const H = wall.height
 
+  // Trimmed framing run: [u0, u1] — the centerline span minus corner/tee
+  // insets, so a butting wall's plates and end stud stop at the through
+  // wall's face.
+  const u0 = Math.max(0, hints.startInset ?? 0)
+  const u1 = Math.max(u0 + 4 * t, len - Math.max(0, hints.endInset ?? 0))
+  const runLen = u1 - u0
+
   const emit: Emit = (role, size, dims, centerU, centerY, length, label, flag) => {
     members.push({
       system: 'wall-framing',
@@ -123,19 +137,26 @@ export function frameWall(
   // ---- plates ----
   // Splice call-out: plate stock tops out at 20 ft — longer runs are built
   // from spliced sticks (min 24" lap on the double top plate, R602.3.2).
+  // Splice call-out arithmetic (round-10): a run needs ceil(len/stock)
+  // sticks and one fewer splices — the old floor()*20 read "40ft stock" on
+  // a 40ft+ wall.
+  const sticks = Math.ceil(runLen / PLATE_STOCK)
   const spliceNote =
-    len > PLATE_STOCK ? ` — spliced @ ${Math.floor(len / PLATE_STOCK) * 20}ft stock, min 24" lap` : ''
-  const plateDims: [number, number, number] = [len, t, w]
-  emit('bottom-plate', studSize, plateDims, len / 2, t / 2, len, `Bottom plate${spliceNote}`)
-  emit('top-plate', studSize, plateDims, len / 2, H - t / 2, len, `Top plate${spliceNote}`)
+    sticks > 1
+      ? ` — spliced from ${sticks}× 20ft stock (${sticks - 1} splice${sticks > 2 ? 's' : ''}, min 24" lap)`
+      : ''
+  const plateDims: [number, number, number] = [runLen, t, w]
+  const runMid = (u0 + u1) / 2
+  emit('bottom-plate', studSize, plateDims, runMid, t / 2, runLen, `Bottom plate${spliceNote}`)
+  emit('top-plate', studSize, plateDims, runMid, H - t / 2, runLen, `Top plate${spliceNote}`)
   if (spec.topPlateCount === 2) {
     // Cap plate: corner hints extend it over the abutting wall's top plate
     // (or pull it short so the neighbor's cap can lap over this one).
     const startDelta = hints.capStartDelta ?? 0
     const endDelta = hints.capEndDelta ?? 0
-    const capLen = Math.max(0.1, len + startDelta + endDelta)
-    // Start edge sits at -startDelta, end edge at len + endDelta.
-    const capMid = (-startDelta + len + endDelta) / 2
+    const capLen = Math.max(0.1, runLen + startDelta + endDelta)
+    // Start edge sits at u0 - startDelta, end edge at u1 + endDelta.
+    const capMid = (u0 - startDelta + u1 + endDelta) / 2
     emit(
       'cap-plate',
       studSize,
@@ -160,13 +181,23 @@ export function frameWall(
   const keepOuts: KeepOut[] = []
 
   for (const opening of wall.openings) {
-    const ro = Math.min(opening.roughWidth, len - 4 * t)
+    const ro = Math.min(opening.roughWidth, runLen - 4 * t)
     if (ro <= 0) continue
     // Openings past 6 ft bear on DOUBLE trimmers (jack studs) per side —
     // header reactions grow with span (R602.7.5 jack stud requirements).
     const trimmersPerSide = ro > DOUBLE_TRIMMER_SPAN ? 2 : 1
     const frameSide = trimmersPerSide * t
-    const u = Math.min(Math.max(opening.u, ro / 2 + frameSide + t), len - ro / 2 - frameSide - t)
+    const u = Math.min(
+      Math.max(opening.u, u0 + ro / 2 + frameSide + t),
+      u1 - ro / 2 - frameSide - t,
+    )
+    // The drawn opening doesn't fit where it was placed — the frame slid it
+    // to clear the wall end / corner. Surface that instead of silently
+    // moving the RO (round-10).
+    const roClampFlag =
+      Math.abs(u - opening.u) > 0.005
+        ? `RO shifted ${((u - opening.u) * 100).toFixed(1)}cm to fit the framed run — verify the drawn position`
+        : undefined
     const [roBottom, roTopRaw] = roughExtent(opening)
     const roTop = Math.min(roTopRaw, studTop - t) // leave room for the header
 
@@ -185,7 +216,9 @@ export function frameWall(
       headerY,
       headerLength,
       `Header ${headerSize} over ${opening.kind}`,
-      engineered ? 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span' : undefined,
+      engineered
+        ? 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span'
+        : roClampFlag,
     )
 
     // Trimmers (jack studs): floor plate → header bottom, tight to the RO.
@@ -243,8 +276,8 @@ export function frameWall(
       if (crippleBottomHeight > t) {
         const crippleDims: [number, number, number] = [t, crippleBottomHeight, w]
         const cus = new Set<number>()
-        for (const cu of studPositions(len, spec.studSpacing, halfT)) {
-          if (Math.abs(cu - u) < ro / 2 - halfT) cus.add(cu)
+        for (const cu of studPositions(runLen, spec.studSpacing, halfT)) {
+          if (Math.abs(cu + u0 - u) < ro / 2 - halfT) cus.add(cu + u0)
         }
         cus.add(u - ro / 2 + halfT)
         cus.add(u + ro / 2 - halfT)
@@ -268,7 +301,7 @@ export function frameWall(
   }
 
   // ---- common studs at o.c. spacing (ends always get a stud) ----
-  const studUs = studPositions(len, spec.studSpacing, halfT)
+  const studUs = studPositions(runLen, spec.studSpacing, halfT).map((su) => su + u0)
   for (const su of studUs) {
     if (keepOuts.some((k) => su > k.min && su < k.max)) continue
     emit('stud', studSize, studDims, su, studBottom + studHeight / 2, studHeight)
@@ -276,49 +309,58 @@ export function frameWall(
 
   // ---- cross-wall extras (California corner backing studs) ----
   for (const extra of hints.extraStuds ?? []) {
-    const eu = Math.min(Math.max(extra.u, halfT), len - halfT)
+    const eu = Math.min(Math.max(extra.u, u0 + halfT), u1 - halfT)
     emit('stud', studSize, studDims, eu, studBottom + studHeight / 2, studHeight, extra.label)
   }
 
   // ---- partition backing at tees (ladder blocking, flat 2x) ----
   for (const tee of hints.backing ?? []) {
-    // A flat block spanning the stud bay around the tee: wide face out so
-    // drywall on BOTH sides of the abutting partition has something to bite.
-    const bay = spec.studSpacing - t
-    const bu = Math.min(Math.max(tee.u, bay / 2 + t), len - bay / 2 - t)
+    // Flat blocks CLIPPED to the actual stud bay around the tee (round-10:
+    // a nominal-bay block swallowed the grid stud inside it). Wide face out
+    // so drywall on both sides of the abutting partition has bite.
+    const uu = Math.min(Math.max(tee.u, u0 + t), u1 - t)
+    const left = Math.max(u0 + halfT, ...studUs.filter((su) => su < uu - EPS))
+    const right = Math.min(u1 - halfT, ...studUs.filter((su) => su > uu + EPS))
+    const blockLen = right - left - t
+    if (blockLen < inches(3)) continue
+    const bu = (left + right) / 2
     for (const y of tee.heights) {
       if (y > studTop - t) continue
       emit(
         'backing',
         studSize,
-        [bay, t, w],
+        [blockLen, t, w],
         bu,
         y,
-        bay,
+        blockLen,
         'Partition backing (ladder)',
       )
     }
   }
 
-  // ---- fire blocking (LOD 400): cap concealed cavities at 10 ft ----
-  if (spec.detail === '400' && studTop > FIRE_BLOCK_HEIGHT + t) {
+  // ---- fire blocking (LOD 400): cap concealed cavities every ≤10 ft ----
+  // R302.11(2): max 10 ft vertical intervals — a 22 ft balloon wall needs
+  // TWO rows, not one (round-10).
+  if (spec.detail === '400') {
     const bay = spec.studSpacing - t
-    for (let i = 0; i + 1 < studUs.length; i++) {
-      const a = studUs[i] as number
-      const b = studUs[i + 1] as number
-      const mid = (a + b) / 2
-      if (keepOuts.some((k) => mid > k.min && mid < k.max)) continue
-      const blockLen = Math.min(bay, b - a - t)
-      if (blockLen < inches(3)) continue
-      emit(
-        'fire-blocking',
-        studSize,
-        [blockLen, t, w],
-        mid,
-        FIRE_BLOCK_HEIGHT,
-        blockLen,
-        'Fire blocking @ 10ft (R302.11)',
-      )
+    for (let rowY = FIRE_BLOCK_HEIGHT; rowY < studTop - t; rowY += FIRE_BLOCK_HEIGHT) {
+      for (let i = 0; i + 1 < studUs.length; i++) {
+        const a = studUs[i] as number
+        const b = studUs[i + 1] as number
+        const mid = (a + b) / 2
+        if (keepOuts.some((k) => mid > k.min && mid < k.max)) continue
+        const blockLen = Math.min(bay, b - a - t)
+        if (blockLen < inches(3)) continue
+        emit(
+          'fire-blocking',
+          studSize,
+          [blockLen, t, w],
+          mid,
+          rowY,
+          blockLen,
+          'Fire blocking @ 10ft (R302.11)',
+        )
+      }
     }
   }
 
@@ -403,7 +445,7 @@ export function detectCorners(walls: WallSlice[]): Corner[] {
   return corners
 }
 
-type Tee = { through: WallSlice; u: number }
+type Tee = { through: WallSlice; u: number; stem: WallSlice; stemEnd: 'start' | 'end' }
 
 /**
  * Detect T-joints: a wall endpoint landing on another wall's run (not near
@@ -426,7 +468,7 @@ export function detectTees(walls: WallSlice[]): Tee[] {
         ]
         const dist = Math.hypot(p[0] - foot[0], p[1] - foot[1])
         if (dist > (through.thickness + partition.thickness) / 2 + EPS) continue
-        tees.push({ through, u: proj })
+        tees.push({ through, u: proj, stem: partition, stemEnd: which })
       }
     }
   }
@@ -473,19 +515,34 @@ export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC)
     // round-2 advisory).
     const [, throughCapW] = LUMBER_CROSS_SECTIONS[studSizeFor(through, spec)]
     const extend = butting.thickness / 2
-    const shorten = -Math.max(through.thickness, throughCapW) / 2
+    // The butting RUN already stops at the through face (startInset below);
+    // the cap only needs the EXCESS when the through cap is wider than the
+    // through wall itself (thin drawn walls — round-2 advisory).
+    const shorten = -Math.max(0, (throughCapW - through.thickness) / 2)
     if (throughEnd === 'start') throughHints.capStartDelta = (throughHints.capStartDelta ?? 0) + extend
     else throughHints.capEndDelta = (throughHints.capEndDelta ?? 0) + extend
     const buttingHints = hintFor(butting)
     if (buttingEnd === 'start') buttingHints.capStartDelta = (buttingHints.capStartDelta ?? 0) + shorten
     else buttingHints.capEndDelta = (buttingHints.capEndDelta ?? 0) + shorten
+    // The butting wall's PLATES and end stud stop at the through wall's
+    // near face — half its thickness back from the centerline corner
+    // (round-10 gate: both frames ran to the corner point and shared it).
+    const inset = through.thickness / 2
+    if (buttingEnd === 'start') buttingHints.startInset = Math.max(buttingHints.startInset ?? 0, inset)
+    else buttingHints.endInset = Math.max(buttingHints.endInset ?? 0, inset)
   }
 
-  // Partition backing at tees (skip when it duplicates a corner).
+  // Partition backing at tees (skip when it duplicates a corner) — and the
+  // partition's own frame stops at the through wall's face, exactly like a
+  // corner butt.
   for (const tee of detectTees(walls)) {
     const h = hintFor(tee.through)
     h.backing = h.backing ?? []
     h.backing.push({ u: tee.u, heights: [0.6, 1.2, 1.8] })
+    const stemHints = hintFor(tee.stem)
+    const inset = tee.through.thickness / 2
+    if (tee.stemEnd === 'start') stemHints.startInset = Math.max(stemHints.startInset ?? 0, inset)
+    else stemHints.endInset = Math.max(stemHints.endInset ?? 0, inset)
   }
 
   const members: Member[] = []

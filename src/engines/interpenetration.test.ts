@@ -6,7 +6,7 @@ import { cmuWall } from './cmu'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
-import { frameWall } from './wall-framing'
+import { frameWall, frameWalls } from './wall-framing'
 
 /**
  * Repo-wide interpenetration gate (round-10): no two STRUCTURAL members of
@@ -262,6 +262,20 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(frameWall(wall({ openings: [door(2), window_(4.2)] }), spec400))).toEqual([])
     expect(violations(frameWall(wall({ thickness: 0.15, openings: [window_(3)] }), spec400))).toEqual([])
     expect(violations(frameWall(wall({ end: [1.2, 0] }), spec400))).toEqual([])
+  })
+
+  test('wall framing: L-corner + tee composition (round-10)', () => {
+    // An L pair plus a partition tee — the butting/stem frames must stop at
+    // the through wall's face instead of sharing the corner volume.
+    const composed = frameWalls(
+      [
+        wall({ id: 'w_through', start: [0, 0], end: [6, 0] }),
+        wall({ id: 'w_butt', start: [0, 0], end: [0, 4] }),
+        wall({ id: 'w_stem', start: [3, 0], end: [3, 2.5] }),
+      ],
+      spec400,
+    )
+    expect(violations(composed)).toEqual([])
   })
 
   test('floor framing: plain, hole, multi-girder span', () => {
