@@ -577,10 +577,15 @@ function frameSlab(
   // With a girder, the mid-span line IS the girder line — blocking there
   // would sit embedded inside the 4x10 body (round-6 finding); the girder
   // itself provides the lateral restraint blocking exists for.
-  const blockLen = spec.joistSpacing - t
-  if (blockLen > inches(3) && !needsGirder) {
+  if (!needsGirder) {
     const mid = runStart + clearSpan / 2
     for (let i = 0; i + 1 < rows.length; i++) {
+      // Each block fills ITS bay — the clear span between the two adjacent
+      // joist faces. A constant nominal-bay length overran the narrower
+      // first/last and sistered bays into joists, rims and neighboring
+      // blocks (round-11).
+      const bayLen = (rows[i + 1] as number) - (rows[i] as number) - t
+      if (bayLen < inches(3)) continue
       const cross = ((rows[i] as number) + (rows[i + 1] as number)) / 2
       const inside = polygonSpans(polygon, runAxis, cross).some(([s, e]) => mid > s && mid < e)
       if (!inside) continue
@@ -592,10 +597,10 @@ function frameSlab(
       emit(
         'blocking',
         size,
-        [blockLen, depth, t],
+        [bayLen, depth, t],
         placeRun(mid, cross),
         runYaw + Math.PI / 2,
-        blockLen,
+        bayLen,
         'lumber',
         'Blocking',
       )

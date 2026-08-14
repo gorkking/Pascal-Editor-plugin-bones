@@ -153,8 +153,19 @@ function pairKey(a: string, b: string): string {
 }
 
 function violations(members: Member[]): string[] {
-  const obbs = members.map(toObb)
+  // A member with non-finite geometry would make every AABB/SAT comparison
+  // false and let broken scenarios pass VACUOUSLY (round-11 blocker: a bad
+  // slab fixture composed all floor members at NaN Y and the gate saw
+  // nothing). Non-finite geometry is itself a violation.
   const bad: string[] = []
+  for (const m of members) {
+    const nums = [...m.dims, ...m.position, ...m.rotation, m.length]
+    if (nums.some((v) => !Number.isFinite(v))) {
+      bad.push(`${m.role}(${m.label ?? ''}) has non-finite geometry`)
+    }
+  }
+  if (bad.length > 0) return bad
+  const obbs = members.map(toObb)
   for (let i = 0; i < obbs.length; i++) {
     const a = obbs[i] as Obb
     for (let j = i + 1; j < obbs.length; j++) {
@@ -222,7 +233,7 @@ const window_ = (u: number): OpeningSlice => ({
 })
 
 function slab(polygon: [number, number][], overrides: Partial<SlabSlice> = {}): SlabSlice {
-  return { id: 'slab_gate', polygon, y: 0, thickness: 0.2, holes: [], ...overrides }
+  return { id: 'slab_gate', polygon, elevation: 0, thickness: 0.2, holes: [], ...overrides }
 }
 
 const rect = (w: number, d: number): [number, number][] => [
@@ -305,7 +316,7 @@ describe('interpenetration gate — structural members never share volume', () =
   // running them through the main roof's volume. That is the multi-segment
   // clipping feature - tracked for the next round; the valley boards and
   // jacks themselves already exist.
-  test.todo('roof framing: intersecting gable pair clips at the valley (overframing)')
+  test.todo('roof framing: intersecting gable pair clips at the valley (overframing)', () => {})
   const UNUSED = () => {
     expect(
       violations(

@@ -95,9 +95,14 @@ describe('frameFloor — rectangular slab 4m x 6m', () => {
   test('one blocking row at mid-span between rows', () => {
     const blocking = byRole(members, 'blocking')
     expect(blocking.length).toBeGreaterThanOrEqual(joists.length - 2)
+    // Blocks fill their ACTUAL bay (round-11): interior bays are the full
+    // 16" o.c. minus a joist; the first/last bays are narrower.
+    const interior = blocking.filter((b) => Math.abs(b.length - (inches(16) - T)) < 1e-6)
+    expect(interior.length).toBeGreaterThan(0)
     for (const b of blocking) {
       expect(b.position[0]).toBeCloseTo(2, 5) // mid of the 4m span
-      expect(b.length).toBeCloseTo(inches(16) - T, 5)
+      expect(b.length).toBeLessThanOrEqual(inches(16) - T + 1e-9)
+      expect(b.length).toBeGreaterThanOrEqual(inches(3) - 1e-9)
     }
   })
 })
