@@ -155,3 +155,24 @@ Y-junctions; 15° foundation corners; rebar×anchor-bolt dedupe in SDC-D;
 non-axis-aligned slab rims; trimmer×joist dedupe; sister offsets;
 hanger stacking). Biggest structural item: plumbing/HVAC route on WORLD
 axes, not wall-relative (electrical's wall-graph is the model).
+
+## All-nighter round 14 (2026-08-15)
+
+Dual loop stood up per the PO: the LOD architect (round-14, strict
+rubric) + a NEW quality reviewer driving the live editor through
+review/QUALITY.md (screenshots, panel UX, blueprint sheets, code refs).
+
+Architect verdict 2/10 strict — every finding fixed the same night:
+wall-layers corner insets + stud-face stacking + sheet-goods takeoff;
+foundation splice/tee precedence; oblique multiplier ported to plates
+and CMU; floor sisters beside rows + rotated slabs framed in their own
+frame; ALL roof families inscribe (flat, gambrel, big gables, steep
+hips, low pitches, mansard/dutch arris skirts); plans project through
+the full euler and paginate schedules. 434 tests + tsc green.
+
+UI per PO: 'Blueprints' CTA (full-width primary, live sheet count),
+searchable jurisdiction picker, ICC code links, code basis in title
+blocks.
+
+Tracked open: MEP wall-relative routing, electrical Phases 1-3,
+valley overframing.
