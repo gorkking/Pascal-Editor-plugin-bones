@@ -295,6 +295,7 @@ function frameSlab(
   }
 
   /** Trimmer cross-lines already emitted — sisters must not coincide. */
+  const sisterLines: number[] = []
   const trimmerLines = new Set<number>()
 
   const emitHanger = (runPos: number, cross: number, host: string) => {
@@ -452,7 +453,14 @@ function frameSlab(
       // pack — which IS already the doubling the wall needs. Emitting one
       // anyway interpenetrated a ply (round-8); the trimmers carry it.
       if ([...trimmerLines].some((v) => Math.abs(v - sisterCross) < t - 1e-9)) continue
-      for (const [rawS, rawE] of polygonSpans(polygon, runAxis, sisterCross)) {
+      // Same for the COMMON GRID (round-14): a sister landing within one
+      // thickness of an existing row IS that row's doubling — nudge to the
+      // row's far face instead of interpenetrating it.
+      const clashRow = rows.find((r) => Math.abs(r - sisterCross) < t - 1e-9)
+      const sisterAt = clashRow === undefined ? sisterCross : clashRow + t
+      if (rows.some((r) => Math.abs(r - sisterAt) < t - 1e-9)) continue
+      sisterLines.push(sisterAt)
+      for (const [rawS, rawE] of polygonSpans(polygon, runAxis, sisterAt)) {
         const s = rawS + t // rim inner face (round-9)
         const e = rawE - t
         if (e - s < MIN_SEGMENT) continue
@@ -463,10 +471,10 @@ function frameSlab(
         // a sister clipped to a distant hole's run coordinate hung mid-air).
         const supports = [s, e]
         for (const girder of girders) {
-          if (girderAt(girder, sisterCross)) supports.push(girder.cut[0], girder.cut[1])
+          if (girderAt(girder, sisterAt)) supports.push(girder.cut[0], girder.cut[1])
         }
         for (const hole of holeFrames) {
-          if (sisterCross > hole.cross[0] - t && sisterCross < hole.cross[1] + t) {
+          if (sisterAt > hole.cross[0] - t && sisterAt < hole.cross[1] + t) {
             supports.push(hole.run[0], hole.run[1])
           }
         }
@@ -478,10 +486,10 @@ function frameSlab(
         // other row uses (round-4 counterexample: an unsplit sister bridged
         // the stairwell). Band ±t matches the support band — sisters ride
         // walls with modeling slop (round-5's 19 mm hangerless window).
-        const sisterSpans = splitRow(sisterCross, [[cs, ce]], null, t)
+        const sisterSpans = splitRow(sisterAt, [[cs, ce]], null, t)
         for (const [ss, se] of sisterSpans) {
           if (se - ss > MIN_SEGMENT) {
-            emitJoist(ss, se, sisterCross, `Sistered joist under bearing wall ${wall.id}`)
+            emitJoist(ss, se, sisterAt, `Sistered joist under bearing wall ${wall.id}`)
           }
         }
       }
@@ -586,6 +594,14 @@ function frameSlab(
       // blocks (round-11).
       const bayLen = (rows[i + 1] as number) - (rows[i] as number) - t
       if (bayLen < inches(3)) continue
+      // A sistered joist INSIDE this bay occupies the blocking line —
+      // skip the bay (round-14: full-bay blocks impaled the sisters).
+      if (
+        sisterLines.some(
+          (sl) => sl > (rows[i] as number) + t / 2 && sl < (rows[i + 1] as number) - t / 2,
+        )
+      )
+        continue
       const cross = ((rows[i] as number) + (rows[i + 1] as number)) / 2
       const inside = polygonSpans(polygon, runAxis, cross).some(([s, e]) => mid > s && mid < e)
       if (!inside) continue
@@ -765,6 +781,32 @@ export function validateJoistBearing(
  * Frame every slab on a level. `walls` sister joists under parallel bearing
  * partitions; `storeyBelowHeight` sizes the girder posts.
  */
+/** Dominant edge direction of a polygon (angle of its longest edge). */
+function dominantAngle(polygon: SlabSlice['polygon']): number {
+  let best = 0
+  let bestLen = -1
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i] as readonly [number, number]
+    const b = polygon[(i + 1) % polygon.length] as readonly [number, number]
+    const dx = b[0] - a[0]
+    const dz = b[1] - a[1]
+    const len = Math.hypot(dx, dz)
+    if (len > bestLen) {
+      bestLen = len
+      best = Math.atan2(dz, dx)
+    }
+  }
+  return best
+}
+
+const rotPt = (p: readonly [number, number], c: readonly [number, number], ang: number): [number, number] => {
+  const cos = Math.cos(ang)
+  const sin = Math.sin(ang)
+  const dx = p[0] - c[0]
+  const dz = p[1] - c[1]
+  return [c[0] + dx * cos - dz * sin, c[1] + dx * sin + dz * cos]
+}
+
 export function frameFloor(
   slabs: SlabSlice[],
   walls: WallSlice[] = [],
@@ -773,7 +815,39 @@ export function frameFloor(
 ): Member[] {
   const members: Member[] = []
   for (const slab of slabs) {
-    members.push(...frameSlab(slab, walls, spec, storeyBelowHeight))
+    // Rotated slabs (round-14): the layout math is axis-aligned by design —
+    // rotate the slab (and walls) into its own frame, frame it there, and
+    // rotate the members back. World yaw = local yaw + slab angle.
+    const theta = dominantAngle(slab.polygon)
+    const snapped = Math.round(theta / (Math.PI / 2)) * (Math.PI / 2)
+    const off = theta - snapped
+    if (Math.abs(off) < 1e-4) {
+      members.push(...frameSlab(slab, walls, spec, storeyBelowHeight))
+      continue
+    }
+    const c: readonly [number, number] = [slab.polygon[0]?.[0] ?? 0, slab.polygon[0]?.[1] ?? 0]
+    const localSlab: SlabSlice = {
+      ...slab,
+      polygon: slab.polygon.map((p) => rotPt(p, c, -off)),
+      holes: slab.holes.map((h) => h.map((p) => rotPt(p, c, -off))),
+    }
+    const localWalls: WallSlice[] = walls.map((w) => {
+      const start = rotPt(w.start, c, -off)
+      const end = rotPt(w.end, c, -off)
+      const dx = end[0] - start[0]
+      const dz = end[1] - start[1]
+      const len = Math.max(1e-9, Math.hypot(dx, dz))
+      return { ...w, start, end, dir: [dx / len, dz / len] as const }
+    })
+    for (const m of frameSlab(localSlab, localWalls, spec, storeyBelowHeight)) {
+      const [x, y, z] = m.position
+      const [wx, wz] = rotPt([x, z], c, off)
+      members.push({
+        ...m,
+        position: [wx, y, wz],
+        rotation: [m.rotation[0], m.rotation[1] - off, m.rotation[2]],
+      })
+    }
   }
   return members
 }

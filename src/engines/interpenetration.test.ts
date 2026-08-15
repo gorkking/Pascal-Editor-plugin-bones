@@ -343,6 +343,23 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(frameFloor([slab(rect(12, 12))], [], spec400))).toEqual([])
   })
 
+  test('floor framing: rotated slabs 10/30/45° (round-14)', () => {
+    for (const deg of [10, 30, 45]) {
+      const th = (deg * Math.PI) / 180
+      const cos = Math.cos(th)
+      const sin = Math.sin(th)
+      const rot = (x: number, z: number): [number, number] => [
+        x * cos - z * sin,
+        x * sin + z * cos,
+      ]
+      const poly = [rot(0, 0), rot(6, 0), rot(6, 9), rot(0, 9)]
+      expect({
+        deg,
+        v: violations(frameFloor([slab(poly)], [], spec400)),
+      }).toEqual({ deg, v: [] })
+    }
+  })
+
   test('roof framing: gable, hip', () => {
     expect(violations(frameRoofs([roofSeg()], [], spec400))).toEqual([])
     expect(violations(frameRoofs([roofSeg({ roofType: 'hip' })], [], spec400))).toEqual([])

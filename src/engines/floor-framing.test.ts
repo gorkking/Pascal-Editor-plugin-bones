@@ -412,9 +412,13 @@ describe('frameFloor — sisters split at stair holes (round-4 counterexample)',
       const hi = (s.position[0] as number) + s.dims[0] / 2
       expect(hi <= 1.5 + 1e-6 || lo >= 2.5 - 1e-6).toBe(true)
     }
-    // cut ends hang on the stair headers
+    // cut ends hang on the stair headers — at the SISTER'S actual line
+    // (round-14: a sister within one thickness of a common row nudges to
+    // the row's far face instead of interpenetrating it).
+    const sisterZ = sisters[0]?.position[2] as number
+    expect(sisterZ).toBeGreaterThanOrEqual(1.99 + T - 1e-6) // never inside the wall line
     const hangers = byRole(members, 'hanger').filter(
-      (h) => h.label?.includes('stair') && Math.abs((h.position[2] as number) - (1.99 + T)) < 1e-6,
+      (h) => h.label?.includes('stair') && Math.abs((h.position[2] as number) - sisterZ) < 1e-6,
     )
     expect(hangers.length).toBe(2)
   })
