@@ -211,6 +211,112 @@ function planSheet(
   const Z = (z: number) => oz + z * scale
 
   const shapes: string[] = []
+  // Foundation runs draw as MITERED PATHS, not independent rectangles:
+  // per-member boxes read as crossed bow-ties at oblique corners (user
+  // report — fine at 90°, wrong at angles). Chained centerlines with
+  // stroke miter joins give the drafting-correct corner at any angle.
+  const STROKE_ROLES = new Set(['footing', 'stemwall', 'bond-beam'])
+  const stroked = new Set<Member>()
+  if (def.key === 'foundation') {
+    type Seg = { a: [number, number]; b: [number, number]; w: number; m: Member }
+    const byRole = new Map<string, Seg[]>()
+    for (const m of mine) {
+      if (!STROKE_ROLES.has(m.role)) continue
+      const yaw = m.rotation[1]
+      const dx = (Math.cos(yaw) * m.dims[0]) / 2
+      const dz = (-Math.sin(yaw) * m.dims[0]) / 2
+      const seg: Seg = {
+        a: [m.position[0] - dx, m.position[2] - dz],
+        b: [m.position[0] + dx, m.position[2] + dz],
+        w: m.dims[2],
+        m,
+      }
+      stroked.add(m)
+      byRole.set(m.role, [...(byRole.get(m.role) ?? []), seg])
+    }
+    const lineHit = (
+      p: Seg,
+      q: Seg,
+    ): [number, number] | null => {
+      // intersection of the two centerlines — the true corner vertex
+      const d1: [number, number] = [p.b[0] - p.a[0], p.b[1] - p.a[1]]
+      const d2: [number, number] = [q.b[0] - q.a[0], q.b[1] - q.a[1]]
+      const den = d1[0] * d2[1] - d1[1] * d2[0]
+      if (Math.abs(den) < 1e-9) return null
+      const t = ((q.a[0] - p.a[0]) * d2[1] - (q.a[1] - p.a[1]) * d2[0]) / den
+      return [p.a[0] + d1[0] * t, p.a[1] + d1[1] * t]
+    }
+    for (const [role, segs] of byRole) {
+      const width = Math.max(...segs.map((sg) => sg.w))
+      const tol = width * 2.5
+      const used = new Set<Seg>()
+      const fill = def.fill[role] ?? def.fill.default ?? '#c9cdd2'
+      for (const seed of segs) {
+        if (used.has(seed)) continue
+        used.add(seed)
+        // grow a chain both directions
+        const chain: [number, number][] = [seed.a, seed.b]
+        let extended = true
+        while (extended) {
+          extended = false
+          for (const cand of segs) {
+            if (used.has(cand)) continue
+            for (const [candEnd, candFar] of [
+              [cand.a, cand.b],
+              [cand.b, cand.a],
+            ] as const) {
+              const head = chain[0] as [number, number]
+              const tail = chain[chain.length - 1] as [number, number]
+              if (Math.hypot(candEnd[0] - tail[0], candEnd[1] - tail[1]) < tol) {
+                const hit = lineHit(
+                  { a: chain[chain.length - 2] as [number, number], b: tail, w: 0, m: seed.m },
+                  cand,
+                )
+                if (hit) chain[chain.length - 1] = hit
+                chain.push(candFar as [number, number])
+                used.add(cand)
+                extended = true
+                break
+              }
+              if (Math.hypot(candEnd[0] - head[0], candEnd[1] - head[1]) < tol) {
+                const hit = lineHit(
+                  { a: chain[1] as [number, number], b: head, w: 0, m: seed.m },
+                  cand,
+                )
+                if (hit) chain[0] = hit
+                chain.unshift(candFar as [number, number])
+                used.add(cand)
+                extended = true
+                break
+              }
+            }
+            if (extended) break
+          }
+        }
+        // closed loop? join the ends at their intersection too
+        const head = chain[0] as [number, number]
+        const tail = chain[chain.length - 1] as [number, number]
+        let closed = false
+        if (chain.length > 3 && Math.hypot(head[0] - tail[0], head[1] - tail[1]) < tol) {
+          const hit = lineHit(
+            { a: chain[1] as [number, number], b: head, w: 0, m: seed.m },
+            { a: chain[chain.length - 2] as [number, number], b: tail, w: 0, m: seed.m },
+          )
+          if (hit) {
+            chain[0] = hit
+            chain[chain.length - 1] = hit
+          }
+          closed = true
+        }
+        const d = chain
+          .map((pt, i) => `${i === 0 ? 'M' : 'L'}${X(pt[0]).toFixed(1)} ${Z(pt[1]).toFixed(1)}`)
+          .join('')
+        shapes.push(
+          `<path d="${d}${closed ? 'Z' : ''}" fill="none" stroke="${fill}" stroke-width="${(width * scale).toFixed(1)}" stroke-linejoin="miter" stroke-miterlimit="8" stroke-linecap="butt"/>`,
+        )
+      }
+    }
+  }
   for (const m of context) {
     const yaw = m.rotation[1]
     const w = m.dims[0] * scale
@@ -222,6 +328,7 @@ function planSheet(
   // Long members first so short hardware reads on top.
   const sorted = [...mine].sort((a, b2) => b2.dims[0] - a.dims[0])
   for (const m of sorted) {
+    if (stroked.has(m)) continue
     // Plan projection from the FULL euler (XYZ: M = Rx·Ry·Rz applied Rz
     // first): rolled members (outlookers) ignore neither rx nor the yaw —
     // round-14 caught 5.8° drift on yawed roofs from the yaw-only path.
