@@ -822,6 +822,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     wall: WallSlice,
     u0: number,
     u1: number,
+    runY: number = WIRE_RUN_Y,
   ): void => {
     const dir = Math.sign(u1 - u0) || 1
     const doors = wall.openings
@@ -841,22 +842,28 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       const near = door.u - (door.roughWidth / 2) * dir
       const far = door.u + (door.roughWidth / 2) * dir
       const overY = Math.min(door.sillHeight + door.roughHeight + inches(4), wall.height - 0.05)
-      emitWire(circuit, gauge, at(cursor, WIRE_RUN_Y), at(near, WIRE_RUN_Y))
-      emitWire(circuit, gauge, at(near, WIRE_RUN_Y), at(near, overY))
+      emitWire(circuit, gauge, at(cursor, runY), at(near, runY))
+      emitWire(circuit, gauge, at(near, runY), at(near, overY))
       emitWire(circuit, gauge, at(near, overY), at(far, overY))
-      emitWire(circuit, gauge, at(far, overY), at(far, WIRE_RUN_Y))
+      emitWire(circuit, gauge, at(far, overY), at(far, runY))
       cursor = far
     }
-    emitWire(circuit, gauge, at(cursor, WIRE_RUN_Y), at(u1, WIRE_RUN_Y))
+    emitWire(circuit, gauge, at(cursor, runY), at(u1, runY))
   }
 
   /** Wall-following legs between two anchors at drill height. */
-  const routeHop = (circuit: string, gauge: number, from: WallPoint, to: WallPoint): void => {
+  const routeHop = (
+    circuit: string,
+    gauge: number,
+    from: WallPoint,
+    to: WallPoint,
+    runY: number = WIRE_RUN_Y,
+  ): void => {
     const legs = wallPath(graph, from, to)
     if (legs) {
       for (let i = 0; i < legs.length; i++) {
         const leg = legs[i] as { wall: WallSlice; u0: number; u1: number }
-        emitWallLeg(circuit, gauge, leg.wall, leg.u0, leg.u1)
+        emitWallLeg(circuit, gauge, leg.wall, leg.u0, leg.u1, runY)
         // Round-12 B2/M1: junctions accepted within JUNCTION_TOL (or
         // snapped out of a door RO) leave the two walls' legs ending at
         // DIFFERENT plan points. Bridge every inter-leg gap explicitly —
@@ -866,7 +873,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
           const a = wallPlan({ wall: leg.wall, u: leg.u1 })
           const b = wallPlan({ wall: next.wall, u: next.u0 })
           if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.02) {
-            emitWire(circuit, gauge, [a[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, b[1]], ' (junction jumper)')
+            emitWire(circuit, gauge, [a[0], runY, a[1]], [b[0], runY, b[1]], ' (junction jumper)')
           }
         }
       }
@@ -875,14 +882,19 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     // Disconnected wall islands: Manhattan air legs, called out in the label.
     const a = wallPlan(from)
     const b = wallPlan(to)
-    emitWire(circuit, gauge, [a[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, a[1]], ' (air run — no wall path)')
-    emitWire(circuit, gauge, [b[0], WIRE_RUN_Y, a[1]], [b[0], WIRE_RUN_Y, b[1]], ' (air run — no wall path)')
+    emitWire(circuit, gauge, [a[0], runY, a[1]], [b[0], runY, a[1]], ' (air run — no wall path)')
+    emitWire(circuit, gauge, [b[0], runY, a[1]], [b[0], runY, b[1]], ' (air run — no wall path)')
   }
 
   const panelPlan: Pt = [panel.position[0], panel.position[2]]
   const panelAnchor = nearestWallPoint(walls, panelPlan)
+  let circuitIndex = 0
   for (const [circuit, devices] of byCircuit) {
     const gauge = Number(devices[0]?.meta?.gaugeAwg ?? 14)
+    // Cables staple side by side, not inside each other: each circuit's
+    // drill-height plane steps 12mm so the homerun spine reads as parallel
+    // colored runs instead of 108 coincident segments (quality round-2).
+    const runY = WIRE_RUN_Y + (circuitIndex++ % 6) * 0.012
     // homerun drop from the panel to drill height at its wall anchor
     const start = panelAnchor ?? null
     if (start) {
@@ -897,7 +909,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
         [panel.position[0], panel.position[1], panel.position[2]],
         [sp[0], panel.position[1], sp[1]],
       )
-      emitWire(circuit, gauge, [sp[0], panel.position[1], sp[1]], [sp[0], WIRE_RUN_Y, sp[1]])
+      emitWire(circuit, gauge, [sp[0], panel.position[1], sp[1]], [sp[0], runY, sp[1]])
     }
     const remaining = [...devices]
     let cursor: WallPoint | null = start
@@ -919,16 +931,16 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       const ceilingDevice = device.kind === 'light' || device.kind === 'smoke-alarm'
       const anchor = nearestWallPoint(walls, [x, z])
       if (anchor && cursor) {
-        routeHop(circuit, gauge, cursor, anchor)
+        routeHop(circuit, gauge, cursor, anchor, runY)
         const ap = wallPlan(anchor)
         if (ceilingDevice) {
           // rise inside the wall, then cross the ceiling through joist bays
-          emitWire(circuit, gauge, [ap[0], WIRE_RUN_Y, ap[1]], [ap[0], y, ap[1]])
+          emitWire(circuit, gauge, [ap[0], runY, ap[1]], [ap[0], y, ap[1]])
           emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, ap[1]])
           emitWire(circuit, gauge, [x, y, ap[1]], [x, y, z])
         } else {
           // drop/rise at the device's stud bay…
-          emitWire(circuit, gauge, [ap[0], WIRE_RUN_Y, ap[1]], [ap[0], y, ap[1]])
+          emitWire(circuit, gauge, [ap[0], runY, ap[1]], [ap[0], y, ap[1]])
           // …then the box stub: centerline → the face-mounted box (round-12
           // M8 — no wire ever reached a box; the ~2.7in jog was implied).
           emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, z])
@@ -937,8 +949,8 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
         cursorPlan = ap
       } else {
         // No walls at all — degenerate scene: straight legs to the device.
-        emitWire(circuit, gauge, [cursorPlan[0], WIRE_RUN_Y, cursorPlan[1]], [x, WIRE_RUN_Y, cursorPlan[1]], ' (air run — no wall path)')
-        emitWire(circuit, gauge, [x, WIRE_RUN_Y, cursorPlan[1]], [x, WIRE_RUN_Y, z], ' (air run — no wall path)')
+        emitWire(circuit, gauge, [cursorPlan[0], runY, cursorPlan[1]], [x, runY, cursorPlan[1]], ' (air run — no wall path)')
+        emitWire(circuit, gauge, [x, runY, cursorPlan[1]], [x, runY, z], ' (air run — no wall path)')
         emitWire(circuit, gauge, [x, WIRE_RUN_Y, z], [x, y, z])
         cursorPlan = [x, z]
       }

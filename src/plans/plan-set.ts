@@ -73,9 +73,12 @@ const PLAN_SHEETS: {
     key: 'mep',
     title: 'Plumbing + HVAC plan',
     systems: ['plumbing', 'hvac'],
-    fill: { 'duct-run': '#9aa7b0', default: '#8fb0c4' },
+    fill: { 'duct-run': '#9aa7b0', 'vent-stack': '#6e8fa0', 'pipe-run': '#8fb0c4', default: '#8fb0c4' },
   },
 ]
+
+/** Systems whose sheets draw the wall footprint as faint context. */
+const CONTEXT_SHEETS = new Set(['electrical', 'mep'])
 
 /** Device tags for the electrical sheet's symbols. */
 const FIXTURE_TAG: Record<string, string> = {
@@ -148,8 +151,9 @@ function chrome(
   const by = H - TITLE_H - 18
   // Two wrapped code lines instead of one overflowing one (quality C1:
   // the effective date clipped off the sheet edge on every sheet).
-  const jur = `Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${opts.codeName ? ` — ${opts.codeName}` : ''}`
-  const line1 = clip(jur, 66)
+  const code = opts.codeName ?? ''
+  const line1 = clip(`Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${code ? ` — ${code.slice(0, 46)}` : ''}`, 66)
+  const line1b = code.length > 46 ? clip(code.slice(46).trim(), 66) : ''
   const line2 = clip(`LOD 400 · Bones${opts.date ? ` · ${opts.date}` : ''}`, 66)
   const bar = scaleBar
     ? `<g stroke="#222" stroke-width="2">
@@ -165,9 +169,10 @@ function chrome(
     <rect x="${W - 380}" y="${H - TITLE_H - 8}" width="${372}" height="${TITLE_H}" fill="#fff" stroke="#222"/>
     <text x="${W - 368}" y="${H - TITLE_H + 12}" font-size="14" font-weight="bold" fill="#111">${esc(clip(title, 44))}</text>
     <text x="${W - 368}" y="${H - TITLE_H + 27}" font-size="10" fill="#333">${esc(clip(`${opts.projectName ?? 'Pascal project'} — ${opts.levelName ?? 'Level'}`, 66))}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 40}" font-size="9" fill="#555">${esc(line1)}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 52}" font-size="9" fill="#555">${esc(line2)}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 64}" font-size="8.5" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 38}" font-size="8.5" fill="#555">${esc(line1)}</text>
+    ${line1b ? `<text x="${W - 368}" y="${H - TITLE_H + 48}" font-size="8.5" fill="#555">${esc(line1b)}</text>` : ''}
+    <text x="${W - 368}" y="${H - TITLE_H + 58}" font-size="8.5" fill="#555">${esc(line2)}</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 68}" font-size="8" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
     ${bar}
     ${extra}
   </g>`
@@ -183,20 +188,37 @@ function planSheet(
   const mine = members.filter((m) => def.systems.includes(m.system))
   const devs = fixtures.filter((f) => def.systems.includes(f.system))
   if (mine.length === 0 && devs.length === 0) return null
-  const b = planBounds(mine, devs)
+  // Wall footprint context: MEP runs floating on white are unreadable —
+  // draw the bottom plates as light gray underlay (quality round-2 C3).
+  const context = CONTEXT_SHEETS.has(def.key)
+    ? members.filter((m) => m.system === 'wall-framing' && m.role === 'bottom-plate')
+    : []
+  const b = planBounds([...mine, ...context], devs)
   if (!b) return null
 
-  const drawW = W - 2 * MARGIN
+  // Legend gutter: sheets with a legend reserve a left strip so the
+  // backing never erases geometry (quality round-2).
+  const hasLegend = def.key === 'electrical' || mine.some((m) => m.size)
+  const gutter = hasLegend ? 258 : 0
+  const drawW = W - 2 * MARGIN - gutter
   const drawH = H - 2 * MARGIN - TITLE_H
   const spanX = Math.max(0.5, b.maxX - b.minX)
   const spanZ = Math.max(0.5, b.maxZ - b.minZ)
   const scale = Math.min(drawW / spanX, drawH / spanZ)
-  const ox = MARGIN + (drawW - spanX * scale) / 2 - b.minX * scale
+  const ox = MARGIN + gutter + (drawW - spanX * scale) / 2 - b.minX * scale
   const oz = MARGIN + (drawH - spanZ * scale) / 2 - b.minZ * scale
   const X = (x: number) => ox + x * scale
   const Z = (z: number) => oz + z * scale
 
   const shapes: string[] = []
+  for (const m of context) {
+    const yaw = m.rotation[1]
+    const w = m.dims[0] * scale
+    const h = Math.max(1, m.dims[2] * scale)
+    shapes.push(
+      `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#e4e7ea" stroke="#c9ced4" stroke-width="0.4" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
+    )
+  }
   // Long members first so short hardware reads on top.
   const sorted = [...mine].sort((a, b2) => b2.dims[0] - a.dims[0])
   for (const m of sorted) {
@@ -274,6 +296,28 @@ function planSheet(
       ([role, size], i) =>
         `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
     )
+  if (def.key === 'mep') {
+    const seenRoles = new Map<string, string>()
+    for (const m of mine) {
+      if (!seenRoles.has(m.role)) {
+        seenRoles.set(m.role, def.fill[m.role] ?? def.fill.default ?? '#8fb0c4')
+      }
+    }
+    let row = legendLines.length
+    const NAMES: Record<string, string> = {
+      'pipe-run': 'supply / DWV pipe',
+      'vent-stack': 'vent stack',
+      'duct-run': 'duct',
+    }
+    for (const [role, color] of seenRoles) {
+      const y = MARGIN + 14 + row * 14
+      legendLines.push(
+        `<rect x="${MARGIN + 2}" y="${y - 8}" width="10" height="10" fill="${color}" stroke="#444" stroke-width="0.5"/>` +
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(NAMES[role] ?? role)}</text>`,
+      )
+      row++
+    }
+  }
   if (def.key === 'electrical') {
     const circuits = new Map<string, Fixture | undefined>()
     for (const m of mine) {
@@ -319,8 +363,7 @@ function schedulesSheets(
   const flags = [...new Set(members.filter((m) => m.flag).map((m) => m.flag as string))]
   const colW = (W - 2 * MARGIN) / 2
   const lineH = 15
-  const flagLines = Math.min(flags.length, 6) > 0 ? Math.min(flags.length, 6) + 1 : 0
-  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH) - Math.ceil(flagLines / 2)
+  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
   const perSheet = 2 * maxLines
   const pages = Math.max(1, Math.ceil(rows.length / perSheet))
   const sheets: PlanSheet[] = []

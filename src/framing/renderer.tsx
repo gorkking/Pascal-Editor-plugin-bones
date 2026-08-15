@@ -268,8 +268,12 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   useEffect(() => () => disposeGroup(group), [group])
 
   // Auto-switch the host to its most revealing wall mode while the X-ray is
-  // on (round-13 user feedback): the plugin's dollhouse layers pair with
-  // the host's own 'cutaway' (near host faces hidden, far faces kept).
+  // on (round-13 user feedback). 'down' — host walls fully hidden — not
+  // 'cutaway': the host's cutaway needs per-face exterior tags the scene
+  // data doesn't carry, so it painted every wall with its dot-stipple film
+  // (quality rounds 1-2). With the host shells gone, Bones' own assembly
+  // layers ARE the walls, and the per-face camera culling below gives the
+  // true dollhouse: near faces open, far drywall is the backdrop.
   // Restores the previous mode on unmount UNLESS the user changed it since.
   useEffect(() => {
     if (node.seeThrough === false) return
@@ -284,15 +288,15 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
         wallMode?: string
         setWallMode?: (mode: string) => void
       }
-      if (!viewer.setWallMode || viewer.wallMode === 'cutaway') return
+      if (!viewer.setWallMode || viewer.wallMode === 'down') return
       previous = viewer.wallMode
-      viewer.setWallMode('cutaway')
+      viewer.setWallMode('down')
       restore = () => {
         const now = useViewer.getState() as unknown as {
           wallMode?: string
           setWallMode?: (m: string) => void
         }
-        if (now.wallMode === 'cutaway' && previous && now.setWallMode) now.setWallMode(previous)
+        if (now.wallMode === 'down' && previous && now.setWallMode) now.setWallMode(previous)
       }
     })
     return () => {

@@ -143,20 +143,26 @@ export function unreachableDevices(
     }
   }
 
-  const nearestComponent = (p: Vector3, tol: number): number | null => {
+  const componentsNear = (p: Vector3, tol: number): Set<number> => {
+    const comps = new Set<number>()
     for (let i = 0; i < wires.length; i++) {
       const [a, b] = ends[i] as [Vector3, Vector3]
-      if (p.distanceTo(a) < tol || p.distanceTo(b) < tol || segDist(p, a, b) < tol) return find(i)
+      if (p.distanceTo(a) < tol || p.distanceTo(b) < tol || segDist(p, a, b) < tol) {
+        comps.add(find(i))
+      }
     }
-    return null
+    return comps
   }
 
-  const panelComp = nearestComponent(new Vector3(...panel.position), 0.35)
-  if (panelComp === null) return routed.map((f) => f.sourceId)
+  // Circuits run on per-circuit drill planes (12mm steps) so each homerun
+  // is its OWN component — every one of them must touch the panel.
+  const panelComps = componentsNear(new Vector3(...panel.position), 0.35)
+  if (panelComps.size === 0) return routed.map((f) => f.sourceId)
   const out: string[] = []
   for (const f of routed) {
-    const comp = nearestComponent(new Vector3(...f.position), DEVICE_TOL)
-    if (comp === null || comp !== panelComp) out.push(`${f.kind}@${f.position.join(',')}`)
+    const comps = componentsNear(new Vector3(...f.position), DEVICE_TOL)
+    const connected = [...comps].some((c) => panelComps.has(c))
+    if (!connected) out.push(`${f.kind}@${f.position.join(',')}`)
   }
   return out
 }

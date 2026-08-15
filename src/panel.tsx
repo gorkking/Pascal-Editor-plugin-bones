@@ -504,9 +504,10 @@ function JurisdictionPicker({
       )}
       <a
         className="text-[10px] text-sidebar-foreground/40 underline-offset-2 hover:underline"
-        href={`https://codes.iccsafe.org/search?query=${encodeURIComponent(
-          // short query — the full prose name (em dashes, effective dates)
-          // returns nothing on the ICC library (quality B2)
+        href={`https://codes.iccsafe.org/search/titles?searchTermAny=${encodeURIComponent(
+          // the ICC library drops ?query= — /search/titles?searchTermAny=
+          // with the short code name is the form that returns results
+          // (quality B2, verified live)
           codeName.split('(')[0]?.split('—')[0]?.trim().slice(0, 48) ?? codeName.slice(0, 48),
         )}`}
         rel="noreferrer"

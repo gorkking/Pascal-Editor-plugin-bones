@@ -172,6 +172,29 @@ function computeLevelUncached(
     members.push(...cmuWalls(masonry, spec))
   }
 
+  // Rooms with no flooring at all deserve a call-out regardless of level
+  // (quality round-2: a phantom room had no slab and nothing said so).
+  if (slabs.length > 0) {
+    const inPoly = (p: readonly [number, number], poly: readonly (readonly [number, number])[]): boolean => {
+      let inside = false
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, zi] = poly[i] as readonly [number, number]
+        const [xj, zj] = poly[j] as readonly [number, number]
+        if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) inside = !inside
+      }
+      return inside
+    }
+    for (const room of activeRooms) {
+      const c = room.polygon.reduce<[number, number]>(
+        (acc, p) => [acc[0] + p[0] / room.polygon.length, acc[1] + p[1] / room.polygon.length],
+        [0, 0],
+      )
+      if (!slabs.some((sl) => inPoly(c, sl.polygon))) {
+        warnings.push(`Room "${room.name}" has no floor slab under it`)
+      }
+    }
+  }
+
   if (config.showFloor) {
     if (isGroundLevel) {
       // Ground floors are slab-on-grade here — the FOUNDATION owns that
