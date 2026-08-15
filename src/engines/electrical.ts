@@ -894,7 +894,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     // Cables staple side by side, not inside each other: each circuit's
     // drill-height plane steps 12mm so the homerun spine reads as parallel
     // colored runs instead of 108 coincident segments (quality round-2).
-    const runY = WIRE_RUN_Y + (circuitIndex++ % 6) * 0.012
+    const runY = WIRE_RUN_Y + (circuitIndex++ % 8) * 0.012
     // homerun drop from the panel to drill height at its wall anchor
     const start = panelAnchor ?? null
     if (start) {

@@ -152,8 +152,17 @@ function chrome(
   // Two wrapped code lines instead of one overflowing one (quality C1:
   // the effective date clipped off the sheet edge on every sheet).
   const code = opts.codeName ?? ''
-  const line1 = clip(`Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${code ? ` — ${code.slice(0, 46)}` : ''}`, 66)
-  const line1b = code.length > 46 ? clip(code.slice(46).trim(), 66) : ''
+  // wrap at a word boundary (round-3: '8th Editi / on' split mid-word)
+  let head = code
+  let rest = ''
+  if (code.length > 46) {
+    const cut = code.lastIndexOf(' ', 46)
+    const at = cut > 20 ? cut : 46
+    head = code.slice(0, at)
+    rest = code.slice(at).trim()
+  }
+  const line1 = clip(`Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${head ? ` — ${head}` : ''}`, 66)
+  const line1b = rest ? clip(rest, 66) : ''
   const line2 = clip(`LOD 400 · Bones${opts.date ? ` · ${opts.date}` : ''}`, 66)
   const bar = scaleBar
     ? `<g stroke="#222" stroke-width="2">
@@ -172,7 +181,7 @@ function chrome(
     <text x="${W - 368}" y="${H - TITLE_H + 38}" font-size="8.5" fill="#555">${esc(line1)}</text>
     ${line1b ? `<text x="${W - 368}" y="${H - TITLE_H + 48}" font-size="8.5" fill="#555">${esc(line1b)}</text>` : ''}
     <text x="${W - 368}" y="${H - TITLE_H + 58}" font-size="8.5" fill="#555">${esc(line2)}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 68}" font-size="8" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 66}" font-size="8" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
     ${bar}
     ${extra}
   </g>`
@@ -198,7 +207,7 @@ function planSheet(
 
   // Legend gutter: sheets with a legend reserve a left strip so the
   // backing never erases geometry (quality round-2).
-  const hasLegend = def.key === 'electrical' || mine.some((m) => m.size)
+  const hasLegend = def.key === 'electrical' || def.key === 'mep' || mine.some((m) => m.size)
   const gutter = hasLegend ? 258 : 0
   const drawW = W - 2 * MARGIN - gutter
   const drawH = H - 2 * MARGIN - TITLE_H
@@ -472,15 +481,28 @@ function schedulesSheets(
   const lineH = 15
   const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
   const perSheet = 2 * maxLines
-  const pages = Math.max(1, Math.ceil(rows.length / perSheet))
+  // The flag block bottom-anchors on the LAST page — shrink that page's
+  // row capacity so a full column never runs under the red list
+  // (quality round-3: row 41 and the flags overprinted at y≈673).
+  const flagRows = Math.min(flags.length, 6) + (flags.length > 6 ? 1 : 0)
+  const lastPageCap = 2 * Math.max(4, maxLines - (flagRows > 0 ? flagRows + 1 : 0))
+  const pages = (() => {
+    if (rows.length <= lastPageCap) return 1
+    let remaining = rows.length - lastPageCap
+    return 1 + Math.ceil(remaining / perSheet)
+  })()
   const sheets: PlanSheet[] = []
+  let cursorRow = 0
   for (let page = 0; page < pages; page++) {
-    const slice = rows.slice(page * perSheet, (page + 1) * perSheet)
+    const cap = page === pages - 1 ? lastPageCap : perSheet
+    const slice = rows.slice(cursorRow, cursorRow + cap)
+    cursorRow += slice.length
     const cells: string[] = []
+    const pageLines = Math.ceil(slice.length / 2)
     slice.forEach((r, i) => {
-      const col = Math.floor(i / maxLines)
+      const col = Math.floor(i / pageLines)
       const x = MARGIN + col * colW
-      const y = MARGIN + 24 + (i % maxLines) * lineH
+      const y = MARGIN + 24 + (i % pageLines) * lineH
       const detail = r.detail && r.detail !== 'linear feet' ? ` (${r.detail})` : ''
       cells.push(
         `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(clip(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}${detail}`, 62))}</text>`,

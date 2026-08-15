@@ -189,7 +189,15 @@ function computeLevelUncached(
         (acc, p) => [acc[0] + p[0] / room.polygon.length, acc[1] + p[1] / room.polygon.length],
         [0, 0],
       )
-      if (!slabs.some((sl) => inPoly(c, sl.polygon))) {
+      // Sample the centroid AND points nudged toward vertices: a centroid
+      // landing exactly on a slab corner ray-casts as covered
+      // (quality round-3 — the warning never fired).
+      const samples: [number, number][] = [c]
+      for (const v of room.polygon.slice(0, 4)) {
+        samples.push([c[0] + (v[0] - c[0]) * 0.5, c[1] + (v[1] - c[1]) * 0.5])
+      }
+      const covered = samples.filter((pt) => slabs.some((sl) => inPoly(pt, sl.polygon))).length
+      if (covered <= samples.length / 2) {
         warnings.push(`Room "${room.name}" has no floor slab under it`)
       }
     }
