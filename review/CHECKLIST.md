@@ -20,6 +20,11 @@ AND a gate — a checklist line without a test is a wish.
   Gate: `src/engines/electrical.connectivity.test.ts`
 - **E3 Circuit colors are unique and identical in 3D and on paper.**
   Gate: `src/plans/circuit-colors.test.ts` (uniqueness pins)
+- **E4 No air jumpers through open rooms.** (OPEN — QA E1 round, 2026-08-15)
+  Straight diagonal wires flying through room air (bed-height jumpers,
+  cross-living-room diagonals) are physically impossible cable paths even
+  when they avoid ROs. Likely E2 connectivity jumpers rendered literally —
+  route them along wall/ceiling Manhattan paths. Gate: TODO with the fix.
 
 ## S — Structure
 
