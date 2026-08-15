@@ -368,7 +368,15 @@ export function buildFoundation(
       // Tee retreats apply here too: an interior bearing wall meeting the
       // exterior run stops at ITS footing face instead of pouring through
       // it (round-12, visible on exported plans).
-      const iSign = extensions.get(wall.id) ?? { start: 0, end: 0 }
+      const rawSign = extensions.get(wall.id) ?? { start: 0, end: 0 }
+      // A short link's footing always BUTTS the runs it bridges: collinear
+      // splice election (a link continuing a longer run's line through a
+      // tee) would leave it flush, poking the wide thickened footing into
+      // the crossing wall's retreated stemwall (gabled-composite gate).
+      const iSign =
+        len <= INTERIOR_BEARING_MIN_LENGTH
+          ? { start: Math.min(rawSign.start, -1), end: Math.min(rawSign.end, -1) }
+          : rawSign
       const iS = (iSign.start * spec.footingWidth) / 2
       const iE = (iSign.end * spec.footingWidth) / 2
       const iLen = Math.max(0.3, len + iS + iE)
