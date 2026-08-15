@@ -165,19 +165,48 @@ export function extractSlabs(nodes: NodesRecord, levelId: string): SlabSlice[] {
 }
 
 /** Ordered level ids (bottom → top) with their storey heights. */
-export function extractLevels(
-  nodes: NodesRecord,
-): { id: string; level: number; height: number }[] {
-  const levels: { id: string; level: number; height: number }[] = []
+export type LevelSlice = {
+  id: string
+  level: number
+  height: number
+  /** Level-floor world Y — mirrors the host's storey stacking exactly
+   * (core getLevelElevations): per building, ordinal order, each floor
+   * sits on the one below plus its own explicit baseElevation offset. */
+  baseY: number
+}
+
+export function extractLevels(nodes: NodesRecord): LevelSlice[] {
+  type Entry = LevelSlice & { baseElevation: number; buildingId: string | null }
+  const buildings = Object.values(nodes).filter((n) => n.type === 'building')
+  const entries: Entry[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'level') continue
-    levels.push({
-      id: String(node.id ?? ''),
+    const id = String(node.id ?? '')
+    const parentId = typeof node.parentId === 'string' ? node.parentId : null
+    let buildingId = parentId && nodes[parentId]?.type === 'building' ? parentId : null
+    if (!buildingId) {
+      // Legacy scenes list levels only in the building's children array.
+      const owner = buildings.find(
+        (b) => Array.isArray(b.children) && (b.children as string[]).includes(id),
+      )
+      buildingId = owner ? String(owner.id ?? '') : null
+    }
+    entries.push({
+      id,
       level: num(node.level, 0),
       height: num(node.height, 2.7),
+      baseElevation: num(node.baseElevation, 0),
+      buildingId,
+      baseY: 0,
     })
   }
-  return levels.sort((a, b) => a.level - b.level)
+  const cumulative = new Map<string | null, number>()
+  const sorted = entries.sort((a, b) => a.level - b.level)
+  for (const e of sorted) {
+    e.baseY = (cumulative.get(e.buildingId) ?? 0) + e.baseElevation
+    cumulative.set(e.buildingId, e.baseY + e.height)
+  }
+  return sorted.map(({ id, level, height, baseY }) => ({ id, level, height, baseY }))
 }
 
 const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [

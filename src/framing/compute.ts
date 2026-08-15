@@ -221,17 +221,69 @@ function computeLevelUncached(
 
   if (config.showRoof) {
     // Roof segments usually live on their OWN level above this one — search
-    // this level first, then every other level (quality A4: the Roof toggle
-    // was dead unless the bones node sat on the roof level itself).
+    // this level first, then the nearest OTHER level, preferring levels
+    // above (quality A4: the Roof toggle was dead unless the bones node sat
+    // on the roof level itself).
     let roofs = extractRoofs(nodes, levelId)
+    let roofLevel = levels[levelIndex]
     if (roofs.length === 0) {
-      for (const other of levels) {
-        if (other.id === levelId) continue
-        roofs = extractRoofs(nodes, other.id)
-        if (roofs.length > 0) break
+      const myOrdinal = levels[levelIndex]?.level ?? 0
+      const candidates = levels
+        .filter((l) => l.id !== levelId)
+        .sort((a, b) => {
+          const aAbove = a.level > myOrdinal ? 0 : 1
+          const bAbove = b.level > myOrdinal ? 0 : 1
+          if (aAbove !== bAbove) return aAbove - bAbove
+          return Math.abs(a.level - myOrdinal) - Math.abs(b.level - myOrdinal)
+        })
+      for (const other of candidates) {
+        const found = extractRoofs(nodes, other.id)
+        if (found.length > 0) {
+          roofs = found
+          roofLevel = other
+          break
+        }
       }
     }
-    members.push(...frameRoofs(roofs, activeWalls, spec))
+    if (roofs.length > 0 && roofLevel && roofLevel.id !== levelId) {
+      // A shared roof is framed by exactly ONE X-ray — the node on the
+      // highest storey (two nodes framing it would z-fight duplicate
+      // trusses). Everyone else says where to look.
+      const rivals = Object.values(nodes).filter(
+        (n) =>
+          n.type === config.type &&
+          n.showRoof !== false &&
+          typeof n.parentId === 'string' &&
+          levels.some((l) => l.id === n.parentId),
+      )
+      const ordinalOf = (n: Record<string, unknown>) =>
+        levels.find((l) => l.id === n.parentId)?.level ?? Number.NEGATIVE_INFINITY
+      const owner = rivals.reduce((best, n) => {
+        const a = ordinalOf(n)
+        const b = ordinalOf(best)
+        if (a > b) return n
+        if (a === b && String(n.id) < String(best.id)) return n
+        return best
+      }, rivals[0] ?? {})
+      if (owner && String(owner.id) !== String(config.id)) {
+        roofs = []
+        warnings.push('Roof is framed by the X-ray on the storey above')
+      }
+    }
+    // Members come out roof-LEVEL-local; this node renders inside ITS OWN
+    // level's group. Shift by the storey elevation delta so trusses land at
+    // the true roof height, not on this floor (prod 2026-08-15: a two-storey
+    // house wore its roof at ground level).
+    const dy = (roofLevel?.baseY ?? 0) - (levels[levelIndex]?.baseY ?? 0)
+    const framed = frameRoofs(roofs, activeWalls, spec)
+    members.push(
+      ...(dy === 0
+        ? framed
+        : framed.map((m) => ({
+            ...m,
+            position: [m.position[0], m.position[1] + dy, m.position[2]] as const,
+          }))),
+    )
   }
 
   if (config.showFoundation && isGroundLevel) {

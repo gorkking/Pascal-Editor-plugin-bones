@@ -57,6 +57,14 @@ AND a gate — a checklist line without a test is a wish.
   The renderer derives from the live nodes prop; any memo that caches past
   an opening edit is a bug.
 
+- **A3 Multi-storey: members are LEVEL-LOCAL.** The host mounts each node
+  inside its level group at the stacked storey elevation — members render
+  level-local; anything pulled from ANOTHER level (the roof search) carries
+  the storey delta (baseY mirror of core getLevelElevations). A shared roof
+  is framed by exactly ONE X-ray node (highest storey wins). Origin: prod
+  report 2026-08-15 (two-storey starter house wore its roof at ground
+  level). Gate: `src/framing/compute.multistorey.test.ts`
+
 ## Process
 
 - New invariant ⇒ new row + new gate in the same commit.
