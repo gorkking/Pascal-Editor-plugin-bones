@@ -141,6 +141,39 @@ function interiorFaces(wall: WallSlice, rooms: RoomSlice[]): WallFace[] {
   return [plus]
 }
 
+// ---- rough-opening geometry --------------------------------------------------
+
+type RoSpan = { lo: number; hi: number; sillY: number; topY: number }
+
+/**
+ * Horizontal RO intervals of every opening whose vertical rough opening
+ * crosses [y0, y1]. Cable, boxes and panels can't occupy ANY rough opening —
+ * doors, windows, fixed glazing alike. Adjacent spans merge (a mulled window
+ * pair or door+sidelite detours once, not twice).
+ */
+export function openingSpans(wall: WallSlice, y0: number, y1: number): RoSpan[] {
+  const spans = wall.openings
+    .filter((o) => o.sillHeight < y1 && o.sillHeight + o.roughHeight > y0)
+    .map((o) => ({
+      lo: Math.max(0, o.u - o.roughWidth / 2),
+      hi: Math.min(wall.length, o.u + o.roughWidth / 2),
+      sillY: o.sillHeight,
+      topY: o.sillHeight + o.roughHeight,
+    }))
+    .filter((s) => s.hi > s.lo)
+    .sort((a, b) => a.lo - b.lo)
+  const merged: RoSpan[] = []
+  for (const s of spans) {
+    const last = merged[merged.length - 1]
+    if (last && s.lo <= last.hi + inches(4)) {
+      last.hi = Math.max(last.hi, s.hi)
+      last.sillY = Math.min(last.sillY, s.sillY)
+      last.topY = Math.max(last.topY, s.topY)
+    } else merged.push({ ...s })
+  }
+  return merged
+}
+
 // ---- receptacle walk (NEC 210.52(A)) ----------------------------------------
 
 type Segment = { a: number; b: number }
@@ -155,8 +188,12 @@ type Segment = { a: number; b: number }
  */
 export function usableSegments(wall: WallSlice): Segment[] {
   const breaks: Segment[] = []
+  // A box also can't mount in glass: any opening whose RO drops below the
+  // top of a receptacle box (floor-to-ceiling glazing, low picture windows,
+  // sliders) breaks the wall space exactly like a doorway.
+  const boxTopY = RECEPTACLE_AFF + inches(4)
   for (const opening of wall.openings) {
-    if (opening.kind !== 'door') continue
+    if (opening.kind !== 'door' && opening.sillHeight >= boxTopY) continue
     const a = Math.max(0, opening.u - opening.roughWidth / 2)
     const b = Math.min(wall.length, opening.u + opening.roughWidth / 2)
     if (b > a) breaks.push({ a, b })
@@ -243,6 +280,10 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
       // would run past the wall end.
       let u = opening.u + halfRo + SWITCH_LATCH_OFFSET
       if (u > wall.length - inches(1)) u = opening.u - halfRo - SWITCH_LATCH_OFFSET
+      // A window butted against the latch side would swallow the box —
+      // nudge out of any RO crossing switch height (prod report: boxes
+      // rendering on top of doors/windows).
+      u = clearOfOpenings(wall, u, SWITCH_AFF - inches(6), SWITCH_AFF + inches(6))
       // No wall left for a box: the door consumes the whole wall, or the
       // opening data runs past the wall end (degenerate scene) — never place
       // a switch off the end of its wall.
@@ -364,15 +405,16 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
  */
 /**
  * Mount coordinate for the panel on its wall: the midpoint when clear, else
- * the center of the WIDEST door-free segment (panels need 30in of working
- * space — NEC 110.26 — and can never live inside a rough opening).
+ * the center of the WIDEST opening-free segment (panels need 30in of working
+ * space — NEC 110.26 — and can never live inside a rough opening; a window
+ * crossing the enclosure's height counts exactly like a door).
  */
 export function panelMountU(wall: WallSlice): number {
   const mid = wall.length / 2
-  const doors = wall.openings
-    .filter((o) => o.kind === 'door')
-    .map((o) => [o.u - o.roughWidth / 2, o.u + o.roughWidth / 2] as const)
-    .sort((a, b) => a[0] - b[0])
+  // Enclosure ≈ 30in tall centered at 60in AFF.
+  const doors = openingSpans(wall, PANEL_AFF - inches(15), PANEL_AFF + inches(15)).map(
+    (s) => [s.lo, s.hi] as const,
+  )
   if (!doors.some(([lo, hi]) => mid > lo && mid < hi)) return mid
   let bestLo = 0
   let bestLen = -1
@@ -641,32 +683,34 @@ const wallPlan = (p: WallPoint): Pt => [
   p.wall.start[1] + p.wall.dir[1] * p.u,
 ]
 
-/** Snap a wall coordinate out of any door rough opening — cable can't drop
- * through a doorway; it lands in the first stud bay past the king studs. */
-function clearOfDoors(wall: WallSlice, u: number): number {
+/** Vertical zone the drill-height planes occupy (8 circuit steps + sheath). */
+const RUN_ZONE_TOP = WIRE_RUN_Y + 8 * 0.012 + inches(2)
+
+/** Snap a wall coordinate out of any rough opening crossing [y0, y1] —
+ * cable can't drop through a doorway OR a window; it lands in the first
+ * stud bay past the king studs. */
+function clearOfOpenings(wall: WallSlice, u: number, y0 = 0, y1 = RUN_ZONE_TOP): number {
   const margin = inches(2)
-  for (const o of wall.openings) {
-    if (o.kind !== 'door') continue
-    const lo = o.u - o.roughWidth / 2
-    const hi = o.u + o.roughWidth / 2
-    if (u > lo && u < hi) {
-      const snapLo = Math.max(margin, lo - margin)
-      const snapHi = Math.min(wall.length - margin, hi + margin)
-      return u - lo < hi - u ? snapLo : snapHi
+  for (const s of openingSpans(wall, y0, y1)) {
+    if (u > s.lo && u < s.hi) {
+      const snapLo = Math.max(margin, s.lo - margin)
+      const snapHi = Math.min(wall.length - margin, s.hi + margin)
+      return u - s.lo < s.hi - u ? snapLo : snapHi
     }
   }
   return u
 }
 
-/** Nearest wall-centerline point to a plan position (never inside a door RO). */
-function nearestWallPoint(walls: WallSlice[], p: Pt): WallPoint | null {
+/** Nearest wall-centerline point to a plan position (never inside a rough
+ * opening that the anchor's vertical leg [0, yTop] would cross). */
+function nearestWallPoint(walls: WallSlice[], p: Pt, yTop = RUN_ZONE_TOP): WallPoint | null {
   let best: WallPoint | null = null
   let bestDist = Number.POSITIVE_INFINITY
   for (const wall of walls) {
     if (wall.curved || wall.length < 0.1) continue
     const [ax, az] = wall.start
     const raw = Math.max(0, Math.min(wall.length, (p[0] - ax) * wall.dir[0] + (p[1] - az) * wall.dir[1]))
-    const u = clearOfDoors(wall, raw)
+    const u = clearOfOpenings(wall, raw, 0, Math.max(yTop, RUN_ZONE_TOP))
     const q = wallPlan({ wall, u })
     const d = Math.hypot(q[0] - p[0], q[1] - p[1])
     if (d < bestDist) {
@@ -702,9 +746,9 @@ export function buildWallGraph(walls: WallSlice[]): Map<string, Junction[]> {
         )
         const q = wallPlan({ wall: other, u: proj })
         if (Math.hypot(q[0] - p[0], q[1] - p[1]) > JUNCTION_TOL) continue
-        // A tee landing inside a door RO would end a drill leg in the
-        // doorway — snap the junction into the adjacent stud bay.
-        const safeProj = clearOfDoors(other, proj)
+        // A tee landing inside a rough opening would end a drill leg in the
+        // doorway/window — snap the junction into the adjacent stud bay.
+        const safeProj = clearOfOpenings(other, proj)
         add({ wall, u: endU }, { wall: other, u: safeProj })
         add({ wall: other, u: safeProj }, { wall, u: endU })
       }
@@ -811,10 +855,12 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   }
 
   /**
-   * One drill-height leg along a wall — DETOURING over any door rough
-   * opening it would cross: rise inside the king-stud bay, cross above the
-   * header, drop back to drill height (round-4 advisory: legs used to drill
-   * straight through door ROs).
+   * One drill-height leg along a wall — DETOURING around ANY rough opening
+   * whose vertical RO crosses the drill plane (doors always; windows when
+   * the sill drops below drill height — prod report: wires bored straight
+   * through low windows). Route: rise inside the king-stud bay, cross above
+   * the header, drop back — or duck UNDER the sill when there's no wall
+   * above (full-height glazing with a stub sill).
    */
   const emitWallLeg = (
     circuit: string,
@@ -825,27 +871,49 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     runY: number = WIRE_RUN_Y,
   ): void => {
     const dir = Math.sign(u1 - u0) || 1
-    const doors = wall.openings
-      .filter((o) => {
-        if (o.kind !== 'door') return false
-        const lo = o.u - o.roughWidth / 2
-        const hi = o.u + o.roughWidth / 2
-        return Math.min(u0, u1) < lo && Math.max(u0, u1) > hi
-      })
-      .sort((a, b) => (a.u - b.u) * dir)
+    const legLo = Math.min(u0, u1)
+    const legHi = Math.max(u0, u1)
+    const crossed = openingSpans(wall, runY - 0.02, runY + 0.02)
+      .filter((s) => s.lo < legHi && s.hi > legLo)
+      .sort((a, b) => (a.lo - b.lo) * dir)
     const at = (u: number, y: number): [number, number, number] => {
       const p = wallPlan({ wall, u })
       return [p[0], y, p[1]]
     }
+    const clamp = (u: number) => Math.max(legLo, Math.min(legHi, u))
     let cursor = u0
-    for (const door of doors) {
-      const near = door.u - (door.roughWidth / 2) * dir
-      const far = door.u + (door.roughWidth / 2) * dir
-      const overY = Math.min(door.sillHeight + door.roughHeight + inches(4), wall.height - 0.05)
+    for (const s of crossed) {
+      const near = clamp(dir > 0 ? s.lo : s.hi)
+      const far = clamp(dir > 0 ? s.hi : s.lo)
+      // The crossing band itself must be clear too — a transom above a door
+      // sits exactly where the over-the-header path would run.
+      const blockedAt = (yy: number) =>
+        openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
+      let detourY: number | null = null
+      for (let yy = s.topY + inches(4); yy <= wall.height - 0.05; yy += inches(4)) {
+        if (!blockedAt(yy)) {
+          detourY = yy
+          break
+        }
+      }
+      if (detourY === null) {
+        for (let yy = s.sillY - inches(4); yy >= 0.04; yy -= inches(4)) {
+          if (!blockedAt(yy)) {
+            detourY = yy
+            break
+          }
+        }
+      }
+      if (detourY === null) {
+        // RO spans floor to ceiling — nowhere inside this wall to route.
+        emitWire(circuit, gauge, at(cursor, runY), at(far, runY), ' (⚠ crosses full-height opening — verify)')
+        cursor = far
+        continue
+      }
       emitWire(circuit, gauge, at(cursor, runY), at(near, runY))
-      emitWire(circuit, gauge, at(near, runY), at(near, overY))
-      emitWire(circuit, gauge, at(near, overY), at(far, overY))
-      emitWire(circuit, gauge, at(far, overY), at(far, runY))
+      emitWire(circuit, gauge, at(near, runY), at(near, detourY))
+      emitWire(circuit, gauge, at(near, detourY), at(far, detourY))
+      emitWire(circuit, gauge, at(far, detourY), at(far, runY))
       cursor = far
     }
     emitWire(circuit, gauge, at(cursor, runY), at(u1, runY))
@@ -887,7 +955,9 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   }
 
   const panelPlan: Pt = [panel.position[0], panel.position[2]]
-  const panelAnchor = nearestWallPoint(walls, panelPlan)
+  // The homerun drop spans drill height up to the panel — its anchor must
+  // clear any RO in that whole vertical band.
+  const panelAnchor = nearestWallPoint(walls, panelPlan, panel.position[1] + inches(15))
   let circuitIndex = 0
   for (const [circuit, devices] of byCircuit) {
     const gauge = Number(devices[0]?.meta?.gaugeAwg ?? 14)
@@ -929,7 +999,14 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       const device = remaining.splice(best, 1)[0] as Fixture
       const [x, y, z] = device.position
       const ceilingDevice = device.kind === 'light' || device.kind === 'smoke-alarm'
-      const anchor = nearestWallPoint(walls, [x, z])
+      // Ceiling devices rise the full wall height inside a stud bay; wall
+      // devices rise to their box — either way the bay must be RO-free for
+      // the whole vertical leg (prod report: risers through windows).
+      const anchor = nearestWallPoint(
+        walls,
+        [x, z],
+        ceilingDevice ? Number.POSITIVE_INFINITY : Math.max(RUN_ZONE_TOP, y + inches(6)),
+      )
       if (anchor && cursor) {
         routeHop(circuit, gauge, cursor, anchor, runY)
         const ap = wallPlan(anchor)

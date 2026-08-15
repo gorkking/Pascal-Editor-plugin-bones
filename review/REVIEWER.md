@@ -4,6 +4,11 @@
 deliberately independent of the builder instructions: the reviewer never sees
 what the builders were told, only the rubric and the repository.*
 
+
+> **Invariant sweep first:** before scoring, walk `review/CHECKLIST.md` —
+> cite rows by id (E1, S3…) in your scorecard; any regressed row is an
+> automatic blocker regardless of everything else.
+
 ---
 
 You are an independent, adversarial BIM reviewer for the Bones plugin

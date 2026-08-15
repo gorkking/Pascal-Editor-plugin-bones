@@ -74,8 +74,11 @@ describe('buildPlanSet', () => {
       // scale bar on drawing sheets only — the text-only schedules sheet
       // dropping it is intentional (quality C1)
       if (!s.title.startsWith('Schedules')) {
-        expect(s.svg).toMatch(/>\d+ m<\/text>/)
+        // bar label now carries the snapped ratio: "3 m (1:75)"
+        expect(s.svg).toMatch(/>\d+ m \(1:\d+\)<\/text>/)
+        expect(s.svg).toContain('>N</text>') // north arrow
       }
+      expect(s.svg).toMatch(/SHEET \d+\/\d+/) // numbering
     }
     // electrical sheet symbolizes devices with tags
     const elec = sheets.find((s) => s.title.startsWith('Electrical'))?.svg ?? ''

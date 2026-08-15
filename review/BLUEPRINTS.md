@@ -6,6 +6,11 @@ judge the exported plan-set document the way a practicing architect or
 plans examiner would judge a submitted drawing set. You look at rendered
 sheets, not code.
 
+
+> **Invariant sweep first:** before scoring, walk `review/CHECKLIST.md` —
+> cite rows by id (E1, S3…) in your scorecard; any regressed row is an
+> automatic blocker regardless of everything else.
+
 ## How to generate the document (no editor browser session needed)
 
 `buildPlanSet` is a pure function. Fetch a scene graph over HTTP, compute,

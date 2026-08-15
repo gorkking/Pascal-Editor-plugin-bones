@@ -20,6 +20,8 @@ export type PlanSetOptions = {
   projectName?: string
   levelName?: string
   jurisdiction?: string
+  /** Engine warnings — printed verbatim in the schedules flag block. */
+  warnings?: string[]
   /** Resolved code name, e.g. "2023 FBC — Residential (2021 IRC base)". */
   codeName?: string
   /** Preformatted date string for the title block. */
@@ -104,6 +106,20 @@ const esc = (s: string): string =>
 
 const deg = (rad: number): number => (rad * 180) / Math.PI
 
+/** Drop exactly-coincident duplicates (same role, position, dims) —
+ * double-plotted bolts/CMU courses read as smudges (blueprint round-1). */
+function dedupeShapes(members: Member[]): Member[] {
+  const seen = new Set<string>()
+  const out: Member[] = []
+  for (const m of members) {
+    const key = `${m.role}|${m.position.map((v) => v.toFixed(3)).join(',')}|${m.dims.map((v) => v.toFixed(3)).join(',')}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(m)
+  }
+  return out
+}
+
 type Bounds = { minX: number; maxX: number; minZ: number; maxZ: number }
 
 function planBounds(members: Member[], fixtures: Fixture[]): Bounds | null {
@@ -143,7 +159,7 @@ function chrome(
   opts: PlanSetOptions,
   scale: number,
   extra = '',
-  { scaleBar = true }: { scaleBar?: boolean } = {},
+  { scaleBar = true, ratio }: { scaleBar?: boolean; ratio?: number } = {},
 ): string {
   const meterPx = scale
   const meters = Math.max(1, Math.round(180 / Math.max(1e-6, meterPx)))
@@ -163,14 +179,22 @@ function chrome(
   }
   const line1 = clip(`Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${head ? ` — ${head}` : ''}`, 66)
   const line1b = rest ? clip(rest, 66) : ''
-  const line2 = clip(`LOD 400 · Bones${opts.date ? ` · ${opts.date}` : ''}`, 66)
+  const line2 = clip(
+    `LOD 400 · Bones${ratio ? ` · scale 1:${ratio}` : ''}${opts.date ? ` · ${opts.date}` : ''} · __SHEET_NO__`,
+    72,
+  )
   const bar = scaleBar
     ? `<g stroke="#222" stroke-width="2">
       <line x1="${MARGIN}" y1="${by}" x2="${MARGIN + barPx}" y2="${by}"/>
       <line x1="${MARGIN}" y1="${by - 5}" x2="${MARGIN}" y2="${by + 5}"/>
       <line x1="${MARGIN + barPx}" y1="${by - 5}" x2="${MARGIN + barPx}" y2="${by + 5}"/>
     </g>
-    <text x="${MARGIN + barPx + 8}" y="${by + 4}" font-size="11" fill="#333">${meters} m</text>`
+    <text x="${MARGIN + barPx + 8}" y="${by + 4}" font-size="11" fill="#333">${meters} m${ratio ? ` (1:${ratio})` : ''}</text>
+    <g transform="translate(${W - 40} ${MARGIN + 8})" stroke="#222" fill="none">
+      <circle r="11"/>
+      <path d="M0 8 L0 -8 M0 -8 L-3.5 -1 M0 -8 L3.5 -1" stroke-width="1.6"/>
+      <text y="-14" font-size="9" text-anchor="middle" fill="#222" stroke="none">N</text>
+    </g>`
     : ''
   return `
   <rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#222" stroke-width="2"/>
@@ -187,37 +211,52 @@ function chrome(
   </g>`
 }
 
+/**
+ * ONE transform for the whole set (blueprint round-1 P2: five different
+ * scales/origins made cross-sheet overlay impossible). Union bbox of every
+ * system, scale snapped DOWN to a standard architectural ratio so the bar
+ * reads 1:50 / 1:75 / 1:100…, gutter reserved on every sheet uniformly.
+ */
+type SetTransform = { scale: number; ratio: number; X: (x: number) => number; Z: (z: number) => number; gutter: number }
+
+/** 96dpi: px per meter at ratio 1:n = 96/0.0254/n. */
+const RATIOS = [20, 25, 50, 75, 100, 125, 150, 200, 250, 500]
+
+function setTransform(members: Member[], fixtures: Fixture[]): SetTransform | null {
+  const b = planBounds(members, fixtures)
+  if (!b) return null
+  const gutter = 258 // uniform legend/notes strip, every sheet
+  const drawW = W - 2 * MARGIN - gutter
+  const drawH = H - 2 * MARGIN - TITLE_H
+  const spanX = Math.max(0.5, b.maxX - b.minX)
+  const spanZ = Math.max(0.5, b.maxZ - b.minZ)
+  const fit = Math.min(drawW / spanX, drawH / spanZ)
+  const pxPerM = 96 / 0.0254
+  const ratio = RATIOS.find((r) => pxPerM / r <= fit) ?? 500
+  const scale = pxPerM / ratio
+  const ox = MARGIN + gutter + (drawW - spanX * scale) / 2 - b.minX * scale
+  const oz = MARGIN + (drawH - spanZ * scale) / 2 - b.minZ * scale
+  return { scale, ratio, X: (x) => ox + x * scale, Z: (z) => oz + z * scale, gutter }
+}
+
 /** One top-view plan sheet for the given systems. */
 function planSheet(
   def: (typeof PLAN_SHEETS)[number],
   members: Member[],
   fixtures: Fixture[],
   opts: PlanSetOptions,
+  t: SetTransform,
 ): PlanSheet | null {
-  const mine = members.filter((m) => def.systems.includes(m.system))
+  const mine = dedupeShapes(members.filter((m) => def.systems.includes(m.system)))
   const devs = fixtures.filter((f) => def.systems.includes(f.system))
   if (mine.length === 0 && devs.length === 0) return null
-  // Wall footprint context: MEP runs floating on white are unreadable —
-  // draw the bottom plates as light gray underlay (quality round-2 C3).
-  const context = CONTEXT_SHEETS.has(def.key)
-    ? members.filter((m) => m.system === 'wall-framing' && m.role === 'bottom-plate')
-    : []
-  const b = planBounds([...mine, ...context], devs)
-  if (!b) return null
-
-  // Legend gutter: sheets with a legend reserve a left strip so the
-  // backing never erases geometry (quality round-2).
-  const hasLegend = def.key === 'electrical' || def.key === 'mep' || mine.some((m) => m.size)
-  const gutter = hasLegend ? 258 : 0
-  const drawW = W - 2 * MARGIN - gutter
-  const drawH = H - 2 * MARGIN - TITLE_H
-  const spanX = Math.max(0.5, b.maxX - b.minX)
-  const spanZ = Math.max(0.5, b.maxZ - b.minZ)
-  const scale = Math.min(drawW / spanX, drawH / spanZ)
-  const ox = MARGIN + gutter + (drawW - spanX * scale) / 2 - b.minX * scale
-  const oz = MARGIN + (drawH - spanZ * scale) / 2 - b.minZ * scale
-  const X = (x: number) => ox + x * scale
-  const Z = (z: number) => oz + z * scale
+  // Wall footprint context: runs floating on white are unreadable — draw
+  // the bottom plates as light gray underlay on every non-wall sheet.
+  const context =
+    def.key === 'wall'
+      ? []
+      : members.filter((m) => m.system === 'wall-framing' && m.role === 'bottom-plate')
+  const { scale, X, Z } = t
 
   const shapes: string[] = []
   // Foundation runs draw as MITERED PATHS, not independent rectangles:
@@ -434,6 +473,36 @@ function planSheet(
       row++
     }
   }
+  if (def.key === 'electrical' || def.key === 'mep') {
+    const TAG_NAMES: Record<string, string> = {
+      R: 'receptacle',
+      G: 'GFCI receptacle',
+      S: 'switch',
+      L: 'light',
+      SD: 'smoke alarm',
+      P: 'panel',
+      EF: 'exhaust fan',
+      T: 'thermostat',
+      SR: 'supply register',
+      RA: 'return air',
+      SO: 'stub-out',
+      VS: 'vent stack',
+      WH: 'water heater',
+      AH: 'air handler',
+      CO: 'cleanout',
+    }
+    const usedTags = [...new Set(devs.map((f) => FIXTURE_TAG[f.kind] ?? '·'))]
+    let trow = legendLines.length
+    for (const tag of usedTags) {
+      const y = MARGIN + 14 + trow * 14
+      legendLines.push(
+        `<circle cx="${MARGIN + 7}" cy="${y - 3}" r="6" fill="#fff" stroke="#a05c10" stroke-width="1"/>` +
+          `<text x="${MARGIN + 7}" y="${y - 0.5}" font-size="7" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text>` +
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(TAG_NAMES[tag] ?? tag)}</text>`,
+      )
+      trow++
+    }
+  }
   if (def.key === 'electrical') {
     const circuits = new Map<string, Fixture | undefined>()
     for (const m of mine) {
@@ -462,7 +531,7 @@ function planSheet(
       ? `<rect x="${MARGIN - 4}" y="${MARGIN - 6}" width="250" height="${legendLines.length * 14 + 14}" fill="#ffffff" fill-opacity="0.92" stroke="#ccc" stroke-width="0.5"/>${legendLines.join('')}`
       : ''
 
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${shapes.join('')}${chrome(def.title, opts, scale, legend)}</svg>`
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${shapes.join('')}${chrome(def.title, opts, scale, legend, { ratio: t.ratio })}</svg>`
   return { title: def.title, svg }
 }
 
@@ -476,7 +545,12 @@ function schedulesSheets(
   // read as nonsense in the grid (quality C5).
   const rows = computeTakeoff(members, fixtures).filter((r) => r.section !== 'Flags')
   if (rows.length === 0) return []
-  const flags = [...new Set(members.filter((m) => m.flag).map((m) => m.flag as string))]
+  const flags = [
+    ...new Set([
+      ...members.filter((m) => m.flag).map((m) => m.flag as string),
+      ...(opts.warnings ?? []),
+    ]),
+  ]
   const colW = (W - 2 * MARGIN) / 2
   const lineH = 15
   const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
@@ -539,13 +613,21 @@ export function buildPlanSet(
   fixtures: Fixture[],
   opts: PlanSetOptions = {},
 ): PlanSheet[] {
+  const t = setTransform(members, fixtures)
   const sheets: PlanSheet[] = []
-  for (const def of PLAN_SHEETS) {
-    const sheet = planSheet(def, members, fixtures, opts)
-    if (sheet) sheets.push(sheet)
+  if (t) {
+    for (const def of PLAN_SHEETS) {
+      const sheet = planSheet(def, members, fixtures, opts, t)
+      if (sheet) sheets.push(sheet)
+    }
   }
   sheets.push(...schedulesSheets(members, fixtures, opts))
-  return sheets
+  // SHEET n/N in every title block (blueprint C6) — patch the placeholder
+  // after the census is known.
+  return sheets.map((sheet, i) => ({
+    ...sheet,
+    svg: sheet.svg.replaceAll('__SHEET_NO__', `SHEET ${i + 1}/${sheets.length}`),
+  }))
 }
 
 /** Self-contained printable document — Print → Save as PDF gives the plan set. */

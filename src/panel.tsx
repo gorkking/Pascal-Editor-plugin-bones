@@ -551,6 +551,9 @@ function ExportPlansButton({
           jurisdiction: result.jurisdiction,
           codeName,
           date: new Date().toLocaleDateString(),
+          // engine warnings print verbatim in the schedules flag block
+          // (blueprint C5 / checklist P4) — paper never hides a caveat
+          warnings: result.warnings,
         })
         if (sheets.length === 0) return
         const html = planSetHtml(sheets, { projectName: levelName })
