@@ -71,14 +71,19 @@ describe('buildPlanSet', () => {
       expect(s.svg).toContain('Jurisdiction: FL')
       expect(s.svg).toContain('2026-08-14')
       expect(s.svg).toContain('Drafting aid, not engineering')
-      expect(s.svg).toMatch(/>\d+ m<\/text>/) // scale bar
+      // scale bar on drawing sheets only — the text-only schedules sheet
+      // dropping it is intentional (quality C1)
+      if (!s.title.startsWith('Schedules')) {
+        expect(s.svg).toMatch(/>\d+ m<\/text>/)
+      }
     }
     // electrical sheet symbolizes devices with tags
     const elec = sheets.find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
     expect(elec).toContain('>R</text>')
     expect(elec).toContain('>S</text>')
-    // wires carry their CIRCUIT color (SA-1 terracotta) + the zone legend
-    expect(elec).toContain('#e2703a')
+    // wires carry their CIRCUIT color + the zone legend
+    const { circuitColor } = require('./circuit-colors') as typeof import('./circuit-colors')
+    expect(elec).toContain(circuitColor('SA-1'))
     expect(elec).toContain('SA-1')
     expect(elec).toContain('kitchen small-appliance')
     // rotated stud carries its yaw into the plan transform (−45°)

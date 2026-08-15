@@ -3,19 +3,19 @@
  * and the exported electrical plan sheet so a wire reads as the SAME
  * circuit in the building and on paper.
  *
- * Prefixes follow the engine's NEC circuit ids: SA (kitchen small
- * appliance), BA (bathroom), LA (laundry), GA (garage), LTG-n (lighting),
- * GEN-n (general receptacles). Even/odd indexes within a family alternate
- * base/variant so SA-1 and SA-2 read apart.
+ * Every circuit INDEX gets its own hue step inside the family band
+ * (quality round-1 A6: two shades per family left GEN-1/3/5/7 identical) —
+ * hue walks ±14° per index around the family base, lightness alternates,
+ * so up to ~8 circuits per family stay tellable apart.
  */
 
-const FAMILY: Record<string, { hint: string; base: string; variant: string }> = {
-  SA: { hint: 'kitchen small-appliance', base: '#e2703a', variant: '#b34f22' },
-  BA: { hint: 'bathroom', base: '#3d84c6', variant: '#2a5f95' },
-  LA: { hint: 'laundry', base: '#2fa3a0', variant: '#1f7a78' },
-  GA: { hint: 'garage', base: '#7a8b5c', variant: '#5a6a40' },
-  LTG: { hint: 'lighting', base: '#e0b53c', variant: '#b18a25' },
-  GEN: { hint: 'general receptacles', base: '#b06fc9', variant: '#844d9c' },
+const FAMILY: Record<string, { hint: string; hue: number }> = {
+  SA: { hint: 'kitchen small-appliance', hue: 21 },
+  BA: { hint: 'bathroom', hue: 210 },
+  LA: { hint: 'laundry', hue: 178 },
+  GA: { hint: 'garage', hue: 82 },
+  LTG: { hint: 'lighting', hue: 44 },
+  GEN: { hint: 'general receptacles', hue: 285 },
 }
 
 export function circuitZoneHint(circuit: string): string {
@@ -27,6 +27,28 @@ export function circuitColor(circuit: string): string {
   const [prefix, indexRaw] = circuit.split('-')
   const family = FAMILY[prefix ?? '']
   if (!family) return '#b0723d' // unknown circuit — legacy copper
-  const index = Number(indexRaw ?? 1)
-  return Number.isFinite(index) && index >= 2 && index % 2 === 0 ? family.variant : family.base
+  const index = Math.max(1, Number(indexRaw ?? 1) || 1)
+  const hue = (family.hue + (index - 1) * 14) % 360
+  const light = index % 2 === 1 ? 42 : 55
+  const sat = 62
+  // hsl → hex so both three.js and the SVG sheets get plain hex strings
+  const h = hue / 360
+  const l = light / 100
+  const sN = sat / 100
+  const q = l < 0.5 ? l * (1 + sN) : l + sN - l * sN
+  const pQ = 2 * l - q
+  const channel = (tRaw: number): number => {
+    let t = tRaw
+    if (t < 0) t += 1
+    if (t > 1) t -= 1
+    if (t < 1 / 6) return pQ + (q - pQ) * 6 * t
+    if (t < 1 / 2) return q
+    if (t < 2 / 3) return pQ + (q - pQ) * (2 / 3 - t) * 6
+    return pQ
+  }
+  const toHex = (v: number): string =>
+    Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0')
+  return `#${toHex(channel(h + 1 / 3))}${toHex(channel(h))}${toHex(channel(h - 1 / 3))}`
 }

@@ -115,7 +115,15 @@ function planBounds(members: Member[], fixtures: Fixture[]): Bounds | null {
     maxZ = Math.max(maxZ, z + r)
   }
   for (const m of members) {
-    eat(m.position[0], m.position[2], Math.max(m.dims[0], m.dims[2]) / 2)
+    // Rotation-aware per-axis extents — a single max-dim radius inflated
+    // the frame ~40% on elongated plans (quality C1).
+    const yaw = m.rotation[1]
+    const ex = (Math.abs(Math.cos(yaw)) * m.dims[0] + Math.abs(Math.sin(yaw)) * m.dims[2]) / 2
+    const ez = (Math.abs(Math.sin(yaw)) * m.dims[0] + Math.abs(Math.cos(yaw)) * m.dims[2]) / 2
+    minX = Math.min(minX, m.position[0] - ex)
+    maxX = Math.max(maxX, m.position[0] + ex)
+    minZ = Math.min(minZ, m.position[2] - ez)
+    maxZ = Math.max(maxZ, m.position[2] + ez)
   }
   for (const f of fixtures) eat(f.position[0], f.position[2], 0.2)
   if (!Number.isFinite(minX)) return null
@@ -123,26 +131,44 @@ function planBounds(members: Member[], fixtures: Fixture[]): Bounds | null {
 }
 
 /** Title block + border + scale bar, shared by every sheet. */
-function chrome(title: string, opts: PlanSetOptions, scale: number, extra = ''): string {
+/** Clip one text line to the title block width (~70 chars at 10px). */
+const clip = (text: string, max: number): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1)}…`
+
+function chrome(
+  title: string,
+  opts: PlanSetOptions,
+  scale: number,
+  extra = '',
+  { scaleBar = true }: { scaleBar?: boolean } = {},
+): string {
   const meterPx = scale
-  // Scale-bar length: a round meter count that fits ~180px.
   const meters = Math.max(1, Math.round(180 / Math.max(1e-6, meterPx)))
   const barPx = meters * meterPx
   const by = H - TITLE_H - 18
-  return `
-  <rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#222" stroke-width="2"/>
-  <g font-family="Helvetica, Arial, sans-serif">
-    <rect x="${W - 380}" y="${H - TITLE_H - 8}" width="${372}" height="${TITLE_H}" fill="#fff" stroke="#222"/>
-    <text x="${W - 368}" y="${H - TITLE_H + 14}" font-size="15" font-weight="bold" fill="#111">${esc(title)}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 32}" font-size="11" fill="#333">${esc(opts.projectName ?? 'Pascal project')} — ${esc(opts.levelName ?? 'Level')}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 47}" font-size="10" fill="#555">Jurisdiction: ${esc(opts.jurisdiction ?? 'AUTO')}${opts.codeName ? ` — ${esc(opts.codeName)}` : ''} · LOD 400 · Bones${opts.date ? ` · ${esc(opts.date)}` : ''}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 62}" font-size="9" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
-    <g stroke="#222" stroke-width="2">
+  // Two wrapped code lines instead of one overflowing one (quality C1:
+  // the effective date clipped off the sheet edge on every sheet).
+  const jur = `Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${opts.codeName ? ` — ${opts.codeName}` : ''}`
+  const line1 = clip(jur, 66)
+  const line2 = clip(`LOD 400 · Bones${opts.date ? ` · ${opts.date}` : ''}`, 66)
+  const bar = scaleBar
+    ? `<g stroke="#222" stroke-width="2">
       <line x1="${MARGIN}" y1="${by}" x2="${MARGIN + barPx}" y2="${by}"/>
       <line x1="${MARGIN}" y1="${by - 5}" x2="${MARGIN}" y2="${by + 5}"/>
       <line x1="${MARGIN + barPx}" y1="${by - 5}" x2="${MARGIN + barPx}" y2="${by + 5}"/>
     </g>
-    <text x="${MARGIN + barPx + 8}" y="${by + 4}" font-size="11" fill="#333">${meters} m</text>
+    <text x="${MARGIN + barPx + 8}" y="${by + 4}" font-size="11" fill="#333">${meters} m</text>`
+    : ''
+  return `
+  <rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#222" stroke-width="2"/>
+  <g font-family="Helvetica, Arial, sans-serif">
+    <rect x="${W - 380}" y="${H - TITLE_H - 8}" width="${372}" height="${TITLE_H}" fill="#fff" stroke="#222"/>
+    <text x="${W - 368}" y="${H - TITLE_H + 12}" font-size="14" font-weight="bold" fill="#111">${esc(clip(title, 44))}</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 27}" font-size="10" fill="#333">${esc(clip(`${opts.projectName ?? 'Pascal project'} — ${opts.levelName ?? 'Level'}`, 66))}</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 40}" font-size="9" fill="#555">${esc(line1)}</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 52}" font-size="9" fill="#555">${esc(line2)}</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 64}" font-size="8.5" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
+    ${bar}
     ${extra}
   </g>`
 }
@@ -201,19 +227,46 @@ function planSheet(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="#444" stroke-width="0.6" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
   }
+  // Device tags: dedupe identical (kind, position) fixtures and nudge
+  // colliding bubbles apart in a small spiral (quality A6/C3: six tags
+  // overprinted into a blob; the panel symbol printed twice).
+  const placed: { x: number; y: number }[] = []
+  const seenDev = new Set<string>()
   for (const f of devs) {
+    const key = `${f.kind}|${f.position[0].toFixed(2)}|${f.position[2].toFixed(2)}`
+    if (seenDev.has(key)) continue
+    seenDev.add(key)
     const tag = FIXTURE_TAG[f.kind] ?? '·'
+    let px = X(f.position[0])
+    let py = Z(f.position[2])
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const clash = placed.some((q) => Math.hypot(q.x - px, q.y - py) < 15)
+      if (!clash) break
+      const ang = (attempt * Math.PI) / 3
+      px = X(f.position[0]) + 16 * Math.cos(ang)
+      py = Z(f.position[2]) + 16 * Math.sin(ang)
+    }
+    placed.push({ x: px, y: py })
     shapes.push(
-      `<g transform="translate(${X(f.position[0]).toFixed(1)} ${Z(f.position[2]).toFixed(1)})"><circle r="7" fill="#fff" stroke="#a05c10" stroke-width="1.2"/><text y="3.5" font-size="8" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text></g>`,
+      `<g transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle r="7" fill="#fff" stroke="#a05c10" stroke-width="1.2"/><text y="3.5" font-size="8" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text></g>`,
     )
   }
 
   // Callouts: most common size per role, top-left legend — and on the
   // electrical sheet, the CIRCUIT legend (color swatch, id, breaker/gauge,
   // zone) so wires on paper match the 3D X-ray colors.
-  const roleSizes = new Map<string, string>()
+  // Most-common size per role — 'first seen' printed 2x4 for everything
+  // on a 2x6-dominant house (quality C4).
+  const roleSizeCounts = new Map<string, Map<string, number>>()
   for (const m of mine) {
-    if (m.size && !roleSizes.has(m.role)) roleSizes.set(m.role, m.size)
+    if (!m.size) continue
+    const counts = roleSizeCounts.get(m.role) ?? new Map<string, number>()
+    counts.set(m.size, (counts.get(m.size) ?? 0) + 1)
+    roleSizeCounts.set(m.role, counts)
+  }
+  const roleSizes = new Map<string, string>()
+  for (const [role, counts] of roleSizeCounts) {
+    roleSizes.set(role, [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '')
   }
   const legendLines: string[] = [...roleSizes.entries()]
     .slice(0, 8)
@@ -244,7 +297,10 @@ function planSheet(
       if (row > 22) break
     }
   }
-  const legend = legendLines.join('')
+  const legend =
+    legendLines.length > 0
+      ? `<rect x="${MARGIN - 4}" y="${MARGIN - 6}" width="250" height="${legendLines.length * 14 + 14}" fill="#ffffff" fill-opacity="0.92" stroke="#ccc" stroke-width="0.5"/>${legendLines.join('')}`
+      : ''
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${shapes.join('')}${chrome(def.title, opts, scale, legend)}</svg>`
   return { title: def.title, svg }
@@ -256,7 +312,9 @@ function schedulesSheets(
   fixtures: Fixture[],
   opts: PlanSetOptions,
 ): PlanSheet[] {
-  const rows = computeTakeoff(members, fixtures)
+  // Flags render as their own ⚑ list — the 'Flags · FLAG — 1 ea' rows
+  // read as nonsense in the grid (quality C5).
+  const rows = computeTakeoff(members, fixtures).filter((r) => r.section !== 'Flags')
   if (rows.length === 0) return []
   const flags = [...new Set(members.filter((m) => m.flag).map((m) => m.flag as string))]
   const colW = (W - 2 * MARGIN) / 2
@@ -273,8 +331,9 @@ function schedulesSheets(
       const col = Math.floor(i / maxLines)
       const x = MARGIN + col * colW
       const y = MARGIN + 24 + (i % maxLines) * lineH
+      const detail = r.detail && r.detail !== 'linear feet' ? ` (${r.detail})` : ''
       cells.push(
-        `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}`)}</text>`,
+        `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(clip(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}${detail}`, 62))}</text>`,
       )
     })
     // Flags on the LAST page; overflow called out, never silently dropped
@@ -296,7 +355,7 @@ function schedulesSheets(
     const title = pages > 1 ? `Schedules + takeoff (${page + 1}/${pages})` : 'Schedules + takeoff'
     sheets.push({
       title,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${flagText}${chrome(title, opts, 40)}</svg>`,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${flagText}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
     })
   }
   return sheets

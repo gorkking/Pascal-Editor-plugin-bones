@@ -50,7 +50,50 @@ function extractOpening(node: AnyRecord): OpeningSlice | null {
 }
 
 /** Extract every straight wall on `levelId` with its openings. */
-export function extractWalls(nodes: NodesRecord, levelId: string): WallSlice[] {
+/**
+ * Geometric exterior fallback (quality round-1 A1): hosts routinely leave
+ * BOTH faces 'interior', which killed sheathing/WRB/cladding, stemwall
+ * hardware, and put devices on the wrong side. When no wall in the level
+ * declares an exterior face, infer: probe one wall-thickness past each
+ * face at the midpoint — a face with NO other wall's segment and no slab
+ * coverage within the footprint faces outdoors.
+ */
+function applyExteriorFallback(walls: WallSlice[], slabs: { polygon: readonly (readonly [number, number])[] }[]): void {
+  if (walls.some((w) => w.exterior)) return
+  const inPoly = (p: readonly [number, number], poly: readonly (readonly [number, number])[]): boolean => {
+    let inside = false
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, zi] = poly[i] as readonly [number, number]
+      const [xj, zj] = poly[j] as readonly [number, number]
+      if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) inside = !inside
+    }
+    return inside
+  }
+  const covered = (p: readonly [number, number]): boolean =>
+    slabs.some((sl) => inPoly(p, sl.polygon))
+  for (const wall of walls) {
+    if (wall.curved) continue
+    const mid: [number, number] = [
+      wall.start[0] + (wall.dir[0] * wall.length) / 2,
+      wall.start[1] + (wall.dir[1] * wall.length) / 2,
+    ]
+    const probeDist = wall.thickness / 2 + 0.2
+    let exposedSides = 0
+    for (const side of [1, -1] as const) {
+      const n: [number, number] = [-wall.dir[1] * side, wall.dir[0] * side]
+      const p: [number, number] = [mid[0] + n[0] * probeDist, mid[1] + n[1] * probeDist]
+      if (!covered(p)) exposedSides++
+    }
+    // exactly one exposed side = a perimeter wall
+    if (exposedSides === 1) (wall as { exterior: boolean }).exterior = true
+  }
+}
+
+export function extractWalls(
+  nodes: NodesRecord,
+  levelId: string,
+  slabs: { polygon: readonly (readonly [number, number])[] }[] = [],
+): WallSlice[] {
   const walls: WallSlice[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'wall' || node.parentId !== levelId) continue
@@ -91,6 +134,7 @@ export function extractWalls(nodes: NodesRecord, levelId: string): WallSlice[] {
       curved,
     })
   }
+  applyExteriorFallback(walls, slabs)
   return walls
 }
 

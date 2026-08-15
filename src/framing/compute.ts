@@ -94,8 +94,39 @@ function computeLevelUncached(
   // 400 (fabrication) builds ON TOP of the code-sized pass — jurisdiction applies to both.
   if (config.detail !== '200') spec = applyJurisdiction(spec, profile)
 
-  const walls = extractWalls(nodes, levelId)
   const slabs = extractSlabs(nodes, levelId)
+  // Slabs feed the exterior fallback: hosts often mark BOTH wall faces
+  // 'interior' (quality round-1 A1) — flooring says which side is in.
+  const rawWalls = extractWalls(nodes, levelId, slabs)
+  // Duplicate colinear walls (host scenes routinely carry overlapping
+  // segments) framed TWICE: z-fighting studs, doubled plates, ~20% phantom
+  // lumber in the takeoff (quality round-1 A5). Keep the longer of any
+  // near-coincident pair and say so.
+  const walls: typeof rawWalls = []
+  const dropped: string[] = []
+  for (const w of [...rawWalls].sort((a, b) => b.length - a.length)) {
+    const dup = walls.find((kept) => {
+      if (Math.abs(kept.thickness - w.thickness) > 0.03) return false
+      const cross = Math.abs(kept.dir[0] * w.dir[1] - kept.dir[1] * w.dir[0])
+      if (cross > 0.05) return false
+      // both endpoints of w lie on kept's centerline band
+      const on = (p: readonly [number, number]): boolean => {
+        const dx = p[0] - kept.start[0]
+        const dz = p[1] - kept.start[1]
+        const along = dx * kept.dir[0] + dz * kept.dir[1]
+        const off = Math.abs(-dx * kept.dir[1] + dz * kept.dir[0])
+        return along > -0.05 && along < kept.length + 0.05 && off < kept.thickness / 2
+      }
+      return on(w.start) && on(w.end)
+    })
+    if (dup) dropped.push(w.id)
+    else walls.push(w)
+  }
+  if (dropped.length > 0) {
+    warnings.push(
+      `${dropped.length} duplicate overlapping wall${dropped.length > 1 ? 's' : ''} skipped (framed once, not twice)`,
+    )
+  }
   const rooms = extractRooms(nodes, levelId)
   const levels = extractLevels(nodes)
   const levelIndex = levels.findIndex((l) => l.id === levelId)
@@ -141,13 +172,34 @@ function computeLevelUncached(
     members.push(...cmuWalls(masonry, spec))
   }
 
-  if (config.showFloor && !isGroundLevel) {
-    const storeyBelowHeight = levels[levelIndex - 1]?.height ?? 2.4
-    members.push(...frameFloor(slabs, activeWalls, spec, storeyBelowHeight))
+  if (config.showFloor) {
+    if (isGroundLevel) {
+      // Ground floors are slab-on-grade here — the FOUNDATION owns that
+      // geometry. Say so instead of silently doing nothing (quality A4:
+      // the toggle looked dead), and call out rooms with no slab at all.
+      if (slabs.length === 0) {
+        warnings.push('No floor slabs on this level — rooms have no floor to derive')
+      } else {
+        warnings.push('Ground floor is slab-on-grade — see Foundation for the slab and footings')
+      }
+    } else {
+      const storeyBelowHeight = levels[levelIndex - 1]?.height ?? 2.4
+      members.push(...frameFloor(slabs, activeWalls, spec, storeyBelowHeight))
+    }
   }
 
   if (config.showRoof) {
-    const roofs = extractRoofs(nodes, levelId)
+    // Roof segments usually live on their OWN level above this one — search
+    // this level first, then every other level (quality A4: the Roof toggle
+    // was dead unless the bones node sat on the roof level itself).
+    let roofs = extractRoofs(nodes, levelId)
+    if (roofs.length === 0) {
+      for (const other of levels) {
+        if (other.id === levelId) continue
+        roofs = extractRoofs(nodes, other.id)
+        if (roofs.length > 0) break
+      }
+    }
     members.push(...frameRoofs(roofs, activeWalls, spec))
   }
 

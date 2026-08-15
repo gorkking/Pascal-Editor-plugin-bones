@@ -175,8 +175,8 @@ function XraySection({
                 } as Partial<AnyNode> as never)
             }
             options={[
-              { label: '16"', value: '16' },
-              { label: '24"', value: '24' },
+              { label: '16 in', value: '16' },
+              { label: '24 in', value: '24' },
             ]}
             value={String(framingNode.studSpacingIn)}
           />
@@ -323,8 +323,13 @@ function TakeoffSection({ result }: { result: NonNullable<ReturnType<typeof comp
                 <div
                   className="flex items-baseline justify-between gap-2 text-[11px]"
                   key={`${row.item}-${row.detail}`}
+                  title={`${row.item} — ${row.detail}`}
                 >
-                  <span className="min-w-0 flex-1 truncate text-sidebar-foreground/70">
+                  <span
+                    className={`min-w-0 flex-1 text-sidebar-foreground/70 ${
+                      section === 'Flags' ? 'whitespace-normal break-words' : 'truncate'
+                    }`}
+                  >
                     {row.item}
                     <span className="text-sidebar-foreground/40"> {row.detail}</span>
                   </span>
@@ -499,7 +504,11 @@ function JurisdictionPicker({
       )}
       <a
         className="text-[10px] text-sidebar-foreground/40 underline-offset-2 hover:underline"
-        href={`https://codes.iccsafe.org/search?query=${encodeURIComponent(codeName)}`}
+        href={`https://codes.iccsafe.org/search?query=${encodeURIComponent(
+          // short query — the full prose name (em dashes, effective dates)
+          // returns nothing on the ICC library (quality B2)
+          codeName.split('(')[0]?.split('—')[0]?.trim().slice(0, 48) ?? codeName.slice(0, 48),
+        )}`}
         rel="noreferrer"
         target="_blank"
       >
@@ -542,7 +551,8 @@ function ExportPlansButton({
         const sheets = buildPlanSet(result.members, result.fixtures, {
           projectName: document.title.split('—')[0]?.trim() || 'Pascal project',
           levelName,
-          jurisdiction: framingNode.jurisdiction,
+          // resolved state code — raw 'AUTO' printed on sheets (quality C1)
+          jurisdiction: result.jurisdiction,
           codeName,
           date: new Date().toLocaleDateString(),
         })
