@@ -71,6 +71,7 @@ export default function BonesPanel() {
             result={result}
             framingNode={framingNode}
             activeLevelId={activeLevelId ?? null}
+            codeName={result.spec ? profileFor(result.jurisdiction).residentialCode : undefined}
           />
         )}
       </footer>
@@ -140,28 +141,13 @@ function XraySection({
         </button>
       </div>
 
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="text-sidebar-foreground/60">Jurisdiction</span>
-        <select
-          className="rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-sidebar-foreground text-xs"
-          onChange={(e) =>
-            useScene
-              .getState()
-              .updateNode(framingNode.id as AnyNodeId, {
-                jurisdiction: e.target.value,
-              } as Partial<AnyNode> as never)
-          }
-          value={framingNode.jurisdiction}
-        >
-          <option value="AUTO">{guess ? `Auto — ${guess.code} (${guess.reason})` : 'Auto'}</option>
-          {options.map((o) => (
-            <option key={o.code} value={o.code}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-        <span className="text-[10px] text-sidebar-foreground/40">{profile.residentialCode}</span>
-      </label>
+      <JurisdictionPicker
+        framingNodeId={framingNode.id as AnyNodeId}
+        value={framingNode.jurisdiction}
+        guess={guess}
+        options={options}
+        codeName={profile.residentialCode}
+      />
 
       <div className="flex gap-2">
         <div className="flex-1">
@@ -431,6 +417,99 @@ function LumberSection() {
 }
 
 /**
+ * Searchable jurisdiction picker (round-14 quality feedback): 51 states +
+ * Auto in a filter-as-you-type list instead of a bare <select>, with the
+ * resolved code linked to the public ICC library.
+ */
+function JurisdictionPicker({
+  framingNodeId,
+  value,
+  guess,
+  options,
+  codeName,
+}: {
+  framingNodeId: AnyNodeId
+  value: string
+  guess: { code: string; reason: string } | null
+  options: { code: string; name: string }[]
+  codeName: string
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const pick = (code: string) => {
+    useScene
+      .getState()
+      .updateNode(framingNodeId, { jurisdiction: code } as Partial<AnyNode> as never)
+    setOpen(false)
+    setQuery('')
+  }
+  const q = query.trim().toLowerCase()
+  const filtered = q
+    ? options.filter((o) => o.name.toLowerCase().includes(q) || o.code.toLowerCase().includes(q))
+    : options
+  const current =
+    value === 'AUTO'
+      ? guess
+        ? `Auto — ${guess.code}`
+        : 'Auto'
+      : (options.find((o) => o.code === value)?.name ?? value)
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      <span className="text-sidebar-foreground/60">Jurisdiction</span>
+      <button
+        type="button"
+        className="flex items-center justify-between rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-left text-sidebar-foreground text-xs"
+        onClick={() => setOpen((v) => !v)}
+      >
+        <span className="truncate">{current}</span>
+        <span className="text-sidebar-foreground/40">{open ? '▴' : '▾'}</span>
+      </button>
+      {open && (
+        <div className="flex max-h-56 flex-col overflow-hidden rounded-md border border-sidebar-border/60 bg-sidebar shadow-lg">
+          <input
+            autoFocus
+            className="border-sidebar-border/40 border-b bg-transparent px-2 py-1.5 text-xs outline-none placeholder:text-sidebar-foreground/30"
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search states…"
+            value={query}
+          />
+          <div className="overflow-y-auto">
+            <button
+              type="button"
+              className="block w-full px-2 py-1.5 text-left text-xs hover:bg-sidebar-accent"
+              onClick={() => pick('AUTO')}
+            >
+              {guess ? `Auto — ${guess.code} (${guess.reason})` : 'Auto'}
+            </button>
+            {filtered.map((o) => (
+              <button
+                key={o.code}
+                type="button"
+                className={`block w-full px-2 py-1.5 text-left text-xs hover:bg-sidebar-accent ${o.code === value ? 'bg-sidebar-accent/60' : ''}`}
+                onClick={() => pick(o.code)}
+              >
+                {o.name}
+              </button>
+            ))}
+            {filtered.length === 0 && (
+              <div className="px-2 py-2 text-sidebar-foreground/40 text-xs">No match</div>
+            )}
+          </div>
+        </div>
+      )}
+      <a
+        className="text-[10px] text-sidebar-foreground/40 underline-offset-2 hover:underline"
+        href={`https://codes.iccsafe.org/search?query=${encodeURIComponent(codeName)}`}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {codeName} ↗
+      </a>
+    </div>
+  )
+}
+
+/**
  * "Save full plans" — the LOD 400 plan set as a printable document: one
  * SVG sheet per system (foundation / floor / wall / roof framing plans,
  * electrical rough-in, MEP) plus schedules + takeoff, paginated for the
@@ -440,23 +519,31 @@ function ExportPlansButton({
   result,
   framingNode,
   activeLevelId,
+  codeName,
 }: {
   result: NonNullable<ReturnType<typeof computeLevel>>
   framingNode: FramingNode
   activeLevelId: AnyNodeId | null
+  codeName?: string
 }) {
   const levelName = useScene((s) =>
     activeLevelId ? ((s.nodes[activeLevelId] as { name?: string } | undefined)?.name ?? 'Level') : 'Level',
   )
+  const sheetCount = useMemo(
+    () =>
+      buildPlanSet(result.members, result.fixtures, {}).length,
+    [result],
+  )
   return (
     <button
       type="button"
-      className="rounded-md border border-sidebar-border bg-sidebar-accent/60 px-3 py-2 font-medium text-sidebar-foreground/90 text-xs transition-colors hover:bg-sidebar-accent"
+      className="flex w-full flex-col items-center gap-0.5 rounded-lg bg-primary px-3 py-2.5 font-semibold text-primary-foreground text-sm shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.99]"
       onClick={() => {
         const sheets = buildPlanSet(result.members, result.fixtures, {
           projectName: document.title.split('—')[0]?.trim() || 'Pascal project',
           levelName,
           jurisdiction: framingNode.jurisdiction,
+          codeName,
           date: new Date().toLocaleDateString(),
         })
         if (sheets.length === 0) return
@@ -467,7 +554,10 @@ function ExportPlansButton({
         setTimeout(() => URL.revokeObjectURL(url), 60_000)
       }}
     >
-      📐 Save full plans (print-ready LOD 400 sheets)
+      <span>📐 Blueprints</span>
+      <span className="font-normal text-[10px] opacity-80">
+        {sheetCount} print-ready sheets · LOD 400
+      </span>
     </button>
   )
 }

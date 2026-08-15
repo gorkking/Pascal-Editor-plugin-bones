@@ -20,6 +20,8 @@ export type PlanSetOptions = {
   projectName?: string
   levelName?: string
   jurisdiction?: string
+  /** Resolved code name, e.g. "2023 FBC — Residential (2021 IRC base)". */
+  codeName?: string
   /** Preformatted date string for the title block. */
   date?: string
 }
@@ -133,7 +135,7 @@ function chrome(title: string, opts: PlanSetOptions, scale: number, extra = ''):
     <rect x="${W - 380}" y="${H - TITLE_H - 8}" width="${372}" height="${TITLE_H}" fill="#fff" stroke="#222"/>
     <text x="${W - 368}" y="${H - TITLE_H + 14}" font-size="15" font-weight="bold" fill="#111">${esc(title)}</text>
     <text x="${W - 368}" y="${H - TITLE_H + 32}" font-size="11" fill="#333">${esc(opts.projectName ?? 'Pascal project')} — ${esc(opts.levelName ?? 'Level')}</text>
-    <text x="${W - 368}" y="${H - TITLE_H + 47}" font-size="10" fill="#555">Jurisdiction: ${esc(opts.jurisdiction ?? 'AUTO')} · LOD 400 · Bones${opts.date ? ` · ${esc(opts.date)}` : ''}</text>
+    <text x="${W - 368}" y="${H - TITLE_H + 47}" font-size="10" fill="#555">Jurisdiction: ${esc(opts.jurisdiction ?? 'AUTO')}${opts.codeName ? ` — ${esc(opts.codeName)}` : ''} · LOD 400 · Bones${opts.date ? ` · ${esc(opts.date)}` : ''}</text>
     <text x="${W - 368}" y="${H - TITLE_H + 62}" font-size="9" fill="#777">Drafting aid, not engineering — verify with your local building department.</text>
     <g stroke="#222" stroke-width="2">
       <line x1="${MARGIN}" y1="${by}" x2="${MARGIN + barPx}" y2="${by}"/>
