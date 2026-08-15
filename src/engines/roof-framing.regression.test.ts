@@ -238,19 +238,27 @@ describe('verify: shed slope matches host (high at −Z, low at +Z)', () => {
 
 describe('verify: collar ties at pitch extremes span between the slope planes', () => {
   for (const deg of [5, 75]) {
-    test(`pitch ${deg}° — tie length = 2·(ridgeY−collarY)/tanθ and endpoints lie on the planes`, () => {
+    test(`pitch ${deg}° — ties clamp under the ridge and endpoints lie on the planes`, () => {
       const roof = seg({ pitch: (deg * Math.PI) / 180 })
       const theta = roof.pitch
       const run = roof.depth / 2
       const baseY = roof.position[1] + roof.wallHeight
       const rise = run * Math.tan(theta)
       const ridgeY = baseY + rise
-      const collarY = baseY + (2 / 3) * rise
+      // Round-14: the upper-third line CLAMPS beneath the ridge's bottom
+      // face (2x8 ridge for 2x6 rafters) so low pitches never bury the tie.
+      const rdd = 7.25 * 0.0254
+      const ctD = 3.5 * 0.0254
+      const collarY = Math.min(baseY + (2 / 3) * rise, ridgeY - rdd - ctD / 2 - 0.005)
       const ties = frameRoofs([roof], [], DEFAULT_SPEC).filter((m) => m.role === 'collar-tie')
+      if (collarY <= baseY + 0.2) {
+        // pitch so low the tie has no room — engine skips them entirely
+        expect(ties).toHaveLength(0)
+        return
+      }
       expect(ties.length).toBeGreaterThan(0)
       for (const tie of ties) {
-        // formula reduces to 2·run/3, independent of pitch
-        expect(tie.length).toBeCloseTo((2 * run) / 3, 6)
+        expect(tie.length).toBeCloseTo((2 * (ridgeY - collarY)) / Math.tan(theta), 6)
         const [e1, e2] = endpoints(tie)
         for (const e of [e1, e2]) {
           expect(e.y).toBeCloseTo(collarY, 6)

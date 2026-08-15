@@ -266,9 +266,12 @@ describe('frameRoofs — hip jack rafters (LOD 350)', () => {
     const kings = byRole(members, 'rafter').filter((r) => r.label?.includes('King common'))
     expect(kings).toHaveLength(2)
     const rd = 5.5 * 0.0254
+    const t = 1.5 * 0.0254
     const inset = (rd / 2) * Math.tan(theta)
+    // top pulled back from the hip junction like a jack cheek (round-14)
+    const setback = (Math.SQRT2 * t) / 2 + (rd / 2) * Math.sin(theta)
     for (const k of kings) {
-      expect(k.length).toBeCloseTo(3 / Math.cos(theta) + roof.overhang - 2 * inset, 5)
+      expect(k.length).toBeCloseTo((3 - setback) / Math.cos(theta) + roof.overhang - 2 * inset, 5)
       expect(Math.abs(k.position[2] as number)).toBeLessThan(1e-6) // centerline
     }
   })
@@ -287,7 +290,8 @@ describe('frameRoofs — flat roof (joists + rim)', () => {
     const joists = byRole(members, 'rafter')
     expect(joists.length).toBeGreaterThanOrEqual(12)
     for (const j of joists) {
-      expect(j.length).toBeCloseTo(6 + 2 * 0.3, 5) // depth + overhang both sides
+      // joists stop at the rim INNER faces (round-14): span − 2t
+      expect(j.length).toBeCloseTo(6 + 2 * 0.3 - 2 * 1.5 * 0.0254, 5)
       expect(j.rotation[2]).toBeCloseTo(0, 6) // no tilt
       expect(j.label).toContain('R903.4') // drainage slope call-out
     }
@@ -296,8 +300,9 @@ describe('frameRoofs — flat roof (joists + rim)', () => {
   test('four rim boards close the perimeter', () => {
     const rims = byRole(members, 'rim-joist')
     expect(rims).toHaveLength(4)
+    // short rims BUTT between the long ones (round-14): −2t
     const lengths = rims.map((r) => r.length).sort((a, b) => a - b)
-    expect(lengths[0]).toBeCloseTo(6.6, 5)
+    expect(lengths[0]).toBeCloseTo(6.6 - 2 * 1.5 * 0.0254, 5)
     expect(lengths[3]).toBeCloseTo(8.6, 5)
   })
 })
@@ -320,7 +325,14 @@ describe('frameRoofs — gambrel (host ratios wr=0.5, hr=0.6)', () => {
     expect(lowers.length).toBe(uppers.length)
     expect((lowers[0] as Member).rotation[2]).toBeCloseTo(theta, 6)
     expect((uppers[0] as Member).rotation[2]).toBeCloseTo(phi, 6)
-    expect((uppers[0] as Member).length).toBeCloseTo(Math.hypot(1.5, upperRise), 5)
+    // spans purlin FACE → ridge FACE with inscribed plumb cuts (round-14):
+    // plan run loses gRt/2 at each end; slope length loses 2·(rd/2)·tanφ.
+    const gRt = 1.5 * 0.0254
+    const rd26 = 5.5 * 0.0254
+    const planRun = 1.5 - gRt
+    const rise2 = upperRise * (planRun / 1.5)
+    const inset = (rd26 / 2) * (upperRise / 1.5)
+    expect((uppers[0] as Member).length).toBeCloseTo(Math.hypot(planRun, rise2) - 2 * inset, 5)
   })
 
   test('ridge at the derived peak; purlins at both kinks', () => {
@@ -456,7 +468,10 @@ describe('frameRoofs — rake framing + fascia (LOD 350/400)', () => {
       expect(Math.abs(o.rotation[0] ?? 0)).toBeCloseTo(theta, 6)
       expect(o.rotation[1]).toBeCloseTo(0, 6)
       expect(o.rotation[2]).toBeCloseTo(0, 6)
-      expect(o.length).toBeCloseTo(0.3 + DEFAULT_SPEC.rafterSpacing - (1.5 * 0.0254) / 2, 5)
+      // ladders derive from ACTUAL rafter positions per side (round-14:
+      // layout snugs the tail rafter, so the two rakes differ slightly)
+      expect(o.length).toBeGreaterThan(0.3)
+      expect(o.length).toBeLessThan(0.3 + 2 * DEFAULT_SPEC.rafterSpacing)
     }
     const barges = byRole(members, 'rafter').filter((r) => r.label?.includes('Barge'))
     expect(barges).toHaveLength(4)

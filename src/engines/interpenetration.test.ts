@@ -343,6 +343,23 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(frameFloor([slab(rect(12, 12))], [], spec400))).toEqual([])
   })
 
+  test('roof framing: flat, gambrel, big gable, steep hip (round-14)', () => {
+    const cases: [string, Partial<RoofSegmentSlice>][] = [
+      ['flat', { roofType: 'flat' }],
+      ['gambrel', { roofType: 'gambrel' }],
+      ['gambrel60', { roofType: 'gambrel', pitch: (60 * Math.PI) / 180 }],
+      ['bigGable', { width: 16, depth: 12 }],
+      ['hip60', { roofType: 'hip', pitch: (60 * Math.PI) / 180 }],
+      ['gable10', { pitch: (10 * Math.PI) / 180 }],
+    ]
+    for (const [name, over] of cases) {
+      expect({ name, v: violations(frameRoofs([roofSeg(over)], [], spec400)) }).toEqual({
+        name,
+        v: [],
+      })
+    }
+  })
+
   test('floor framing: rotated slabs 10/30/45° (round-14)', () => {
     for (const deg of [10, 30, 45]) {
       const th = (deg * Math.PI) / 180
@@ -372,6 +389,11 @@ describe('interpenetration gate — structural members never share volume', () =
   // clipping feature - tracked for the next round; the valley boards and
   // jacks themselves already exist.
   test.todo('roof framing: intersecting gable pair clips at the valley (overframing)', () => {})
+
+  // frameSkirt (mansard/dutch perimeter skirts) still shares volume where
+  // arris hips meet the corner rafters — the same inscribing treatment as
+  // the hip family, next round.
+  test.todo('roof framing: mansard + dutch skirts inscribe at arris hips', () => {})
   const UNUSED = () => {
     expect(
       violations(
