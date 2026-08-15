@@ -221,3 +221,57 @@ describe('multi-storey — verify-round defect gates', () => {
     expect(minB).toBeLessThan(4.5)
   })
 })
+
+describe('multi-storey — mixed roof levels (re-verify regression)', () => {
+  test('porch on the ground level + main roof above: the owner frames BOTH', () => {
+    const nodes = twoStoreyScene()
+    nodes.porchseg = {
+      id: 'porchseg',
+      type: 'roof-segment',
+      parentId: 'lvl0',
+      position: [50, 2.5, 2],
+      rotation: 0,
+      roofType: 'shed',
+      width: 3,
+      depth: 2,
+      pitch: 15,
+      thickness: 0.15,
+    }
+    const node0 = bones('bonesframing_0', 'lvl0')
+    const node1 = bones('bonesframing_1', 'lvl1')
+    nodes.bonesframing_0 = node0 as unknown as Record<string, unknown>
+    nodes.bonesframing_1 = node1 as unknown as Record<string, unknown>
+    const roof0 = computeLevel(nodes, node0).members.filter((m) => m.system === 'roof-framing')
+    const roof1 = computeLevel(nodes, node1).members.filter((m) => m.system === 'roof-framing')
+    // node1 owns: it frames BOTH the main roof and the ground-level porch
+    expect(roof0).toEqual([])
+    const porch = roof1.filter((m) => m.position[0] > 40)
+    const main = roof1.filter((m) => m.position[0] <= 40)
+    expect(porch.length).toBeGreaterThan(0)
+    expect(main.length).toBeGreaterThan(0)
+    // porch members shift DOWN by node1's storey height (lvl0 − lvl1 = −2.7)
+    const porchMax = Math.max(...porch.map((m) => m.position[1]))
+    expect(porchMax).toBeLessThan(2.0)
+  })
+
+  test('single X-ray on the ground frames both roof levels too', () => {
+    const nodes = twoStoreyScene()
+    nodes.porchseg = {
+      id: 'porchseg',
+      type: 'roof-segment',
+      parentId: 'lvl0',
+      position: [50, 2.5, 2],
+      rotation: 0,
+      roofType: 'shed',
+      width: 3,
+      depth: 2,
+      pitch: 15,
+      thickness: 0.15,
+    }
+    const node0 = bones('bonesframing_0', 'lvl0')
+    nodes.bonesframing_0 = node0 as unknown as Record<string, unknown>
+    const roof = computeLevel(nodes, node0).members.filter((m) => m.system === 'roof-framing')
+    expect(roof.filter((m) => m.position[0] > 40).length).toBeGreaterThan(0)
+    expect(roof.filter((m) => m.position[0] <= 40).length).toBeGreaterThan(0)
+  })
+})

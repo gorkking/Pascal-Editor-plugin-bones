@@ -220,43 +220,27 @@ function computeLevelUncached(
         warnings.push('Ground floor is slab-on-grade — see Foundation for the slab and footings')
       }
     } else {
-      const storeyBelowHeight = levels[levelIndex - 1]?.height ?? 2.4
+      // Host floor-to-floor is baseY delta (resolveLevelFloorToFloorHeight),
+      // not the raw storey height — baseElevation offsets count too.
+      const below = levels[levelIndex - 1]
+      const storeyBelowHeight = below
+        ? (levels[levelIndex]?.baseY ?? 0) - below.baseY
+        : 2.4
       members.push(...frameFloor(slabs, activeWalls, spec, storeyBelowHeight))
     }
   }
 
   if (config.showRoof) {
-    // Roof segments usually live on their OWN level above this one — search
-    // this level first, then the nearest OTHER level, preferring levels
-    // above (quality A4: the Roof toggle was dead unless the bones node sat
-    // on the roof level itself).
-    let roofs = extractRoofs(nodes, levelId)
-    let roofLevel = levels[levelIndex]
-    if (roofs.length === 0) {
-      const myOrdinal = levels[levelIndex]?.level ?? 0
-      const candidates = levels
-        .filter((l) => l.id !== levelId)
-        .sort((a, b) => {
-          const aAbove = a.level > myOrdinal ? 0 : 1
-          const bAbove = b.level > myOrdinal ? 0 : 1
-          if (aAbove !== bAbove) return aAbove - bAbove
-          return Math.abs(a.level - myOrdinal) - Math.abs(b.level - myOrdinal)
-        })
-      for (const other of candidates) {
-        const found = extractRoofs(nodes, other.id)
-        if (found.length > 0) {
-          roofs = found
-          roofLevel = other
-          break
-        }
-      }
-    }
-    if (roofs.length > 0) {
-      // A shared roof is framed by exactly ONE X-ray — the node on the
-      // highest storey of THIS building (two nodes framing it would z-fight
-      // duplicate trusses; verify round: the election used to be skipped
-      // when the roof sat on the node's own level, and it spanned every
-      // building). Everyone else says where to look.
+    // Roof segments live wherever the designer drew them — porch roofs on
+    // the ground level, the main roof on its own level on top. ONE X-ray
+    // per building frames ALL of them (re-verify round: a single owner that
+    // stopped at the first roof-bearing level framed the main roof and
+    // orphaned the porch); everyone else says where to look. Ownership =
+    // highest storey with showRoof on, tie by id — building-scoped.
+    const levelRoofs = levels
+      .map((l) => ({ level: l, roofs: extractRoofs(nodes, l.id) }))
+      .filter((entry) => entry.roofs.length > 0)
+    if (levelRoofs.length > 0) {
       const rivals = Object.values(nodes).filter(
         (n) =>
           n.type === config.type &&
@@ -266,32 +250,38 @@ function computeLevelUncached(
       )
       const ordinalOf = (n: Record<string, unknown>) =>
         levels.find((l) => l.id === n.parentId)?.level ?? Number.NEGATIVE_INFINITY
-      const owner = rivals.reduce((best, n) => {
-        const a = ordinalOf(n)
-        const b = ordinalOf(best)
-        if (a > b) return n
-        if (a === b && String(n.id) < String(best.id)) return n
-        return best
-      }, rivals[0] ?? {})
+      const owner =
+        rivals.length > 0
+          ? rivals.reduce((best, n) => {
+              const a = ordinalOf(n)
+              const b = ordinalOf(best)
+              if (a > b) return n
+              if (a === b && String(n.id) < String(best.id)) return n
+              return best
+            })
+          : null
       if (owner && String(owner.id) !== String(config.id)) {
-        roofs = []
         warnings.push('Roof is framed by the X-ray on another storey')
+      } else {
+        // Members come out roof-LEVEL-local; this node renders inside ITS
+        // OWN level's group. Shift each level's roofs by the storey delta
+        // so trusses land at the true drawn height (prod 2026-08-15: a
+        // two-storey house wore its roof at ground level).
+        const myBaseY = levels[levelIndex]?.baseY ?? 0
+        for (const { level, roofs } of levelRoofs) {
+          const dy = level.baseY - myBaseY
+          const framed = frameRoofs(roofs, activeWalls, spec)
+          members.push(
+            ...(dy === 0
+              ? framed
+              : framed.map((m) => ({
+                  ...m,
+                  position: [m.position[0], m.position[1] + dy, m.position[2]] as const,
+                }))),
+          )
+        }
       }
     }
-    // Members come out roof-LEVEL-local; this node renders inside ITS OWN
-    // level's group. Shift by the storey elevation delta so trusses land at
-    // the true roof height, not on this floor (prod 2026-08-15: a two-storey
-    // house wore its roof at ground level).
-    const dy = (roofLevel?.baseY ?? 0) - (levels[levelIndex]?.baseY ?? 0)
-    const framed = frameRoofs(roofs, activeWalls, spec)
-    members.push(
-      ...(dy === 0
-        ? framed
-        : framed.map((m) => ({
-            ...m,
-            position: [m.position[0], m.position[1] + dy, m.position[2]] as const,
-          }))),
-    )
   }
 
   if (config.showFoundation && isGroundLevel) {
