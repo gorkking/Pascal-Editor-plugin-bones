@@ -1072,11 +1072,18 @@ function frameSkirt(
     theta: number,
   ) => {
     const cosT = Math.cos(theta)
-    const len = runH / cosT + roof.overhang
+    // Inscribed like the hip family (round-14): the tail plumb cut pulls
+    // (rd/2)·tanθ in, and the TOP bears short of the arris junction by the
+    // jack-style cheek setback so band-edge rafters, the perpendicular
+    // face's rafters and the arris hips never share the corner volume.
+    const topSetback = (Math.SQRT2 * t) / 2 + (rd / 2) * Math.sin(theta)
+    const tailInset = (rd / 2) * Math.tan(theta)
+    const len = (runH - topSetback) / cosT + roof.overhang - 2 * tailInset
+    if (len < 0.2) return
     const tipOut = half + roof.overhang * cosT
-    const topOut = half - runH
+    const topOut = half - runH + topSetback
     const tipY = eaveY - roof.overhang * Math.sin(theta)
-    const topY = eaveY + rise
+    const topY = eaveY + rise - topSetback * Math.tan(theta)
     for (const u of stations) {
       for (const side of [1, -1] as const) {
         const cross = (side * (tipOut + topOut)) / 2
@@ -1098,8 +1105,9 @@ function frameSkirt(
   }
 
   // long faces (slopes facing ±Z), stations along X between the arris lines
+  // — bands pull one thickness in so edge stations clear the arris tops.
   face(
-    layout(-(roof.width / 2 - endRun), roof.width / 2 - endRun, spec.rafterSpacing, halfT),
+    layout(-(roof.width / 2 - endRun - t), roof.width / 2 - endRun - t, spec.rafterSpacing, halfT),
     true,
     roof.depth / 2,
     sideRun,
@@ -1107,17 +1115,19 @@ function frameSkirt(
   )
   // end faces (slopes facing ±X), stations along Z
   face(
-    layout(-(roof.depth / 2 - sideRun), roof.depth / 2 - sideRun, spec.rafterSpacing, halfT),
+    layout(-(roof.depth / 2 - sideRun - t), roof.depth / 2 - sideRun - t, spec.rafterSpacing, halfT),
     false,
     roof.width / 2,
     endRun,
     endTheta,
   )
 
-  // four arris hips: footprint corner → top corner of the skirt
+  // four arris hips: footprint corner → top corner of the skirt, inscribed
+  // between their plumb cuts (round-14)
   const hipPlan = Math.hypot(endRun, sideRun)
-  const hipLen = Math.hypot(hipPlan, rise)
   const hipTilt = Math.atan2(rise, hipPlan)
+  const hipInset = (rd / 2) * Math.tan(hipTilt)
+  const hipLen = Math.hypot(hipPlan, rise) - 2 * hipInset
   for (const sx of [1, -1] as const) {
     for (const sz of [1, -1] as const) {
       const corner: [number, number] = [sx * (roof.width / 2), sz * (roof.depth / 2)]

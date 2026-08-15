@@ -390,10 +390,14 @@ describe('interpenetration gate — structural members never share volume', () =
   // jacks themselves already exist.
   test.todo('roof framing: intersecting gable pair clips at the valley (overframing)', () => {})
 
-  // frameSkirt (mansard/dutch perimeter skirts) still shares volume where
-  // arris hips meet the corner rafters — the same inscribing treatment as
-  // the hip family, next round.
-  test.todo('roof framing: mansard + dutch skirts inscribe at arris hips', () => {})
+  test('roof framing: mansard + dutch skirts inscribe at arris hips (round-14)', () => {
+    for (const type of ['mansard', 'dutch'] as const) {
+      expect({
+        type,
+        v: violations(frameRoofs([roofSeg({ roofType: type })], [], spec400)),
+      }).toEqual({ type, v: [] })
+    }
+  })
   const UNUSED = () => {
     expect(
       violations(
