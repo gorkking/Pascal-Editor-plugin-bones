@@ -137,7 +137,7 @@ function computeLevelUncached(
     // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
     // face, jurisdiction-defaulted cladding + climate labels. The renderer's
     // dollhouse cut hides the camera-facing stacks.
-    members.push(...layoutWallLayers(framed, activeRooms, spec, code))
+    members.push(...layoutWallLayers(framed, activeRooms, spec, code, slabs))
     members.push(...cmuWalls(masonry, spec))
   }
 

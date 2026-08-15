@@ -42,6 +42,21 @@ const roomAbove: RoomSlice = {
 }
 
 describe('exteriorSide', () => {
+  test('FLOORING decides without any rooms: slab on +1 side → exterior −1', () => {
+    // Round-13 user feedback: inside has flooring, outside does not — works
+    // on blank-canvas scenes before zones exist.
+    const slab = {
+      id: 'slab_1',
+      polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+      holes: [],
+      elevation: 0,
+      thickness: 0.2,
+    }
+    expect(exteriorSide(wall(), [], [slab])).toBe(-1)
+    // slab overrides an ambiguous / missing room signal
+    expect(exteriorSide(wall(), [roomAbove], [slab])).toBe(-1)
+  })
+
   test('room on +1 side → exterior faces −1; interior walls → null', () => {
     expect(exteriorSide(wall(), [roomAbove])).toBe(-1)
     expect(exteriorSide(wall({ exterior: false }), [roomAbove])).toBe(null)

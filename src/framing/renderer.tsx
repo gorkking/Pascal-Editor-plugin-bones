@@ -267,6 +267,40 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   )
   useEffect(() => () => disposeGroup(group), [group])
 
+  // Auto-switch the host to its most revealing wall mode while the X-ray is
+  // on (round-13 user feedback): the plugin's dollhouse layers pair with
+  // the host's own 'cutaway' (near host faces hidden, far faces kept).
+  // Restores the previous mode on unmount UNLESS the user changed it since.
+  useEffect(() => {
+    if (node.seeThrough === false) return
+    // Dynamic import: the viewer package drags browser-only deps that must
+    // never evaluate under bun test (this effect only runs in the host).
+    let previous: string | undefined
+    let restore: (() => void) | undefined
+    let cancelled = false
+    import('@pascal-app/viewer').then(({ useViewer }) => {
+      if (cancelled) return
+      const viewer = useViewer.getState() as unknown as {
+        wallMode?: string
+        setWallMode?: (mode: string) => void
+      }
+      if (!viewer.setWallMode || viewer.wallMode === 'cutaway') return
+      previous = viewer.wallMode
+      viewer.setWallMode('cutaway')
+      restore = () => {
+        const now = useViewer.getState() as unknown as {
+          wallMode?: string
+          setWallMode?: (m: string) => void
+        }
+        if (now.wallMode === 'cutaway' && previous && now.setWallMode) now.setWallMode(previous)
+      }
+    })
+    return () => {
+      cancelled = true
+      restore?.()
+    }
+  }, [node.seeThrough])
+
   // Dollhouse cut (round 13): assembly-layer buckets carry their face
   // normal — hide the stacks whose face points TOWARD the camera so you
   // look INTO the cavity and see the far side's drywall as the backdrop.

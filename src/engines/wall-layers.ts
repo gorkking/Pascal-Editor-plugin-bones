@@ -21,7 +21,7 @@
 
 import assemblies from '../../data/wall-assemblies.json'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
-import type { Member, MemberRole, RoomSlice, WallSlice } from '../core/types'
+import type { Member, MemberRole, RoomSlice, SlabSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 
 type Pt = readonly [number, number]
@@ -59,24 +59,38 @@ const normalOf = (wall: WallSlice, side: 1 | -1): Pt => [
   wall.dir[0] * side,
 ]
 
-/** Which side (+1/−1) of an exterior wall faces OUTDOORS (no room contains
- * its probe point); null for interior walls (both sides roomed) or unknown. */
-export function exteriorSide(wall: WallSlice, rooms: RoomSlice[]): 1 | -1 | null {
+/** Which side (+1/−1) of an exterior wall faces OUTDOORS. FLOORING is the
+ * automatic signal (round-13 user feedback): the side standing over a slab
+ * is inside — slabs exist wherever rooms do, even before zones are drawn.
+ * Room polygons are the fallback; null = ambiguous (treated as interior). */
+export function exteriorSide(
+  wall: WallSlice,
+  rooms: RoomSlice[],
+  slabs: SlabSlice[] = [],
+): 1 | -1 | null {
   if (!wall.exterior) return null
   const mid: Pt = [
     wall.start[0] + (wall.dir[0] * wall.length) / 2,
     wall.start[1] + (wall.dir[1] * wall.length) / 2,
   ]
   const probeDist = wall.thickness / 2 + 0.15
-  const roomed = (side: 1 | -1): boolean => {
+  const probe = (side: 1 | -1): Pt => {
     const n = normalOf(wall, side)
-    const p: Pt = [mid[0] + n[0] * probeDist, mid[1] + n[1] * probeDist]
-    return rooms.some((r) => pointInPolygon(p, r.polygon))
+    return [mid[0] + n[0] * probeDist, mid[1] + n[1] * probeDist]
   }
-  const plusRoomed = roomed(1)
-  const minusRoomed = roomed(-1)
-  if (plusRoomed === minusRoomed) return null // ambiguous — treat as interior
-  return plusRoomed ? -1 : 1
+  const overSlab = (p: Pt): boolean => slabs.some((sl) => pointInPolygon(p, sl.polygon))
+  const inRoom = (p: Pt): boolean => rooms.some((r) => pointInPolygon(p, r.polygon))
+  const pPlus = probe(1)
+  const pMinus = probe(-1)
+  // flooring first
+  const plusFloor = overSlab(pPlus)
+  const minusFloor = overSlab(pMinus)
+  if (plusFloor !== minusFloor) return plusFloor ? -1 : 1
+  // rooms fallback
+  const plusRoom = inRoom(pPlus)
+  const minusRoom = inRoom(pMinus)
+  if (plusRoom !== minusRoom) return plusRoom ? -1 : 1
+  return null
 }
 
 /** u-intervals of the wall NOT covered by an opening whose vertical extent
@@ -142,6 +156,8 @@ export function layoutWallLayers(
   spec: FramingSpec = DEFAULT_SPEC,
   /** Resolved state code (drives cladding family + climate labels). */
   stateCode = 'NY',
+  /** Floor slabs — the automatic inside/outside signal. */
+  slabs: SlabSlice[] = [],
 ): Member[] {
   const members: Member[] = []
   if (spec.detail === '200') return members
@@ -155,7 +171,7 @@ export function layoutWallLayers(
   for (const wall of walls) {
     if (wall.curved || wall.length < 0.2) continue
     const inset = runInsets(wall, walls)
-    const extSide = exteriorSide(wall, rooms)
+    const extSide = exteriorSide(wall, rooms, slabs)
     const bands = bandsAround(wall, wall.height)
 
     /** Emit one layer stack outward from face `side`, starting at the
