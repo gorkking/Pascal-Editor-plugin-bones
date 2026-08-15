@@ -130,6 +130,14 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
 
   for (const member of members) {
     const color = colorOf(member)
+    if (member.face && !seeThrough) {
+      // Solid mode: the HOST's wall skin is visible and our flush drywall
+      // face z-fights it (random depth-precision squares — user report).
+      // The host grey IS the drywall look there; layers render only in
+      // X-ray, where the host shells are hidden ('down') and our stacks
+      // are the walls. (They still count in the takeoff either way.)
+      continue
+    }
     if (member.face) {
       // Assembly layers: bucket PER FACE NORMAL (quantized) so the
       // dollhouse cut can hide camera-facing stacks as whole meshes.

@@ -168,7 +168,9 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
       expect(m.material.opacity).toBeLessThan(0.8)
       expect(m.castShadow).toBe(false) // one shadow per member, not two
     }
-    // X-ray off: members are ordinary scene-layer geometry, no ghosts
+    // X-ray off: members are ordinary scene-layer geometry, no ghosts —
+    // and assembly layers DON'T render at all (they z-fight the host's
+    // visible wall skin; the host grey is the drywall look in solid mode).
     const off = buildGroup(synthesizeMembers(100), [], false)
     for (const m of off.children as unknown as MeshLike[]) {
       expect(m.isInstancedMesh).toBe(true)
@@ -177,5 +179,17 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
       expect(m.material.transparent).toBe(false)
       expect(m.renderOrder).toBe(0)
     }
+    const offLayers = buildGroup(
+      [
+        {
+          ...synthesizeMembers(1)[0]!,
+          role: 'drywall' as const,
+          face: [0, 1] as const,
+        },
+      ],
+      [],
+      false,
+    )
+    expect(offLayers.children).toHaveLength(0)
   })
 })
