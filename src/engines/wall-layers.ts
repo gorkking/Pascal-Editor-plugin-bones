@@ -23,6 +23,7 @@ import assemblies from '../../data/wall-assemblies.json'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, MemberRole, RoomSlice, SlabSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
+import { LUMBER_CROSS_SECTIONS } from '../lumber'
 
 type Pt = readonly [number, number]
 
@@ -136,7 +137,11 @@ function runInsets(wall: WallSlice, walls: WallSlice[]): { start: number; end: n
         Math.hypot(p[0] - other.end[0], p[1] - other.end[1]),
       )
       if (dEnds > tol) continue
-      const through = other.length > wall.length || (other.length === wall.length && other.id < wall.id)
+      // Round-14: '>' left EQUAL-length corners (every drawn rectangle!)
+      // with neither wall inset — 20 layer clashes on the default house.
+      // Tie breaks by id so exactly one wall runs through.
+      const through =
+        other.length > wall.length || (other.length === wall.length && other.id < wall.id)
       if (through) insets[which] = Math.max(insets[which], other.thickness / 2)
     }
   }
@@ -176,9 +181,19 @@ export function layoutWallLayers(
 
     /** Emit one layer stack outward from face `side`, starting at the
      * framing face, ordered inside→out. */
+    // The DRAWN thickness already includes the finishes (4.5in = 0.5 gypsum
+    // + 3.5 studs + 0.5 gypsum): stacks start at the STUD face, so the
+    // interior gypsum's outer face lands flush with the drawn wall face
+    // (round-14 — layers floated 12.6mm proud and fattened every wall).
+    const studDepth =
+      LUMBER_CROSS_SECTIONS[
+        wall.thickness >= spec.thickWallThreshold ? spec.exteriorStudSize : spec.interiorStudSize
+      ][1]
+    const stackOrigin = Math.min(studDepth, wall.thickness - inches(1)) / 2
+
     const emitStack = (side: 1 | -1, layers: LayerSpec[], noteSuffix = '') => {
       const n = normalOf(wall, side)
-      let offset = wall.thickness / 2
+      let offset = stackOrigin
       for (const layer of layers) {
         const t = inches(layer.thicknessIn)
         const role = ROLE_OF[layer.role]

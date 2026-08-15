@@ -174,9 +174,23 @@ function planSheet(
   // Long members first so short hardware reads on top.
   const sorted = [...mine].sort((a, b2) => b2.dims[0] - a.dims[0])
   for (const m of sorted) {
-    const yaw = m.rotation[1]
-    const tilt = m.rotation[2]
-    const planLen = Math.max(0.02, m.dims[0] * Math.abs(Math.cos(tilt)))
+    // Plan projection from the FULL euler (XYZ: M = Rx·Ry·Rz applied Rz
+    // first): rolled members (outlookers) ignore neither rx nor the yaw —
+    // round-14 caught 5.8° drift on yawed roofs from the yaw-only path.
+    const [rx, ry, rz] = m.rotation
+    const cy = Math.cos(ry)
+    const sy = Math.sin(ry)
+    const cz = Math.cos(rz)
+    const sz = Math.sin(rz)
+    // axis = R·(1,0,0): x' = cy·cz, y' = cx·sz + sx·sy·cz…, z' only needs
+    // the plan pair — for XYZ order: x' = cy·cz, z' = sx·sz − cx·sy·cz
+    const cx = Math.cos(rx)
+    const sxr = Math.sin(rx)
+    const ax = cy * cz
+    const az = sxr * sz - cx * sy * cz
+    const planFrac = Math.hypot(ax, az)
+    const yaw = Math.atan2(-az, ax)
+    const planLen = Math.max(0.02, m.dims[0] * planFrac)
     const w = planLen * scale
     const h = Math.max(1.2, m.dims[2] * scale)
     const fill =
@@ -237,35 +251,55 @@ function planSheet(
 }
 
 /** Schedules sheet: takeoff rows + engineering flags, as printable text. */
-function schedulesSheet(
+function schedulesSheets(
   members: Member[],
   fixtures: Fixture[],
   opts: PlanSetOptions,
-): PlanSheet | null {
+): PlanSheet[] {
   const rows = computeTakeoff(members, fixtures)
-  if (rows.length === 0) return null
+  if (rows.length === 0) return []
   const flags = [...new Set(members.filter((m) => m.flag).map((m) => m.flag as string))]
   const colW = (W - 2 * MARGIN) / 2
   const lineH = 15
-  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
-  const cells: string[] = []
-  rows.slice(0, 2 * maxLines).forEach((r, i) => {
-    const col = Math.floor(i / maxLines)
-    const x = MARGIN + col * colW
-    const y = MARGIN + 24 + (i % maxLines) * lineH
-    cells.push(
-      `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}`)}</text>`,
-    )
-  })
-  const flagText = flags
-    .slice(0, 4)
-    .map(
-      (f, i) =>
-        `<text x="${MARGIN}" y="${H - TITLE_H - 40 - i * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">⚑ ${esc(f)}</text>`,
-    )
-    .join('')
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff</text>${cells.join('')}${flagText}${chrome('Schedules + takeoff', opts, 40)}</svg>`
-  return { title: 'Schedules + takeoff', svg }
+  const flagLines = Math.min(flags.length, 6) > 0 ? Math.min(flags.length, 6) + 1 : 0
+  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH) - Math.ceil(flagLines / 2)
+  const perSheet = 2 * maxLines
+  const pages = Math.max(1, Math.ceil(rows.length / perSheet))
+  const sheets: PlanSheet[] = []
+  for (let page = 0; page < pages; page++) {
+    const slice = rows.slice(page * perSheet, (page + 1) * perSheet)
+    const cells: string[] = []
+    slice.forEach((r, i) => {
+      const col = Math.floor(i / maxLines)
+      const x = MARGIN + col * colW
+      const y = MARGIN + 24 + (i % maxLines) * lineH
+      cells.push(
+        `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}`)}</text>`,
+      )
+    })
+    // Flags on the LAST page; overflow called out, never silently dropped
+    // (round-14: a 60-wall house lost 11 rows and most flags).
+    let flagText = ''
+    if (page === pages - 1 && flags.length > 0) {
+      const shown = flags.slice(0, 6)
+      const parts = shown.map(
+        (f, i) =>
+          `<text x="${MARGIN}" y="${H - TITLE_H - 40 - (shown.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">⚑ ${esc(f)}</text>`,
+      )
+      if (flags.length > shown.length) {
+        parts.push(
+          `<text x="${MARGIN}" y="${H - TITLE_H - 40 + 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">… +${flags.length - shown.length} more flags — see the panel takeoff</text>`,
+        )
+      }
+      flagText = parts.join('')
+    }
+    const title = pages > 1 ? `Schedules + takeoff (${page + 1}/${pages})` : 'Schedules + takeoff'
+    sheets.push({
+      title,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${flagText}${chrome(title, opts, 40)}</svg>`,
+    })
+  }
+  return sheets
 }
 
 /** Every sheet the current level's members can support, in print order. */
@@ -279,8 +313,7 @@ export function buildPlanSet(
     const sheet = planSheet(def, members, fixtures, opts)
     if (sheet) sheets.push(sheet)
   }
-  const schedules = schedulesSheet(members, fixtures, opts)
-  if (schedules) sheets.push(schedules)
+  sheets.push(...schedulesSheets(members, fixtures, opts))
   return sheets
 }
 

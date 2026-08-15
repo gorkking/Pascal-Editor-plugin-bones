@@ -464,14 +464,22 @@ export function cmuWalls(walls: WallSlice[], spec: FramingSpec): Member[] {
     hints.set(id, h)
   }
   for (const corner of detectCorners(walls)) {
+    // Oblique multiplier (round-14): the interlock reach/retreat scales by
+    // (1+|cosθ|)/sinθ so 45/60/120° corners neither share block volume nor
+    // gap. Perpendicular k = 1; splices (near-parallel) skip. Capped at 4.
+    const a = corner.through.dir
+    const b = corner.butting.dir
+    const crossD = Math.abs(a[0] * b[1] - a[1] * b[0])
+    if (crossD < 0.1) continue
+    const k = Math.min(4, (1 + Math.abs(a[0] * b[0] + a[1] * b[1])) / crossD)
     add(corner.through.id, {
       end: corner.throughEnd,
-      otherThickness: corner.butting.thickness,
+      otherThickness: k * corner.butting.thickness,
       claimEven: true,
     })
     add(corner.butting.id, {
       end: corner.buttingEnd,
-      otherThickness: corner.through.thickness,
+      otherThickness: k * corner.through.thickness,
       claimEven: false,
     })
   }

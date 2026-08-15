@@ -2,11 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import { Euler, Matrix4, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
-import { cmuWall } from './cmu'
+import { cmuWall, cmuWalls } from './cmu'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
 import { frameWall, frameWalls } from './wall-framing'
+import { layoutWallLayers } from './wall-layers'
 
 /**
  * Repo-wide interpenetration gate (round-10): no two STRUCTURAL members of
@@ -275,6 +276,43 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(frameWall(wall({ end: [1.2, 0] }), spec400))).toEqual([])
   })
 
+  test('wall framing + assembly layers: default rectangle (round-14)', () => {
+    // Round-14 blocker: equal-length corners inset NEITHER wall's layers →
+    // 20 clashes on a plain drawn rectangle. Framing + layers together.
+    const rectangle = [
+      wall({ id: 'w_s', start: [0, 0], end: [6, 0] }),
+      wall({ id: 'w_e', start: [6, 0], end: [6, 4] }),
+      wall({ id: 'w_n', start: [6, 4], end: [0, 4] }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const combined = [
+      ...frameWalls(rectangle, spec400),
+      ...layoutWallLayers(rectangle, rooms, spec400, 'NY'),
+    ]
+    expect(violations(combined)).toEqual([])
+  })
+
+  test('wall framing: oblique corners 20/45/60/135° (round-14)', () => {
+    for (const deg of [20, 45, 60, 135]) {
+      const th = (deg * Math.PI) / 180
+      const pair = [
+        wall({ id: 'w_base', start: [0, 0], end: [6, 0] }),
+        wall({ id: 'w_ob', start: [6, 0], end: [6 + 4 * Math.cos(th), 4 * Math.sin(th)] }),
+      ]
+      expect({ deg, v: violations(frameWalls(pair, spec400)) }).toEqual({ deg, v: [] })
+    }
+  })
+
   test('wall framing: L-corner + tee composition (round-10)', () => {
     // An L pair plus a partition tee — the butting/stem frames must stop at
     // the through wall's face instead of sharing the corner volume.
@@ -391,6 +429,22 @@ describe('interpenetration gate — structural members never share volume', () =
       wall({ id: 'p_link', start: [7, 11], end: [7, 10], exterior: false }),
     ]
     expect(violations(buildFoundation(plan, [], spec400))).toEqual([])
+  })
+
+  test('CMU: oblique corner pairs 45/60/120° (round-14)', () => {
+    for (const deg of [45, 60, 120]) {
+      const th = (deg * Math.PI) / 180
+      const pair = [
+        wall({ id: 'w_cbase', start: [0, 0], end: [6, 0], thickness: 0.2032 }),
+        wall({
+          id: 'w_cob',
+          start: [6, 0],
+          end: [6 + 4 * Math.cos(th), 4 * Math.sin(th)],
+          thickness: 0.2032,
+        }),
+      ]
+      expect({ deg, v: violations(cmuWalls(pair, spec400)) }).toEqual({ deg, v: [] })
+    }
   })
 
   test('CMU: wall with a window', () => {

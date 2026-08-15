@@ -76,7 +76,12 @@ describe('layoutWallLayers', () => {
     expect(layers.filter((m) => m.role === 'cladding')).toHaveLength(0)
     for (const d of drywall) {
       expect(d.dims[2]).toBeCloseTo(0.0127, 4) // 1/2"
-      expect(Math.abs(d.position[2] as number)).toBeCloseTo(0.114 / 2 + 0.0127 / 2, 5)
+      // Stacks start at the STUD face (2x4 depth 3.5in), so the gypsum sits
+      // INSIDE the drawn envelope — its outer face flush-ish with the drawn
+      // wall face instead of fattening it (round-14).
+      // 0.114m wall ≥ thick threshold → 2x6 studs (0.1397) clamped to the
+      // envelope minus 1": origin (0.114−0.0254)/2, gypsum centered outside.
+      expect(Math.abs(d.position[2] as number)).toBeCloseTo((0.114 - 0.0254) / 2 + 0.0127 / 2, 5)
       expect(d.face).toBeDefined()
       expect(d.label).toContain('R702')
     }

@@ -514,20 +514,29 @@ export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC)
     // so walls drawn thinner than that would otherwise still collide —
     // round-2 advisory).
     const [, throughCapW] = LUMBER_CROSS_SECTIONS[studSizeFor(through, spec)]
-    const extend = butting.thickness / 2
+    // Oblique multiplier (round-14, ported from foundation): perpendicular
+    // corners give k = 1; at 20–60° the square-cut run must retreat
+    // (1+|cosθ|)/sinθ half-thicknesses to clear the through wall's sloped
+    // face, and the cap lap extends the same factor. Capped at 4.
+    const crossD = Math.abs(
+      through.dir[0] * butting.dir[1] - through.dir[1] * butting.dir[0],
+    )
+    const dotD = Math.abs(through.dir[0] * butting.dir[0] + through.dir[1] * butting.dir[1])
+    const k = crossD < 0.1 ? 1 : Math.min(4, (1 + dotD) / crossD)
+    const extend = (k * butting.thickness) / 2
     // The butting RUN already stops at the through face (startInset below);
     // the cap only needs the EXCESS when the through cap is wider than the
     // through wall itself (thin drawn walls — round-2 advisory).
-    const shorten = -Math.max(0, (throughCapW - through.thickness) / 2)
+    const shorten = -Math.max(0, (k * (throughCapW - through.thickness)) / 2)
     if (throughEnd === 'start') throughHints.capStartDelta = (throughHints.capStartDelta ?? 0) + extend
     else throughHints.capEndDelta = (throughHints.capEndDelta ?? 0) + extend
     const buttingHints = hintFor(butting)
     if (buttingEnd === 'start') buttingHints.capStartDelta = (buttingHints.capStartDelta ?? 0) + shorten
     else buttingHints.capEndDelta = (buttingHints.capEndDelta ?? 0) + shorten
     // The butting wall's PLATES and end stud stop at the through wall's
-    // near face — half its thickness back from the centerline corner
-    // (round-10 gate: both frames ran to the corner point and shared it).
-    const inset = through.thickness / 2
+    // near face — k half-thicknesses back from the centerline corner
+    // (round-10 gate; round-14 obliques).
+    const inset = (k * through.thickness) / 2
     if (buttingEnd === 'start') buttingHints.startInset = Math.max(buttingHints.startInset ?? 0, inset)
     else buttingHints.endInset = Math.max(buttingHints.endInset ?? 0, inset)
   }

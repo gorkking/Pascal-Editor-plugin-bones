@@ -378,6 +378,32 @@ export function computeTakeoff(
     }
   }
 
+  // ---- wall assembly layers (round 14): sheet goods by AREA ----
+  // Drywall/sheathing/WRB/cladding members carry [len, height, t] dims —
+  // area = len × height. 4×8 sheets for board goods; sqft for membranes.
+  const layerTallies = new Map<string, { item: string; sqft: number }>()
+  const SQFT = 1 / 0.09290304
+  for (const m of members) {
+    if (m.role !== 'drywall' && m.role !== 'sheathing' && m.role !== 'wrb' && m.role !== 'cladding') continue
+    const item =
+      m.role === 'drywall'
+        ? 'Drywall 1/2"'
+        : m.role === 'sheathing'
+          ? 'Sheathing 7/16" WSP'
+          : m.role === 'wrb'
+            ? 'WRB (housewrap/felt)'
+            : `Cladding — ${(m.label ?? 'siding').split(' (')[0] ?? 'siding'}`
+    const tally = layerTallies.get(item) ?? { item, sqft: 0 }
+    tally.sqft += m.dims[0] * m.dims[1] * SQFT
+    layerTallies.set(item, tally)
+  }
+  for (const tally of layerTallies.values()) {
+    const sheets = tally.item.startsWith('Drywall') || tally.item.startsWith('Sheathing')
+      ? ` (~${Math.ceil(tally.sqft / 32)} 4x8 sheets)`
+      : ''
+    push('Wall framing', tally.item, `net of openings${sheets}`, round1(tally.sqft), 'sqft')
+  }
+
   // Rebar: linear feet per system (steel role 'rebar' — CMU cells, bond
   // beams, footings, stemwalls).
   const rebarBySection = new Map<string, { lf: number; pcs: number }>()

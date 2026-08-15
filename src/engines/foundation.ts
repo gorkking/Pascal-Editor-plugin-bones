@@ -147,8 +147,12 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
       e = { start: 0, end: 0 }
       ext.set(wall.id, e)
     }
-    // An end shared by two corners keeps the through role if it has one.
-    e[which] = e[which] === 0 ? sign : Math.max(e[which], sign)
+    // Round-14: an end that is BOTH a through corner and a tee-butt must
+    // RETREAT — extending drove a wing footing 0.4m into the run it tees
+    // into. Any butt claim (negative) wins over a through claim.
+    if (e[which] === 0) e[which] = sign
+    else if (sign < 0 || e[which] < 0) e[which] = Math.min(e[which], sign < 0 ? sign : e[which])
+    else e[which] = Math.max(e[which], sign)
   }
   // --- 1. cluster endpoint-coincident wall ends (round-12: Y-junctions) ---
   // Pairwise marking let SEVERAL walls claim 'through' at one shared point
@@ -182,13 +186,13 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
   }
 
   const obliqueK = (a: WallSlice, b: WallSlice): number | null => {
-    // Parallel walls butting end-to-end are a splice, not a corner.
+    // Parallel walls butting end-to-end are a splice, not a corner
+    // (round-14: threshold lowered 0.3→0.1 so 6–17° corners still miter;
+    // k capped at 4 so razor angles don't shoot runs meters past the joint).
     const cross = Math.abs(a.dir[0] * b.dir[1] - a.dir[1] * b.dir[0])
-    if (cross < 0.3) return null
-    // sinθ is |cross|, |cosθ| the |dot|: k = 1 at 90°, grows as the corner
-    // sharpens/flattens.
+    if (cross < 0.1) return null
     const dot = Math.abs(a.dir[0] * b.dir[0] + a.dir[1] * b.dir[1])
-    return (1 + dot) / cross
+    return Math.min(4, (1 + dot) / cross)
   }
 
   for (const cluster of clusters) {
@@ -198,6 +202,13 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
         ? c
         : best,
     )
+    // Round-14 splice repro: an exterior run drawn as TWO collinear
+    // segments with a partition teeing at the joint — the through segment
+    // must NOT extend (its collinear partner IS the continuation; extending
+    // drove 203mm of footing into it). It also must not retreat: flush.
+    const hasCollinearPartner = cluster.some(
+      (m) => m !== through && obliqueK(through.wall, m.wall) === null,
+    )
     let throughK = 0
     for (const member of cluster) {
       if (member === through) continue
@@ -206,7 +217,7 @@ export function cornerExtensions(walls: WallSlice[]): Map<string, RunExtension> 
       mark(member.wall, member.which, -k)
       throughK = Math.max(throughK, k)
     }
-    if (throughK > 0) mark(through.wall, through.which, throughK)
+    if (throughK > 0 && !hasCollinearPartner) mark(through.wall, through.which, throughK)
   }
 
   // --- 2. tee retreats: an end landing on another wall's BODY stops at
