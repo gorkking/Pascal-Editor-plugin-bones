@@ -26,6 +26,8 @@ export type PlanSetOptions = {
   codeName?: string
   /** Preformatted date string for the title block. */
   date?: string
+  /** Stud spacing (inches o.c.) for the framing-sheet callout. */
+  studSpacingIn?: number
 }
 
 // Sheet canvas (landscape letter at 96dpi: 11in × 8.5in).
@@ -404,6 +406,24 @@ function planSheet(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="#444" stroke-width="0.6" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
   }
+  // Circuit-ID text on each circuit's longest horizontal run — the examiner
+  // couldn't trace a colored line back to its legend row without following
+  // it to the panel (blueprint P4).
+  if (def.key === 'electrical') {
+    const longest = new Map<string, Member>()
+    for (const m of mine) {
+      if (m.role !== 'wire-run') continue
+      const prev = longest.get(m.sourceId)
+      if (!prev || m.length > prev.length) longest.set(m.sourceId, m)
+    }
+    for (const [circuit, m] of longest) {
+      if (m.length * scale < 40) continue // too short to label legibly
+      shapes.push(
+        `<text x="${X(m.position[0]).toFixed(1)}" y="${(Z(m.position[2]) - 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${circuitColor(circuit)}" stroke="#fff" stroke-width="2" paint-order="stroke">${esc(circuit)}</text>`,
+      )
+    }
+  }
+
   // Device tags: dedupe identical (kind, position) fixtures and nudge
   // colliding bubbles apart in a small spiral (quality A6/C3: six tags
   // overprinted into a blob; the panel symbol printed twice).
@@ -526,6 +546,22 @@ function planSheet(
       if (row > 22) break
     }
   }
+  if (def.key === 'foundation') {
+    const bolts = mine.filter((m) => m.role === 'anchor-bolt')
+    if (bolts.length > 0) {
+      const y = MARGIN + 14 + legendLines.length * 14
+      legendLines.push(
+        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`1/2" anchor bolts @ 6'-0" o.c. max — ${bolts.length} pcs`)}</text>`,
+      )
+    }
+  }
+  if (def.key === 'wall' && opts.studSpacingIn) {
+    const y = MARGIN + 14 + legendLines.length * 14
+    legendLines.push(
+      `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`STUDS @ ${opts.studSpacingIn}" O.C. U.N.O.`)}</text>`,
+    )
+  }
+
   const legend =
     legendLines.length > 0
       ? `<rect x="${MARGIN - 4}" y="${MARGIN - 6}" width="250" height="${legendLines.length * 14 + 14}" fill="#ffffff" fill-opacity="0.92" stroke="#ccc" stroke-width="0.5"/>${legendLines.join('')}`

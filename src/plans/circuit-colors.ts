@@ -28,8 +28,12 @@ export function circuitColor(circuit: string): string {
   const family = FAMILY[prefix ?? '']
   if (!family) return '#b0723d' // unknown circuit — legacy copper
   const index = Math.max(1, Number(indexRaw ?? 1) || 1)
-  const hue = (family.hue + (index - 1) * 14) % 360
-  const light = index % 2 === 1 ? 42 : 55
+  // GEN is the crowded family (a house easily runs GEN-1…8): walk its hue
+  // 26° per index and cycle THREE lightness stops — the 14°/two-stop walk
+  // left four near-identical magentas on paper (blueprint round-1 P4).
+  const crowded = prefix === 'GEN'
+  const hue = (family.hue + (index - 1) * (crowded ? 26 : 14)) % 360
+  const light = crowded ? [40, 52, 63][(index - 1) % 3] as number : index % 2 === 1 ? 42 : 55
   const sat = 62
   // hsl → hex so both three.js and the SVG sheets get plain hex strings
   const h = hue / 360

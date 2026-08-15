@@ -554,6 +554,7 @@ function ExportPlansButton({
           // engine warnings print verbatim in the schedules flag block
           // (blueprint C5 / checklist P4) — paper never hides a caveat
           warnings: result.warnings,
+          studSpacingIn: framingNode.studSpacingIn,
         })
         if (sheets.length === 0) return
         const html = planSetHtml(sheets, { projectName: levelName })
