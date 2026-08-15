@@ -598,13 +598,24 @@ function schedulesSheets(
   const lastPageCap = 2 * Math.max(4, maxLines - (flagRows > 0 ? flagRows + 1 : 0))
   const pages = (() => {
     if (rows.length <= lastPageCap) return 1
-    let remaining = rows.length - lastPageCap
-    return 1 + Math.ceil(remaining / perSheet)
+    let p = 2
+    while ((p - 1) * perSheet + lastPageCap < rows.length) p++
+    return p
   })()
+  // Even distribution: filling early pages to 100% left a near-blank
+  // flags-only sheet at the end (blueprint P1) — every page carries its
+  // share; the last stays under its flag-shrunk cap.
+  const basePerPage =
+    pages === 1
+      ? lastPageCap
+      : Math.max(
+          Math.ceil(rows.length / pages),
+          Math.ceil((rows.length - lastPageCap) / (pages - 1)),
+        )
   const sheets: PlanSheet[] = []
   let cursorRow = 0
   for (let page = 0; page < pages; page++) {
-    const cap = page === pages - 1 ? lastPageCap : perSheet
+    const cap = page === pages - 1 ? lastPageCap : basePerPage
     const slice = rows.slice(cursorRow, cursorRow + cap)
     cursorRow += slice.length
     const cells: string[] = []
