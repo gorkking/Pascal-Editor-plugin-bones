@@ -104,6 +104,10 @@ export function extractRoofs(nodes: NodesRecord, levelId: string): RoofSegmentSl
       }
       const parent = nodes[parentId]
       if (!parent) break
+      // Another LEVEL in the chain means this segment belongs elsewhere —
+      // walking through it would double-extract the segment from two levels
+      // (re-verify advisory: 2x members, one copy at the wrong elevation).
+      if (parent.type === 'level') break
       if (parent.type === 'roof') {
         // Compose: p' = roofPos + Ry(roofRot)·p ; yaw' = roofRot + yaw.
         const rot = num(parent.rotation, 0)
