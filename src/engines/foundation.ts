@@ -342,7 +342,29 @@ export function buildFoundation(
       // under bearing walls; on a slab that is a thickened section poured
       // monolithically with it — 12" deep × footing width, top at the
       // slab/plate line (y = 0). See INTERIOR_BEARING_MIN_LENGTH ASSUMPTION.
-      if (!fabDetail || len <= INTERIOR_BEARING_MIN_LENGTH) continue
+      if (!fabDetail) continue
+      if (len <= INTERIOR_BEARING_MIN_LENGTH) {
+        // Short interior walls are normally non-bearing partitions — but one
+        // whose BOTH ends land on footing-carrying walls is a link in the
+        // foundation ring (blueprint round-1 auto-reject: the plan showed an
+        // open ring where a 1.2 m link wall bridged two perimeter runs).
+        const touchesRun = (px: number, pz: number) =>
+          straightWalls.some((o) => {
+            if (o.id === wall.id) return false
+            if (!o.exterior && o.length <= INTERIOR_BEARING_MIN_LENGTH) return false
+            const [ax, az] = o.start
+            const proj = Math.max(
+              0,
+              Math.min(o.length, (px - ax) * o.dir[0] + (pz - az) * o.dir[1]),
+            )
+            const qx = ax + o.dir[0] * proj
+            const qz = az + o.dir[1] * proj
+            return Math.hypot(qx - px, qz - pz) < 0.15
+          })
+        const ex = sx + dx * len
+        const ez = sz + dz * len
+        if (!(touchesRun(sx, sz) && touchesRun(ex, ez))) continue
+      }
       // Tee retreats apply here too: an interior bearing wall meeting the
       // exterior run stops at ITS footing face instead of pouring through
       // it (round-12, visible on exported plans).

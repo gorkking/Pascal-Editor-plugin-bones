@@ -620,3 +620,30 @@ describe('cornerExtensions — oblique corners (round-10)', () => {
     expect(ext2.get('w_perp')?.start).toBeCloseTo(-1, 6)
   })
 })
+
+describe('buildFoundation — short interior link walls (blueprint round-1 p_link)', () => {
+  const FAB: FramingSpec = { ...DEFAULT_SPEC, detail: '400' }
+  const perimeter = [
+    makeWall({ id: 'w_s', start: [0, 0], end: [8, 0] }),
+    makeWall({ id: 'w_e', start: [8, 0], end: [8, 4] }),
+    makeWall({ id: 'w_n', start: [8, 4], end: [0, 4] }),
+    makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+  ]
+
+  test('a 1.2 m interior wall bridging two footing runs gets a footing', () => {
+    // links the south perimeter to a long interior bearing wall — the ring
+    // on the foundation plan must close through it
+    const bearing = makeWall({ id: 'w_bear', start: [0, 1.2], end: [8, 1.2], exterior: false })
+    const link = makeWall({ id: 'w_link', start: [4, 0], end: [4, 1.2], exterior: false })
+    const members = buildFoundation([...perimeter, bearing, link], [slab as never], FAB)
+    const linkFootings = byRole(members, 'footing').filter((m) => m.sourceId === 'w_link')
+    expect(linkFootings.length).toBeGreaterThan(0)
+  })
+
+  test('an isolated 1.2 m closet partition still gets none', () => {
+    const stub = makeWall({ id: 'w_stub', start: [3, 2], end: [4.2, 2], exterior: false })
+    const members = buildFoundation([...perimeter, stub], [slab as never], FAB)
+    const stubFootings = byRole(members, 'footing').filter((m) => m.sourceId === 'w_stub')
+    expect(stubFootings).toEqual([])
+  })
+})
