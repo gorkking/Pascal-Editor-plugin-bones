@@ -131,3 +131,93 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     expect(minY).toBeLessThan(0.5)
   })
 })
+
+describe('multi-storey — verify-round defect gates', () => {
+  test('height-less legacy levels stack at the host default 2.5, not 2.7', () => {
+    const nodes = twoStoreyScene()
+    delete (nodes.lvl0 as Record<string, unknown>).height
+    delete (nodes.lvl1 as Record<string, unknown>).height
+    const byId = new Map(extractLevels(nodes).map((l) => [l.id, l]))
+    expect(byId.get('lvl1')?.baseY).toBeCloseTo(2.5, 5)
+    expect(byId.get('lvlroof')?.baseY).toBeCloseTo(5.0, 5)
+  })
+
+  test('own-level roof: election still applies — no double framing', () => {
+    // porch roof drawn on lvl0 itself; nodes on lvl0 AND lvl1
+    const nodes = twoStoreyScene()
+    ;(nodes.roofseg as Record<string, unknown>).parentId = 'lvl0'
+    const node0 = bones('bonesframing_0', 'lvl0')
+    const node1 = bones('bonesframing_1', 'lvl1')
+    nodes.bonesframing_0 = node0 as unknown as Record<string, unknown>
+    nodes.bonesframing_1 = node1 as unknown as Record<string, unknown>
+    const roof0 = computeLevel(nodes, node0).members.filter((m) => m.system === 'roof-framing')
+    const roof1 = computeLevel(nodes, node1).members.filter((m) => m.system === 'roof-framing')
+    expect(roof0.length + roof1.length).toBeGreaterThan(0)
+    expect(Math.min(roof0.length, roof1.length)).toBe(0)
+  })
+
+  test('two buildings: each ground floor keeps its foundation and slab-on-grade', () => {
+    const nodes = twoStoreyScene()
+    // building B: single storey, its own ground level with walls + slab
+    nodes.bldgB = { id: 'bldgB', type: 'building', children: ['lvlB0'] }
+    nodes.lvlB0 = { id: 'lvlB0', type: 'level', parentId: 'bldgB', level: 0, height: 4.0 }
+    nodes.wBa = wall('wBa', 'lvlB0', [20, 0], [26, 0])
+    nodes.wBb = wall('wBb', 'lvlB0', [26, 0], [26, 4])
+    nodes.wBc = wall('wBc', 'lvlB0', [26, 4], [20, 4])
+    nodes.wBd = wall('wBd', 'lvlB0', [20, 4], [20, 0])
+    nodes.slabB = {
+      id: 'slabB',
+      type: 'slab',
+      parentId: 'lvlB0',
+      polygon: [
+        [20, 0],
+        [26, 0],
+        [26, 4],
+        [20, 4],
+      ],
+      holes: [],
+      elevation: 0.05,
+      thickness: 0.1,
+    }
+    const nodeB = bones('bonesframing_b', 'lvlB0')
+    nodes.bonesframing_b = nodeB as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, nodeB)
+    // ground of building B: foundation present, NO elevated floor framing
+    expect(result.members.filter((m) => m.system === 'foundation').length).toBeGreaterThan(0)
+    expect(result.members.filter((m) => m.system === 'floor-framing')).toEqual([])
+  })
+
+  test('two buildings: each frames its OWN roof; no cross-building adoption', () => {
+    const nodes = twoStoreyScene()
+    nodes.bldgB = { id: 'bldgB', type: 'building', children: ['lvlB0', 'lvlBroof'] }
+    nodes.lvlB0 = { id: 'lvlB0', type: 'level', parentId: 'bldgB', level: 0, height: 2.5 }
+    nodes.lvlBroof = { id: 'lvlBroof', type: 'level', parentId: 'bldgB', level: 1, height: 0.4 }
+    nodes.wBa = wall('wBa', 'lvlB0', [20, 0], [26, 0])
+    nodes.roofsegB = {
+      id: 'roofsegB',
+      type: 'roof-segment',
+      parentId: 'lvlBroof',
+      position: [23, 0, 2],
+      rotation: 0,
+      roofType: 'gable',
+      width: 6.5,
+      depth: 4.5,
+      pitch: 30,
+      thickness: 0.2,
+    }
+    const nodeA = bones('bonesframing_0', 'lvl0')
+    const nodeB = bones('bonesframing_b', 'lvlB0')
+    nodes.bonesframing_0 = nodeA as unknown as Record<string, unknown>
+    nodes.bonesframing_b = nodeB as unknown as Record<string, unknown>
+    const roofA = computeLevel(nodes, nodeA).members.filter((m) => m.system === 'roof-framing')
+    const roofB = computeLevel(nodes, nodeB).members.filter((m) => m.system === 'roof-framing')
+    // both buildings' roofs frame — by their own nodes
+    expect(roofA.length).toBeGreaterThan(0)
+    expect(roofB.length).toBeGreaterThan(0)
+    // A's roof members lift by A's storey delta (5.4); B's by B's (2.5)
+    const minA = Math.min(...roofA.map((m) => m.position[1]))
+    const minB = Math.min(...roofB.map((m) => m.position[1]))
+    expect(minA).toBeGreaterThan(4.5)
+    expect(minB).toBeLessThan(4.5)
+  })
+})

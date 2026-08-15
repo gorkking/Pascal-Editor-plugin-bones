@@ -57,13 +57,20 @@ AND a gate — a checklist line without a test is a wish.
   The renderer derives from the live nodes prop; any memo that caches past
   an opening edit is a bug.
 
-- **A3 Multi-storey: members are LEVEL-LOCAL.** The host mounts each node
+- **A3 Multi-storey: bones aligns with what the host DRAWS.** The host mounts each node
   inside its level group at the stacked storey elevation — members render
   level-local; anything pulled from ANOTHER level (the roof search) carries
   the storey delta (baseY mirror of core getLevelElevations). A shared roof
-  is framed by exactly ONE X-ray node (highest storey wins). Origin: prod
-  report 2026-08-15 (two-storey starter house wore its roof at ground
-  level). Gate: `src/framing/compute.multistorey.test.ts`
+  is framed by exactly ONE X-ray node (highest storey of the SAME building
+  wins — never skipped on the roof's own level). Level arithmetic (ground
+  detection, storey-below height, roof search) never crosses buildings;
+  height-less legacy levels default to the host's 2.5 m. The reference is
+  the HOST-DRAWN shell (world Y of the rendered roof), not wall tops — if
+  the scene data floats its roof, bones floats WITH it (demo scene carries
+  roof y=2.7 inside a stacked roof level: shell draws at 5.2, verified in
+  the live three.js graph). Origin: prod report 2026-08-15 (two-storey
+  starter house wore its roof at ground level).
+  Gate: `src/framing/compute.multistorey.test.ts` (10 scenarios)
 
 ## Process
 

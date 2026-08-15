@@ -46,24 +46,25 @@ export function wallConstruction(
   return 'framed'
 }
 
-// 1-deep memo: the panel and the 3D renderer both derive from the same
+// Per-config memo: the panel and the 3D renderer both derive from the same
 // store snapshot on every scene edit — identical (nodes, config) references
-// return the cached result, halving per-edit compute (round-2 advisory).
-// Pascal's stores hand out immutable snapshots, so reference equality is a
-// safe cache key; any new snapshot recomputes.
-let memoNodes: Record<string, Record<string, unknown>> | null = null
-let memoConfig: FramingNode | null = null
-let memoResult: ComputeResult | null = null
+// return the cached result. Keyed by config (WeakMap) so a multi-storey
+// scene with an X-ray node per level doesn't thrash a single slot every
+// frame (verify round advisory). Pascal's stores hand out immutable
+// snapshots, so reference equality is a safe cache key.
+const memo = new WeakMap<
+  FramingNode,
+  { nodes: Record<string, Record<string, unknown>>; result: ComputeResult }
+>()
 
 export function computeLevel(
   nodes: Record<string, Record<string, unknown>>,
   config: FramingNode,
 ): ComputeResult {
-  if (memoResult !== null && nodes === memoNodes && config === memoConfig) return memoResult
+  const hit = memo.get(config)
+  if (hit && hit.nodes === nodes) return hit.result
   const result = computeLevelUncached(nodes, config)
-  memoNodes = nodes
-  memoConfig = config
-  memoResult = result
+  memo.set(config, { nodes, result })
   return result
 }
 
@@ -128,7 +129,12 @@ function computeLevelUncached(
     )
   }
   const rooms = extractRooms(nodes, levelId)
-  const levels = extractLevels(nodes)
+  // ALL level arithmetic stays inside THIS level's building — a second
+  // building's ground floor is still a ground floor (verify round: global
+  // indexing skipped its foundation and framed its slab as an upper floor).
+  const allLevels = extractLevels(nodes)
+  const myBuilding = allLevels.find((l) => l.id === levelId)?.buildingId ?? null
+  const levels = allLevels.filter((l) => l.buildingId === myBuilding)
   const levelIndex = levels.findIndex((l) => l.id === levelId)
   const isGroundLevel = levelIndex <= 0
 
@@ -245,10 +251,12 @@ function computeLevelUncached(
         }
       }
     }
-    if (roofs.length > 0 && roofLevel && roofLevel.id !== levelId) {
+    if (roofs.length > 0) {
       // A shared roof is framed by exactly ONE X-ray — the node on the
-      // highest storey (two nodes framing it would z-fight duplicate
-      // trusses). Everyone else says where to look.
+      // highest storey of THIS building (two nodes framing it would z-fight
+      // duplicate trusses; verify round: the election used to be skipped
+      // when the roof sat on the node's own level, and it spanned every
+      // building). Everyone else says where to look.
       const rivals = Object.values(nodes).filter(
         (n) =>
           n.type === config.type &&
@@ -267,7 +275,7 @@ function computeLevelUncached(
       }, rivals[0] ?? {})
       if (owner && String(owner.id) !== String(config.id)) {
         roofs = []
-        warnings.push('Roof is framed by the X-ray on the storey above')
+        warnings.push('Roof is framed by the X-ray on another storey')
       }
     }
     // Members come out roof-LEVEL-local; this node renders inside ITS OWN

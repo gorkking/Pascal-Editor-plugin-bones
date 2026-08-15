@@ -173,6 +173,9 @@ export type LevelSlice = {
    * (core getLevelElevations): per building, ordinal order, each floor
    * sits on the one below plus its own explicit baseElevation offset. */
   baseY: number
+  /** Owning building — level arithmetic (ground detection, storey-below
+   * height, roof search/ownership) never crosses buildings. */
+  buildingId: string | null
 }
 
 export function extractLevels(nodes: NodesRecord): LevelSlice[] {
@@ -194,7 +197,9 @@ export function extractLevels(nodes: NodesRecord): LevelSlice[] {
     entries.push({
       id,
       level: num(node.level, 0),
-      height: num(node.height, 2.7),
+      // host core DEFAULT_LEVEL_HEIGHT — a 2.7 fallback desyncs baseY on
+      // legacy height-less levels (verify round: 0.2 m float per storey)
+      height: num(node.height, 2.5),
       baseElevation: num(node.baseElevation, 0),
       buildingId,
       baseY: 0,
@@ -206,7 +211,7 @@ export function extractLevels(nodes: NodesRecord): LevelSlice[] {
     e.baseY = (cumulative.get(e.buildingId) ?? 0) + e.baseElevation
     cumulative.set(e.buildingId, e.baseY + e.height)
   }
-  return sorted.map(({ id, level, height, baseY }) => ({ id, level, height, baseY }))
+  return sorted.map(({ id, level, height, baseY, buildingId }) => ({ id, level, height, baseY, buildingId }))
 }
 
 const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
