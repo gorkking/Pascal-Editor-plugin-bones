@@ -539,11 +539,6 @@ function ExportPlansButton({
   const levelName = useScene((s) =>
     activeLevelId ? ((s.nodes[activeLevelId] as { name?: string } | undefined)?.name ?? 'Level') : 'Level',
   )
-  const sheetCount = useMemo(
-    () =>
-      buildPlanSet(result.members, result.fixtures, {}).length,
-    [result],
-  )
   return (
     <button
       type="button"
@@ -566,9 +561,6 @@ function ExportPlansButton({
       }}
     >
       <span>📐 Blueprints</span>
-      <span className="font-normal text-[10px] opacity-80">
-        {sheetCount} print-ready sheets · LOD 400
-      </span>
     </button>
   )
 }
