@@ -407,6 +407,55 @@ function riser(
   })
 }
 
+/**
+ * Braided supply connector: a 3-segment sagging arc from the wall stub to
+ * the fixture's connection point (user ask — a toilet standing off the wall
+ * showed pipe dead-ending in air). Chained endpoints land EXACTLY on stub
+ * and fixture so the connectivity harness sees continuous pipe. No new
+ * roles: plain copper pipe-runs under sourceId `conn-<fixture id>`.
+ */
+function connectorArc(
+  members: Member[],
+  id: string,
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+): void {
+  const sag = Math.min(0.05, 0.25 * Math.hypot(to[0] - from[0], to[2] - from[2]))
+  // quadratic bezier through a control point sagging below the chord
+  const cx = (from[0] + to[0]) / 2
+  const cy = (from[1] + to[1]) / 2 - sag * 2
+  const cz = (from[2] + to[2]) / 2
+  const pt = (t: number): [number, number, number] => {
+    const u = 1 - t
+    return [
+      u * u * from[0] + 2 * u * t * cx + t * t * to[0],
+      u * u * from[1] + 2 * u * t * cy + t * t * to[1],
+      u * u * from[2] + 2 * u * t * cz + t * t * to[2],
+    ]
+  }
+  const pts = [pt(0), pt(1 / 3), pt(2 / 3), pt(1)]
+  for (let i = 0; i < 3; i++) {
+    const a = pts[i] as [number, number, number]
+    const b = pts[i + 1] as [number, number, number]
+    const hi = a[1] >= b[1] ? a : b
+    const lo = hi === a ? b : a
+    const plan = Math.hypot(hi[0] - lo[0], hi[2] - lo[2])
+    const drop = hi[1] - lo[1]
+    const length = Math.hypot(plan, drop)
+    members.push({
+      system: 'plumbing',
+      role: 'pipe-run',
+      dims: [length, 0.012, 0.012],
+      length,
+      position: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2],
+      rotation: [0, Math.atan2(-(hi[2] - lo[2]), hi[0] - lo[0]), Math.atan2(drop, Math.max(1e-6, plan))],
+      material: 'copper',
+      sourceId: `conn-${id}`,
+      label: 'braided supply connector',
+    })
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Placed-fixture engine (LOD 400 rebuild): the items the user dropped are
 // the demand points; the room-category path stays as the fallback.
@@ -451,6 +500,20 @@ const STUB_HEIGHT: Record<PlacedFixtureSlice['kind'], number> = {
   'clothes-washer': inches(42), // laundry outlet box — practice, not code
   'kitchen-sink': inches(18), // supplies under the sink — practice
 }
+
+/** Where the braided supply connector lands ON the fixture (tank inlet /
+ * faucet tails) — user ask: a fixture standing off its wall shows the hose. */
+const CONN_HEIGHT: Record<PlacedFixtureSlice['kind'], number> = {
+  toilet: 0.2, // tank inlet
+  lavatory: 0.3, // faucet tails
+  shower: STUB_HEIGHT.shower, // valve height — hose runs level
+  bathtub: STUB_HEIGHT.bathtub,
+  'clothes-washer': STUB_HEIGHT['clothes-washer'],
+  'kitchen-sink': 0.35, // tails under the sink
+}
+
+/** A fixture farther than this from its wall stub gets a visible connector. */
+const CONN_MIN = 0.06
 
 /** Where the fixture's tailpiece meets its trap (drop start height). */
 const DRAIN_CONN_Y: Record<PlacedFixtureSlice['kind'], number> = {
@@ -1134,6 +1197,14 @@ function placedPlumbing(
           a.stubY,
           false,
         )
+      } else if (a.armLen > CONN_MIN) {
+        // Visible braided connector stub → fixture (islands keep air runs).
+        connectorArc(
+          members,
+          a.f.id,
+          [a.plan[0], a.stubY, a.plan[1]],
+          [a.f.plan[0], CONN_HEIGHT[a.f.kind], a.f.plan[1]],
+        )
       }
       if (a.f.hot) {
         const hotY = SUPPLY_HOT_Y + (hotIdx++ % 6) * SUPPLY_STEP
@@ -1161,6 +1232,19 @@ function placedPlumbing(
             a.stubAt,
             a.stubY,
             false,
+          )
+        } else if (a.armLen > CONN_MIN) {
+          // Hot connector lands beside the cold one — same 1" nudge along
+          // the wall as the hot drop, so red and blue hoses never z-fight.
+          connectorArc(
+            members,
+            a.f.id,
+            [hotAt[0], a.stubY, hotAt[1]],
+            [
+              a.f.plan[0] + a.anchor.wall.dir[0] * 0.025,
+              CONN_HEIGHT[a.f.kind],
+              a.f.plan[1] + a.anchor.wall.dir[1] * 0.025,
+            ],
           )
         }
       }

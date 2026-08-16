@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { Vector3 } from 'three'
 import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import type { PlacedFixtureSlice } from '../core/wall-model'
@@ -593,6 +594,94 @@ describe('P5 gate — re-verify round 4 (exhaustion flags, clamp re-check, wire 
         }
       }
     }
+  })
+})
+
+describe('flexible connectors — off-wall fixtures get braided supply arcs (task 18a)', () => {
+  const { walls, rooms } = housePlan()
+
+  test('toilet 0.3m off the wall → conn members chain stub → tank inlet', () => {
+    const placed = [pf('wc', 'toilet', [6.5, 0.3])]
+    const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed)
+    const conns = members.filter((m) => m.sourceId === 'conn-wc')
+    // 2-3 short chained members, no new roles, plain copper
+    expect(conns.length).toBeGreaterThanOrEqual(2)
+    expect(conns.length).toBeLessThanOrEqual(3)
+    for (const c of conns) {
+      expect(c.role).toBe('pipe-run')
+      expect(c.material).toBe('copper')
+      expect(c.label).toBe('braided supply connector')
+      expect(c.length).toBeLessThan(0.5) // short segments, not a homerun
+    }
+    // endpoints land within 2cm of the stub and of the tank inlet (~0.2m)
+    const stub = fixtures.find(
+      (f) => f.kind === 'stub-out' && f.meta?.fixtureId === 'wc',
+    ) as Fixture
+    const pts = conns.flatMap((c) => endpointsOf(c))
+    const near = (p: readonly [number, number, number]): number =>
+      Math.min(...pts.map((q) => q.distanceTo(new Vector3(p[0], p[1], p[2]))))
+    expect(near(stub.position)).toBeLessThan(0.02)
+    expect(near([6.5, 0.2, 0.3])).toBeLessThan(0.02)
+    // the chain is contiguous: consecutive segments share an endpoint
+    for (let i = 0; i < conns.length - 1; i++) {
+      const [a1, a2] = endpointsOf(conns[i] as Member)
+      const [b1, b2] = endpointsOf(conns[i + 1] as Member)
+      const gap = Math.min(
+        a1.distanceTo(b1),
+        a1.distanceTo(b2),
+        a2.distanceTo(b1),
+        a2.distanceTo(b2),
+      )
+      expect(gap).toBeLessThan(0.005)
+    }
+    // toilet is cold-only: no hot connector doubles the arc
+    expect(conns.length).toBeLessThanOrEqual(3)
+  })
+
+  test('hot fixture off the wall gets BOTH hoses; flush fixture gets none', () => {
+    const placed = [pf('lav', 'lavatory', [7.6, 0.4]), pf('wc', 'toilet', [6.5, 0.0])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    // lav: cold arc + hot arc = 6 segments under one conn id
+    expect(members.filter((m) => m.sourceId === 'conn-lav')).toHaveLength(6)
+    // flush toilet (plan point ON the wall line): no connector at all
+    expect(members.filter((m) => m.sourceId === 'conn-wc')).toHaveLength(0)
+  })
+
+  test('island fixture keeps its flagged air run — no connector doubles it', () => {
+    const islandWalls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [10, 0] }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+    ]
+    const placed = [pf('island', 'kitchen-sink', [4, 4]), pf('wc', 'toilet', [8, 0.6])]
+    const { members } = layoutPlumbing(islandWalls, [], undefined, placed)
+    expect(members.filter((m) => m.sourceId === 'conn-island')).toHaveLength(0)
+    // the wall-adjacent toilet still gets its hose
+    expect(members.filter((m) => m.sourceId === 'conn-wc').length).toBeGreaterThan(0)
+  })
+
+  test('connectivity harness stays green with connectors in the member set', () => {
+    const placed = [
+      pf('wc', 'toilet', [6.5, 0.3]),
+      pf('lav', 'lavatory', [7.6, 0.4]),
+      pf('ks', 'kitchen-sink', [1.5, 7.6]),
+    ]
+    const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed)
+    checkSupply(members, fixtures)
+    expect(drainFailures(members, ['wc', 'lav', 'ks'])).toEqual([])
+    expect(pipesThroughOpenings(members, walls)).toEqual([])
+    // connector attaches stub ↔ fixture: walking cold pipe PLUS connectors
+    // from the meter reaches the tank-inlet point itself
+    const meter = fixtures.find((f) => f.kind === 'water-meter') as Fixture
+    const coldPlus = members.filter(
+      (m) =>
+        m.role === 'pipe-run' &&
+        (m.sourceId.startsWith('cold-') || m.sourceId.startsWith('conn-')),
+    )
+    expect(
+      unreachableFrom(coldPlus, meter.position, 0.12, [{ id: 'wc-inlet', position: [6.5, 0.2, 0.3] }], 0.03),
+    ).toEqual([])
   })
 })
 
