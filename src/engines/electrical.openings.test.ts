@@ -239,3 +239,23 @@ describe('electrical vs rough openings (prod 2026-08-15)', () => {
     expect(unreachableDevices(members, fixtures)).toEqual([])
   })
 })
+
+describe('panel edge clearance (prod 2026-08-16)', () => {
+  test('a door overlapping the mount point by a sliver still pushes the panel clear', () => {
+    // door RO ends 5 cm past the wall midpoint — the panel CENTER is
+    // outside the RO but the 16in enclosure would overlap the jamb
+    const wallSliver = makeWall({
+      id: 'w_s',
+      start: [0, 0],
+      end: [8, 0],
+      openings: [opening('door', 3.55, 0.95, 0, 2.15)], // RO: 3.075..4.025
+    })
+    const u = panelMountU(wallSliver)
+    const halfW = 0.2032 // 8in
+    const lo = 3.075
+    const hi = 4.025
+    // enclosure edge (u ± 8in) plus 6in clearance stays out of the RO
+    expect(u + halfW < lo || u - halfW > hi).toBe(true)
+    expect(Math.min(Math.abs(u - lo), Math.abs(u - hi))).toBeGreaterThan(halfW + 0.1)
+  })
+})

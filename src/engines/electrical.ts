@@ -411,9 +411,15 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
  */
 export function panelMountU(wall: WallSlice): number {
   const mid = wall.length / 2
-  // Enclosure ≈ 30in tall centered at 60in AFF.
+  // Enclosure ≈ 30in tall centered at 60in AFF — and ~16in WIDE, so the
+  // rough opening must clear the box EDGE, not just its centerline, plus
+  // working clearance off the casing (prod report: a door overlapping the
+  // wall midpoint by a sliver left the panel jammed against the jamb).
+  const PANEL_HALF_W = inches(8)
+  const CLEARANCE = inches(6)
+  const inflate = PANEL_HALF_W + CLEARANCE
   const doors = openingSpans(wall, PANEL_AFF - inches(15), PANEL_AFF + inches(15)).map(
-    (s) => [s.lo, s.hi] as const,
+    (s) => [Math.max(0, s.lo - inflate), Math.min(wall.length, s.hi + inflate)] as const,
   )
   if (!doors.some(([lo, hi]) => mid > lo && mid < hi)) return mid
   let bestLo = 0
@@ -690,7 +696,9 @@ const RUN_ZONE_TOP = WIRE_RUN_Y + 8 * 0.012 + inches(2)
  * cable can't drop through a doorway OR a window; it lands in the first
  * stud bay past the king studs. */
 function clearOfOpenings(wall: WallSlice, u: number, y0 = 0, y1 = RUN_ZONE_TOP): number {
-  const margin = inches(2)
+  // Box edge + casing clearance, not just the point: 4in keeps a device
+  // visibly off the RO trim (prod report: box kissing the door edge).
+  const margin = inches(4)
   for (const s of openingSpans(wall, y0, y1)) {
     if (u > s.lo && u < s.hi) {
       const snapLo = Math.max(margin, s.lo - margin)

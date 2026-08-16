@@ -50,7 +50,12 @@ export default function BonesPanel() {
   return (
     <div className="flex flex-col gap-4 p-4 text-sidebar-foreground">
       <header className="flex flex-col gap-1">
-        <h2 className="font-semibold text-base">Bones</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="font-semibold text-base">Bones</h2>
+          <span className="rounded-full border border-sidebar-border/60 bg-sidebar-accent px-1.5 py-px font-semibold text-[9px] text-sidebar-foreground/70 uppercase tracking-widest">
+            Alpha
+          </span>
+        </div>
         <p className="text-sidebar-foreground/50 text-xs leading-relaxed">
           The engineering X-ray — see the construction inside the model: framing, foundation,
           wiring. Computed from your walls, sized to your jurisdiction.
