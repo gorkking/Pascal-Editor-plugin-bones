@@ -350,3 +350,75 @@ describe('frameWalls — cap-plate lap clears the cap WIDTH on thin walls (round
     expect(planAabb(capB).minZ).toBeGreaterThanOrEqual((3.5 * 0.0254) / 2 - 1e-9)
   })
 })
+
+/**
+ * GATE (full wall engineering panel — per-field plumb-through): frameWalls
+ * consumes per-wall studSize/spacingIn overrides — stud DIMS change with the
+ * size, stud COUNT with the spacing — while walls without an override (and
+ * an empty override object) frame byte-equal to today.
+ */
+describe('frameWalls — per-wall studSize/spacingIn overrides', () => {
+  const wallA = () => makeWall({ id: 'wall_a', start: [0, 0], end: [4, 0], thickness: 0.15 })
+  const wallB = () => makeWall({ id: 'wall_b', start: [0, 6], end: [4, 6], thickness: 0.15 })
+
+  test('studSize override re-sizes every framing member of THAT wall only', () => {
+    // 0.15m thick ≥ threshold → 2x6 by default; override wall_a down to 2x4
+    const members = frameWalls(
+      [wallA(), wallB()],
+      DEFAULT_SPEC,
+      new Map([['wall_a', { studSize: '2x4' as const }]]),
+    )
+    const studA = members.find((m) => m.role === 'stud' && m.sourceId === 'wall_a') as Member
+    const studB = members.find((m) => m.role === 'stud' && m.sourceId === 'wall_b') as Member
+    expect(studA.size).toBe('2x4')
+    expect(studA.dims[2]).toBeCloseTo(inches(3.5), 6)
+    expect(studB.size).toBe('2x6')
+    expect(studB.dims[2]).toBeCloseTo(inches(5.5), 6)
+    // plates follow the stud size too
+    const plateA = members.find(
+      (m) => m.role === 'bottom-plate' && m.sourceId === 'wall_a',
+    ) as Member
+    expect(plateA.size).toBe('2x4')
+  })
+
+  test('spacingIn override changes the stud count of THAT wall only', () => {
+    const at16 = frameWalls([wallA(), wallB()], DEFAULT_SPEC)
+    const at24 = frameWalls(
+      [wallA(), wallB()],
+      DEFAULT_SPEC,
+      new Map([['wall_a', { spacingIn: 24 as const }]]),
+    )
+    const studs = (members: Member[], id: string) =>
+      members.filter((m) => m.role === 'stud' && m.sourceId === id).length
+    expect(studs(at24, 'wall_a')).toBeLessThan(studs(at16, 'wall_a'))
+    expect(studs(at24, 'wall_b')).toBe(studs(at16, 'wall_b'))
+  })
+
+  test('empty override map / fieldless entries stay byte-equal to today', () => {
+    const walls = [wallA(), wallB()]
+    const base = frameWalls(walls, DEFAULT_SPEC)
+    expect(frameWalls(walls, DEFAULT_SPEC, new Map())).toEqual(base)
+    expect(frameWalls(walls, DEFAULT_SPEC, new Map([['wall_a', {}]]))).toEqual(base)
+  })
+
+  test('corner arithmetic keys off the overridden through-wall stud size', () => {
+    // L-corner: the through wall's California backing setback uses ITS stud
+    // thickness; overriding the through wall must not disturb the butting
+    // wall's members beyond the shared corner math.
+    const through = makeWall({ id: 'w_through', start: [0, 0], end: [6, 0], thickness: 0.15 })
+    const butting = makeWall({ id: 'w_butt', start: [0, 0], end: [0, 4], thickness: 0.15 })
+    const members = frameWalls(
+      [through, butting],
+      DEFAULT_SPEC,
+      new Map([['w_through', { studSize: '2x4' as const }]]),
+    )
+    const backing = members.find(
+      (m) => m.sourceId === 'w_through' && m.label === 'California corner backing',
+    ) as Member
+    expect(backing).toBeDefined()
+    expect(backing.size).toBe('2x4')
+    // butting wall keeps its default 2x6 recipe
+    const buttStud = members.find((m) => m.role === 'stud' && m.sourceId === 'w_butt') as Member
+    expect(buttStud.size).toBe('2x6')
+  })
+})

@@ -57,6 +57,32 @@ export function studSizeFor(wall: WallSlice, spec: FramingSpec): LumberSize {
 }
 
 /**
+ * Per-wall engineering override the framing consumes — a projection of the
+ * resolved WallOverride object (framing/compute.ts): stud size pins BOTH
+ * spec sizes so the thickness heuristic can't argue, spacing replaces the
+ * config's o.c. rhythm. Absent fields keep the spec untouched.
+ */
+export type WallFramingOverride = { studSize?: '2x4' | '2x6'; spacingIn?: 16 | 24 }
+
+/**
+ * The spec one wall frames with: the shared spec, unless the wall carries a
+ * studSize/spacingIn override. Returns the SAME object when nothing is
+ * overridden, so the default path stays byte-equal (and memo-friendly).
+ */
+export function specForWall(spec: FramingSpec, override?: WallFramingOverride): FramingSpec {
+  if (!override || (override.studSize === undefined && override.spacingIn === undefined)) {
+    return spec
+  }
+  return {
+    ...spec,
+    ...(override.studSize !== undefined
+      ? { interiorStudSize: override.studSize, exteriorStudSize: override.studSize }
+      : {}),
+    ...(override.spacingIn !== undefined ? { studSpacing: inches(override.spacingIn) } : {}),
+  }
+}
+
+/**
  * Cross-wall fabrication hints computed by `frameWalls` for one wall.
  * All distances in meters, u measured from the wall's `start`.
  */
@@ -476,13 +502,18 @@ export function detectTees(walls: WallSlice[]): Tee[] {
 }
 
 /**
- * Frame a SET of walls with cross-wall fabrication:
- *  - California corner backing stud in the through wall (3-stud corner),
- *  - alternating cap-plate laps (through cap extends over the butting
- *    wall's top plate; butting cap pulls short of the through wall),
- *  - partition backing (ladder blocking) at tees.
+ * Cross-wall fabrication hints for a SET of walls — the corner/tee pass
+ * frameWalls runs before framing each wall. Exported so the layer engine's
+ * insulation batts can lay out against the SAME trimmed runs and backing
+ * bays the studs actually occupy (wall-layers.ts) instead of re-deriving a
+ * diverging approximation. Per-wall studSize overrides feed the corner
+ * arithmetic exactly like the framing pass.
  */
-export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC): Member[] {
+export function frameHints(
+  walls: WallSlice[],
+  spec: FramingSpec = DEFAULT_SPEC,
+  overrides?: ReadonlyMap<string, WallFramingOverride>,
+): Map<string, FrameHints> {
   const hints = new Map<string, FrameHints>()
   const hintFor = (wall: WallSlice): FrameHints => {
     let h = hints.get(wall.id)
@@ -492,10 +523,11 @@ export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC)
     }
     return h
   }
+  const wallSpec = (wall: WallSlice): FramingSpec => specForWall(spec, overrides?.get(wall.id))
 
   for (const corner of detectCorners(walls)) {
     const { through, butting, throughEnd, buttingEnd } = corner
-    const [tt] = LUMBER_CROSS_SECTIONS[studSizeFor(through, spec)]
+    const [tt] = LUMBER_CROSS_SECTIONS[studSizeFor(through, wallSpec(through))]
     // California 3-stud corner: the through wall's end stud + the butting
     // wall's end stud + ONE backing stud in the through wall, set past the
     // butting wall's far face so interior drywall has backing.
@@ -513,7 +545,7 @@ export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC)
     // wall's drawn thickness or its CAP PLATE width (a 2x4 cap is 3.5" wide,
     // so walls drawn thinner than that would otherwise still collide —
     // round-2 advisory).
-    const [, throughCapW] = LUMBER_CROSS_SECTIONS[studSizeFor(through, spec)]
+    const [, throughCapW] = LUMBER_CROSS_SECTIONS[studSizeFor(through, wallSpec(through))]
     // Oblique multiplier (round-14, ported from foundation): perpendicular
     // corners give k = 1; at 20–60° the square-cut run must retreat
     // (1+|cosθ|)/sinθ half-thicknesses to clear the through wall's sloped
@@ -554,9 +586,29 @@ export function frameWalls(walls: WallSlice[], spec: FramingSpec = DEFAULT_SPEC)
     else stemHints.endInset = Math.max(stemHints.endInset ?? 0, inset)
   }
 
+  return hints
+}
+
+/**
+ * Frame a SET of walls with cross-wall fabrication:
+ *  - California corner assembly stud in the through wall (3-stud corner),
+ *  - alternating cap-plate laps (through cap extends over the butting
+ *    wall's top plate; butting cap pulls short of the through wall),
+ *  - partition backing (ladder blocking) at tees.
+ * `overrides` (per wall id) re-sizes a wall's studs/spacing — the resolved
+ * per-wall engineering from the framing config; absent = the shared spec.
+ */
+export function frameWalls(
+  walls: WallSlice[],
+  spec: FramingSpec = DEFAULT_SPEC,
+  overrides?: ReadonlyMap<string, WallFramingOverride>,
+): Member[] {
+  const hints = frameHints(walls, spec, overrides)
   const members: Member[] = []
   for (const wall of walls) {
-    members.push(...frameWall(wall, spec, hints.get(wall.id) ?? {}))
+    members.push(
+      ...frameWall(wall, specForWall(spec, overrides?.get(wall.id)), hints.get(wall.id) ?? {}),
+    )
   }
   return members
 }

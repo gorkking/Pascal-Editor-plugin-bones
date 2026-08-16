@@ -377,16 +377,17 @@ function computeLevelUncached(
     const framed: WallSlice[] = []
     const masonry: WallSlice[] = []
     const mixed: { wall: WallSlice; seam: number }[] = []
+    // Per-wall engineering (studSize/spacingIn/insulation/cladding…) rides
+    // to the framed-wall engines keyed by wall id — resolved once here so
+    // frameWalls and layoutWallLayers consume the identical fields.
+    const engineering = new Map<string, ResolvedWallConstruction>()
     for (const wall of activeWalls) {
       if (wall.curved) {
         warnings.push(`Curved wall skipped (framing for curved walls lands later)`)
         continue
       }
-      const { construction, cmuHeightM } = resolveWallConstruction(
-        wall,
-        config,
-        profile.exteriorWallDefault,
-      )
+      const resolved = resolveWallConstruction(wall, config, profile.exteriorWallDefault)
+      const { construction, cmuHeightM } = resolved
       if (construction === 'cmu' && cmuHeightM !== undefined) {
         // Snap HERE so a height at/above every course that fits routes the
         // wall down today's full-height path (regression guarantee).
@@ -397,9 +398,12 @@ function computeLevelUncached(
         }
       }
       if (construction === 'cmu') masonry.push(wall)
-      else framed.push(wall)
+      else {
+        framed.push(wall)
+        engineering.set(wall.id, resolved)
+      }
     }
-    members.push(...frameWalls(framed, spec))
+    members.push(...frameWalls(framed, spec, engineering))
     // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
     // face, jurisdiction-defaulted cladding + climate labels. The renderer's
     // dollhouse cut hides the camera-facing stacks. Probe slabs (widened to
