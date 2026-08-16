@@ -120,6 +120,11 @@ export type Member = {
    * the host's stacked/exploded/solo moves apply natively. Unset = the
    * node's own level. */
   levelId?: string
+  /** Render-only mount override: the renderer mounts this member into this
+   * level's Object3D WITHOUT the plan-set's cross-level baseY lift (used
+   * for own-level roof strata — the sheets already draw these owner-local).
+   * Mutually exclusive with levelId. */
+  mountLevelId?: string
   /** Set (with `levelId`) when the member's SOURCE level sits strictly
    * ABOVE the owner X-ray's storey (the main roof adopted by a lower
    * owner). Only these foreign groups take the exploded-view roof stratum

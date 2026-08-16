@@ -131,10 +131,13 @@ export function buildGroups(
   const own: Member[] = []
   const byLevel = new Map<string, Member[]>()
   for (const m of members) {
-    if (m.levelId) {
-      const list = byLevel.get(m.levelId) ?? []
+    // mountLevelId = render-only mount (own-level roof strata); the sheets
+    // never lift it — only the renderer groups on it.
+    const mount = m.levelId ?? m.mountLevelId
+    if (mount) {
+      const list = byLevel.get(mount) ?? []
       list.push(m)
-      byLevel.set(m.levelId, list)
+      byLevel.set(mount, list)
     } else own.push(m)
   }
   const group = buildGroup(own, fixtures, seeThrough)
@@ -293,7 +296,8 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
 /** Exploded-view stratum for a foreign roof group (day board A): drop the
  * bones roof HALF an exploded slot below the roof shell so floor / trusses /
  * shingle shell read as three ~equal strata — but ONLY for groups whose
- * source level sits strictly ABOVE the owner's storey (`strataAbove`, tagged
+ * source level sits strictly ABOVE the owner's storey — or the owner sits ON
+ * a true attic level (render-only mountLevelId) — (`strataAbove`, tagged
  * by compute): a ground-storey porch roof foreign to an upper owner drops
  * INTO the storey below it otherwise (verify round 2026-08-16, F1). Intended
  * limitation (checklist A3): an owner ON the roof level frames that roof as

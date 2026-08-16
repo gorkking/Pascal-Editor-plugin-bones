@@ -122,8 +122,9 @@ AND a gate — a checklist line without a test is a wish.
   sits strictly ABOVE the owner's storey (`Member.strataAbove`, tagged by
   compute, propagated as group userData): a ground-storey porch roof foreign
   to an upper owner is NEVER offset into the storey below it. INTENDED
-  limitation: an owner ON the roof level frames that roof as own-level
-  members (no foreign group), so it gets no stratum drop in exploded view.
+  F1b closed (prod report 2026-08-16): an owner ON a true attic level
+  (roomless, slab-less, storey below) strata-drops its OWN roof members via
+  the render-only mountLevelId tag — sheets keep drawing them owner-local.
   Gates: `src/framing/compute.multistorey.test.ts` (scenario matrix incl.
   strataAbove tagging + the own-level F1b pin) +
   `src/framing/renderer.test.ts` (offset only when strataAbove; userData
