@@ -5,6 +5,7 @@ import { SegmentedControl, SliderControl, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
+import { extractLevels } from './core/wall-model'
 import { FramingNode, type WallConstruction } from './framing/schema'
 import { buildPlanSet, planSetHtml } from './plans/plan-set'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
@@ -560,6 +561,13 @@ function ExportPlansButton({
           // (blueprint C5 / checklist P4) — paper never hides a caveat
           warnings: result.warnings,
           studSpacingIn: framingNode.studSpacingIn,
+          // storey elevations so cross-level (tagged) members draw at the
+          // right height on elevations/section/cover
+          levelBaseY: Object.fromEntries(
+            extractLevels(
+              useScene.getState().nodes as Record<string, Record<string, unknown>>,
+            ).map((l) => [l.id, l.baseY]),
+          ),
         })
         if (sheets.length === 0) return
         const html = planSetHtml(sheets, { projectName: levelName })

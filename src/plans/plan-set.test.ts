@@ -54,11 +54,17 @@ describe('buildPlanSet', () => {
     })
     const titles = sheets.map((s) => s.title)
     expect(titles).toEqual([
+      'Cover',
       'Foundation plan',
       'Floor framing plan',
       'Wall framing plan',
       'Roof framing plan',
       'Electrical rough-in plan',
+      'South elevation (framing)',
+      'North elevation (framing)',
+      'East elevation (framing)',
+      'West elevation (framing)',
+      'Section A-A (longitudinal)',
       'Schedules + takeoff',
     ])
     // no plumbing/hvac members → no MEP sheet
@@ -66,6 +72,7 @@ describe('buildPlanSet', () => {
     for (const s of sheets) {
       expect(s.svg).toContain('<svg xmlns="http://www.w3.org/2000/svg"')
       expect(s.svg).toContain('viewBox="0 0 1056 816"')
+      if (s.title === 'Cover') continue // hero layout: title + index, no chrome block
       expect(s.svg).toContain('Demo House')
       expect(s.svg).toContain('Ground Floor')
       expect(s.svg).toContain('Jurisdiction: FL')
@@ -76,7 +83,10 @@ describe('buildPlanSet', () => {
       if (!s.title.startsWith('Schedules')) {
         // bar label now carries the snapped ratio: "3 m (1:75)"
         expect(s.svg).toMatch(/>\d+ m \(1:\d+\)<\/text>/)
-        expect(s.svg).toContain('>N</text>') // north arrow
+        // north arrow on PLAN sheets only — elevations/sections have none
+        if (!s.title.includes('elevation') && !s.title.startsWith('Section')) {
+          expect(s.svg).toContain('>N</text>')
+        }
       }
       expect(s.svg).toMatch(/SHEET \d+\/\d+/) // numbering
     }
@@ -122,5 +132,25 @@ describe('planSetHtml', () => {
     expect(html).toContain('Save as PDF')
     // self-contained: the svg markup is inlined
     expect(html).toContain('viewBox="0 0 1056 816"')
+  })
+})
+
+describe('cover / elevations / section (round: standard set)', () => {
+  test('cover leads with title + sheet index; elevations carry a grade line', () => {
+    const members = [
+      member({ system: 'wall-framing', role: 'stud', dims: [0.04, 2.4, 0.09], position: [1, 1.2, 0], rotation: [0, 0, 0] }),
+      member({ system: 'roof-framing', role: 'rafter', dims: [3, 0.04, 0.09], position: [2, 0.5, 1], rotation: [0, 0, 0.5], levelId: 'lvlroof' }),
+    ]
+    const sheets = buildPlanSet(members, [], {
+      projectName: 'Two Storey',
+      levelBaseY: { lvlroof: 5.0 },
+    })
+    expect(sheets[0]?.title).toBe('Cover')
+    expect(sheets[0]?.svg).toContain('SHEET INDEX')
+    expect(sheets[0]?.svg).toContain('Two Storey')
+    const south = sheets.find((s) => s.title.startsWith('South elevation'))
+    expect(south).toBeDefined()
+    expect(south?.svg).toContain('GRADE')
+    expect(sheets.some((s) => s.title.startsWith('Section A-A'))).toBe(true)
   })
 })

@@ -28,6 +28,9 @@ export type PlanSetOptions = {
   date?: string
   /** Stud spacing (inches o.c.) for the framing-sheet callout. */
   studSpacingIn?: number
+  /** Storey elevations by level id — members tagged levelId (cross-level
+   * roofs) are level-local; elevations/sections/cover lift them by this. */
+  levelBaseY?: Record<string, number>
 }
 
 // Sheet canvas (landscape letter at 96dpi: 11in × 8.5in).
@@ -161,7 +164,7 @@ function chrome(
   opts: PlanSetOptions,
   scale: number,
   extra = '',
-  { scaleBar = true, ratio }: { scaleBar?: boolean; ratio?: number } = {},
+  { scaleBar = true, ratio, northArrow }: { scaleBar?: boolean; ratio?: number; northArrow?: boolean } = {},
 ): string {
   const meterPx = scale
   const meters = Math.max(1, Math.round(180 / Math.max(1e-6, meterPx)))
@@ -192,11 +195,15 @@ function chrome(
       <line x1="${MARGIN + barPx}" y1="${by - 5}" x2="${MARGIN + barPx}" y2="${by + 5}"/>
     </g>
     <text x="${MARGIN + barPx + 8}" y="${by + 4}" font-size="11" fill="#333">${meters} m${ratio ? ` (1:${ratio})` : ''}</text>
-    <g transform="translate(${W - 40} ${MARGIN + 8})" stroke="#222" fill="none">
+    ${
+      (northArrow ?? true)
+        ? `<g transform="translate(${W - 40} ${MARGIN + 8})" stroke="#222" fill="none">
       <circle r="11"/>
       <path d="M0 8 L0 -8 M0 -8 L-3.5 -1 M0 -8 L3.5 -1" stroke-width="1.6"/>
       <text y="-14" font-size="9" text-anchor="middle" fill="#222" stroke="none">N</text>
     </g>`
+        : ''
+    }`
     : ''
   return `
   <rect x="8" y="8" width="${W - 16}" height="${H - 16}" fill="none" stroke="#222" stroke-width="2"/>
@@ -572,6 +579,204 @@ function planSheet(
 }
 
 /** Schedules sheet: takeoff rows + engineering flags, as printable text. */
+// ---------------------------------------------------------------------------
+// Cover, elevations, section — the rest of a standard set (round: "standard
+// blueprints show side views"). Members are drawn as stroke segments along
+// their longest local axis: honest line-art framing, no hidden-face solver.
+// ---------------------------------------------------------------------------
+
+type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string }
+
+/** World-space endpoints of a member's longest axis + its stroke thickness. */
+function memberAxis(m: Member, lift: number): { a: [number, number, number]; b: [number, number, number]; w: number } {
+  const dims = m.dims
+  const axis = dims[0] >= dims[1] && dims[0] >= dims[2] ? 0 : dims[1] >= dims[2] ? 1 : 2
+  const half = dims[axis] / 2
+  const [rx, ry, rz] = m.rotation
+  // R = Rx(rx) · Ry(ry) · Rz(rz) applied to e_axis (three.js XYZ order)
+  const e: [number, number, number] = [0, 0, 0]
+  e[axis] = 1
+  const cz = Math.cos(rz)
+  const sz = Math.sin(rz)
+  let vx = e[0] * cz - e[1] * sz
+  let vy = e[0] * sz + e[1] * cz
+  let vz = e[2]
+  const cy = Math.cos(ry)
+  const sy = Math.sin(ry)
+  const tx = vx * cy + vz * sy
+  vz = -vx * sy + vz * cy
+  vx = tx
+  const cx = Math.cos(rx)
+  const sx = Math.sin(rx)
+  const ty = vy * cx - vz * sx
+  vz = vy * sx + vz * cx
+  vy = ty
+  const c: [number, number, number] = [m.position[0], m.position[1] + lift, m.position[2]]
+  const w = [...dims].sort((p, q) => q - p)[1] ?? 0.05
+  return {
+    a: [c[0] - vx * half, c[1] - vy * half, c[2] - vz * half],
+    b: [c[0] + vx * half, c[1] + vy * half, c[2] + vz * half],
+    w,
+  }
+}
+
+const SYSTEM_STROKE: Record<string, string> = {
+  foundation: '#8b8f96',
+  'wall-framing': '#caa06a',
+  'floor-framing': '#b98d55',
+  'roof-framing': '#a97e48',
+  electrical: '#c2803d',
+  plumbing: '#6f8fa8',
+  hvac: '#8fa8a0',
+}
+
+function memberSegs(
+  members: Member[],
+  opts: PlanSetOptions,
+  proj: (p: [number, number, number]) => [number, number],
+  depthOf: (p: [number, number, number]) => number,
+  filter?: (m: Member) => boolean,
+): Seg[] {
+  const segs: Seg[] = []
+  for (const m of members) {
+    if (m.role === 'wire-run' || m.face) continue // keep line art structural
+    if (filter && !filter(m)) continue
+    const lift = m.levelId ? (opts.levelBaseY?.[m.levelId] ?? 0) : 0
+    const { a, b, w } = memberAxis(m, lift)
+    const [x1, y1] = proj(a)
+    const [x2, y2] = proj(b)
+    segs.push({
+      x1,
+      y1,
+      x2,
+      y2,
+      w,
+      depth: (depthOf(a) + depthOf(b)) / 2,
+      color: SYSTEM_STROKE[m.system] ?? '#9a9a9a',
+    })
+  }
+  return segs.sort((p, q) => p.depth - q.depth)
+}
+
+function fitSegs(segs: Seg[]): { sx: (x: number) => number; sy: (y: number) => number; scale: number; ratio: number } | null {
+  if (segs.length === 0) return null
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+  for (const s of segs) {
+    minX = Math.min(minX, s.x1, s.x2)
+    maxX = Math.max(maxX, s.x1, s.x2)
+    minY = Math.min(minY, s.y1, s.y2)
+    maxY = Math.max(maxY, s.y1, s.y2)
+  }
+  const availW = W - 2 * MARGIN - 258
+  const availH = H - 2 * MARGIN - TITLE_H - 30
+  const raw = Math.min(availW / Math.max(0.1, maxX - minX), availH / Math.max(0.1, maxY - minY))
+  const ppm = 96 / 0.0254
+  const ratio = RATIOS.find((r) => ppm / r <= raw) ?? RATIOS[RATIOS.length - 1] as number
+  const scale = ppm / ratio
+  const ox = MARGIN + (availW - (maxX - minX) * scale) / 2
+  const oy = MARGIN + (availH - (maxY - minY) * scale) / 2
+  return { sx: (x) => ox + (x - minX) * scale, sy: (y) => oy + (y - minY) * scale, scale, ratio }
+}
+
+function segSvg(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string {
+  return segs
+    .map(
+      (s) =>
+        `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="round"/>`,
+    )
+    .join('')
+}
+
+const ELEVATIONS: { key: string; title: string; proj: (p: [number, number, number]) => [number, number]; depth: (p: [number, number, number]) => number }[] = [
+  { key: 'south', title: 'South elevation (framing)', proj: (p) => [p[0], -p[1]], depth: (p) => -p[2] },
+  { key: 'north', title: 'North elevation (framing)', proj: (p) => [-p[0], -p[1]], depth: (p) => p[2] },
+  { key: 'east', title: 'East elevation (framing)', proj: (p) => [p[2], -p[1]], depth: (p) => p[0] },
+  { key: 'west', title: 'West elevation (framing)', proj: (p) => [-p[2], -p[1]], depth: (p) => -p[0] },
+]
+
+function elevationSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
+  const sheets: PlanSheet[] = []
+  for (const ev of ELEVATIONS) {
+    const segs = memberSegs(members, opts, ev.proj, ev.depth)
+    const f = fitSegs(segs)
+    if (!f) continue
+    // grade line at world y = 0 (proj y of [x,0,z] is 0 in every elevation)
+    const gy = f.sy(0)
+    const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/><text x="${MARGIN - 14}" y="${(gy + 14).toFixed(1)}" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#222">GRADE</text>`
+    sheets.push({
+      title: ev.title,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}${chrome(ev.title, opts, f.scale, '', { ratio: f.ratio, northArrow: false })}</svg>`,
+    })
+  }
+  return sheets
+}
+
+function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null {
+  if (members.length === 0) return null
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  for (const m of members) {
+    minX = Math.min(minX, m.position[0])
+    maxX = Math.max(maxX, m.position[0])
+  }
+  const cutX = (minX + maxX) / 2
+  const BAND = 0.9
+  const segs = memberSegs(
+    members,
+    opts,
+    (p) => [p[2], -p[1]],
+    (p) => p[0],
+    (m) => Math.abs(m.position[0] - cutX) < BAND,
+  )
+  const f = fitSegs(segs)
+  if (!f) return null
+  const gy = f.sy(0)
+  const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/>`
+  const title = 'Section A-A (longitudinal)'
+  return {
+    title,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band at plan midpoint — members within the band shown</text>${chrome(title, opts, f.scale, '', { ratio: f.ratio, northArrow: false })}</svg>`,
+  }
+}
+
+function coverSheet(members: Member[], opts: PlanSetOptions, index: string[]): PlanSheet | null {
+  // isometric hero: u = (x − z)·cos30, v = (x + z)·sin30 − y
+  const c30 = Math.cos(Math.PI / 6)
+  const s30 = Math.sin(Math.PI / 6)
+  const segs = memberSegs(
+    members,
+    opts,
+    (p) => [(p[0] - p[2]) * c30, (p[0] + p[2]) * s30 - p[1]],
+    (p) => p[0] + p[2] - p[1] * 0.01,
+  )
+  const f = fitSegs(segs)
+  if (!f) return null
+  const title = opts.projectName ?? 'Pascal project'
+  const lines = [
+    `${opts.levelName ?? 'Level'} — full construction set`,
+    [opts.jurisdiction, opts.codeName].filter(Boolean).join(' · '),
+    `${opts.date ?? ''} · Drafting aid, not engineering — verify with your local building department`,
+  ].filter((l) => l.length > 0)
+  const indexRows = index
+    .map(
+      (name, i) =>
+        `<text x="${W - MARGIN - 236}" y="${MARGIN + 30 + i * 16}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${i + 2}.  ${esc(name)}</text>`,
+    )
+    .join('')
+  return {
+    title: 'Cover',
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}<text x="${W - MARGIN - 236}" y="${MARGIN + 8}" font-size="12" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">SHEET INDEX</text>${indexRows}<text x="${MARGIN}" y="${H - MARGIN - 44}" font-size="30" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">${esc(title)}</text>${lines
+      .map(
+        (l, i) =>
+          `<text x="${MARGIN}" y="${H - MARGIN - 22 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#444">${esc(l)}</text>`,
+      )
+      .join('')}</svg>`,
+  }
+}
+
 function schedulesSheets(
   members: Member[],
   fixtures: Fixture[],
@@ -668,7 +873,12 @@ export function buildPlanSet(
       if (sheet) sheets.push(sheet)
     }
   }
+  sheets.push(...elevationSheets(members, opts))
+  const section = sectionSheet(members, opts)
+  if (section) sheets.push(section)
   sheets.push(...schedulesSheets(members, fixtures, opts))
+  const cover = coverSheet(members, opts, sheets.map((sh) => sh.title))
+  if (cover) sheets.unshift(cover)
   // SHEET n/N in every title block (blueprint C6) — patch the placeholder
   // after the census is known.
   return sheets.map((sheet, i) => ({
