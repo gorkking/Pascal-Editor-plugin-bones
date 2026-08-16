@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'bun:test'
-import { Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import type { PlacedFixtureSlice } from '../core/wall-model'
@@ -10,7 +9,7 @@ import {
   placePanelSpot,
   routeWiring,
 } from './electrical'
-import { endpointsOf, segDist, unreachableDevices } from './electrical.test-helpers'
+import { cableConnects, endpointsOf, unreachableDevices } from './electrical.test-helpers'
 import { layoutHvac, placeHeatPumpSpot, placeThermostatSpot } from './hvac'
 import { layoutPlumbing, placeSewerExit } from './plumbing'
 import {
@@ -418,52 +417,8 @@ describe('A4 gate — thermostat + heat-pump service nodes drive the hvac engine
 })
 
 // ---- electrical: METER + service cable (street → meter → panel) --------------
-
-/** Union-find continuity over the SE-cable members: true when `points` all
- * live in one connected cable component. */
-function cableConnects(members: Member[], points: [number, number, number][]): boolean {
-  const cable = members.filter((m) => m.sourceId === 'service-entrance')
-  if (cable.length === 0) return false
-  const parent = cable.map((_, i) => i)
-  const find = (i: number): number => {
-    let r = i
-    while (parent[r] !== r) r = parent[r] as number
-    return r
-  }
-  const ends = cable.map(endpointsOf)
-  for (let i = 0; i < cable.length; i++) {
-    for (let j = i + 1; j < cable.length; j++) {
-      const [a1, a2] = ends[i] as [
-        ReturnType<typeof endpointsOf>[0],
-        ReturnType<typeof endpointsOf>[1],
-      ]
-      const [b1, b2] = ends[j] as [
-        ReturnType<typeof endpointsOf>[0],
-        ReturnType<typeof endpointsOf>[1],
-      ]
-      const touch =
-        a1.distanceTo(b1) < 0.03 ||
-        a1.distanceTo(b2) < 0.03 ||
-        a2.distanceTo(b1) < 0.03 ||
-        a2.distanceTo(b2) < 0.03 ||
-        segDist(a1, b1, b2) < 0.03 ||
-        segDist(a2, b1, b2) < 0.03
-      if (touch) parent[find(i)] = find(j)
-    }
-  }
-  const compAt = (p: [number, number, number]): number | null => {
-    const v = new Vector3(p[0], p[1], p[2])
-    for (let i = 0; i < cable.length; i++) {
-      const [a, b] = ends[i] as [ReturnType<typeof endpointsOf>[0], ReturnType<typeof endpointsOf>[1]]
-      if (v.distanceTo(a) < 0.05 || v.distanceTo(b) < 0.05 || segDist(v, a, b) < 0.05) {
-        return find(i)
-      }
-    }
-    return null
-  }
-  const comps = points.map(compAt)
-  return comps.every((c) => c !== null && c === comps[0])
-}
+// (continuity helper `cableConnects` lives in electrical.test-helpers.ts —
+// shared with the E1 service-cable gates in electrical.openings.test.ts)
 
 describe('E gate — electric meter: street → METER → panel', () => {
   const { walls, rooms } = electricalPlan()

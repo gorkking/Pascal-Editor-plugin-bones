@@ -990,6 +990,110 @@ export function wallPath(
   return null
 }
 
+/** Emits one straight cable segment; `note` lands in the member label. */
+type SegmentEmitter = (
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  note?: string,
+) => void
+
+/**
+ * One drill-height leg along a wall — DETOURING around ANY rough opening
+ * whose vertical RO crosses the drill plane (doors always; windows when
+ * the sill drops below drill height — prod report: wires bored straight
+ * through low windows). Route: rise inside the king-stud bay, cross above
+ * the header, drop back — or duck UNDER the sill when there's no wall
+ * above (full-height glazing with a stub sill). Shared by the branch
+ * circuits AND the service feed (E1 applies to every cable).
+ */
+function emitWallLegWith(
+  emit: SegmentEmitter,
+  wall: WallSlice,
+  u0: number,
+  u1: number,
+  runY: number,
+): void {
+  const dir = Math.sign(u1 - u0) || 1
+  const legLo = Math.min(u0, u1)
+  const legHi = Math.max(u0, u1)
+  const crossed = openingSpans(wall, runY - 0.02, runY + 0.02)
+    .filter((s) => s.lo < legHi && s.hi > legLo)
+    .sort((a, b) => (a.lo - b.lo) * dir)
+  const at = (u: number, y: number): [number, number, number] => {
+    const p = wallPlan({ wall, u })
+    return [p[0], y, p[1]]
+  }
+  const clamp = (u: number) => Math.max(legLo, Math.min(legHi, u))
+  let cursor = u0
+  for (const s of crossed) {
+    const near = clamp(dir > 0 ? s.lo : s.hi)
+    const far = clamp(dir > 0 ? s.hi : s.lo)
+    // The crossing band itself must be clear too — a transom above a door
+    // sits exactly where the over-the-header path would run.
+    const blockedAt = (yy: number) =>
+      openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
+    let detourY: number | null = null
+    for (let yy = s.topY + inches(4); yy <= wall.height - 0.05; yy += inches(4)) {
+      if (!blockedAt(yy)) {
+        detourY = yy
+        break
+      }
+    }
+    if (detourY === null) {
+      for (let yy = s.sillY - inches(4); yy >= 0.04; yy -= inches(4)) {
+        if (!blockedAt(yy)) {
+          detourY = yy
+          break
+        }
+      }
+    }
+    if (detourY === null) {
+      // RO spans floor to ceiling — nowhere inside this wall to route.
+      emit(at(cursor, runY), at(far, runY), ' (⚠ crosses full-height opening — verify)')
+      cursor = far
+      continue
+    }
+    emit(at(cursor, runY), at(near, runY))
+    emit(at(near, runY), at(near, detourY))
+    emit(at(near, detourY), at(far, detourY))
+    emit(at(far, detourY), at(far, runY))
+    cursor = far
+  }
+  emit(at(cursor, runY), at(u1, runY))
+}
+
+/**
+ * Wall-following legs between two anchors at `runY`, bridging junction gaps
+ * — false when the walls are disconnected (caller picks its fallback).
+ * Round-12 B2/M1: junctions accepted within JUNCTION_TOL (or snapped out of
+ * a door RO) leave the two walls' legs ending at DIFFERENT plan points;
+ * every inter-leg gap is bridged explicitly — a run is continuous cable,
+ * not adjacent segments.
+ */
+function emitWallPathWith(
+  emit: SegmentEmitter,
+  graph: Map<string, Junction[]>,
+  from: WallPoint,
+  to: WallPoint,
+  runY: number,
+): boolean {
+  const legs = wallPath(graph, from, to)
+  if (!legs) return false
+  for (let i = 0; i < legs.length; i++) {
+    const leg = legs[i] as { wall: WallSlice; u0: number; u1: number }
+    emitWallLegWith(emit, leg.wall, leg.u0, leg.u1, runY)
+    const next = legs[i + 1]
+    if (next) {
+      const a = wallPlan({ wall: leg.wall, u: leg.u1 })
+      const b = wallPlan({ wall: next.wall, u: next.u0 })
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.02) {
+        emit([a[0], runY, a[1]], [b[0], runY, b[1]], ' (junction jumper)')
+      }
+    }
+  }
+  return true
+}
+
 /**
  * Route every circuit as geometry that FOLLOWS THE WALLS: one homerun drop
  * at the panel, then a greedy nearest-neighbor chain through the circuit's
@@ -1042,72 +1146,8 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     })
   }
 
-  /**
-   * One drill-height leg along a wall — DETOURING around ANY rough opening
-   * whose vertical RO crosses the drill plane (doors always; windows when
-   * the sill drops below drill height — prod report: wires bored straight
-   * through low windows). Route: rise inside the king-stud bay, cross above
-   * the header, drop back — or duck UNDER the sill when there's no wall
-   * above (full-height glazing with a stub sill).
-   */
-  const emitWallLeg = (
-    circuit: string,
-    gauge: number,
-    wall: WallSlice,
-    u0: number,
-    u1: number,
-    runY: number = WIRE_RUN_Y,
-  ): void => {
-    const dir = Math.sign(u1 - u0) || 1
-    const legLo = Math.min(u0, u1)
-    const legHi = Math.max(u0, u1)
-    const crossed = openingSpans(wall, runY - 0.02, runY + 0.02)
-      .filter((s) => s.lo < legHi && s.hi > legLo)
-      .sort((a, b) => (a.lo - b.lo) * dir)
-    const at = (u: number, y: number): [number, number, number] => {
-      const p = wallPlan({ wall, u })
-      return [p[0], y, p[1]]
-    }
-    const clamp = (u: number) => Math.max(legLo, Math.min(legHi, u))
-    let cursor = u0
-    for (const s of crossed) {
-      const near = clamp(dir > 0 ? s.lo : s.hi)
-      const far = clamp(dir > 0 ? s.hi : s.lo)
-      // The crossing band itself must be clear too — a transom above a door
-      // sits exactly where the over-the-header path would run.
-      const blockedAt = (yy: number) =>
-        openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
-      let detourY: number | null = null
-      for (let yy = s.topY + inches(4); yy <= wall.height - 0.05; yy += inches(4)) {
-        if (!blockedAt(yy)) {
-          detourY = yy
-          break
-        }
-      }
-      if (detourY === null) {
-        for (let yy = s.sillY - inches(4); yy >= 0.04; yy -= inches(4)) {
-          if (!blockedAt(yy)) {
-            detourY = yy
-            break
-          }
-        }
-      }
-      if (detourY === null) {
-        // RO spans floor to ceiling — nowhere inside this wall to route.
-        emitWire(circuit, gauge, at(cursor, runY), at(far, runY), ' (⚠ crosses full-height opening — verify)')
-        cursor = far
-        continue
-      }
-      emitWire(circuit, gauge, at(cursor, runY), at(near, runY))
-      emitWire(circuit, gauge, at(near, runY), at(near, detourY))
-      emitWire(circuit, gauge, at(near, detourY), at(far, detourY))
-      emitWire(circuit, gauge, at(far, detourY), at(far, runY))
-      cursor = far
-    }
-    emitWire(circuit, gauge, at(cursor, runY), at(u1, runY))
-  }
-
-  /** Wall-following legs between two anchors at drill height. */
+  /** Wall-following legs between two anchors at drill height (shared
+   * emitWallPathWith — RO detours + junction jumpers). */
   const routeHop = (
     circuit: string,
     gauge: number,
@@ -1115,26 +1155,8 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     to: WallPoint,
     runY: number = WIRE_RUN_Y,
   ): void => {
-    const legs = wallPath(graph, from, to)
-    if (legs) {
-      for (let i = 0; i < legs.length; i++) {
-        const leg = legs[i] as { wall: WallSlice; u0: number; u1: number }
-        emitWallLeg(circuit, gauge, leg.wall, leg.u0, leg.u1, runY)
-        // Round-12 B2/M1: junctions accepted within JUNCTION_TOL (or
-        // snapped out of a door RO) leave the two walls' legs ending at
-        // DIFFERENT plan points. Bridge every inter-leg gap explicitly —
-        // a circuit is continuous cable, not adjacent segments.
-        const next = legs[i + 1]
-        if (next) {
-          const a = wallPlan({ wall: leg.wall, u: leg.u1 })
-          const b = wallPlan({ wall: next.wall, u: next.u0 })
-          if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.02) {
-            emitWire(circuit, gauge, [a[0], runY, a[1]], [b[0], runY, b[1]], ' (junction jumper)')
-          }
-        }
-      }
-      return
-    }
+    const emit: SegmentEmitter = (a, b, note = '') => emitWire(circuit, gauge, a, b, note)
+    if (emitWallPathWith(emit, graph, from, to, runY)) return
     // Disconnected wall islands: Manhattan air legs, called out in the label.
     const a = wallPlan(from)
     const b = wallPlan(to)
@@ -1223,7 +1245,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   }
 
   // ---- service entrance: street lateral → METER → panel feed ----
-  members.push(...routeServiceCable(fixtures, walls))
+  members.push(...routeServiceCable(fixtures, walls, graph))
 
   return members
 }
@@ -1234,16 +1256,84 @@ const SERVICE_LATERAL_Y = -0.45
 const SERVICE_SECTION = 0.035
 /** Map-edge proxy: the street corridor runs this far outside the walls' bbox. */
 const STREET_EDGE_MARGIN = 4
+/** The meter→panel feed's service plane along the walls — one step above
+ * the branch circuits' 8 stapled drill planes, inside the RO-cleared zone. */
+const SERVICE_FEED_Y = WIRE_RUN_Y + 9 * 0.012
+
+/**
+ * True when the straight segment a→b passes through any rough opening's
+ * wall-body volume (sampled every 5 cm — the E1 harness geometry). Used to
+ * ⚠-flag the service legs that cannot detour (laterals, socket/enclosure
+ * bridges) instead of crossing silently.
+ */
+export function segmentCrossesRo(
+  walls: WallSlice[],
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+): boolean {
+  type Box = { min: [number, number, number]; max: [number, number, number] }
+  const boxes: Box[] = []
+  for (const w of walls) {
+    if (w.curved) continue
+    const latX = Math.abs(-w.dir[1]) * (w.thickness / 2 + 0.01)
+    const latZ = Math.abs(w.dir[0]) * (w.thickness / 2 + 0.01)
+    for (const o of w.openings) {
+      const lo = Math.max(0, o.u - o.roughWidth / 2)
+      const hi = Math.min(w.length, o.u + o.roughWidth / 2)
+      if (hi <= lo) continue
+      const p = wallPlan({ wall: w, u: lo })
+      const q = wallPlan({ wall: w, u: hi })
+      boxes.push({
+        min: [Math.min(p[0], q[0]) - latX, o.sillHeight, Math.min(p[1], q[1]) - latZ],
+        max: [
+          Math.max(p[0], q[0]) + latX,
+          o.sillHeight + o.roughHeight,
+          Math.max(p[1], q[1]) + latZ,
+        ],
+      })
+    }
+  }
+  if (boxes.length === 0) return false
+  const steps = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 0.05))
+  for (let i = 0; i <= steps; i++) {
+    const px = a[0] + ((b[0] - a[0]) * i) / steps
+    const py = a[1] + ((b[1] - a[1]) * i) / steps
+    const pz = a[2] + ((b[2] - a[2]) * i) / steps
+    if (
+      boxes.some(
+        (bx) =>
+          px > bx.min[0] &&
+          px < bx.max[0] &&
+          py > bx.min[1] &&
+          py < bx.max[1] &&
+          pz > bx.min[2] &&
+          pz < bx.max[2],
+      )
+    ) {
+      return true
+    }
+  }
+  return false
+}
 
 /**
  * The standard residential chain is street → METER on the house side →
  * panel. Route it as real geometry: an underground lateral from the nearest
  * map-edge point to below the meter, a riser up the exterior face into the
- * socket, then the meter→panel feed through the wall. The meter fixture is
- * the anchor — a moved `bones:service` electric-meter node re-anchors the
- * whole chain (checklist A4). Exported for the continuity gates.
+ * socket, then the meter→panel feed ALONG THE WALLS at a service plane —
+ * wall-graph legs with the standard RO detours, exactly like the branch
+ * circuits (skeptic 2026-08-16: the old straight Manhattan feed pierced a
+ * garage-door RO at socket height and flew 3.6 m through room air after a
+ * panel drag). Legs that cannot detour (laterals, socket/enclosure bridges)
+ * are sampled against the RO boxes and ⚠-flagged when crossing. The meter
+ * fixture is the anchor — a moved `bones:service` electric-meter node
+ * re-anchors the whole chain (checklist A4). Exported for the gates.
  */
-export function routeServiceCable(fixtures: Fixture[], walls: WallSlice[]): Member[] {
+export function routeServiceCable(
+  fixtures: Fixture[],
+  walls: WallSlice[],
+  graph: Map<string, Junction[]> = buildWallGraph(walls),
+): Member[] {
   const members: Member[] = []
   const meter = fixtures.find((f) => f.kind === 'electric-meter')
   const panel = fixtures.find((f) => f.kind === 'panel')
@@ -1274,6 +1364,17 @@ export function routeServiceCable(fixtures: Fixture[], walls: WallSlice[]): Memb
       label: `Service entrance 2 AWG Cu — ${note}`,
     })
   }
+  /** Straight leg that can't detour: flag it when it crosses an RO box. */
+  const flagged = (
+    from: readonly [number, number, number],
+    to: readonly [number, number, number],
+    note: string,
+  ): void =>
+    heavy(
+      from,
+      to,
+      segmentCrossesRo(walls, from, to) ? `${note} (⚠ crosses rough opening — verify)` : note,
+    )
 
   // Nearest map-edge point: the walls' plan bbox pushed out by the street
   // margin, then the closest point on that ring to the meter.
@@ -1300,14 +1401,37 @@ export function routeServiceCable(fixtures: Fixture[], walls: WallSlice[]): Memb
     Math.hypot(e[0] - mx, e[1] - mz) < Math.hypot(best[0] - mx, best[1] - mz) ? e : best,
   )
 
-  // Underground lateral (Manhattan), then the riser up into the socket.
-  heavy([street[0], SERVICE_LATERAL_Y, street[1]], [mx, SERVICE_LATERAL_Y, street[1]], 'street lateral (NEC 300.5)')
-  heavy([mx, SERVICE_LATERAL_Y, street[1]], [mx, SERVICE_LATERAL_Y, mz], 'street lateral (NEC 300.5)')
-  heavy([mx, SERVICE_LATERAL_Y, mz], [mx, my, mz], 'riser to meter')
-  // Meter → panel feed through the wall (NEC 230.66/230.70 service equipment).
+  // Underground lateral (Manhattan), then the riser up into the socket —
+  // sampled against the RO boxes (a meter dragged under full-height glazing
+  // gets a flag, never a silent crossing).
+  flagged([street[0], SERVICE_LATERAL_Y, street[1]], [mx, SERVICE_LATERAL_Y, street[1]], 'street lateral (NEC 300.5)')
+  flagged([mx, SERVICE_LATERAL_Y, street[1]], [mx, SERVICE_LATERAL_Y, mz], 'street lateral (NEC 300.5)')
+  flagged([mx, SERVICE_LATERAL_Y, mz], [mx, my, mz], 'riser to meter')
+
+  // Meter → panel feed (NEC 230.66/230.70): socket → wall centerline, down
+  // the stud bay to the service plane, wall-graph legs (RO detours + junction
+  // jumpers), back up the panel's bay and into the enclosure.
   const [px, py, pz] = panel.position
-  heavy([mx, my, mz], [mx, py, mz], 'meter → panel feed')
-  heavy([mx, py, mz], [px, py, mz], 'meter → panel feed')
-  heavy([px, py, mz], [px, py, pz], 'meter → panel feed')
+  const meterAnchor = nearestWallPoint(walls, [mx, mz], my + 0.25)
+  const panelAnchor = nearestWallPoint(walls, [px, pz], py + inches(15))
+  const feedEmit: SegmentEmitter = (a, b, note = '') => heavy(a, b, `meter → panel feed${note}`)
+  const routed =
+    meterAnchor !== null &&
+    panelAnchor !== null &&
+    wallPath(graph, meterAnchor, panelAnchor) !== null
+  if (routed && meterAnchor && panelAnchor) {
+    const ma = wallPlan(meterAnchor)
+    const pa = wallPlan(panelAnchor)
+    flagged([mx, my, mz], [ma[0], my, ma[1]], 'meter → panel feed')
+    heavy([ma[0], my, ma[1]], [ma[0], SERVICE_FEED_Y, ma[1]], 'meter → panel feed')
+    emitWallPathWith(feedEmit, graph, meterAnchor, panelAnchor, SERVICE_FEED_Y)
+    heavy([pa[0], SERVICE_FEED_Y, pa[1]], [pa[0], py, pa[1]], 'meter → panel feed')
+    flagged([pa[0], py, pa[1]], [px, py, pz], 'meter → panel feed')
+  } else {
+    // Disconnected islands / degenerate scenes: Manhattan air legs, flagged.
+    heavy([mx, my, mz], [mx, py, mz], 'meter → panel feed (⚠ air run — no wall path)')
+    heavy([mx, py, mz], [px, py, mz], 'meter → panel feed (⚠ air run — no wall path)')
+    heavy([px, py, mz], [px, py, pz], 'meter → panel feed (⚠ air run — no wall path)')
+  }
   return members
 }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import { layoutElectrical, panelMountU, routeWiring } from './electrical'
-import { endpointsOf, unreachableDevices } from './electrical.test-helpers'
+import { cableConnects, endpointsOf, unreachableDevices } from './electrical.test-helpers'
 
 /**
  * Prod report (2026-08-15): drop a low window or a door on a wall and the
@@ -237,6 +237,117 @@ describe('electrical vs rough openings (prod 2026-08-15)', () => {
     const members = routeWiring(fixtures, walls)
     expect(wiresThroughOpenings(members, walls)).toEqual([])
     expect(unreachableDevices(members, fixtures)).toEqual([])
+  })
+})
+
+describe('service cable vs rough openings (E1, skeptic 2026-08-16)', () => {
+  // The old routeServiceCable drew the meter→panel feed as straight
+  // Manhattan legs: through the garage-door RO at socket height (y≈1.5) on
+  // one scene, and as a 3.6 m member flying through room air after a panel
+  // drag on another. The feed now rides the wall graph like every circuit.
+
+  /** Plan distance from a point to the nearest wall centerline segment. */
+  const distToWalls = (p: [number, number], walls: WallSlice[]): number => {
+    let best = Number.POSITIVE_INFINITY
+    for (const w of walls) {
+      const [ax, az] = w.start
+      const t = Math.max(0, Math.min(w.length, (p[0] - ax) * w.dir[0] + (p[1] - az) * w.dir[1]))
+      best = Math.min(best, Math.hypot(ax + w.dir[0] * t - p[0], az + w.dir[1] * t - p[1]))
+    }
+    return best
+  }
+
+  const garageWalls = () => [
+    makeWall({
+      id: 'w_s',
+      start: [0, 0],
+      end: [8, 0],
+      // 16' garage door: RO 1.55..6.45, sill 0, head 2.2 — the socket-height
+      // feed plane (y≈1.4–1.5) runs straight through it pre-fix
+      openings: [opening('door', 4, 4.9, 0, 2.2)],
+    }),
+    makeWall({ id: 'w_e', start: [8, 0], end: [8, 4] }),
+    makeWall({ id: 'w_n', start: [8, 4], end: [0, 4] }),
+    makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+  ]
+
+  test('garage-door scene: the feed detours the RO — E1 harness clean', () => {
+    const walls = garageWalls()
+    const rooms = [room('garage', RECT)]
+    // meter and panel straddle the garage door on the same wall
+    const fixtures = layoutElectrical(walls, rooms, {
+      panel: { wallId: 'w_s', wallT: 0.09, position: [0, 0, 0] },
+      electricMeter: { wallId: 'w_s', wallT: 0.9, position: [0, 0, 0] },
+    })
+    const members = routeWiring(fixtures, walls)
+    expect(wiresThroughOpenings(members, walls)).toEqual([])
+    const feed = members.filter(
+      (m) => m.sourceId === 'service-entrance' && m.label?.includes('meter → panel feed'),
+    )
+    expect(feed.length).toBeGreaterThan(0)
+    // the detour actually rises over the 2.2 m header inside the wall
+    expect(feed.some((m) => endpointsOf(m).some((e) => e.y > 2.2))).toBe(true)
+    // and the chain stays continuous street → meter → panel
+    const meter = fixtures.find((f) => f.kind === 'electric-meter') as Fixture
+    const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
+    expect(
+      cableConnects(members, [
+        [meter.position[0], meter.position[1], meter.position[2]],
+        [panel.position[0], panel.position[1], panel.position[2]],
+      ]),
+    ).toBe(true)
+  })
+
+  test('post-drag scene: panel on ANOTHER wall — the feed follows walls, never room air', () => {
+    const walls = garageWalls()
+    const rooms = [room('garage', RECT)]
+    const fixtures = layoutElectrical(walls, rooms, {
+      panel: { wallId: 'w_e', wallT: 0.5, position: [0, 0, 0] },
+    })
+    const members = routeWiring(fixtures, walls)
+    expect(wiresThroughOpenings(members, walls)).toEqual([])
+    const feed = members.filter(
+      (m) => m.sourceId === 'service-entrance' && m.label?.includes('meter → panel feed'),
+    )
+    expect(feed.length).toBeGreaterThan(0)
+    // every unflagged feed member hugs a wall body — the old route flew a
+    // straight 3.6 m member through the middle of the room
+    for (const m of feed) {
+      if (m.label?.includes('⚠')) continue
+      for (const e of endpointsOf(m)) {
+        expect(distToWalls([e.x, e.z], walls)).toBeLessThan(0.2)
+      }
+    }
+    const meter = fixtures.find((f) => f.kind === 'electric-meter') as Fixture
+    const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
+    expect(
+      cableConnects(members, [
+        [meter.position[0], meter.position[1], meter.position[2]],
+        [panel.position[0], panel.position[1], panel.position[2]],
+      ]),
+    ).toBe(true)
+  })
+
+  test('street lateral + riser get sampled too: a socket forced into glazing is flagged', () => {
+    // meter override dead-center of a full-height window — the riser has
+    // nowhere to detour, so it must carry the ⚠, never cross silently
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [8, 0], openings: [opening('window', 4, 3.0, 0, 2.48)] }),
+      makeWall({ id: 'w_e', start: [8, 0], end: [8, 4] }),
+      makeWall({ id: 'w_n', start: [8, 4], end: [0, 4] }),
+      makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms = [room('bedroom', RECT)]
+    const fixtures = layoutElectrical(walls, rooms, {
+      electricMeter: { wallId: 'w_s', wallT: 0.5, position: [0, 0, 0] },
+    })
+    const members = routeWiring(fixtures, walls)
+    // the E1 harness stays clean: whatever crosses carries the flag
+    expect(wiresThroughOpenings(members, walls)).toEqual([])
+    const flaggedOrClear = members
+      .filter((m) => m.sourceId === 'service-entrance')
+      .every((m) => m.label !== undefined)
+    expect(flaggedOrClear).toBe(true)
   })
 })
 

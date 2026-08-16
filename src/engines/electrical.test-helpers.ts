@@ -102,3 +102,43 @@ export function unreachableDevices(
   return out
 }
 
+/** Union-find continuity over the SE-cable members: true when `points` all
+ * live in one connected cable component (street → meter → panel proofs). */
+export function cableConnects(members: Member[], points: [number, number, number][]): boolean {
+  const cable = members.filter((m) => m.sourceId === 'service-entrance')
+  if (cable.length === 0) return false
+  const parent = cable.map((_, i) => i)
+  const find = (i: number): number => {
+    let r = i
+    while (parent[r] !== r) r = parent[r] as number
+    return r
+  }
+  const ends = cable.map(endpointsOf)
+  for (let i = 0; i < cable.length; i++) {
+    for (let j = i + 1; j < cable.length; j++) {
+      const [a1, a2] = ends[i] as [Vector3, Vector3]
+      const [b1, b2] = ends[j] as [Vector3, Vector3]
+      const touch =
+        a1.distanceTo(b1) < 0.03 ||
+        a1.distanceTo(b2) < 0.03 ||
+        a2.distanceTo(b1) < 0.03 ||
+        a2.distanceTo(b2) < 0.03 ||
+        segDist(a1, b1, b2) < 0.03 ||
+        segDist(a2, b1, b2) < 0.03
+      if (touch) parent[find(i)] = find(j)
+    }
+  }
+  const compAt = (p: [number, number, number]): number | null => {
+    const v = new Vector3(p[0], p[1], p[2])
+    for (let i = 0; i < cable.length; i++) {
+      const [a, b] = ends[i] as [Vector3, Vector3]
+      if (v.distanceTo(a) < 0.05 || v.distanceTo(b) < 0.05 || segDist(v, a, b) < 0.05) {
+        return find(i)
+      }
+    }
+    return null
+  }
+  const comps = points.map(compAt)
+  return comps.every((c) => c !== null && c === comps[0])
+}
+
