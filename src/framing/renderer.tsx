@@ -287,6 +287,17 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   return group
 }
 
+/** Exploded-view stratum for the foreign roof group (day board A): drop the
+ * bones roof HALF an exploded slot below the roof shell so floor / trusses /
+ * shingle shell read as three ~equal strata. The host's EXPLODED_GAP is 5 m
+ * per ordinal (packages/viewer level explode), so half a slot = 2.5. Foreign
+ * groups are level-LOCAL — this offset composes with the host's own level
+ * lerp in every mode. `undefined` (viewer store not resolved yet) reads as
+ * stacked. */
+export function explodedRoofOffset(levelMode: string | undefined): number {
+  return levelMode === 'exploded' ? -2.5 : 0
+}
+
 function disposeGroup(group: Group) {
   // All meshes share one unit-box geometry — dispose each UNIQUE geometry
   // exactly once.
@@ -303,6 +314,10 @@ function disposeGroup(group: Group) {
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   const ref = useRef<Group>(null!)
   const viewDir = useRef(new Vector3())
+  // Cached useViewer store handle (resolved by the dynamic import below) —
+  // useFrame can't await, so attachForeign reads levelMode through this ref;
+  // null until the import lands = treat as stacked.
+  const viewerStore = useRef<{ getState: () => { levelMode?: string } } | null>(null)
   useRegistry(node.id, node.type, ref)
 
   // Any scene edit re-derives the skeleton — that's the contract (never stale).
@@ -333,9 +348,15 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // in stacked view (prod 2026-08-15 round 3). The level object may
   // register after us, so (re)attach lazily in the frame loop below.
   const attachForeign = () => {
+    // Exploded stratum: in exploded level mode the bones roof drops half a
+    // slot below the roof shell (floor / trusses / shell = three strata);
+    // any other mode — or the viewer store not resolved yet — sits flush.
+    const levelMode = viewerStore.current?.getState().levelMode
+    const strataY = explodedRoofOffset(levelMode)
     for (const [levelId, g] of built.foreign) {
       const levelObj = sceneRegistry.nodes.get(levelId as Parameters<typeof sceneRegistry.nodes.get>[0])
       if (levelObj && g.parent !== levelObj) levelObj.add(g)
+      g.position.y = strataY
       // Imperative children don't unmount with the JSX — mirror the node's
       // visibility by hand (hiding the X-ray must hide the foreign roofs).
       g.visible = node.visible !== false
@@ -351,14 +372,19 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // true dollhouse: near faces open, far drywall is the backdrop.
   // Restores the previous mode on unmount UNLESS the user changed it since.
   useEffect(() => {
-    if (node.seeThrough === false) return
     // Dynamic import: the viewer package drags browser-only deps that must
     // never evaluate under bun test (this effect only runs in the host).
     let previous: string | undefined
     let restore: (() => void) | undefined
     let cancelled = false
     import('@pascal-app/viewer').then(({ useViewer }) => {
-      if (cancelled) return
+      // Cache the store HANDLE for the frame loop (exploded roof stratum) —
+      // regardless of seeThrough and even past cancellation: attachForeign
+      // polls it every frame and the handle is a module singleton.
+      viewerStore.current = useViewer as unknown as {
+        getState: () => { levelMode?: string }
+      }
+      if (cancelled || node.seeThrough === false) return
       const viewer = useViewer.getState() as unknown as {
         wallMode?: string
         setWallMode?: (mode: string) => void

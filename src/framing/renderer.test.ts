@@ -217,6 +217,34 @@ describe('buildGroups — cross-level members split into foreign level groups', 
   })
 })
 
+describe('exploded roof stratum (day board A, 2026-08-16)', () => {
+  test('explodedRoofOffset: half an exploded slot (EXPLODED_GAP 5 → 2.5) below in exploded mode, flush otherwise', () => {
+    const { explodedRoofOffset } = require('./renderer') as typeof import('./renderer')
+    expect(explodedRoofOffset('exploded')).toBe(-2.5)
+    expect(explodedRoofOffset('stacked')).toBe(0)
+    expect(explodedRoofOffset('solo')).toBe(0)
+    // viewer store not resolved yet (dynamic import pending) = stacked
+    expect(explodedRoofOffset(undefined)).toBe(0)
+  })
+
+  test('buildGroups foreign groups start flush at y 0 — the offset is frame-loop applied', () => {
+    const { buildGroups } = require('./renderer') as typeof import('./renderer')
+    const rafter = {
+      system: 'roof-framing' as const,
+      role: 'rafter' as const,
+      dims: [0.04, 0.2, 3] as const,
+      length: 3,
+      position: [1, 1.2, 0] as const,
+      rotation: [0.5, 0, 0] as const,
+      material: 'lumber' as const,
+      sourceId: 'roofseg',
+      levelId: 'lvlroof',
+    }
+    const { foreign } = buildGroups([rafter], [], true)
+    expect(foreign.get('lvlroof')?.position.y).toBe(0)
+  })
+})
+
 describe('under-slab plumbing ghosts through the floor (user ask 2026-08-16)', () => {
   test('buried DWV buckets are ghosted; above-floor supply stays solid', () => {
     const { buildGroup } = require('./renderer') as typeof import('./renderer')
