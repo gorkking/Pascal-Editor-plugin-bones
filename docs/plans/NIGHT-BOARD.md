@@ -5,6 +5,28 @@
 rounds; ~18 confirmed defects fixed+gated today. All four morning items +
 hover bug + electric meter live.
 
+## ACTIVE: mixed wall construction (user ask 2026-08-16 evening)
+A wall is not all-wood or all-block: CMU bottom + framed top (knee/stem
+wall pattern). Spec:
+- Schema: FramingNode.wallOverrides values grow from 'framed'|'cmu'|'skip'
+  to also accept { construction: 'cmu', cmuHeightM?: number } (zod union,
+  back-compat; absent height = full-height CMU as today).
+- Engines: split wall vertically at cmuHeightM SNAPPED to whole courses
+  (8in block = 0.203m course): cmu() builds courses+bond beam to the seam;
+  wall-framing builds a PT sill plate ON the bond beam (anchor bolts at
+  the seam per R403.1.6 spacing) + studs/plates above (shortened height).
+  Openings entirely above/below the seam: normal king/trimmer or CMU
+  lintel logic in their zone. Openings CROSSING the seam: flag
+  ('opening crosses the CMU/framing seam — verify detail'), frame as if
+  fully in the taller zone. Layers v1: unchanged per-wall (note).
+- UI: Engineering section (wall card + sidebar) — selecting CMU reveals a
+  height control: slider snapped to course multiples with a % readout,
+  default 100%. Writes the override object.
+- Takeoff: block count for the CMU zone only; studs shortened; PT sill +
+  bolts booked. Gates: member composition of a 50% split (courses below,
+  sill at seam, studs above, no overlap via SAT), crossing-opening flag,
+  full-height unchanged vs today, takeoff deltas.
+
 ## Next-session queue
 - User's Q1-Q8 answers (morning review file) still pending — gate street
   point (Q6), movable outlets (Q7), drawer stage 2 host menu (Q8).
