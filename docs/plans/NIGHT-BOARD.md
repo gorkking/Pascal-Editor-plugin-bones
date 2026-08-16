@@ -127,7 +127,20 @@
   unification (Q6 answer pending), power-entry routing (node places at the
   panel wall weatherhead; no engine consumer yet).
 
-## State right now (~05:30 → final fix pass LANDED green)
+## State right now (~06:30 — NIGHT COMPLETE, three batches shipped)
+- BATCH 3 SHIPPED: plugin 45d4ad4 via editor#662 + private-editor#357
+  (prod main 59b5fa02). 585 tests green. Localhost = prod sha.
+- Morning review file final: ~/Downloads/bones-morning-review.txt.
+- Night totals: 3 prod ships, 434→585 tests, ~30 skeptic-confirmed
+  defects fixed+gated across plumbing (6 rounds), service nodes (2),
+  blueprints (3 examiner rounds), view modes, multi-storey.
+- Next session queue: user's Q1-Q8 answers from the review file, examiner
+  cosmetics (P1 pagination, N2 depth/datums, C4 rafter note), per-element
+  drawer stage 1, movable outlets (Q7), street point (Q6), electrical
+  jumper RO analog (E4/#12), insulation batts toggle, connector RO
+  sampling halving (skeptic future note).
+
+## Older (~05:30 → final fix pass LANDED green)
 - Connector skeptic: PASS (loop closed; ~2% predicate-halo grazes = 0.0mm
   physical penetration, future sampling refinement noted).
 - Examiner fix-check: N3 FAIL→FLAG (sections legible), C1+C5+N2 CLOSED;
