@@ -585,7 +585,7 @@ function planSheet(
 // their longest local axis: honest line-art framing, no hidden-face solver.
 // ---------------------------------------------------------------------------
 
-type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string }
+type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string; butt?: boolean }
 
 /** World-space endpoints of a member's longest axis + its stroke thickness. */
 function memberAxis(m: Member, lift: number): { a: [number, number, number]; b: [number, number, number]; w: number } {
@@ -653,12 +653,14 @@ function memberSegs(
       w,
       depth: (depthOf(a) + depthOf(b)) / 2,
       color: SYSTEM_STROKE[m.system] ?? '#9a9a9a',
+      // below-grade work prints dashed with butt caps ('hidden' convention)
+      butt: m.system === 'foundation',
     })
   }
   return segs.sort((p, q) => p.depth - q.depth)
 }
 
-function fitSegs(segs: Seg[]): { sx: (x: number) => number; sy: (y: number) => number; scale: number; ratio: number } | null {
+function fitSegs(segs: Seg[], fixedRatio?: number): { sx: (x: number) => number; sy: (y: number) => number; scale: number; ratio: number } | null {
   if (segs.length === 0) return null
   let minX = Number.POSITIVE_INFINITY
   let maxX = Number.NEGATIVE_INFINITY
@@ -674,7 +676,7 @@ function fitSegs(segs: Seg[]): { sx: (x: number) => number; sy: (y: number) => n
   const availH = H - 2 * MARGIN - TITLE_H - 30
   const raw = Math.min(availW / Math.max(0.1, maxX - minX), availH / Math.max(0.1, maxY - minY))
   const ppm = 96 / 0.0254
-  const ratio = RATIOS.find((r) => ppm / r <= raw) ?? RATIOS[RATIOS.length - 1] as number
+  const ratio = fixedRatio ?? (RATIOS.find((r) => ppm / r <= raw) ?? (RATIOS[RATIOS.length - 1] as number))
   const scale = ppm / ratio
   const ox = MARGIN + (availW - (maxX - minX) * scale) / 2
   const oy = MARGIN + (availH - (maxY - minY) * scale) / 2
@@ -685,7 +687,7 @@ function segSvg(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string
   return segs
     .map(
       (s) =>
-        `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="round"/>`,
+        `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="${s.butt ? 'butt' : 'round'}"${s.butt ? ' stroke-dasharray="5 3" opacity="0.75"' : ''}/>`,
     )
     .join('')
 }
@@ -693,15 +695,21 @@ function segSvg(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string
 const ELEVATIONS: { key: string; title: string; proj: (p: [number, number, number]) => [number, number]; depth: (p: [number, number, number]) => number }[] = [
   { key: 'south', title: 'South elevation (framing)', proj: (p) => [p[0], -p[1]], depth: (p) => -p[2] },
   { key: 'north', title: 'North elevation (framing)', proj: (p) => [-p[0], -p[1]], depth: (p) => p[2] },
-  { key: 'east', title: 'East elevation (framing)', proj: (p) => [p[2], -p[1]], depth: (p) => p[0] },
-  { key: 'west', title: 'West elevation (framing)', proj: (p) => [-p[2], -p[1]], depth: (p) => -p[0] },
+  // Standing EAST of the building looking west, north (−z) is screen-RIGHT
+  // (blueprint round-2: both sheets printed mirrored).
+  { key: 'east', title: 'East elevation (framing)', proj: (p) => [-p[2], -p[1]], depth: (p) => p[0] },
+  { key: 'west', title: 'West elevation (framing)', proj: (p) => [p[2], -p[1]], depth: (p) => -p[0] },
 ]
 
 function elevationSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
   const sheets: PlanSheet[] = []
+  // one building, one elevation family, ONE scale (round-2: S/N printed
+  // 1:100 next to E/W at 1:75) — fit every view, keep the coarsest ratio
+  const fits = ELEVATIONS.map((ev) => fitSegs(memberSegs(members, opts, ev.proj, ev.depth)))
+  const familyRatio = Math.max(...fits.filter((f) => f !== null).map((f) => f.ratio), 0)
   for (const ev of ELEVATIONS) {
     const segs = memberSegs(members, opts, ev.proj, ev.depth)
-    const f = fitSegs(segs)
+    const f = fitSegs(segs, familyRatio || undefined)
     if (!f) continue
     // grade line at world y = 0 (proj y of [x,0,z] is 0 in every elevation)
     const gy = f.sy(0)
@@ -729,13 +737,19 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
     opts,
     (p) => [p[2], -p[1]],
     (p) => p[0],
-    (m) => Math.abs(m.position[0] - cutX) < BAND,
+    (m) => {
+      // a member belongs to the section if its EXTENT crosses the cut band
+      // (round-2: center-only tests dropped the very walls the cut slices)
+      const yaw = m.rotation[1]
+      const ex = (Math.abs(Math.cos(yaw)) * m.dims[0] + Math.abs(Math.sin(yaw)) * m.dims[2]) / 2
+      return Math.abs(m.position[0] - cutX) < BAND + ex
+    },
   )
   const f = fitSegs(segs)
   if (!f) return null
   const gy = f.sy(0)
   const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/>`
-  const title = 'Section A-A (longitudinal)'
+  const title = 'Section A-A (transverse)'
   return {
     title,
     svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band at plan midpoint — members within the band shown</text>${chrome(title, opts, f.scale, '', { ratio: f.ratio, northArrow: false })}</svg>`,
@@ -768,7 +782,7 @@ function coverSheet(members: Member[], opts: PlanSetOptions, index: string[]): P
     .join('')
   return {
     title: 'Cover',
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}<text x="${W - MARGIN - 236}" y="${MARGIN + 8}" font-size="12" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">SHEET INDEX</text>${indexRows}<text x="${MARGIN}" y="${H - MARGIN - 44}" font-size="30" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">${esc(title)}</text>${lines
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}<text x="${W - MARGIN - 236}" y="${MARGIN + 8}" font-size="12" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">SHEET INDEX</text><text x="${W - MARGIN}" y="${H - MARGIN}" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#555">__SHEET_NO__ · members drawn at model elevations</text>${indexRows}<text x="${MARGIN}" y="${H - MARGIN - 44}" font-size="30" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">${esc(title)}</text>${lines
       .map(
         (l, i) =>
           `<text x="${MARGIN}" y="${H - MARGIN - 22 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#444">${esc(l)}</text>`,

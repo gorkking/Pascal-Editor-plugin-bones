@@ -64,7 +64,7 @@ describe('buildPlanSet', () => {
       'North elevation (framing)',
       'East elevation (framing)',
       'West elevation (framing)',
-      'Section A-A (longitudinal)',
+      'Section A-A (transverse)',
       'Schedules + takeoff',
     ])
     // no plumbing/hvac members → no MEP sheet
@@ -152,5 +152,36 @@ describe('cover / elevations / section (round: standard set)', () => {
     expect(south).toBeDefined()
     expect(south?.svg).toContain('GRADE')
     expect(sheets.some((s) => s.title.startsWith('Section A-A'))).toBe(true)
+  })
+})
+
+describe('elevation orientation + section membership (blueprint round-2)', () => {
+  test('east elevation puts north (−z) on screen-right; west mirrors it', () => {
+    // two studs on an east wall: zNear=1, zFar=7 — standing EAST, the z=7
+    // (south) stud must print LEFT of the z=1 stud
+    const members = [
+      member({ system: 'wall-framing', role: 'stud', dims: [0.04, 2.4, 0.09], position: [8, 1.2, 1], rotation: [0, 0, 0] }),
+      member({ system: 'wall-framing', role: 'stud', dims: [0.04, 2.4, 0.09], position: [8, 1.2, 7], rotation: [0, 0, 0] }),
+    ]
+    const sheets = buildPlanSet(members, [], {})
+    const east = sheets.find((s) => s.title.startsWith('East elevation'))
+    const xs = [...(east?.svg.matchAll(/<line x1="([\d.]+)"/g) ?? [])].map((m2) => Number(m2[1]))
+    expect(xs.length).toBeGreaterThanOrEqual(2)
+    // both studs are vertical lines; the SECOND member (z=7) must be left
+    expect(xs[1]).toBeLessThan(xs[0] as number)
+  })
+
+  test('section includes walls whose extent crosses the cut band', () => {
+    // long wall plate centered away from the cut midpoint but crossing it
+    const members = [
+      member({ system: 'wall-framing', role: 'plate', dims: [10, 0.04, 0.09], position: [5, 0.02, 0], rotation: [0, 0, 0] }),
+      member({ system: 'wall-framing', role: 'stud', dims: [0.04, 2.4, 0.09], position: [0.2, 1.2, 4], rotation: [0, 0, 0] }),
+    ]
+    const sheets = buildPlanSet(members, [], {})
+    const section = sheets.find((s) => s.title.startsWith('Section A-A'))
+    // the plate's extent crosses cutX=~2.6 even though its center (5,0) is
+    // outside the band — it must be drawn (>=1 line beyond the grade line)
+    const lines = [...(section?.svg.matchAll(/<line /g) ?? [])]
+    expect(lines.length).toBeGreaterThanOrEqual(2)
   })
 })
