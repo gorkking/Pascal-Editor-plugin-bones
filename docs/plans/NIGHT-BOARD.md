@@ -29,6 +29,27 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
+## Task #17 blueprint round-3 flags — LANDED (2026-08-16, a152cf9)
+- All six examiner flags fixed + gated in plan-set.test.ts (565 tests at
+  land): (1) section poché — cut members dark #222 ×1.3 width, beyond at
+  0.6 opacity; (2) A-A cut mark on the wall plan (dashed line + 'A'
+  bubbles at the shared sectionCutX helper); (3) stroke legends on
+  cover/elevations/section (per-sheet systems only); (4) takeoff rows wrap
+  at word boundaries — pagination counts LINES, wrapped row costs 2;
+  (5) roof-coverage <60% flag on the roof legend + schedules flags;
+  (6) rebar dowels OPEN circles vs anchor-bolt FILLED dots + legend keys.
+- NOT done from the old queue wording: elevations stay 1-per-sheet (the
+  2-per-sheet pairing wasn't in the round-3 brief).
+
+## Task #18a flexible connectors — LANDED (2026-08-16, 5fdb510)
+- Off-wall placed fixtures (>6cm from stub) get a 3-segment braided-hose
+  arc stub → fixture connection (toilet inlet 0.2m, lav tails 0.3m); cold
+  always, hot beside it; sourceId conn-<id>, no new roles. Islands keep
+  flagged air runs; flush fixtures get nothing. Gated in
+  plumbing.connectivity.test.ts incl. meter→conn reachability. 569 tests.
+- NOT shipped to prod yet — needs the adversarial loop (skeptic + visual +
+  blueprint examiner re-read) before a pin bump.
+
 ## Task #19 service nodes FIX BATCH — LANDED (2026-08-16, bdfdd7e)
 - Adversarial review round on bones:service, 8 defects fixed + gated
   (558 tests): (1) RO-collision warnings for panel/WH/water-entry overrides
@@ -68,9 +89,10 @@
   ±2cm, not full device height (tall tank under a sill can overlap
   unflagged); wallT slider inert after a gizmo drag until position reset
   (documented, maybe surface in inspector help).
-- Remaining queue: blueprint round-3 flags (#17), flexible connectors,
-  per-element drawer stage 1, movable outlets (Q7), street point (Q6),
-  electrical jumper RO analog (E4/#12), insulation batts toggle.
+- Remaining queue: per-element drawer stage 1, movable outlets (Q7),
+  street point (Q6), electrical jumper RO analog (E4/#12), insulation
+  batts toggle. (#17 round-3 flags + 18a connectors LANDED — see above;
+  both still need the adversarial loop before any prod pin bump.)
 
 ## Older state (POST-SHIP 1, ~01:40)
 - PROD SHIPPED: plugin 9f5a43f via editor #660 + private-editor #355
