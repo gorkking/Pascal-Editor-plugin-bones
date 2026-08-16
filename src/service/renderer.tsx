@@ -10,11 +10,12 @@ import type { ServiceNode } from './schema'
 /**
  * Renderer for a `bones:service` point: an equipment box per type plus an
  * identifying SIGN plate (canvas-texture label, double-sided) offset off the
- * wall face. Wall-mounted types resolve their world spot from
- * `wallId + wallT + heightAff` (wall start/end lerp — live, so sliding
- * `wallT` moves the node along its wall); floor types fall back to
- * `position`. The engines consume the same node as a routing override, so
- * wherever this renders, the wires/pipes follow.
+ * wall face. A gizmo-written `position` (non-default) OUTRANKS the wall
+ * anchor (wall types snap to the nearest wall); otherwise wall-mounted types
+ * resolve from `wallId + wallT + heightAff` (wall start/end lerp — live, so
+ * sliding `wallT` moves the node along its wall). No usable anchor → a bare
+ * selectable stub. The engines consume the same node as a routing override,
+ * so wherever this renders, the wires/pipes follow.
  */
 
 /** Draw the sign label (+ bolt glyph for the panel) onto a canvas texture. */
@@ -86,6 +87,24 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
   if (lastTexture.current && lastTexture.current !== texture) lastTexture.current.dispose()
   lastTexture.current = texture
 
+  if (node.visible === false) return null
+
+  // Unresolvable anchor (missing/curved/foreign wall + never-moved position):
+  // render only a small selectable stub — the node stays pickable/deletable
+  // via the gizmo, but no equipment is drawn and the engines auto-place.
+  if (!placement) {
+    const sx = Number.isFinite(node.position?.[0]) ? node.position[0] : 0
+    const sz = Number.isFinite(node.position?.[2]) ? node.position[2] : 0
+    return (
+      <group position={[sx, 0, sz]} ref={ref} {...handlers}>
+        <mesh position={[0, 0.08, 0]}>
+          <boxGeometry args={[0.16, 0.16, 0.16]} />
+          <meshStandardMaterial color="#9aa0a6" roughness={0.85} />
+        </mesh>
+      </group>
+    )
+  }
+
   // Gizmo drags override the plan position live (floor-placed nodes).
   const position: readonly [number, number, number] =
     !placement.wallMounted && liveTransform?.position
@@ -101,8 +120,6 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
         [0, body.dims[1] / 2 + SIGN_H / 2 + 0.02, -signZ],
       ]
     : [[0, body.dims[1] / 2 + SIGN_H / 2 + 0.06, 0]]
-
-  if (node.visible === false) return null
   return (
     <group
       position={[position[0], 0, position[2]]}

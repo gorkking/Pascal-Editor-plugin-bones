@@ -491,48 +491,72 @@ export function placePanelSpot(
 }
 
 /**
- * Resolve a `bones:service` override to the engine's WallPoint form:
- * `wallId`+`wallT` verbatim (0..1 → u along the wall), else the nearest wall
- * point to a gizmo-written `position`. Null = no override → auto-place.
+ * A gizmo-written override position: every component finite AND off the
+ * schema default [0,0,0] (within 1e-6). The default means "never moved";
+ * NaN/Infinity components make the position unusable (never trust it).
+ */
+function movedOverridePosition(
+  o: ServicePointOverride,
+): readonly [number, number, number] | null {
+  const p = o.position
+  if (!p || p.length < 3) return null
+  if (!p.every((v) => Number.isFinite(v))) return null
+  return p.some((v) => Math.abs(v) > 1e-6) ? p : null
+}
+
+/** The override's usable wall: straight, non-degenerate, in this level's
+ * walls list (missing/curved/foreign ids resolve to nothing). */
+function overrideWall(walls: WallSlice[], o: ServicePointOverride): WallSlice | undefined {
+  return o.wallId
+    ? walls.find((w) => w.id === o.wallId && !w.curved && w.length >= 0.1)
+    : undefined
+}
+
+const overrideT = (o: ServicePointOverride): number =>
+  Math.max(0, Math.min(1, typeof o.wallT === 'number' && Number.isFinite(o.wallT) ? o.wallT : 0.5))
+
+/**
+ * Resolve a `bones:service` override to the engine's WallPoint form.
+ * Precedence: a NON-default `position` (host gizmo write) OUTRANKS the wall
+ * anchor and maps to the nearest wall point — otherwise gizmo drags of a
+ * wall-anchored node would silently no-op; the default [0,0,0] means "never
+ * moved" → `wallId`+`wallT` verbatim (0..1 → u along the wall). An
+ * unresolvable wall with a never-moved position is NOT an override.
+ * Null = no override → auto-place.
  */
 export function overrideWallPoint(
   walls: WallSlice[],
   o: ServicePointOverride | undefined,
 ): WallPoint | null {
   if (!o) return null
-  if (o.wallId) {
-    const wall = walls.find((w) => w.id === o.wallId && !w.curved && w.length >= 0.1)
-    if (wall) {
-      const t = Math.max(0, Math.min(1, o.wallT ?? 0.5))
-      return { wall, u: t * wall.length }
-    }
-  }
-  if (o.position) {
-    return nearestWallPoint(walls, [o.position[0], o.position[2]], Number.POSITIVE_INFINITY)
-  }
+  const moved = movedOverridePosition(o)
+  if (moved) return nearestWallPoint(walls, [moved[0], moved[2]], Number.POSITIVE_INFINITY)
+  const wall = overrideWall(walls, o)
+  if (wall) return { wall, u: overrideT(o) * wall.length }
   return null
 }
 
 /**
- * Resolve a `bones:service` override to a PLAN point: the wall lerp when
- * anchored, else the node's own position. Null = no override.
+ * Resolve a `bones:service` override to a PLAN point, with the same
+ * precedence as `overrideWallPoint`: a moved `position` wins (verbatim —
+ * floor consumers like the sewer exit take it as-is), else the wall lerp,
+ * else null (no override → auto-place).
  */
 export function overridePlanPoint(
   walls: WallSlice[],
   o: ServicePointOverride | undefined,
 ): readonly [number, number] | null {
   if (!o) return null
-  if (o.wallId) {
-    const wall = walls.find((w) => w.id === o.wallId)
-    if (wall) {
-      const t = Math.max(0, Math.min(1, o.wallT ?? 0.5))
-      return [
-        wall.start[0] + wall.dir[0] * wall.length * t,
-        wall.start[1] + wall.dir[1] * wall.length * t,
-      ]
-    }
+  const moved = movedOverridePosition(o)
+  if (moved) return [moved[0], moved[2]]
+  const wall = overrideWall(walls, o)
+  if (wall) {
+    const t = overrideT(o)
+    return [
+      wall.start[0] + wall.dir[0] * wall.length * t,
+      wall.start[1] + wall.dir[1] * wall.length * t,
+    ]
   }
-  if (o.position) return [o.position[0], o.position[2]]
   return null
 }
 

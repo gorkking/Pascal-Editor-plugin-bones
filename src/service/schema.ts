@@ -11,8 +11,10 @@ import { z } from 'zod'
  *
  * Wall-mounted types mirror the host item wall contract (`wallId` + `wallT`
  * 0..1 along the wall + `heightAff`) so host tools can slide them along a
- * wall; `position` is the level-local fallback for floor-placed types
- * (sewer exit) and for nodes moved by the standard gizmo.
+ * wall. `position` is the level-local spot for floor-placed types (sewer
+ * exit) AND the standard gizmo's write target: once moved off the default
+ * [0,0,0] it OUTRANKS the wall anchor (wall types snap to the nearest wall),
+ * so a drag is never a silent no-op.
  */
 
 export const SERVICE_TYPES = [
@@ -43,7 +45,7 @@ export const ServiceNode = BaseNode.extend({
   `Bones service point — a building/utility interface the systems route to.
   - serviceType: panel (electric service panel) | water-heater | water-entry (meter + shut-off) | sewer-exit | power-entry
   - wallId + wallT (0..1 along the wall) + heightAff: wall-mounted anchor; move it and wires/pipes re-route
-  - position: level-local fallback for floor-placed types (sewer exit)
+  - position: level-local spot for floor-placed types (sewer exit); once moved off [0,0,0] (gizmo drag) it outranks the wall anchor
   Engines treat an existing node as authoritative; delete it to return to auto-placement.`,
 )
 

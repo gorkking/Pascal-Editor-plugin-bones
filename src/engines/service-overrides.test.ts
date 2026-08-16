@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Fixture, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import type { PlacedFixtureSlice } from '../core/wall-model'
-import { layoutElectrical, placePanelSpot, routeWiring } from './electrical'
+import { layoutElectrical, overrideWallPoint, placePanelSpot, routeWiring } from './electrical'
 import { unreachableDevices } from './electrical.test-helpers'
 import { layoutPlumbing, placeSewerExit } from './plumbing'
 import {
@@ -111,8 +111,9 @@ describe('A4 gate — panel override re-anchors the homeruns', () => {
   })
 
   test('wallId+wallT override mounts the panel there, verbatim', () => {
+    // real node shape: `position` is always present, default [0,0,0]
     const fixtures = layoutElectrical(walls, rooms, {
-      panel: { wallId: 'w_e', wallT: 0.5, heightAff: 1.4 },
+      panel: { wallId: 'w_e', wallT: 0.5, heightAff: 1.4, position: [0, 0, 0] },
     })
     const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
     expect(panel).toBeDefined()
@@ -143,11 +144,46 @@ describe('A4 gate — panel override re-anchors the homeruns', () => {
     expect(unreachableDevices(members, fixtures)).toEqual([])
   })
 
-  test('override pointing at a missing wall with no position falls back to auto', () => {
-    const fixtures = layoutElectrical(walls, rooms, { panel: { wallId: 'w_gone', wallT: 0.5 } })
+  // GATE (dead anchors): a real node always carries `position` (schema
+  // default [0,0,0]) — an unresolvable wallId must NOT teleport the panel to
+  // the origin-nearest wall; it is no override at all → auto placement.
+  test('override pointing at a missing wall with a never-moved position falls back to auto', () => {
+    const fixtures = layoutElectrical(walls, rooms, {
+      panel: { wallId: 'w_gone', wallT: 0.5, position: [0, 0, 0] },
+    })
     const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
     expect(panel.position[0]).toBeCloseTo(autoPanel.position[0], 6)
     expect(panel.position[2]).toBeCloseTo(autoPanel.position[2], 6)
+  })
+
+  // GATE (gizmo precedence): `position` moved off the default OUTRANKS the
+  // wall anchor — otherwise a host gizmo drag (which writes `position` only)
+  // would silently no-op while wallId+wallT pin the panel in place.
+  test('gizmo-moved position outranks a live wallId+wallT anchor', () => {
+    const fixtures = layoutElectrical(walls, rooms, {
+      panel: { wallId: 'w_e', wallT: 0.5, position: [0.2, 1.52, 3.0] },
+    })
+    const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
+    // nearest wall to the dragged spot (0.2, 3.0) is w_w at x=0 — NOT w_e at x=8
+    expect(Math.abs(panel.position[0])).toBeLessThan(0.15)
+    expect(Math.abs(panel.position[2] - 3)).toBeLessThan(0.3)
+    const members = routeWiring(fixtures, walls)
+    expect(unreachableDevices(members, fixtures)).toEqual([])
+  })
+
+  test('overrideWallPoint: curved wall + never-moved position is NOT an override', () => {
+    const curved = makeWall({ id: 'w_curve', curved: true })
+    expect(
+      overrideWallPoint([curved, ...walls], {
+        wallId: 'w_curve',
+        wallT: 0.5,
+        position: [0, 0, 0],
+      }),
+    ).toBeNull()
+    // missing wall id, default position — same verdict
+    expect(
+      overrideWallPoint(walls, { wallId: 'w_other_level', position: [0, 0, 0] }),
+    ).toBeNull()
   })
 })
 
@@ -246,5 +282,29 @@ describe('A4 gate — meter + WH overrides keep the supplies continuous', () => 
     expect(Math.abs(wh.position[0] - 5)).toBeLessThan(0.5)
     expect(Math.abs(wh.position[2] - 6)).toBeLessThan(0.1)
     checkSupply(members, fixtures)
+  })
+
+  // GATE (gizmo precedence, plumbing side): the moved position wins for the
+  // wall-anchored consumers (nearest wall point) and verbatim for the floor
+  // sewer exit — wallId+wallT must not pin them once the node was dragged.
+  test('gizmo-moved WH position outranks its wall anchor (snaps to nearest wall)', () => {
+    const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed, {
+      waterHeater: { wallId: 'w_mid', wallT: 0.75, position: [9.6, 0, 4.0] },
+    })
+    const wh = fixtures.find((f) => f.kind === 'water-heater') as Fixture
+    // dragged next to w_e at x=10 — the w_mid anchor (x=5) must NOT win
+    expect(Math.abs(wh.position[0] - 10)).toBeLessThan(0.5)
+    expect(Math.abs(wh.position[2] - 4)).toBeLessThan(1.0)
+    checkSupply(members, fixtures)
+  })
+
+  test('gizmo-moved sewer-exit position outranks its wall anchor (verbatim)', () => {
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed, {
+      sewerExit: { wallId: 'w_n', wallT: 0.5, position: [9.5, 0, 7.5] },
+    })
+    const exit = buildingDrainExit(members)
+    // w_n lerp would say [5,8] — the dragged position [9.5,7.5] must win
+    expect(Math.hypot((exit?.x ?? 0) - 9.5, (exit?.z ?? 0) - 7.5)).toBeLessThan(0.1)
+    expect(drainFailures(members, placed.map((f) => f.id))).toEqual([])
   })
 })

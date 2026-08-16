@@ -47,19 +47,20 @@ describe('resolveServicePlacement', () => {
       wallId: 'wall_1',
       wallT: 0.25,
       heightAff: 1.5,
-      position: [99, 0, 99],
+      position: [0, 0, 0],
       rotation: [0, 0, 0],
     })
-    expect(p.wallMounted).toBe(true)
-    expect(p.position[0]).toBeCloseTo(1, 6)
-    expect(p.position[1]).toBeCloseTo(1.5, 6)
-    expect(p.position[2]).toBeCloseTo(0, 6)
-    expect(p.wallThickness).toBeCloseTo(0.12, 6)
+    expect(p).not.toBeNull()
+    expect(p?.wallMounted).toBe(true)
+    expect(p?.position[0]).toBeCloseTo(1, 6)
+    expect(p?.position[1]).toBeCloseTo(1.5, 6)
+    expect(p?.position[2]).toBeCloseTo(0, 6)
+    expect(p?.wallThickness).toBeCloseTo(0.12, 6)
     // +X wall → normal [0, 1] → yaw 0 maps local +Z onto the normal
-    expect(p.rotationY).toBeCloseTo(0, 6)
+    expect(p?.rotationY).toBeCloseTo(0, 6)
   })
 
-  test('falls back to position when the wall is missing from the scene', () => {
+  test('moved position on a floor type wins over a dead wall anchor', () => {
     const p = resolveServicePlacement({}, {
       serviceType: 'sewer-exit',
       wallId: 'wall_gone',
@@ -67,12 +68,12 @@ describe('resolveServicePlacement', () => {
       position: [3, 0, -2],
       rotation: [0, 1.2, 0],
     })
-    expect(p.wallMounted).toBe(false)
-    expect(p.position[0]).toBe(3)
-    expect(p.position[2]).toBe(-2)
+    expect(p?.wallMounted).toBe(false)
+    expect(p?.position[0]).toBe(3)
+    expect(p?.position[2]).toBe(-2)
     // floor default height for the sewer stub center
-    expect(p.position[1]).toBeCloseTo(0.15, 6)
-    expect(p.rotationY).toBeCloseTo(1.2, 6)
+    expect(p?.position[1]).toBeCloseTo(0.15, 6)
+    expect(p?.rotationY).toBeCloseTo(1.2, 6)
   })
 
   test('clamps wallT into the wall segment', () => {
@@ -83,6 +84,113 @@ describe('resolveServicePlacement', () => {
       position: [0, 0, 0],
       rotation: [0, 0, 0],
     })
-    expect(p.position[0]).toBeCloseTo(4, 6)
+    expect(p?.position[0]).toBeCloseTo(4, 6)
+  })
+
+  // GATE (gizmo precedence): a position moved off the schema default OUTRANKS
+  // the wall anchor — otherwise host gizmo drags write `position` and nothing
+  // moves. Wall types snap back to the NEAREST wall; floor types stand free.
+  test('gizmo-moved position outranks a live wall anchor (wall type snaps to nearest wall)', () => {
+    const twoWalls = {
+      ...scene,
+      wall_2: { id: 'wall_2', type: 'wall', start: [0, 3], end: [4, 3], thickness: 0.2 },
+    } as Record<string, Record<string, unknown>>
+    const p = resolveServicePlacement(twoWalls, {
+      serviceType: 'panel',
+      wallId: 'wall_1', // anchored to wall_1 at z=0…
+      wallT: 0.25,
+      heightAff: 1.5,
+      position: [3, 0, 2.6], // …but dragged next to wall_2 at z=3
+      rotation: [0, 0, 0],
+    })
+    expect(p).not.toBeNull()
+    expect(p?.wallMounted).toBe(true)
+    expect(p?.position[0]).toBeCloseTo(3, 6)
+    expect(p?.position[2]).toBeCloseTo(3, 6) // snapped onto wall_2
+    expect(p?.position[1]).toBeCloseTo(1.5, 6)
+    expect(p?.wallThickness).toBeCloseTo(0.2, 6)
+  })
+
+  test('gizmo-moved position on a floor type stays free even with a live wall anchor', () => {
+    const p = resolveServicePlacement(scene, {
+      serviceType: 'sewer-exit',
+      wallId: 'wall_1',
+      wallT: 0.5,
+      position: [2, 0, 1.5],
+      rotation: [0, 0, 0],
+    })
+    expect(p?.wallMounted).toBe(false)
+    expect(p?.position[0]).toBeCloseTo(2, 6)
+    expect(p?.position[2]).toBeCloseTo(1.5, 6)
+  })
+
+  test('default position with a live wall anchor still follows the wall (drag round-trip)', () => {
+    // The schema default [0,0,0] means "never moved" — the wall rule holds.
+    const p = resolveServicePlacement(scene, {
+      serviceType: 'panel',
+      wallId: 'wall_1',
+      wallT: 0.75,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    })
+    expect(p?.wallMounted).toBe(true)
+    expect(p?.position[0]).toBeCloseTo(3, 6)
+  })
+
+  // GATE (dead anchors): missing/curved/foreign wallId + never-moved position
+  // is NOT a placement — null, so the engines auto-place and the renderer
+  // shows only the selectable stub (no teleport to the origin-nearest wall).
+  test('missing wall + default position → null (no placement)', () => {
+    const p = resolveServicePlacement({}, {
+      serviceType: 'panel',
+      wallId: 'wall_gone',
+      wallT: 0.5,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    })
+    expect(p).toBeNull()
+  })
+
+  test('curved wall + default position → null (the lerp would be a chord)', () => {
+    const curvedScene = {
+      wall_c: {
+        id: 'wall_c',
+        type: 'wall',
+        start: [0, 0],
+        end: [4, 0],
+        curveOffset: 0.5,
+        thickness: 0.12,
+      },
+    } as Record<string, Record<string, unknown>>
+    const p = resolveServicePlacement(curvedScene, {
+      serviceType: 'panel',
+      wallId: 'wall_c',
+      wallT: 0.5,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    })
+    expect(p).toBeNull()
+  })
+
+  test('foreign-level wall + default position → null (positions are level-local)', () => {
+    const twoLevels = {
+      wall_up: {
+        id: 'wall_up',
+        type: 'wall',
+        parentId: 'level_2',
+        start: [0, 0],
+        end: [4, 0],
+        thickness: 0.12,
+      },
+    } as Record<string, Record<string, unknown>>
+    const p = resolveServicePlacement(twoLevels, {
+      serviceType: 'panel',
+      parentId: 'level_1',
+      wallId: 'wall_up',
+      wallT: 0.5,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    })
+    expect(p).toBeNull()
   })
 })

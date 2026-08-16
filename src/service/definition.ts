@@ -23,8 +23,10 @@ const serviceParametrics: ParametricDescriptor<ServiceNode> = {
 /**
  * The `bones:service` definition — service points the Bones panel creates
  * (never palette-placed). Selectable and movable with the host's standard
- * tools: dragging writes `position`, the wall fields stay available for
- * host wall-anchor tooling. Engines re-route to the node on every change.
+ * tools: dragging writes `position`, which (once off the default [0,0,0])
+ * OUTRANKS the wall anchor — wall types snap to the nearest wall, so gizmo
+ * moves are never silent no-ops; the wall fields stay available for host
+ * wall-anchor tooling. Engines re-route to the node on every change.
  */
 export const serviceDefinition: ServiceDefinition = {
   kind: 'bones:service',
@@ -69,6 +71,6 @@ export const serviceDefinition: ServiceDefinition = {
 
   mcp: {
     description:
-      'Bones service point node. serviceType: panel | water-heater | water-entry | sewer-exit | power-entry. Wall-mounted via wallId + wallT (0..1 along the wall) + heightAff, or floor-placed via position. The electrical/plumbing engines treat an existing node as the authoritative location and re-route wiring/piping to it; deleting it restores auto-placement.',
+      'Bones service point node. serviceType: panel | water-heater | water-entry | sewer-exit | power-entry. Wall-mounted via wallId + wallT (0..1 along the wall) + heightAff, or floor-placed via position; a position moved off the default [0,0,0] outranks the wall anchor. The electrical/plumbing engines treat an existing node as the authoritative location and re-route wiring/piping to it; deleting it restores auto-placement.',
   },
 }

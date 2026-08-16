@@ -172,8 +172,11 @@ export type Fixture = {
 /**
  * Authoritative location of one service point (from a `bones:service` node).
  * When present, engines use it VERBATIM instead of auto-placement — routing
- * follows (checklist A4). Wall-anchored via `wallId`+`wallT`, or a plain
- * level-local `position` (gizmo-moved / floor-placed nodes).
+ * follows (checklist A4). Precedence: a non-default `position` (host gizmo
+ * write) OUTRANKS `wallId`+`wallT` (wall consumers snap it to the nearest
+ * wall point); the schema default [0,0,0] means "never moved" → the wall
+ * anchor rule. An unresolvable wall with a never-moved position is NOT an
+ * override (engines auto-place).
  */
 export type ServicePointOverride = {
   wallId?: string
