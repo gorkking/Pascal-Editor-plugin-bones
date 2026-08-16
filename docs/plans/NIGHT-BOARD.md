@@ -57,7 +57,22 @@
   unification (Q6 answer pending), power-entry routing (node places at the
   panel wall weatherhead; no engine consumer yet).
 
-## State right now (POST-SHIP, ~01:40)
+## State right now (POST-SHIP 2, ~03:30)
+- SERVICE POINTS SHIPPED: plugin e8d15ea via editor#661 + private-editor#356
+  (main 13296c84). Two verify rounds, 8 defects fixed+gated, visual PASS,
+  closing skeptic PASS. 559 tests. Localhost = prod sha.
+- Morning review file updated with service-points test steps + residuals.
+- Residual tickets (non-blockers, from closing pass): renderer visual snap
+  can draw a dragged box inside an RO while wiring routes clear (renderer/
+  engine divergence, needs snap parity); RO warning band = device CENTER
+  ±2cm, not full device height (tall tank under a sill can overlap
+  unflagged); wallT slider inert after a gizmo drag until position reset
+  (documented, maybe surface in inspector help).
+- Remaining queue: blueprint round-3 flags (#17), flexible connectors,
+  per-element drawer stage 1, movable outlets (Q7), street point (Q6),
+  electrical jumper RO analog (E4/#12), insulation batts toggle.
+
+## Older state (POST-SHIP 1, ~01:40)
 - PROD SHIPPED: plugin 9f5a43f via editor #660 + private-editor #355
   (main 3aac52d6). Plumbing loop CLOSED after 6 rounds / 14 defect classes
   (final skeptic PASS). Localhost:3002 = prod sha.
