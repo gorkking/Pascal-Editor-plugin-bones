@@ -100,7 +100,22 @@
   unification (Q6 answer pending), power-entry routing (node places at the
   panel wall weatherhead; no engine consumer yet).
 
-## State right now (~04:30 — round-3 batch HELD for fixes)
+## State right now (~05:30 — final polish pass running)
+- Connector skeptic: PASS (loop closed; ~2% predicate-halo grazes = 0.0mm
+  physical penetration, future sampling refinement noted).
+- Examiner fix-check: N3 FAIL→FLAG (sections legible), C1+C5+N2 CLOSED;
+  narrow REVISE on 3 items → FINAL FIX AGENT RUNNING: width-aware label
+  de-collision, filled-rect cut poché, flag-list wrap (exact criteria in
+  its brief + scorecard fixCheck notes).
+- ON ITS GREEN LANDING: ship the round-3 batch through the prod chain
+  (editor PR pin bump → merge → private-editor PR pin+submodule → merge),
+  update ~/Downloads/bones-morning-review.txt (add: round-3 sheet polish +
+  braided connectors shipped; note examiner's remaining P1 pagination +
+  N2 datum/depth items as next round), pin localhost, mark task #17 done.
+- Examiner's morning queue: P1 pagination balance (3 sheets ~2/3 empty),
+  N2 depth cues + T.O. PLATE/RIDGE/GRADE datums, C4 rafter o.c. note.
+
+## Older (~04:30 hold)
 - Blueprint examiner round 3: REVISE — all round-2 items closed, but FAIL
   N3 (section poché recolors whole members; cutX on a wall axis = black
   sheet) + flags (roof-coverage bbox proxy misses the demo wing, electrical
