@@ -460,7 +460,15 @@ function computeLevelUncached(
           const framed = frameRoofs(roofs, activeWalls, spec)
           members.push(
             ...(level.id === levelId
-              ? framed
+              ? // Owner ON the roof level (F1b, user prod report: trusses rode
+                // the shell as ONE exploded layer): when the owner's level is
+                // a true attic/roof storey (no rooms, no slabs — gable walls
+                // don't make it lived-in), its own roof members still form
+                // the carpentry stratum. A lived storey's porch roof stays
+                // flush with its level.
+                (extractSlabs(nodes, levelId).length === 0 && rooms.length === 0
+                  ? framed.map((m) => ({ ...m, levelId: level.id, strataAbove: true as const }))
+                  : framed)
               : framed.map((m) =>
                   level.level > myOrdinal
                     ? { ...m, levelId: level.id, strataAbove: true as const }

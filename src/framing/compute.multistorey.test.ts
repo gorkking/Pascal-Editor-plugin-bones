@@ -104,11 +104,11 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     expect(roof.length).toBeGreaterThan(0)
     const minY = Math.min(...roof.map((m) => m.position[1]))
     expect(minY).toBeLessThan(5.0)
-    // F1b — INTENDED limitation (checklist A3): an owner ON the roof level
-    // frames the roof as own-level members: no levelId tag, no strataAbove,
-    // no foreign group — and therefore no stratum drop in exploded view.
-    expect(roof.every((m) => m.levelId === undefined)).toBe(true)
-    expect(roof.every((m) => m.strataAbove === undefined)).toBe(true)
+    // F1b CLOSED (prod report): an owner on a roomless slab-less level
+    // tags its own roof members to that level with strataAbove so the
+    // exploded carpentry stratum works regardless of owner placement.
+    // Positions stay level-local (unshifted) — the tag drives mounting.
+    expect(roof.every((m) => m.levelId === 'lvl0' && m.strataAbove === true)).toBe(true)
   })
 
   test('a shared roof is framed by exactly one X-ray — the highest storey wins', () => {
@@ -596,5 +596,36 @@ describe('hvac attic detection — gable-walled roof level (re-verify round)', (
       const maxTop = Math.max(...ducts.map((m) => m.position[1] + m.dims[1] / 2))
       expect(maxTop).toBeGreaterThan(2.5)
     }
+  })
+})
+
+describe('exploded stratum — owner ON the roof level (F1b closure, prod report)', () => {
+  test('roof members on a roomless slab-less owner level carry strataAbove', () => {
+    const nodes = twoStoreyScene()
+    // owner sits on the roof level itself (the user's gable-framing flow)
+    const node = bones('bonesframing_roof', 'lvlroof')
+    nodes.bonesframing_roof = node as unknown as Record<string, unknown>
+    const roof = computeLevel(nodes, node).members.filter((m) => m.system === 'roof-framing')
+    expect(roof.length).toBeGreaterThan(0)
+    expect(roof.every((m) => m.levelId === 'lvlroof' && m.strataAbove === true)).toBe(true)
+  })
+
+  test('a porch roof on a lived-in owner level stays flush (no stratum)', () => {
+    const nodes = twoStoreyScene()
+    delete nodes.roofseg
+    nodes.slab0 = {
+      id: 'slab0', type: 'slab', parentId: 'lvl0',
+      polygon: [[0, 0], [8, 0], [8, 5], [0, 5]], holes: [], elevation: 0.05, thickness: 0.1,
+    }
+    ;(nodes.lvl0 as Record<string, unknown>).children = ['w0a', 'w0b', 'w0c', 'w0d', 'slab0']
+    nodes.porch = {
+      id: 'porch', type: 'roof-segment', parentId: 'lvl0', position: [50, 2.5, 2],
+      rotation: 0, roofType: 'shed', width: 3, depth: 2, pitch: 15, thickness: 0.15,
+    }
+    const node = bones('bonesframing_0', 'lvl0')
+    nodes.bonesframing_0 = node as unknown as Record<string, unknown>
+    const roof = computeLevel(nodes, node).members.filter((m) => m.system === 'roof-framing')
+    expect(roof.length).toBeGreaterThan(0)
+    expect(roof.every((m) => m.strataAbove !== true)).toBe(true)
   })
 })
