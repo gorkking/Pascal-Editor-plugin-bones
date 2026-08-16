@@ -49,6 +49,8 @@ function colorOf(member: Member): string {
       return '#4f7d8c'
     case 'cladding':
       return '#aebfc7'
+    case 'insulation':
+      return '#e8b4c8' // pink batts (board spec, full wall engineering panel)
     default:
       break
   }

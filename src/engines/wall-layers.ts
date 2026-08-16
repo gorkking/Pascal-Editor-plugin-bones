@@ -15,8 +15,13 @@
  * point sits in no room faces outdoors. Corner treatment mirrors the
  * framing run insets: a butting wall's layers stop at the through wall's
  * face, the through wall's layers run past (how drywall is actually hung).
- * Insulation batts and vapor-retarder geometry land in a later round — the
- * climate-zone R-value/class ride the labels for now.
+ *
+ * Per-wall overrides (full wall engineering panel): `cladding` swaps the
+ * exterior finish family for THAT wall (falls back to the state default);
+ * `insulation` ≠ 'none' fills the stud bays with labeled batt members
+ * (role 'insulation', laid out against the framing engine's own trimmed
+ * runs/backing bays via frameHints so batts and studs never share volume);
+ * absent overrides keep today's output byte-equal.
  */
 
 import assemblies from '../../data/wall-assemblies.json'
@@ -24,10 +29,21 @@ import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, MemberRole, RoomSlice, SlabSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
+import {
+  DOUBLE_TRIMMER_SPAN,
+  FIRE_BLOCK_HEIGHT,
+  type FrameHints,
+  frameHints,
+  specForWall,
+  studPositions,
+  studSizeFor,
+  type WallFramingOverride,
+} from './wall-framing'
 
 type Pt = readonly [number, number]
 
 type LayerSpec = { role: string; thicknessIn: number; material: string; citation: string }
+type ZoneInsulation = { value?: string; battThicknessIn?: number }
 type Assemblies = {
   interior: { layers: LayerSpec[] }
   exterior: {
@@ -36,11 +52,22 @@ type Assemblies = {
     claddings: Record<string, { layers: LayerSpec[] }>
     defaultCladdingByState: Record<string, string>
     stateClimateZone?: Record<string, string>
-    insulationByClimateZone?: Record<string, string>
+    insulationByClimateZone?: Record<string, ZoneInsulation>
     vaporRetarderClassByZone?: Record<string, string>
   }
 }
 const DATA = assemblies as unknown as Assemblies
+
+/**
+ * Per-wall engineering the layer engine consumes — a projection of the
+ * resolved WallOverride object (framing/compute.ts hands the same map to
+ * frameWalls, so both engines read one truth).
+ */
+export type WallLayerOverride = WallFramingOverride & {
+  insulation?: 'none' | 'batt' | 'blown' | 'spray-foam'
+  insulationR?: number
+  cladding?: string
+}
 
 function pointInPolygon(p: Pt, polygon: readonly (readonly [number, number])[]): boolean {
   let inside = false
@@ -163,18 +190,38 @@ export function layoutWallLayers(
   stateCode = 'NY',
   /** Floor slabs — the automatic inside/outside signal. */
   slabs: SlabSlice[] = [],
+  /** Per-wall engineering overrides, keyed by wall id (see WallLayerOverride). */
+  overrides?: ReadonlyMap<string, WallLayerOverride>,
 ): Member[] {
   const members: Member[] = []
   if (spec.detail === '200') return members
 
   const state = stateCode
-  const claddingKey = DATA.exterior.defaultCladdingByState[state] ?? 'vinyl'
-  const cladding = DATA.exterior.claddings[claddingKey] ?? DATA.exterior.claddings.vinyl
+  const defaultCladdingKey = DATA.exterior.defaultCladdingByState[state] ?? 'vinyl'
   const zone = DATA.exterior.stateClimateZone?.[state]
-  const rValue = zone ? DATA.exterior.insulationByClimateZone?.[zone] : undefined
+  const rValue = zone ? DATA.exterior.insulationByClimateZone?.[zone]?.value : undefined
+
+  // Insulation batts lay out against the framing's OWN trimmed runs and
+  // backing bays — derive the (identical) hint pass only when some wall
+  // actually asks for batts, so the default path costs nothing.
+  const wantsBatts = (o?: WallLayerOverride): boolean =>
+    o?.insulation !== undefined && o.insulation !== 'none'
+  const battHints =
+    overrides && walls.some((w) => wantsBatts(overrides.get(w.id)))
+      ? frameHints(walls, spec, overrides)
+      : null
+  const battZone = battHints ? battZoneInfo(state) : null
 
   for (const wall of walls) {
     if (wall.curved || wall.length < 0.2) continue
+    const override = overrides?.get(wall.id)
+    // Per-wall exterior finish: the override key when it names a known
+    // cladding family, else the jurisdiction default.
+    const claddingKey =
+      override?.cladding && DATA.exterior.claddings[override.cladding]
+        ? override.cladding
+        : defaultCladdingKey
+    const cladding = DATA.exterior.claddings[claddingKey] ?? DATA.exterior.claddings.vinyl
     const inset = runInsets(wall, walls)
     const extSide = exteriorSide(wall, rooms, slabs)
     const bands = bandsAround(wall, wall.height)
@@ -185,10 +232,8 @@ export function layoutWallLayers(
     // + 3.5 studs + 0.5 gypsum): stacks start at the STUD face, so the
     // interior gypsum's outer face lands flush with the drawn wall face
     // (round-14 — layers floated 12.6mm proud and fattened every wall).
-    const studDepth =
-      LUMBER_CROSS_SECTIONS[
-        wall.thickness >= spec.thickWallThreshold ? spec.exteriorStudSize : spec.interiorStudSize
-      ][1]
+    const wallSpec = specForWall(spec, override)
+    const studDepth = LUMBER_CROSS_SECTIONS[studSizeFor(wall, wallSpec)][1]
     const stackOrigin = Math.min(studDepth, wall.thickness - inches(1)) / 2
 
     const emitStack = (side: 1 | -1, layers: LayerSpec[], noteSuffix = '') => {
@@ -253,6 +298,159 @@ export function layoutWallLayers(
         ],
         rValue ? ` — cavity ${rValue} (zone ${zone})` : '',
       )
+    }
+
+    // Insulation batts in the stud bays (per-wall override, ≠ 'none').
+    if (battHints && battZone && wantsBatts(override) && override) {
+      members.push(
+        ...insulationBatts(wall, wallSpec, override, battHints.get(wall.id) ?? {}, battZone),
+      )
+    }
+  }
+  return members
+}
+
+// ---------------------------------------------------------------------------
+// Insulation batts (full wall engineering panel)
+// ---------------------------------------------------------------------------
+
+type BattZone = { zoneLabel: string | null; minR: number; thicknessIn: number }
+
+/**
+ * Climate-zone batt data for a state: primary IECC zone label ("2A"), the
+ * prescriptive cavity minimum R, and the batt thickness the data prescribes
+ * (3.5" for R-13/15 bays, 5.5" for deeper). Zone-less codes (INTL) fall
+ * back to R-13 / 3.5" with no zone tag on the label.
+ */
+function battZoneInfo(state: string): BattZone {
+  const raw = DATA.exterior.stateClimateZone?.[state]
+  const m = raw ? /^(\d)([ABC])?/.exec(raw.trim()) : null
+  const key = m ? (m[1] === '4' && m[2] === 'C' ? '4M' : (m[1] as string)) : null
+  const entry = key ? DATA.exterior.insulationByClimateZone?.[key] : undefined
+  const minR = entry?.value ? Number.parseInt(entry.value.replace(/^R/i, ''), 10) || 13 : 13
+  return {
+    zoneLabel: m ? `${m[1]}${m[2] ?? ''}` : null,
+    minR,
+    thicknessIn: entry?.battThicknessIn ?? 3.5,
+  }
+}
+
+/**
+ * Batt members for one framed wall: one box per clear stud bay, mirroring
+ * the framing engine's OWN layout — the trimmed run (corner insets), the
+ * grid + California-backing stud rhythm, opening-frame keep-outs (kings/
+ * trimmers/cripples own that span), partition-backing bays, and LOD-400
+ * fire-blocking rows (batts split around them) — so batts and framing
+ * touch but never share volume (S1). Thickness comes from the climate
+ * zone's batt data, capped at the stud depth; label reads
+ * 'batt R-13 (zone 2A)' style with the override's type + R.
+ */
+function insulationBatts(
+  wall: WallSlice,
+  wallSpec: FramingSpec,
+  override: WallLayerOverride,
+  hints: FrameHints,
+  zone: BattZone,
+): Member[] {
+  const members: Member[] = []
+  const studSize = studSizeFor(wall, wallSpec)
+  const [t, w] = LUMBER_CROSS_SECTIONS[studSize]
+  const halfT = t / 2
+  const len = wall.length
+  const u0 = Math.max(0, hints.startInset ?? 0)
+  const u1 = Math.max(u0 + 4 * t, len - Math.max(0, hints.endInset ?? 0))
+  const runLen = u1 - u0
+  const studBottom = t
+  const studTop = wall.height - (wallSpec.topPlateCount === 2 ? 2 * t : t)
+  if (studTop - studBottom <= t) return members // pony wall — plates only
+
+  // The stud rhythm the framing actually emits: o.c. grid on the trimmed
+  // run, plus the cross-wall extra studs (California corner backing).
+  const gridUs = studPositions(runLen, wallSpec.studSpacing, halfT).map((su) => su + u0)
+  const studUs = [...gridUs]
+  for (const extra of hints.extraStuds ?? []) {
+    studUs.push(Math.min(Math.max(extra.u, u0 + halfT), u1 - halfT))
+  }
+  studUs.sort((a, b) => a - b)
+
+  // Keep-outs: the opening frame owns its span (kings/trimmers/header/
+  // cripples), and a partition-backing ladder fills its whole bay.
+  type Span = { min: number; max: number }
+  const keepOuts: Span[] = []
+  for (const opening of wall.openings) {
+    const ro = Math.min(opening.roughWidth, runLen - 4 * t)
+    if (ro <= 0) continue
+    const frameSide = (ro > DOUBLE_TRIMMER_SPAN ? 2 : 1) * t
+    const u = Math.min(
+      Math.max(opening.u, u0 + ro / 2 + frameSide + t),
+      u1 - ro / 2 - frameSide - t,
+    )
+    keepOuts.push({ min: u - ro / 2 - frameSide - t, max: u + ro / 2 + frameSide + t })
+  }
+  for (const tee of hints.backing ?? []) {
+    const uu = Math.min(Math.max(tee.u, u0 + t), u1 - t)
+    const left = Math.max(u0 + halfT, ...gridUs.filter((su) => su < uu - 1e-6))
+    const right = Math.min(u1 - halfT, ...gridUs.filter((su) => su > uu + 1e-6))
+    keepOuts.push({ min: left, max: right })
+  }
+
+  // Vertical segments: the full cavity, split around LOD-400 fire rows.
+  const ySegments: [number, number][] = []
+  let yCursor = studBottom
+  if (wallSpec.detail === '400') {
+    for (let rowY = FIRE_BLOCK_HEIGHT; rowY < studTop - t; rowY += FIRE_BLOCK_HEIGHT) {
+      ySegments.push([yCursor, rowY - halfT])
+      yCursor = rowY + halfT
+    }
+  }
+  ySegments.push([yCursor, studTop])
+
+  const type = override.insulation ?? 'batt'
+  const r = override.insulationR ?? zone.minR
+  const label = `${type} R-${r}${zone.zoneLabel ? ` (zone ${zone.zoneLabel})` : ''}`
+  const depth = Math.min(inches(zone.thicknessIn), w)
+  const yaw = Math.atan2(-wall.dir[1], wall.dir[0])
+
+  for (let i = 0; i + 1 < studUs.length; i++) {
+    // clear bay between two studs, minus every keep-out
+    let spans: Span[] = [
+      { min: (studUs[i] as number) + halfT, max: (studUs[i + 1] as number) - halfT },
+    ]
+    for (const k of keepOuts) {
+      const next: Span[] = []
+      for (const s of spans) {
+        if (k.max <= s.min || k.min >= s.max) {
+          next.push(s)
+          continue
+        }
+        if (k.min > s.min) next.push({ min: s.min, max: k.min })
+        if (k.max < s.max) next.push({ min: k.max, max: s.max })
+      }
+      spans = next
+    }
+    for (const s of spans) {
+      const bayLen = s.max - s.min
+      if (bayLen < inches(3)) continue
+      const uMid = (s.min + s.max) / 2
+      for (const [yLo, yHi] of ySegments) {
+        const segH = yHi - yLo
+        if (segH < inches(3)) continue
+        members.push({
+          system: 'wall-framing',
+          role: 'insulation',
+          dims: [bayLen, segH, depth],
+          length: bayLen,
+          position: [
+            wall.start[0] + wall.dir[0] * uMid,
+            (yLo + yHi) / 2,
+            wall.start[1] + wall.dir[1] * uMid,
+          ],
+          rotation: [0, yaw, 0],
+          material: 'lumber',
+          sourceId: wall.id,
+          label,
+        })
+      }
     }
   }
   return members

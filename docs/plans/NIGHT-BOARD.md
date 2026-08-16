@@ -76,6 +76,11 @@ fiber-cement/wood...) }.
 - Oblique (non-perpendicular) tees — pre-existing repo-wide convention:
   tee insets use plain thickness/2 with no oblique multiplier; audit +
   angle-aware stem retreat across engines (S5 scope note, 2026-08-16).
+- Tee-stem FACE layers cross the through wall's framing — pre-existing:
+  wall-layers runInsets only detects endpoint corners, so a stem's drywall
+  runs to the centerline through the through wall's plates/backing at tees
+  (exposed by the batt SAT composition, 2026-08-16 engineering-panel work;
+  gate scoped to batts meanwhile — interpenetration.test.ts tee scenario).
 
 # Bones day board — 2026-08-16 (morning directives; night board below)
 

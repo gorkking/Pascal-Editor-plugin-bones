@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { RoomSlice, WallSlice } from '../core/types'
-import { exteriorSide, layoutWallLayers } from './wall-layers'
+import { exteriorSide, layoutWallLayers, type WallLayerOverride } from './wall-layers'
 
 const spec400 = { ...DEFAULT_SPEC, detail: '400' as const }
 
@@ -161,5 +161,160 @@ describe('layoutWallLayers', () => {
 
   test('LOD 200 emits no layers', () => {
     expect(layoutWallLayers([wall()], [roomAbove], { ...DEFAULT_SPEC, detail: '200' }, 'NY')).toEqual([])
+  })
+})
+
+/**
+ * GATE (full wall engineering panel — cladding plumb-through): a per-wall
+ * cladding override swaps THAT wall's finish family (incl. the stucco
+ * double-WRB rule), other walls keep the state default, and an override-less
+ * call stays byte-equal to today.
+ */
+describe('layoutWallLayers — per-wall cladding override', () => {
+  test('stucco override on one wall: cement plaster + doubled WRB there only', () => {
+    const wallB = wall({ id: 'wall_B', start: [0, 8], end: [6, 8] })
+    const roomB: RoomSlice = { ...roomAbove, id: 'room_b2', polygon: [[0, 8], [6, 8], [6, 12], [0, 12]], boundaryWallIds: ['wall_B'] }
+    const layers = layoutWallLayers(
+      [wall(), wallB],
+      [roomAbove, roomB],
+      spec400,
+      'NY',
+      [],
+      new Map([['wall_B', { cladding: 'stucco' }]]),
+    )
+    const of = (id: string, role: string) => layers.filter((m) => m.sourceId === id && m.role === role)
+    // overridden wall: stucco cladding, TWO wrb layers (R703.7.3)
+    expect(of('wall_B', 'cladding')[0]?.label?.toLowerCase()).toContain('cement plaster')
+    expect(of('wall_B', 'wrb')).toHaveLength(2)
+    // untouched wall keeps the NY default (vinyl) and a single WRB
+    expect(of('wall_L', 'cladding')[0]?.label?.toLowerCase()).toContain('vinyl')
+    expect(of('wall_L', 'wrb')).toHaveLength(1)
+  })
+
+  test('unknown cladding key falls back to the state default', () => {
+    const layers = layoutWallLayers(
+      [wall()],
+      [roomAbove],
+      spec400,
+      'NY',
+      [],
+      new Map([['wall_L', { cladding: 'chrome' }]]),
+    )
+    expect(layers.find((m) => m.role === 'cladding')?.label?.toLowerCase()).toContain('vinyl')
+  })
+
+  test('empty/fieldless override map stays byte-equal to the default call', () => {
+    const base = layoutWallLayers([wall()], [roomAbove], spec400, 'NY')
+    expect(layoutWallLayers([wall()], [roomAbove], spec400, 'NY', [], new Map())).toEqual(base)
+    expect(
+      layoutWallLayers([wall()], [roomAbove], spec400, 'NY', [], new Map([['wall_L', {}]])),
+    ).toEqual(base)
+  })
+})
+
+/**
+ * GATE (full wall engineering panel — insulation batts): insulation ≠ 'none'
+ * fills the stud bays with role-'insulation' members labeled type + R +
+ * zone ('batt R-30 (zone 5A)' for NY); batts live BETWEEN the studs the
+ * framing emits (never across one), clear opening frames, cap their depth
+ * at the stud bay, and 'none'/absent emits nothing (defaults byte-equal).
+ */
+describe('layoutWallLayers — insulation batts', () => {
+  const battMap = (o: WallLayerOverride = {}) =>
+    new Map<string, WallLayerOverride>([['wall_L', { insulation: 'batt', ...o }]])
+
+  test("absent by default; explicit 'none' also emits nothing", () => {
+    expect(
+      layoutWallLayers([wall()], [roomAbove], spec400, 'NY').filter((m) => m.role === 'insulation'),
+    ).toHaveLength(0)
+    expect(
+      layoutWallLayers(
+        [wall()],
+        [roomAbove],
+        spec400,
+        'NY',
+        [],
+        new Map([['wall_L', { insulation: 'none' as const }]]),
+      ).filter((m) => m.role === 'insulation'),
+    ).toHaveLength(0)
+  })
+
+  test('batt override fills the bays, labeled with type + code-min R + zone', () => {
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'NY', [], battMap())
+    const batts = layers.filter((m) => m.role === 'insulation')
+    expect(batts.length).toBeGreaterThan(5) // one per clear bay on a 6m wall
+    // NY primary zone 5A → prescriptive R-30 (2021 IECC)
+    for (const b of batts) expect(b.label).toBe('batt R-30 (zone 5A)')
+    // depth caps at the stud bay (0.114m wall → 2x4 bay, 3.5")
+    for (const b of batts) expect(b.dims[2]).toBeLessThanOrEqual(3.5 * 0.0254 + 1e-9)
+    // system/sourceId ride like every other wall member
+    for (const b of batts) {
+      expect(b.system).toBe('wall-framing')
+      expect(b.sourceId).toBe('wall_L')
+    }
+  })
+
+  test('insulationR override re-labels; blown/spray-foam name their type', () => {
+    const r15 = layoutWallLayers(
+      [wall()],
+      [roomAbove],
+      spec400,
+      'NY',
+      [],
+      battMap({ insulationR: 15 }),
+    ).find((m) => m.role === 'insulation')
+    expect(r15?.label).toBe('batt R-15 (zone 5A)')
+    const foam = layoutWallLayers(
+      [wall()],
+      [roomAbove],
+      spec400,
+      'NY',
+      [],
+      new Map([['wall_L', { insulation: 'spray-foam' as const }]]),
+    ).find((m) => m.role === 'insulation')
+    expect(foam?.label).toBe('spray-foam R-30 (zone 5A)')
+  })
+
+  test('batts sit BETWEEN studs and clear the opening frame', () => {
+    const w = wall({
+      openings: [
+        {
+          id: 'win_1',
+          kind: 'window',
+          u: 3,
+          width: 1.2,
+          roughWidth: 1.25,
+          height: 1.2,
+          roughHeight: 1.25,
+          sillHeight: 0.9,
+        },
+      ],
+    })
+    const layers = layoutWallLayers([w], [roomAbove], spec400, 'NY', [], battMap())
+    const batts = layers.filter((m) => m.role === 'insulation')
+    expect(batts.length).toBeGreaterThan(0)
+    // no batt reaches into the opening-frame span (RO + trimmers + kings)
+    const t = 1.5 * 0.0254
+    const frameLo = 3 - 1.25 / 2 - 2 * t
+    const frameHi = 3 + 1.25 / 2 + 2 * t
+    for (const b of batts) {
+      const lo = (b.position[0] as number) - b.dims[0] / 2
+      const hi = (b.position[0] as number) + b.dims[0] / 2
+      expect(lo >= frameHi - 1e-6 || hi <= frameLo + 1e-6).toBe(true)
+    }
+    // batts never span an o.c. grid stud: each fits inside one 16" bay
+    for (const b of batts) expect(b.dims[0]).toBeLessThanOrEqual(16 * 0.0254 - t + 1e-6)
+  })
+
+  test('interior partitions take sound batts too (per-wall ask)', () => {
+    const layers = layoutWallLayers(
+      [wall({ exterior: false })],
+      [roomAbove],
+      spec400,
+      'NY',
+      [],
+      battMap(),
+    )
+    expect(layers.some((m) => m.role === 'insulation')).toBe(true)
   })
 })

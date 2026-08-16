@@ -308,6 +308,78 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(combined)).toEqual([])
   })
 
+  test('wall framing + layers + insulation batts: rectangle with openings (engineering panel)', () => {
+    // Batts fill the stud bays — they must lay out against the framing's
+    // OWN trimmed runs, corner backing studs and opening frames, so the
+    // composed member set stays SAT-clean with NO allow-list entry for
+    // insulation (a batt across a stud would be a real violation).
+    const rectangle = [
+      wall({ id: 'w_s', start: [0, 0], end: [6, 0], openings: [door(2), window_(4.2)] }),
+      wall({ id: 'w_e', start: [6, 0], end: [6, 4] }),
+      wall({ id: 'w_n', start: [6, 4], end: [0, 4], openings: [window_(3)] }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const overrides = new Map(
+      rectangle.map((w) => [w.id, { insulation: 'batt' as const }]),
+    )
+    const combined = [
+      ...frameWalls(rectangle, spec400),
+      ...layoutWallLayers(rectangle, rooms, spec400, 'NY', [], overrides),
+    ]
+    expect(combined.some((m) => m.role === 'insulation')).toBe(true)
+    expect(violations(combined)).toEqual([])
+  })
+
+  test('batts + tee partition backing: ladder bay skipped, SAT-clean (engineering panel)', () => {
+    const composed = [
+      wall({ id: 'w_through', start: [0, 0], end: [6, 0] }),
+      wall({ id: 'w_butt', start: [0, 0], end: [0, 4] }),
+      wall({ id: 'w_stem', start: [3, 0], end: [3, 2.5] }),
+    ]
+    const overrides = new Map(composed.map((w) => [w.id, { insulation: 'batt' as const }]))
+    // Framing + batts only: the stem's FACE layers (drywall) crossing the
+    // through wall's plates at a tee is a PRE-EXISTING runInsets gap
+    // (endpoint-only corner detection — queued on the night board); this
+    // gate owns the batt surface: batts must skip the backing-ladder bay
+    // and never share volume with any framing member.
+    const members = [
+      ...frameWalls(composed, spec400),
+      ...layoutWallLayers(composed, [], spec400, 'NY', [], overrides).filter(
+        (m) => m.role === 'insulation',
+      ),
+    ]
+    expect(members.some((m) => m.role === 'insulation')).toBe(true)
+    expect(violations(members)).toEqual([])
+  })
+
+  test('tall wall batts split around LOD-400 fire blocking (engineering panel)', () => {
+    const tall = wall({ id: 'w_tall', height: 3.6 })
+    const members = [
+      ...frameWalls([tall], spec400),
+      ...layoutWallLayers(
+        [tall],
+        [],
+        spec400,
+        'NY',
+        [],
+        new Map([['w_tall', { insulation: 'batt' as const }]]),
+      ),
+    ]
+    expect(members.some((m) => m.role === 'fire-blocking')).toBe(true)
+    expect(members.some((m) => m.role === 'insulation')).toBe(true)
+    expect(violations(members)).toEqual([])
+  })
+
   test('wall framing: oblique corners 20/45/60/135° (round-14)', () => {
     for (const deg of [20, 45, 60, 135]) {
       const th = (deg * Math.PI) / 180

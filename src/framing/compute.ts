@@ -409,7 +409,7 @@ function computeLevelUncached(
     // dollhouse cut hides the camera-facing stacks. Probe slabs (widened to
     // the storey below on slab-less levels) — exteriorSide needs the same
     // inside/outside signal the exterior fallback used.
-    members.push(...layoutWallLayers(framed, activeRooms, spec, code, probeSlabs))
+    members.push(...layoutWallLayers(framed, activeRooms, spec, code, probeSlabs, engineering))
     members.push(...cmuWalls(masonry, spec))
     for (const { wall, seam } of mixed) {
       const neighbors = activeWalls.filter((w) => w.id !== wall.id && !w.curved)
