@@ -1,9 +1,9 @@
 import {
   extractPlacedFixtures,
   extractRooms,
-  extractSlabs,
   extractWalls,
 } from '../core/wall-model'
+import { probeSlabsFor } from '../framing/compute'
 import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
 import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeSewerExit, placeWhSpot } from '../engines/plumbing'
@@ -44,8 +44,13 @@ export function buildServicePointNodes(
 ): ServiceNode[] {
   const existing: Set<string> = placedServiceTypes(nodes, levelId)
 
-  const slabs = extractSlabs(nodes, levelId)
-  const walls = extractWalls(nodes, levelId, slabs)
+  // The COMPUTE probe, not this level's own slabs: seeding must classify
+  // walls exactly like the engines (widened storey-below probe + gated
+  // attic rule), or on a slab-less gable storey the seeded meter lands on
+  // a different wall than the engine's auto spot and creation alone moves
+  // it — an A4 contract break (verify round 2026-08-16, F3).
+  const { probeSlabs, hasLowerStorey } = probeSlabsFor(nodes, levelId)
+  const walls = extractWalls(nodes, levelId, probeSlabs, hasLowerStorey)
   const rooms = extractRooms(nodes, levelId)
   const placed = extractPlacedFixtures(nodes, levelId)
 

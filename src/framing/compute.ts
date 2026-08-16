@@ -11,6 +11,7 @@ import type {
   Member,
   ServiceOverrides,
   ServicePointOverride,
+  SlabSlice,
   WallSlice,
 } from '../core/types'
 import { inches } from '../core/units'
@@ -21,6 +22,7 @@ import {
   extractServiceOverrides,
   extractSlabs,
   extractWalls,
+  type LevelSlice,
 } from '../core/wall-model'
 import { cmuWalls } from '../engines/cmu'
 import {
@@ -175,6 +177,47 @@ function extractExtraServiceOverrides(
   return { overrides, duplicates: [...duplicates].sort() }
 }
 
+/**
+ * The ONE wall-classification probe (checklist A4 parity): this level's own
+ * slabs, widened to the nearest LOWER storey with flooring in the same
+ * building when the level has none (plan projection — the footprint below
+ * says which side of a gable wall is in), plus the hasLowerStorey flag that
+ * gates the attic blanket-exterior rule. Exported so the service seeding
+ * action (place.ts) and the per-element drawer (panel-selection.ts) classify
+ * walls EXACTLY like the engines — seeding with a narrower probe moved the
+ * water meter on creation (verify round 2026-08-16, F3).
+ * `levels` (building-scoped, ordinal-sorted) is accepted to save the
+ * re-extraction when the caller already has it.
+ */
+export function probeSlabsFor(
+  nodes: Record<string, Record<string, unknown>>,
+  levelId: string,
+  levels?: LevelSlice[],
+): { slabs: SlabSlice[]; probeSlabs: SlabSlice[]; hasLowerStorey: boolean } {
+  const scoped =
+    levels ??
+    (() => {
+      const all = extractLevels(nodes)
+      const myBuilding = all.find((l) => l.id === levelId)?.buildingId ?? null
+      return all.filter((l) => l.buildingId === myBuilding)
+    })()
+  const levelIndex = scoped.findIndex((l) => l.id === levelId)
+  const slabs = extractSlabs(nodes, levelId)
+  let probeSlabs = slabs
+  if (slabs.length === 0) {
+    for (let i = levelIndex - 1; i >= 0; i--) {
+      const lowerId = scoped[i]?.id
+      if (!lowerId) continue
+      const lower = extractSlabs(nodes, lowerId)
+      if (lower.length > 0) {
+        probeSlabs = lower
+        break
+      }
+    }
+  }
+  return { slabs, probeSlabs, hasLowerStorey: levelIndex > 0 }
+}
+
 function computeLevelUncached(
   nodes: Record<string, Record<string, unknown>>,
   config: FramingNode,
@@ -212,34 +255,21 @@ function computeLevelUncached(
   const levelIndex = levels.findIndex((l) => l.id === levelId)
   const isGroundLevel = levelIndex <= 0
 
-  const slabs = extractSlabs(nodes, levelId)
   // Slabs feed the exterior fallback: hosts often mark BOTH wall faces
   // 'interior' (quality round-1 A1) — flooring says which side is in.
   // Roof/attic levels carry NO slabs of their own, so the probe found both
   // sides of a gable-end wall equally 'uncovered' and framed it as INTERIOR
-  // (prod starter house 2026-08-16 — no sheathing/WRB/cladding). Widen the
-  // PROBE set to the nearest LOWER storey with flooring in the same building
-  // (plan projection — the footprint below says which side is in). Only the
-  // probes use it: floor framing / foundation / areas keep this level's own
-  // (empty) slab list.
-  let probeSlabs = slabs
-  if (slabs.length === 0) {
-    for (let i = levelIndex - 1; i >= 0; i--) {
-      const lowerId = levels[i]?.id
-      if (!lowerId) continue
-      const lower = extractSlabs(nodes, lowerId)
-      if (lower.length > 0) {
-        probeSlabs = lower
-        break
-      }
-    }
-  }
-  // hasLowerStorey gates the attic blanket-exterior rule: only a level with
-  // a storey below it in the same building can be an attic/gable storey —
-  // an in-progress GROUND storey (no slabs, no rooms, nothing below) keeps
-  // interior walls, so the takeoff never books sheathing the layer engine
-  // can't render (checklist S4).
-  const rawWalls = extractWalls(nodes, levelId, probeSlabs, levelIndex > 0)
+  // (prod starter house 2026-08-16 — no sheathing/WRB/cladding). The PROBE
+  // set widens to the nearest LOWER storey with flooring in the same
+  // building (probeSlabsFor — shared with place.ts / panel-selection.ts so
+  // every consumer classifies walls identically, A4). Only the probes use
+  // it: floor framing / foundation / areas keep this level's own (empty)
+  // slab list. hasLowerStorey gates the attic blanket-exterior rule: only a
+  // level with a storey below it can be an attic/gable storey — an
+  // in-progress GROUND storey keeps interior walls, so the takeoff never
+  // books sheathing the layer engine can't render (checklist S4).
+  const { slabs, probeSlabs, hasLowerStorey } = probeSlabsFor(nodes, levelId, levels)
+  const rawWalls = extractWalls(nodes, levelId, probeSlabs, hasLowerStorey)
   // Duplicate colinear walls (host scenes routinely carry overlapping
   // segments) framed TWICE: z-fighting studs, doubled plates, ~20% phantom
   // lumber in the takeoff (quality round-1 A5). Keep the longer of any

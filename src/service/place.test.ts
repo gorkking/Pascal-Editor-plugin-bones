@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
+import { probeSlabsFor } from '../framing/compute'
 import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
 import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
@@ -164,6 +165,57 @@ describe('buildServicePointNodes', () => {
       level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
     }
     expect(buildServicePointNodes(nodes, 'level_1')).toEqual([])
+  })
+
+  test('slab-less gable storey: seeded meter wall === engine auto meter wall (A4 probe parity)', () => {
+    // Verify round 2026-08-16 (F3): buildServicePointNodes classified walls
+    // with the level's OWN slabs (none up here) while compute uses the
+    // widened storey-below probe — up here the attic blanket marked every
+    // wall exterior, the LONGEST (the partition) won placeMeterSpot, and
+    // creation alone moved the meter off the engine's auto spot. The seeding
+    // now shares probeSlabsFor: the partition (both probe sides over the
+    // storey-below slab) stays interior, the perimeter gable wall wins —
+    // exactly the wall the engine routes to.
+    const bare = (id: string, start: [number, number], end: [number, number]) => ({
+      id,
+      type: 'wall',
+      parentId: 'lvl_g',
+      start,
+      end,
+      thickness: 0.114,
+      height: 2.5,
+      children: [],
+    })
+    const nodes: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl_0', 'lvl_g'] },
+      lvl_0: { id: 'lvl_0', type: 'level', parentId: 'bldg', level: 0, height: 2.7 },
+      lvl_g: { id: 'lvl_g', type: 'level', parentId: 'bldg', level: 1, height: 2.0 },
+      slab0: {
+        id: 'slab0',
+        type: 'slab',
+        parentId: 'lvl_0',
+        polygon: [
+          [0, 0],
+          [10, 0],
+          [10, 6],
+          [0, 6],
+        ],
+        holes: [],
+        elevation: 0.05,
+        thickness: 0.1,
+      },
+      // perimeter gable wall on the slab edge — exterior under the widened probe
+      w_perim: bare('w_perim', [0, 0], [6, 0]),
+      // interior partition, LONGER than the perimeter wall — the pre-fix winner
+      w_part: bare('w_part', [1, 3], [9, 3]),
+    }
+    const { probeSlabs, hasLowerStorey } = probeSlabsFor(nodes, 'lvl_g')
+    const walls = extractWalls(nodes, 'lvl_g', probeSlabs, hasLowerStorey)
+    const engineWall = placeMeterSpot(walls)?.wall.id
+    expect(engineWall).toBe('w_perim') // the engines route to the exterior wall
+    const created = buildServicePointNodes(nodes, 'lvl_g')
+    const meter = created.find((n) => n.serviceType === 'water-entry')
+    expect(meter?.wallId).toBe(engineWall as string)
   })
 })
 

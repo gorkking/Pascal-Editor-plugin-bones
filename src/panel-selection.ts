@@ -7,9 +7,9 @@
  * Pure (no React, no stores) so the whole path is testable headlessly.
  */
 
-import { extractLevels, extractSlabs, extractWalls } from './core/wall-model'
+import { extractWalls } from './core/wall-model'
 import { studSizeFor } from './engines/wall-framing'
-import { type ComputeResult, wallConstruction } from './framing/compute'
+import { type ComputeResult, probeSlabsFor, wallConstruction } from './framing/compute'
 import type { FramingNode, WallConstruction } from './framing/schema'
 import { profileFor } from './jurisdiction/profiles'
 
@@ -58,27 +58,13 @@ export function selectedWallInfo(
   if (!node || (node.type as string) !== 'wall') return null
   if (node.parentId !== levelId) return null
 
-  // Same probe-slab widening computeLevel uses so the exterior verdict here
-  // matches the engines: this level's slabs, else the nearest LOWER storey
-  // with flooring in the same building (gable walls on slab-less roof
-  // levels read exterior, not interior).
-  const slabs = extractSlabs(nodes, levelId)
-  let probeSlabs = slabs
-  if (slabs.length === 0) {
-    const allLevels = extractLevels(nodes)
-    const myBuilding = allLevels.find((l) => l.id === levelId)?.buildingId ?? null
-    const levels = allLevels.filter((l) => l.buildingId === myBuilding)
-    for (let i = levels.findIndex((l) => l.id === levelId) - 1; i >= 0; i--) {
-      const lowerId = levels[i]?.id
-      if (!lowerId) continue
-      const lower = extractSlabs(nodes, lowerId)
-      if (lower.length > 0) {
-        probeSlabs = lower
-        break
-      }
-    }
-  }
-  const wall = extractWalls(nodes, levelId, probeSlabs).find((w) => w.id === id)
+  // The SHARED compute probe (probeSlabsFor) so the exterior verdict here
+  // matches the engines exactly: this level's slabs, else the nearest LOWER
+  // storey with flooring in the same building (gable walls on slab-less
+  // roof levels read exterior, not interior), attic rule gated on a storey
+  // below.
+  const { probeSlabs, hasLowerStorey } = probeSlabsFor(nodes, levelId)
+  const wall = extractWalls(nodes, levelId, probeSlabs, hasLowerStorey).find((w) => w.id === id)
   if (!wall) return null
 
   const override = framingNode.wallOverrides?.[wall.id]
