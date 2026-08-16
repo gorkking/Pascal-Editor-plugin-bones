@@ -10,6 +10,7 @@ describe('Bones plugin manifest', () => {
     expect(bonesPlugin.nodes?.map((definition) => definition.kind)).toEqual([
       'bones:framing',
       'bones:lumber',
+      'bones:service',
     ])
   })
 
