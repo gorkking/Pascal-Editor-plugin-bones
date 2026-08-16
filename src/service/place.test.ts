@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
 import { placePanelSpot } from '../engines/electrical'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
-import { buildServicePointNodes } from './place'
+import { buildServicePointNodes, placedServiceTypes } from './place'
 import { ServiceNode } from './schema'
 
 /**
@@ -126,5 +126,54 @@ describe('buildServicePointNodes', () => {
       level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
     }
     expect(buildServicePointNodes(nodes, 'level_1')).toEqual([])
+  })
+})
+
+/**
+ * GATE (panel badge/disable): the "Place service points" button counts
+ * DISTINCT service types (visible nodes only) — five duplicate panels must
+ * NOT read as "all placed" while four types are still missing.
+ */
+describe('placedServiceTypes', () => {
+  const svc = (id: string, serviceType: string, extra: Record<string, unknown> = {}) => ({
+    id,
+    type: 'bones:service',
+    parentId: 'level_1',
+    serviceType,
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    ...extra,
+  })
+
+  test('duplicates of one type count ONCE', () => {
+    const nodes: Record<string, Record<string, unknown>> = {
+      a: svc('a', 'panel'),
+      b: svc('b', 'panel'),
+      c: svc('c', 'panel'),
+      d: svc('d', 'panel'),
+      e: svc('e', 'panel'),
+      f: svc('f', 'water-heater'),
+    }
+    const types = placedServiceTypes(nodes, 'level_1')
+    expect(types.size).toBe(2)
+    expect([...types].sort()).toEqual(['panel', 'water-heater'])
+    // …so the action still has three types to create
+    const created = buildServicePointNodes({ ...scene(), ...nodes }, 'level_1')
+    expect(created.map((n) => n.serviceType).sort()).toEqual([
+      'power-entry',
+      'sewer-exit',
+      'water-entry',
+    ])
+  })
+
+  test('hidden nodes and foreign levels/types do not count', () => {
+    const nodes: Record<string, Record<string, unknown>> = {
+      a: svc('a', 'panel', { visible: false }),
+      b: svc('b', 'water-heater', { parentId: 'level_2' }),
+      c: svc('c', 'flux-capacitor'),
+      d: svc('d', 'sewer-exit'),
+    }
+    const types = placedServiceTypes(nodes, 'level_1')
+    expect([...types]).toEqual(['sewer-exit'])
   })
 })

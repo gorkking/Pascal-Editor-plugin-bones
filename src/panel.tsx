@@ -13,13 +13,12 @@ import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeo
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
 import { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, type LumberSize } from './lumber'
-import { buildServicePointNodes } from './service/place'
+import { buildServicePointNodes, placedServiceTypes } from './service/place'
 import { SERVICE_TYPES } from './service/schema'
 import { useBonesStore } from './store'
 
 const LUMBER_KIND: string = 'bones:lumber'
 const FRAMING_KIND: string = 'bones:framing'
-const SERVICE_KIND: string = 'bones:service'
 
 const setPluginTool = (tool: string) => {
   const setTool = useEditor.getState().setTool as (value: string) => void
@@ -244,11 +243,10 @@ function XraySection({
  * the truth and wires/pipes re-route to wherever they're moved.
  */
 function ServicePointsSection({ activeLevelId }: { activeLevelId: string }) {
-  const count = useScene(
-    (s) =>
-      Object.values(s.nodes).filter(
-        (n) => (n.type as string) === SERVICE_KIND && n.parentId === activeLevelId,
-      ).length,
+  // DISTINCT types present (visible nodes only) — a raw node count would let
+  // duplicates of one type disable the button while others are missing.
+  const count = useScene((s) =>
+    placedServiceTypes(s.nodes as Record<string, Record<string, unknown>>, activeLevelId).size,
   )
   const allPlaced = count >= SERVICE_TYPES.length
 

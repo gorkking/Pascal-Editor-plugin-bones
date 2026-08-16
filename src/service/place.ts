@@ -6,7 +6,28 @@ import {
 } from '../core/wall-model'
 import { placePanelSpot } from '../engines/electrical'
 import { placeMeterSpot, placeSewerExit, placeWhSpot } from '../engines/plumbing'
-import { ServiceNode, type ServiceType } from './schema'
+import { SERVICE_TYPES, ServiceNode, type ServiceType } from './schema'
+
+/**
+ * DISTINCT service types present on `levelId` (VISIBLE nodes only, unknown
+ * types ignored) — duplicates of one type count once. Drives both the
+ * idempotent skip below and the panel's "Place service points" badge/disable
+ * (a raw node count over-reports when a type is duplicated and under-offers
+ * the button while types are still missing).
+ */
+export function placedServiceTypes(
+  nodes: Record<string, Record<string, unknown>>,
+  levelId: string,
+): Set<ServiceType> {
+  const out = new Set<ServiceType>()
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'bones:service' || node.parentId !== levelId) continue
+    if (node.visible === false) continue
+    const t = String(node.serviceType) as ServiceType
+    if ((SERVICE_TYPES as readonly string[]).includes(t)) out.add(t)
+  }
+  return out
+}
 
 /**
  * The "Place service points" panel action, as a pure function: build the
@@ -19,12 +40,7 @@ export function buildServicePointNodes(
   nodes: Record<string, Record<string, unknown>>,
   levelId: string,
 ): ServiceNode[] {
-  const existing = new Set<string>()
-  for (const node of Object.values(nodes)) {
-    if (node.type === 'bones:service' && node.parentId === levelId && node.visible !== false) {
-      existing.add(String(node.serviceType))
-    }
-  }
+  const existing: Set<string> = placedServiceTypes(nodes, levelId)
 
   const slabs = extractSlabs(nodes, levelId)
   const walls = extractWalls(nodes, levelId, slabs)
