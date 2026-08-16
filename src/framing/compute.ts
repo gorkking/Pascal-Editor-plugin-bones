@@ -16,6 +16,10 @@ import {
   extractWalls,
 } from '../core/wall-model'
 import { cmuWalls } from '../engines/cmu'
+import {
+  type BuildingCharacteristics,
+  computeCharacteristics,
+} from '../engines/characteristics'
 import { layoutWallLayers } from '../engines/wall-layers'
 import { layoutElectrical, routeWiring } from '../engines/electrical'
 import { layoutHvac } from '../engines/hvac'
@@ -38,6 +42,9 @@ export type ComputeResult = {
   spec: FramingSpec
   /** Gross sheet-goods areas for the takeoff (walls/slabs aren't returned). */
   areas: TakeoffAreas
+  /** Whole-building metrics (floor area, volume, envelope UA…) — null when
+   * there is nothing to measure. Cited/assumption-labeled via `notes`. */
+  characteristics: BuildingCharacteristics | null
 }
 
 /** Construction system for one wall: override → jurisdiction default → framed. */
@@ -88,6 +95,7 @@ function computeLevelUncached(
       jurisdiction: 'INTL',
       spec: DEFAULT_SPEC,
       areas: {},
+      characteristics: null,
     }
   }
 
@@ -353,5 +361,9 @@ function computeLevelUncached(
     }
   }
 
-  return { members, fixtures, warnings, jurisdiction: code, spec, areas }
+  // Whole-building metrics (floor area / volume / envelope UA…) — shared by
+  // the panel drawer and the blueprints' schedules block.
+  const characteristics = computeCharacteristics(activeWalls, activeRooms, slabs, spec, code)
+
+  return { members, fixtures, warnings, jurisdiction: code, spec, areas, characteristics }
 }
