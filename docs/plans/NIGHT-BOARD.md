@@ -1,3 +1,19 @@
+# Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
+
+## Day batch SHIPPED: plugin eace4e8 via editor#665+#666 + private-editor#358
+(prod main 9131aedc, E2E green post-merge). 585→668 tests. Five verify
+rounds; ~18 confirmed defects fixed+gated today. All four morning items +
+hover bug + electric meter live.
+
+## Next-session queue
+- User's Q1-Q8 answers (morning review file) still pending — gate street
+  point (Q6), movable outlets (Q7), drawer stage 2 host menu (Q8).
+- FUTURE WORK section below: gas, internet, per-utility arrival mode.
+- Examiner non-mechanical advisories (slab-less gabled WH outside wall).
+- E4 air jumpers (electrical Manhattan re-route) — oldest open row.
+- Electrical jumper RO analog audit; connector RO sampling halving.
+- Round-12 electrical phases 1-3 (staples/nail plates, switch legs, 14/3).
+
 # Bones day board — 2026-08-16 (morning directives; night board below)
 
 ## Today's four items (user, verbatim intent) — 6h+ loop directive
