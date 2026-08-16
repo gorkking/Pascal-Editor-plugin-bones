@@ -29,7 +29,17 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
-## State right now (updated after verify round 4)
+## State right now (POST-SHIP, ~01:40)
+- PROD SHIPPED: plugin 9f5a43f via editor #660 + private-editor #355
+  (main 3aac52d6). Plumbing loop CLOSED after 6 rounds / 14 defect classes
+  (final skeptic PASS). Localhost:3002 = prod sha.
+- Morning review file written: ~/Downloads/bones-morning-review.txt
+  (update it if more ships tonight).
+- Task #18 complete except flexible connectors (queue item below).
+- Next: #19 service nodes core (impl agent), then blueprint round-3 flags,
+  then connectors. Electrical jumper analog of the RO fix: queued (#12/E4).
+
+## Older state (verify round 4)
 - Plumbing verify: rounds 1-4 done, 12 defects found+fixed+gated total.
   Round-5 CLOSING skeptic pass running on 6a2f5e4 (agent ad147b8f670d56e12
   — resume via SendMessage). PASS ⇒ ship prod batch immediately.
