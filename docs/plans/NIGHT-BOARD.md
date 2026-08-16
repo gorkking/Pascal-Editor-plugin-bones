@@ -29,6 +29,22 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
+## Task #19 service nodes FIX BATCH — LANDED (2026-08-16, bdfdd7e)
+- Adversarial review round on bones:service, 8 defects fixed + gated
+  (558 tests): (1) RO-collision warnings for panel/WH/water-entry overrides
+  in computeLevel (NEC 110.26); (2) gizmo precedence — non-default
+  `position` outranks wallId+wallT in resolveServicePlacement +
+  overrideWallPoint/PlanPoint (wall types snap to nearest wall); (3)
+  missing/curved/foreign wallId + default position = NO override — engines
+  auto-place, renderer draws a selectable stub only; (4) NaN guards on
+  wallT/heightAff/position/rotation; (5) panel button counts DISTINCT
+  visible service types (placedServiceTypes); (6) duplicate same-type
+  nodes: lowest id wins + 'duplicate service point (…) — extra node
+  ignored' warning; (7) sign texture disposed via useEffect cleanup; (8)
+  exterior sign plate rotated 180° (was mirrored).
+- extractServiceOverrides now returns { overrides, duplicates } (only
+  caller: computeLevel).
+
 ## Task #19 service nodes CORE — LANDED (2026-08-16)
 - bones:service kind (panel/water-heater/water-entry/sewer-exit/power-entry)
   + renderer (equipment box + canvas sign plates, wallId+wallT+heightAff
