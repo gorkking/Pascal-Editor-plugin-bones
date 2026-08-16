@@ -69,16 +69,22 @@ function applyExteriorFallback(
   walls: WallSlice[],
   slabs: { polygon: readonly (readonly [number, number])[] }[],
   hasRooms: boolean,
+  hasLowerStorey: boolean,
 ): void {
   if (walls.some((w) => w.exterior)) return
   if (slabs.length === 0 && !hasRooms) {
-    // NOTHING to probe against and nothing interior to enclose: a slab-less,
-    // room-less level is an attic / gable storey — its walls face outdoors.
-    // (Prod starter house 2026-08-16: roof-level gable-end walls framed as
-    // INTERIOR — no sheathing/WRB/cladding — because the slab probe below
-    // found both sides equally 'uncovered'.) compute widens `slabs` with the
-    // storey-below footprint first; this is the last resort when the whole
-    // building has no flooring at all.
+    // NOTHING to probe against and nothing interior to enclose. With a
+    // storey BELOW in the same building this is an attic / gable storey —
+    // its walls face outdoors. (Prod starter house 2026-08-16: roof-level
+    // gable-end walls framed as INTERIOR — no sheathing/WRB/cladding —
+    // because the slab probe below found both sides equally 'uncovered'.)
+    // WITHOUT a storey below it is an in-progress GROUND storey: leave the
+    // walls interior — blanket-exterior there turned partitions into
+    // exterior/CMU and the takeoff booked sheathing area the layer engine
+    // never renders (checklist S4, verify round 2026-08-16). compute widens
+    // `slabs` with the storey-below footprint first; this is the last
+    // resort when the whole building has no flooring at all.
+    if (!hasLowerStorey) return
     for (const wall of walls) {
       if (!wall.curved) (wall as { exterior: boolean }).exterior = true
     }
@@ -117,6 +123,10 @@ export function extractWalls(
   nodes: NodesRecord,
   levelId: string,
   slabs: { polygon: readonly (readonly [number, number])[] }[] = [],
+  /** A storey exists BELOW this level in the same building — gates the
+   * attic blanket-exterior rule (an in-progress ground storey with no
+   * slabs/rooms anywhere must NOT frame its partitions as exterior). */
+  hasLowerStorey = false,
 ): WallSlice[] {
   const walls: WallSlice[] = []
   for (const node of Object.values(nodes)) {
@@ -160,14 +170,17 @@ export function extractWalls(
   }
   // Rooms gate the attic fallback above: a level with drawn zones is a lived
   // storey — ambiguous walls there stay interior, never blanket-exterior.
+  // Polygon validity mirrors extractRooms exactly (pair-filtered points,
+  // >= 3 VALID vertices) so a malformed zone can't count as a room here
+  // while extractRooms drops it.
   const hasRooms = Object.values(nodes).some(
     (n) =>
       n.type === 'zone' &&
       n.parentId === levelId &&
       Array.isArray(n.polygon) &&
-      (n.polygon as unknown[]).length >= 3,
+      (n.polygon as unknown[]).map(pair).filter((p) => p !== null).length >= 3,
   )
-  applyExteriorFallback(walls, slabs, hasRooms)
+  applyExteriorFallback(walls, slabs, hasRooms, hasLowerStorey)
   return walls
 }
 

@@ -234,7 +234,12 @@ function computeLevelUncached(
       }
     }
   }
-  const rawWalls = extractWalls(nodes, levelId, probeSlabs)
+  // hasLowerStorey gates the attic blanket-exterior rule: only a level with
+  // a storey below it in the same building can be an attic/gable storey —
+  // an in-progress GROUND storey (no slabs, no rooms, nothing below) keeps
+  // interior walls, so the takeoff never books sheathing the layer engine
+  // can't render (checklist S4).
+  const rawWalls = extractWalls(nodes, levelId, probeSlabs, levelIndex > 0)
   // Duplicate colinear walls (host scenes routinely carry overlapping
   // segments) framed TWICE: z-fighting studs, doubled plates, ~20% phantom
   // lumber in the takeoff (quality round-1 A5). Keep the longer of any

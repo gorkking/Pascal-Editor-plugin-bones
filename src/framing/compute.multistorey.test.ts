@@ -313,7 +313,8 @@ describe('gable walls on slab-less levels (prod starter house, day board B 2026-
   test('no flooring ANYWHERE + no rooms: every straight wall on the level is exterior (attic rule)', () => {
     const nodes = gableScene()
     delete nodes.slab0
-    const walls = extractWalls(nodes, 'lvlroof', [])
+    // lvlroof has a storey below it in the building — the attic rule applies
+    const walls = extractWalls(nodes, 'lvlroof', [], true)
     expect(walls).toHaveLength(2)
     expect(walls.every((w) => w.exterior)).toBe(true)
   })
@@ -333,8 +334,109 @@ describe('gable walls on slab-less levels (prod starter house, day board B 2026-
       ],
       boundaryWallIds: [],
     }
-    const walls = extractWalls(nodes, 'lvlroof', [])
+    const walls = extractWalls(nodes, 'lvlroof', [], true)
     expect(walls.every((w) => !w.exterior)).toBe(true)
+  })
+
+  test('a zone whose polygon points are all malformed does NOT suppress the attic rule (extractRooms parity)', () => {
+    // extractRooms pair-filters polygon points and requires >= 3 VALID
+    // vertices — the hasRooms gate must apply the same validation, or a
+    // malformed zone counts as a room here while extractRooms drops it.
+    const nodes = gableScene()
+    delete nodes.slab0
+    nodes.zbad = {
+      id: 'zbad',
+      type: 'zone',
+      parentId: 'lvlroof',
+      name: 'Ghost',
+      polygon: ['a', null, {}, [1]],
+      boundaryWallIds: [],
+    }
+    const walls = extractWalls(nodes, 'lvlroof', [], true)
+    expect(walls.every((w) => w.exterior)).toBe(true)
+  })
+
+  test('in-progress GROUND storey (no slabs, no rooms, nothing below): walls stay INTERIOR', () => {
+    // Verify round 2026-08-16 (F2): the attic rule fired on a bare ground
+    // storey — partitions framed exterior/CMU and the takeoff booked
+    // sheathing the layer engine never renders. No storey below = no attic.
+    const nodes = gableScene()
+    delete nodes.slab0
+    const walls = extractWalls(nodes, 'lvl0', [], false)
+    expect(walls.length).toBeGreaterThan(0)
+    expect(walls.every((w) => !w.exterior)).toBe(true)
+  })
+})
+
+describe('takeoff/member consistency (checklist S4, verify round 2026-08-16)', () => {
+  /** Bare walls: no frontSide/backSide — everything rides the fallback. */
+  const bareWall = (
+    id: string,
+    level: string,
+    start: [number, number],
+    end: [number, number],
+  ) => ({
+    id,
+    type: 'wall',
+    parentId: level,
+    start,
+    end,
+    thickness: 0.114,
+    height: 2.5,
+    children: [],
+  })
+
+  const sheathingMembers = (r: ReturnType<typeof computeLevel>) =>
+    r.members.filter((m) => m.role === 'sheathing')
+
+  test('in-progress ground storey: zero sheathing area AND zero sheathing members', () => {
+    // Pre-fix this scene booked wallSheathingM2 > 0 (attic blanket marked
+    // every wall exterior) while layoutWallLayers emitted NO sheathing
+    // (exteriorSide had no slab/room signal) — the takeoff lied.
+    const nodes: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl0'] },
+      lvl0: { id: 'lvl0', type: 'level', parentId: 'bldg', level: 0, height: 2.5 },
+      wa: bareWall('wa', 'lvl0', [0, 0], [8, 0]),
+      wb: bareWall('wb', 'lvl0', [8, 0], [8, 5]),
+      w_part: bareWall('w_part', 'lvl0', [0, 2.5], [8, 2.5]),
+    }
+    const node = bones('bonesframing_0', 'lvl0')
+    nodes.bonesframing_0 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    expect(result.areas.wallSheathingM2 ?? 0).toBe(0)
+    expect(sheathingMembers(result)).toHaveLength(0)
+    // and nothing framed as CMU either — partitions are not exterior walls
+    expect(result.members.filter((m) => m.role === 'block')).toHaveLength(0)
+  })
+
+  test('gable storey over a slabbed ground: sheathing area > 0 IMPLIES sheathing members > 0 (non-vacuous)', () => {
+    const nodes: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl0', 'lvlroof'] },
+      lvl0: { id: 'lvl0', type: 'level', parentId: 'bldg', level: 0, height: 2.7 },
+      lvlroof: { id: 'lvlroof', type: 'level', parentId: 'bldg', level: 1, height: 2.0 },
+      slab0: {
+        id: 'slab0',
+        type: 'slab',
+        parentId: 'lvl0',
+        polygon: [
+          [0, 0],
+          [8, 0],
+          [8, 5],
+          [0, 5],
+        ],
+        holes: [],
+        elevation: 0.05,
+        thickness: 0.1,
+      },
+      wroofa: bareWall('wroofa', 'lvlroof', [0, 0], [8, 0]),
+      wroofb: bareWall('wroofb', 'lvlroof', [0, 5], [8, 5]),
+    }
+    const node = bones('bonesframing_roof', 'lvlroof')
+    nodes.bonesframing_roof = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    // booked area and rendered members move TOGETHER
+    expect(result.areas.wallSheathingM2 ?? 0).toBeGreaterThan(0)
+    expect(sheathingMembers(result).length).toBeGreaterThan(0)
   })
 })
 

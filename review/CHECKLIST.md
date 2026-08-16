@@ -37,6 +37,16 @@ AND a gate — a checklist line without a test is a wish.
 - **S3 Foundation corners close** at any angle (oblique multiplier, butt
   claims, splice suppression) — no gaps, no bow-ties on paper.
   Gates: foundation tests + mitered-path pins in `plan-set.test.ts`
+- **S4 Takeoff areas never book material the members don't render.** The
+  gross sheet-goods areas (wallSheathingM2…) and the member list derive from
+  the same wall classification: if the takeoff books WSP sheathing, sheathing
+  members exist on the level — and an interior-only storey books zero.
+  Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
+  an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
+  framed exterior/CMU and the takeoff booked sheathing the layer engine never
+  rendered. The attic rule now requires a storey BELOW in the same building
+  (`extractWalls` hasLowerStorey).
+  Gate: `src/framing/compute.multistorey.test.ts` (takeoff/member consistency)
 
 ## P — Plans (the exported document)
 
