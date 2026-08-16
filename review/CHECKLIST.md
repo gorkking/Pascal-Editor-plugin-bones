@@ -55,10 +55,15 @@ AND a gate — a checklist line without a test is a wish.
   zones never share volume (S1 matrix covers the seam), openings zone per
   the seam, a CROSSING opening always flags ('opening crosses the CMU/framing
   seam — verify detail') and frames as if fully in the taller zone. At a
-  shared corner or tee the mixed wall BUTTS, never through-runs: both zones
-  inset to the neighbor's near face (butt joints at corners, advisory
-  emitted — 'mixed wall butts at corners — verify tie detail' per junction),
-  so it never shares volume with a framed, full-CMU or mixed neighbor.
+  shared corner, and as the STEM of a tee, the mixed wall BUTTS, never
+  through-runs: both zones inset to the neighbor's near face — the retreat
+  is block-width-aware at acute corners,
+  (neighborThickness + blockWidth·|cosθ|)/(2·sinθ), since the CMU block is
+  wider than a thin framed neighbor — with the per-junction advisory
+  ('mixed wall butts at corners — verify tie detail'), so it never shares
+  volume with a framed, full-CMU or mixed neighbor at those junctions.
+  Reverse-direction tees and oblique tees follow the pre-existing repo-wide
+  tee conventions (night-board next-session queue), not this row.
   A height absent or at/above every fitting course = byte-equal to today's
   full-height CMU. Takeoff: blocks for the zone only, PT booked on its own
   `<size> PT` row, seam bolts under Wall framing. The WRITE side holds the same line:

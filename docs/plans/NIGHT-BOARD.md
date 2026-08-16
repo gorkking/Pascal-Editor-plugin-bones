@@ -35,6 +35,12 @@ wall pattern). Spec:
 - E4 air jumpers (electrical Manhattan re-route) — oldest open row.
 - Electrical jumper RO analog audit; connector RO sampling halving.
 - Round-12 electrical phases 1-3 (staples/nail plates, switch legs, 14/3).
+- Reverse-direction tees (stem direction pointing away from the through
+  run) — pre-existing repo-wide detectTees convention; audit across
+  engines (S5 scope note, 2026-08-16).
+- Oblique (non-perpendicular) tees — pre-existing repo-wide convention:
+  tee insets use plain thickness/2 with no oblique multiplier; audit +
+  angle-aware stem retreat across engines (S5 scope note, 2026-08-16).
 
 # Bones day board — 2026-08-16 (morning directives; night board below)
 
