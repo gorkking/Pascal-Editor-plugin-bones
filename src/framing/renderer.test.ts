@@ -193,3 +193,26 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(offLayers.children).toHaveLength(0)
   })
 })
+
+describe('buildGroups — cross-level members split into foreign level groups', () => {
+  test('tagged members land in a per-level group, untagged in the main group', () => {
+    const { buildGroups } = require('./renderer') as typeof import('./renderer')
+    const stud = {
+      system: 'wall-framing' as const,
+      role: 'stud' as const,
+      dims: [0.04, 2.4, 0.09] as const,
+      length: 2.4,
+      position: [1, 1.2, 0] as const,
+      rotation: [0, 0, 0] as const,
+      material: 'lumber' as const,
+      sourceId: 'w1',
+    }
+    const rafter = { ...stud, system: 'roof-framing' as const, role: 'rafter' as const, levelId: 'lvlroof' }
+    const { group, foreign } = buildGroups([stud, rafter], [], true)
+    expect(foreign.size).toBe(1)
+    expect(foreign.get('lvlroof')?.name).toBe('bones-foreign-lvlroof')
+    // main group holds only the stud's instanced mesh, foreign only the rafter's
+    expect(group.children.length).toBeGreaterThan(0)
+    expect((foreign.get('lvlroof')?.children.length ?? 0)).toBeGreaterThan(0)
+  })
+})

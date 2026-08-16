@@ -263,21 +263,19 @@ function computeLevelUncached(
       if (owner && String(owner.id) !== String(config.id)) {
         warnings.push('Roof is framed by the X-ray on another storey')
       } else {
-        // Members come out roof-LEVEL-local; this node renders inside ITS
-        // OWN level's group. Shift each level's roofs by the storey delta
-        // so trusses land at the true drawn height (prod 2026-08-15: a
-        // two-storey house wore its roof at ground level).
-        const myBaseY = levels[levelIndex]?.baseY ?? 0
+        // Members come out roof-LEVEL-local and STAY that way: a baked
+        // storey offset is only right in stacked view — exploded mode moves
+        // each level +5 m per ordinal and solo hides whole level groups, so
+        // cross-level members are TAGGED with their source level instead
+        // and the renderer mounts them into that level's own Object3D
+        // (prod 2026-08-15 rounds 1-2: roof at ground level, then trusses
+        // detached from the roof in exploded/solo).
         for (const { level, roofs } of levelRoofs) {
-          const dy = level.baseY - myBaseY
           const framed = frameRoofs(roofs, activeWalls, spec)
           members.push(
-            ...(dy === 0
+            ...(level.id === levelId
               ? framed
-              : framed.map((m) => ({
-                  ...m,
-                  position: [m.position[0], m.position[1] + dy, m.position[2]] as const,
-                }))),
+              : framed.map((m) => ({ ...m, levelId: level.id }))),
           )
         }
       }

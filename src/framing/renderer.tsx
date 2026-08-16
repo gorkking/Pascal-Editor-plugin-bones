@@ -1,6 +1,6 @@
 'use client'
 
-import { useRegistry, useScene } from '@pascal-app/core'
+import { sceneRegistry, useRegistry, useScene } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
@@ -107,6 +107,36 @@ type Bucket = {
   face?: readonly [number, number]
   /** No overlay ghost for this bucket. */
   ghostless?: boolean
+}
+
+/** Main group (the node's own level) + one group per FOREIGN source level
+ * (cross-level roofs). Foreign groups hold level-LOCAL geometry and get
+ * mounted into that level's Object3D by the renderer so the host's
+ * stacked / exploded / solo level transforms apply natively. */
+export type BuiltGroups = { group: Group; foreign: Map<string, Group> }
+
+export function buildGroups(
+  members: Member[],
+  fixtures: Fixture[],
+  seeThrough: boolean,
+): BuiltGroups {
+  const foreign = new Map<string, Group>()
+  const own: Member[] = []
+  const byLevel = new Map<string, Member[]>()
+  for (const m of members) {
+    if (m.levelId) {
+      const list = byLevel.get(m.levelId) ?? []
+      list.push(m)
+      byLevel.set(m.levelId, list)
+    } else own.push(m)
+  }
+  const group = buildGroup(own, fixtures, seeThrough)
+  for (const [levelId, list] of byLevel) {
+    const g = buildGroup(list, [], seeThrough)
+    g.name = `bones-foreign-${levelId}`
+    foreign.set(levelId, g)
+  }
+  return { group, foreign }
 }
 
 export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: boolean): Group {
@@ -269,11 +299,35 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     [nodes, node],
   )
 
-  const group = useMemo(
-    () => buildGroup(result.members, result.fixtures, node.seeThrough !== false),
+  const built = useMemo(
+    () => buildGroups(result.members, result.fixtures, node.seeThrough !== false),
     [result, node.seeThrough],
   )
-  useEffect(() => () => disposeGroup(group), [group])
+  const group = built.group
+  useEffect(() => {
+    return () => {
+      disposeGroup(built.group)
+      for (const g of built.foreign.values()) {
+        g.parent?.remove(g)
+        disposeGroup(g)
+      }
+    }
+  }, [built])
+
+  // Cross-level members (the roof on its own storey) mount into THEIR
+  // level's Object3D so the host's stacked/exploded/solo level transforms
+  // and visibility apply natively — a baked storey offset was only right
+  // in stacked view (prod 2026-08-15 round 3). The level object may
+  // register after us, so (re)attach lazily in the frame loop below.
+  const attachForeign = () => {
+    for (const [levelId, g] of built.foreign) {
+      const levelObj = sceneRegistry.nodes.get(levelId as Parameters<typeof sceneRegistry.nodes.get>[0])
+      if (levelObj && g.parent !== levelObj) levelObj.add(g)
+      // Imperative children don't unmount with the JSX — mirror the node's
+      // visibility by hand (hiding the X-ray must hide the foreign roofs).
+      g.visible = node.visible !== false
+    }
+  }
 
   // Auto-switch the host to its most revealing wall mode while the X-ray is
   // on (round-13 user feedback). 'down' — host walls fully hidden — not
@@ -318,6 +372,7 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // look INTO the cavity and see the far side's drywall as the backdrop.
   // The wall is never transparent; the near face is simply removed.
   useFrame(({ camera }) => {
+    attachForeign()
     if (node.seeThrough === false) return
     const dir = camera.getWorldDirection(viewDir.current)
     for (const child of group.children) {

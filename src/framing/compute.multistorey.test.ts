@@ -82,10 +82,12 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     const result = computeLevel(nodes, node)
     const roof = result.members.filter((m) => m.system === 'roof-framing')
     expect(roof.length).toBeGreaterThan(0)
-    // roof level sits 5.4 m above lvl0 — every roof member must be ABOVE
-    // floor one's ceiling in lvl0-local coordinates
-    const minY = Math.min(...roof.map((m) => m.position[1] - m.dims[1] / 2))
-    expect(minY).toBeGreaterThan(5.0)
+    // cross-level members stay roof-LEVEL-local and carry the tag — the
+    // renderer mounts them into the roof level's Object3D, so stacked,
+    // exploded AND solo transforms all apply natively (round 3)
+    expect(roof.every((m) => m.levelId === 'lvlroof')).toBe(true)
+    const maxY = Math.max(...roof.map((m) => m.position[1]))
+    expect(maxY).toBeLessThan(4.0) // local, never pre-shifted to world
   })
 
   test('roof on the node.s own level frames with no shift (single-storey regression)', () => {
@@ -114,9 +116,8 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     expect(roof0).toEqual([])
     expect(r0.warnings.some((w) => w.includes('Roof is framed by'))).toBe(true)
     expect(roof1.length).toBeGreaterThan(0)
-    // floor one is 2.7 below the roof level: local roof Y ≈ 2.7+
-    const minY = Math.min(...roof1.map((m) => m.position[1] - m.dims[1] / 2))
-    expect(minY).toBeGreaterThan(2.3)
+    // tagged to the roof level, roof-level-local coordinates
+    expect(roof1.every((m) => m.levelId === 'lvlroof')).toBe(true)
   })
 
   test('floor-one X-ray frames its own walls level-locally (y from 0)', () => {
@@ -214,11 +215,9 @@ describe('multi-storey — verify-round defect gates', () => {
     // both buildings' roofs frame — by their own nodes
     expect(roofA.length).toBeGreaterThan(0)
     expect(roofB.length).toBeGreaterThan(0)
-    // A's roof members lift by A's storey delta (5.4); B's by B's (2.5)
-    const minA = Math.min(...roofA.map((m) => m.position[1]))
-    const minB = Math.min(...roofB.map((m) => m.position[1]))
-    expect(minA).toBeGreaterThan(4.5)
-    expect(minB).toBeLessThan(4.5)
+    // each tagged to its own building's roof level
+    expect(roofA.every((m) => m.levelId === 'lvlroof')).toBe(true)
+    expect(roofB.every((m) => m.levelId === 'lvlBroof')).toBe(true)
   })
 })
 
@@ -249,9 +248,9 @@ describe('multi-storey — mixed roof levels (re-verify regression)', () => {
     const main = roof1.filter((m) => m.position[0] <= 40)
     expect(porch.length).toBeGreaterThan(0)
     expect(main.length).toBeGreaterThan(0)
-    // porch members shift DOWN by node1's storey height (lvl0 − lvl1 = −2.7)
-    const porchMax = Math.max(...porch.map((m) => m.position[1]))
-    expect(porchMax).toBeLessThan(2.0)
+    // each tagged to ITS source level, positions level-local (unshifted)
+    expect(porch.every((m) => m.levelId === 'lvl0')).toBe(true)
+    expect(main.every((m) => m.levelId === 'lvlroof')).toBe(true)
   })
 
   test('single X-ray on the ground frames both roof levels too', () => {

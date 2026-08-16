@@ -110,6 +110,12 @@ export type Member = {
   label?: string
   /** Set when the prescriptive tables run out (engineered beam required). */
   flag?: string
+  /** Level whose transform this member follows when it belongs to ANOTHER
+   * storey than its X-ray node (cross-level roofs). Position is LOCAL to
+   * that level; the renderer mounts these into the level's own Object3D so
+   * the host's stacked/exploded/solo moves apply natively. Unset = the
+   * node's own level. */
+  levelId?: string
   /**
    * Informational note that is NOT a problem (e.g. "sized schematically —
    * verify with span/load design"). Kept apart from `flag` so advisory
