@@ -141,10 +141,38 @@ function computeLevelUncached(
   // 400 (fabrication) builds ON TOP of the code-sized pass — jurisdiction applies to both.
   if (config.detail !== '200') spec = applyJurisdiction(spec, profile)
 
+  // ALL level arithmetic stays inside THIS level's building — a second
+  // building's ground floor is still a ground floor (verify round: global
+  // indexing skipped its foundation and framed its slab as an upper floor).
+  const allLevels = extractLevels(nodes)
+  const myBuilding = allLevels.find((l) => l.id === levelId)?.buildingId ?? null
+  const levels = allLevels.filter((l) => l.buildingId === myBuilding)
+  const levelIndex = levels.findIndex((l) => l.id === levelId)
+  const isGroundLevel = levelIndex <= 0
+
   const slabs = extractSlabs(nodes, levelId)
   // Slabs feed the exterior fallback: hosts often mark BOTH wall faces
   // 'interior' (quality round-1 A1) — flooring says which side is in.
-  const rawWalls = extractWalls(nodes, levelId, slabs)
+  // Roof/attic levels carry NO slabs of their own, so the probe found both
+  // sides of a gable-end wall equally 'uncovered' and framed it as INTERIOR
+  // (prod starter house 2026-08-16 — no sheathing/WRB/cladding). Widen the
+  // PROBE set to the nearest LOWER storey with flooring in the same building
+  // (plan projection — the footprint below says which side is in). Only the
+  // probes use it: floor framing / foundation / areas keep this level's own
+  // (empty) slab list.
+  let probeSlabs = slabs
+  if (slabs.length === 0) {
+    for (let i = levelIndex - 1; i >= 0; i--) {
+      const lowerId = levels[i]?.id
+      if (!lowerId) continue
+      const lower = extractSlabs(nodes, lowerId)
+      if (lower.length > 0) {
+        probeSlabs = lower
+        break
+      }
+    }
+  }
+  const rawWalls = extractWalls(nodes, levelId, probeSlabs)
   // Duplicate colinear walls (host scenes routinely carry overlapping
   // segments) framed TWICE: z-fighting studs, doubled plates, ~20% phantom
   // lumber in the takeoff (quality round-1 A5). Keep the longer of any
@@ -175,14 +203,6 @@ function computeLevelUncached(
     )
   }
   const rooms = extractRooms(nodes, levelId)
-  // ALL level arithmetic stays inside THIS level's building — a second
-  // building's ground floor is still a ground floor (verify round: global
-  // indexing skipped its foundation and framed its slab as an upper floor).
-  const allLevels = extractLevels(nodes)
-  const myBuilding = allLevels.find((l) => l.id === levelId)?.buildingId ?? null
-  const levels = allLevels.filter((l) => l.buildingId === myBuilding)
-  const levelIndex = levels.findIndex((l) => l.id === levelId)
-  const isGroundLevel = levelIndex <= 0
 
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -219,8 +239,10 @@ function computeLevelUncached(
     members.push(...frameWalls(framed, spec))
     // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
     // face, jurisdiction-defaulted cladding + climate labels. The renderer's
-    // dollhouse cut hides the camera-facing stacks.
-    members.push(...layoutWallLayers(framed, activeRooms, spec, code, slabs))
+    // dollhouse cut hides the camera-facing stacks. Probe slabs (widened to
+    // the storey below on slab-less levels) — exteriorSide needs the same
+    // inside/outside signal the exterior fallback used.
+    members.push(...layoutWallLayers(framed, activeRooms, spec, code, probeSlabs))
     members.push(...cmuWalls(masonry, spec))
   }
 

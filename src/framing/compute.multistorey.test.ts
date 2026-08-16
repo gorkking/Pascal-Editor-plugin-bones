@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { extractLevels } from '../core/wall-model'
+import { extractLevels, extractWalls } from '../core/wall-model'
 import { FramingNode } from './schema'
 import { computeLevel } from './compute'
 
@@ -218,6 +218,123 @@ describe('multi-storey — verify-round defect gates', () => {
     // each tagged to its own building's roof level
     expect(roofA.every((m) => m.levelId === 'lvlroof')).toBe(true)
     expect(roofB.every((m) => m.levelId === 'lvlBroof')).toBe(true)
+  })
+})
+
+describe('gable walls on slab-less levels (prod starter house, day board B 2026-08-16)', () => {
+  /** Host scenes routinely mark BOTH wall faces 'interior' — these walls
+   * carry no frontSide/backSide at all, so everything rides the fallback. */
+  const bareWall = (
+    id: string,
+    level: string,
+    start: [number, number],
+    end: [number, number],
+  ) => ({
+    id,
+    type: 'wall',
+    parentId: level,
+    start,
+    end,
+    thickness: 0.114,
+    height: 2.5,
+    children: [],
+  })
+
+  function gableScene() {
+    const nodes: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl0', 'lvlroof'] },
+      lvl0: { id: 'lvl0', type: 'level', parentId: 'bldg', level: 0, height: 2.7 },
+      lvlroof: { id: 'lvlroof', type: 'level', parentId: 'bldg', level: 1, height: 2.0 },
+      // ground storey: bare perimeter + an interior partition, over a slab
+      wga: bareWall('wga', 'lvl0', [0, 0], [8, 0]),
+      wgb: bareWall('wgb', 'lvl0', [8, 0], [8, 5]),
+      wgc: bareWall('wgc', 'lvl0', [8, 5], [0, 5]),
+      wgd: bareWall('wgd', 'lvl0', [0, 5], [0, 0]),
+      w_mid: bareWall('w_mid', 'lvl0', [0, 2.5], [8, 2.5]),
+      slab0: {
+        id: 'slab0',
+        type: 'slab',
+        parentId: 'lvl0',
+        polygon: [
+          [0, 0],
+          [8, 0],
+          [8, 5],
+          [0, 5],
+        ],
+        holes: [],
+        elevation: 0.05,
+        thickness: 0.1,
+      },
+      // roof storey: gable-end walls, NO slabs, NO rooms
+      wroofa: bareWall('wroofa', 'lvlroof', [0, 0], [8, 0]),
+      wroofb: bareWall('wroofb', 'lvlroof', [0, 5], [8, 5]),
+    }
+    return nodes
+  }
+
+  test('gable wall above a slabbed ground storey frames EXTERIOR with the full layer stack', () => {
+    // The prod bug: applyExteriorFallback probed THIS level's slabs — a roof
+    // level has none, both sides read 'uncovered', the gable framed interior
+    // (no sheathing/WRB/cladding). The probe now widens to the storey below.
+    const nodes = gableScene()
+    const node = bones('bonesframing_roof', 'lvlroof')
+    nodes.bonesframing_roof = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    for (const wallId of ['wroofa', 'wroofb']) {
+      const roles = new Set(
+        result.members.filter((m) => m.sourceId === wallId).map((m) => m.role),
+      )
+      expect(roles.has('sheathing')).toBe(true)
+      expect(roles.has('wrb')).toBe(true)
+      expect(roles.has('cladding')).toBe(true)
+    }
+    // and the takeoff books WSP for the (framed, exterior) gable walls
+    expect(result.areas.wallSheathingM2 ?? 0).toBeGreaterThan(0)
+  })
+
+  test('ground interior partition stays interior; slabbed perimeter probe unchanged', () => {
+    const nodes = gableScene()
+    const node = bones('bonesframing_ground', 'lvl0')
+    nodes.bonesframing_ground = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const midRoles = new Set(
+      result.members.filter((m) => m.sourceId === 'w_mid').map((m) => m.role),
+    )
+    expect(midRoles.has('sheathing')).toBe(false)
+    expect(midRoles.has('wrb')).toBe(false)
+    expect(midRoles.has('cladding')).toBe(false)
+    expect(midRoles.has('drywall')).toBe(true)
+    const perimRoles = new Set(
+      result.members.filter((m) => m.sourceId === 'wga').map((m) => m.role),
+    )
+    expect(perimRoles.has('sheathing')).toBe(true)
+  })
+
+  test('no flooring ANYWHERE + no rooms: every straight wall on the level is exterior (attic rule)', () => {
+    const nodes = gableScene()
+    delete nodes.slab0
+    const walls = extractWalls(nodes, 'lvlroof', [])
+    expect(walls).toHaveLength(2)
+    expect(walls.every((w) => w.exterior)).toBe(true)
+  })
+
+  test('a drawn zone suppresses the attic rule — ambiguous walls stay interior', () => {
+    const nodes = gableScene()
+    delete nodes.slab0
+    nodes.zroof = {
+      id: 'zroof',
+      type: 'zone',
+      parentId: 'lvlroof',
+      name: 'Loft',
+      polygon: [
+        [0, 0],
+        [8, 0],
+        [8, 5],
+      ],
+      boundaryWallIds: [],
+    }
+    const walls = extractWalls(nodes, 'lvlroof', [])
+    expect(walls.every((w) => !w.exterior)).toBe(true)
   })
 })
 

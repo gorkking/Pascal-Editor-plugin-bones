@@ -65,8 +65,25 @@ function extractOpening(node: AnyRecord): OpeningSlice | null {
  * face at the midpoint — a face with NO other wall's segment and no slab
  * coverage within the footprint faces outdoors.
  */
-function applyExteriorFallback(walls: WallSlice[], slabs: { polygon: readonly (readonly [number, number])[] }[]): void {
+function applyExteriorFallback(
+  walls: WallSlice[],
+  slabs: { polygon: readonly (readonly [number, number])[] }[],
+  hasRooms: boolean,
+): void {
   if (walls.some((w) => w.exterior)) return
+  if (slabs.length === 0 && !hasRooms) {
+    // NOTHING to probe against and nothing interior to enclose: a slab-less,
+    // room-less level is an attic / gable storey — its walls face outdoors.
+    // (Prod starter house 2026-08-16: roof-level gable-end walls framed as
+    // INTERIOR — no sheathing/WRB/cladding — because the slab probe below
+    // found both sides equally 'uncovered'.) compute widens `slabs` with the
+    // storey-below footprint first; this is the last resort when the whole
+    // building has no flooring at all.
+    for (const wall of walls) {
+      if (!wall.curved) (wall as { exterior: boolean }).exterior = true
+    }
+    return
+  }
   const inPoly = (p: readonly [number, number], poly: readonly (readonly [number, number])[]): boolean => {
     let inside = false
     for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -141,7 +158,16 @@ export function extractWalls(
       curved,
     })
   }
-  applyExteriorFallback(walls, slabs)
+  // Rooms gate the attic fallback above: a level with drawn zones is a lived
+  // storey — ambiguous walls there stay interior, never blanket-exterior.
+  const hasRooms = Object.values(nodes).some(
+    (n) =>
+      n.type === 'zone' &&
+      n.parentId === levelId &&
+      Array.isArray(n.polygon) &&
+      (n.polygon as unknown[]).length >= 3,
+  )
+  applyExteriorFallback(walls, slabs, hasRooms)
   return walls
 }
 
