@@ -12,6 +12,7 @@ import {
   extractLevels,
   extractPlacedFixtures,
   extractRooms,
+  extractServiceOverrides,
   extractSlabs,
   extractWalls,
 } from '../core/wall-model'
@@ -300,8 +301,13 @@ function computeLevelUncached(
     members.push(...buildFoundation(activeWalls, slabs, spec))
   }
 
+  // bones:service nodes on this level are AUTHORITATIVE — the engines route
+  // to them instead of auto-placing (checklist A4); reactivity is free since
+  // computeLevel re-runs on any node change.
+  const services = extractServiceOverrides(nodes, levelId)
+
   if (config.showElectrical) {
-    const electrical = layoutElectrical(activeWalls, activeRooms)
+    const electrical = layoutElectrical(activeWalls, activeRooms, services)
     fixtures.push(...electrical)
     // LOD 400: homerun + branch wiring following the walls to the panel.
     if (spec.detail === '400') members.push(...routeWiring(electrical, activeWalls))
@@ -311,7 +317,7 @@ function computeLevelUncached(
     // Placed sanitary items (toilet/shower/sinks…) are the demand points;
     // the engine's room-category inference is only the fallback.
     const placedFixtures = extractPlacedFixtures(nodes, levelId)
-    const plumbing = layoutPlumbing(activeWalls, activeRooms, spec, placedFixtures)
+    const plumbing = layoutPlumbing(activeWalls, activeRooms, spec, placedFixtures, services)
     members.push(...plumbing.members)
     fixtures.push(...plumbing.fixtures)
     // Cross-level stacks land later — each level owns its fixtures for now.

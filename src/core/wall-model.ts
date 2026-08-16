@@ -7,7 +7,14 @@
  */
 
 import { inches } from './units'
-import type { OpeningSlice, RoomSlice, SlabSlice, WallSlice } from './types'
+import type {
+  OpeningSlice,
+  RoomSlice,
+  ServiceOverrides,
+  ServicePointOverride,
+  SlabSlice,
+  WallSlice,
+} from './types'
 
 // Minimal structural views of the host nodes we read — kept local so the
 // extractor compiles against any @pascal-app/core >=0.9 without depending on
@@ -212,6 +219,43 @@ export function extractPlacedFixtures(nodes: NodesRecord, levelId: string): Plac
       yaw: num(rot[1], 0),
       ...profile,
     })
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
+// Service points — bones:service nodes are AUTHORITATIVE engine overrides
+// (checklist A4): where one exists, the engine routes to it, verbatim.
+// ---------------------------------------------------------------------------
+
+/** serviceType → the engines' override slot. */
+const SERVICE_OVERRIDE_KEY: Record<string, keyof ServiceOverrides> = {
+  panel: 'panel',
+  'water-heater': 'waterHeater',
+  'water-entry': 'waterEntry',
+  'sewer-exit': 'sewerExit',
+  'power-entry': 'powerEntry',
+}
+
+/** Collect the service overrides on `levelId` (first node per type wins). */
+export function extractServiceOverrides(nodes: NodesRecord, levelId: string): ServiceOverrides {
+  const out: ServiceOverrides = {}
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'bones:service' || node.parentId !== levelId) continue
+    if (node.visible === false) continue
+    const key = SERVICE_OVERRIDE_KEY[String(node.serviceType)]
+    if (!key || out[key]) continue
+    const override: ServicePointOverride = {}
+    if (typeof node.wallId === 'string' && node.wallId.length > 0) override.wallId = node.wallId
+    if (typeof node.wallT === 'number' && Number.isFinite(node.wallT)) override.wallT = node.wallT
+    if (typeof node.heightAff === 'number' && Number.isFinite(node.heightAff)) {
+      override.heightAff = node.heightAff
+    }
+    const pos = Array.isArray(node.position) ? (node.position as number[]) : null
+    if (pos && pos.length >= 3) {
+      override.position = [num(pos[0], 0), num(pos[1], 0), num(pos[2], 0)]
+    }
+    out[key] = override
   }
   return out
 }

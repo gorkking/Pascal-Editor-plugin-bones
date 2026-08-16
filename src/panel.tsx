@@ -13,10 +13,13 @@ import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeo
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
 import { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, type LumberSize } from './lumber'
+import { buildServicePointNodes } from './service/place'
+import { SERVICE_TYPES } from './service/schema'
 import { useBonesStore } from './store'
 
 const LUMBER_KIND: string = 'bones:lumber'
 const FRAMING_KIND: string = 'bones:framing'
+const SERVICE_KIND: string = 'bones:service'
 
 const setPluginTool = (tool: string) => {
   const setTool = useEditor.getState().setTool as (value: string) => void
@@ -66,6 +69,7 @@ export default function BonesPanel() {
 
       <XraySection activeLevelId={activeLevelId ?? null} framingNode={framingNode} result={result} />
 
+      {framingNode && activeLevelId && <ServicePointsSection activeLevelId={activeLevelId} />}
       {framingNode && <WallOverrideSection framingNode={framingNode} />}
       {framingNode && result && <TakeoffSection result={result} />}
       {framingNode && result && <CharacteristicsSection result={result} />}
@@ -229,6 +233,56 @@ function XraySection({
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+/**
+ * Service points — the draggable building/utility interfaces (electric
+ * panel, water heater, water/sewer/power entries). One idempotent action
+ * creates them at the engines' current auto positions; from then on THEY are
+ * the truth and wires/pipes re-route to wherever they're moved.
+ */
+function ServicePointsSection({ activeLevelId }: { activeLevelId: string }) {
+  const count = useScene(
+    (s) =>
+      Object.values(s.nodes).filter(
+        (n) => (n.type as string) === SERVICE_KIND && n.parentId === activeLevelId,
+      ).length,
+  )
+  const allPlaced = count >= SERVICE_TYPES.length
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between">
+        <span className="font-medium text-xs">Service points</span>
+        {count > 0 && (
+          <span className="rounded-full bg-sidebar-accent px-2 py-0.5 text-[10px] text-sidebar-foreground/60">
+            {count}/{SERVICE_TYPES.length}
+          </span>
+        )}
+      </div>
+      <button
+        className="rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-left text-xs transition-colors hover:bg-sidebar-accent disabled:cursor-default disabled:opacity-50"
+        disabled={allPlaced}
+        onClick={() => {
+          const scene = useScene.getState()
+          const created = buildServicePointNodes(
+            scene.nodes as Record<string, Record<string, unknown>>,
+            activeLevelId,
+          )
+          for (const node of created) {
+            scene.createNode(node as unknown as AnyNode, activeLevelId as AnyNodeId)
+          }
+        }}
+        type="button"
+      >
+        {allPlaced ? 'All service points placed' : '⚡ Place service points'}
+        <span className="block font-normal text-[10px] text-sidebar-foreground/50">
+          Panel, water heater, water/sewer/power entries — move one and the
+          wires &amp; pipes follow.
+        </span>
+      </button>
     </div>
   )
 }
