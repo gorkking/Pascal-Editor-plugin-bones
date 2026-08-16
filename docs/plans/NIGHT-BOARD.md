@@ -29,7 +29,14 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
-## State right now
+## State right now (updated after verify round 4)
+- Plumbing verify: rounds 1-4 done, 12 defects found+fixed+gated total.
+  Round-5 CLOSING skeptic pass running on 6a2f5e4 (agent ad147b8f670d56e12
+  — resume via SendMessage). PASS ⇒ ship prod batch immediately.
+- Under-slab DWV ghost (task 18b) DONE at e59f17b. Flexible connectors
+  (18a) still open — touches plumbing.ts, was blocked on skeptic.
+
+## State at board creation
 - Plugin master 711c401, 508 tests green. Localhost :3002 pinned c592fa7
   (STALE — re-pin to 711c401 before visual work).
 - Prod: bones 4cd28a0 + editor fb221460 (lerp fix). NOT yet in prod:
