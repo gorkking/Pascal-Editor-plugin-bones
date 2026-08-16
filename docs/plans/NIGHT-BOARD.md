@@ -81,6 +81,38 @@ then implement. Loop after each; ship in 1-2 prod batches today.
 
 # Bones night board — 2026-08-16 (living file: update on every land/verdict)
 
+## Item C LANDED (2026-08-16 ~09:55) — hover fix (host PR) + door-style drag
+- PART 1 (hover bug): hypothesis CONFIRMED by source read — prod
+  (apps/community) discovers plugins via DYNAMIC imports, so kinds register
+  AFTER the selection managers snapshot getSelectableKinds() into their
+  emitter subscriptions (deps never re-run); dev (apps/editor) imports
+  statically → registered pre-mount → why localhost never reproduced it.
+  Click had the same latent staleness (any mode/movingNode change re-ran
+  the effects, masking it). Registry had NO change notification at all.
+- HOST FIX: editor PR #665 (branch fix/plugin-kind-hover, b05a4a91, NOT
+  merged): registry version + onRegistryChange in core, useRegistryVersion()
+  hook, added to the dep arrays of all 6 kind-snapshot effects (5 editor
+  SelectionManager + 1 viewer). Gates in core registry.test.ts. 1007/604/101
+  pass, tsc clean.
+- PART 2 (drag): plugin c2ac419 — capabilities.movable.parentFrame
+  (src/service/frame.ts) for WALL_MOUNTED_TYPES: planToLocal projects the
+  cursor onto the wall axis (clamp 0..1), localToPlan idempotent, live
+  preview via the position override (renderer merge + nearest-wall snap =
+  zero extra wiring), onCommit ONE update {wallId, wallT, position:[0,0,0]}
+  — the 'wallT inert after gizmo drag' quirk is RETIRED (comments updated).
+  cursorAttached:true (drag origin independent of the [0,0,0] sentinel).
+  Floor types keep plain moves. 12 gates in frame.test.ts; 624 tests.
+- VISUAL PASS (/tmp/qa-c-dragux, scene 74c2ce0b8791 on :3002 pinned
+  c2ac419 + host branch): a7 window outline, a4 panel outline, a5 WH
+  outline (same rim); b1→b4 (panel rides the wall mid-drag, green box)
+  →b6/b9 (new spot, feeder + circuit drops re-routed). Post-session API:
+  wallT 0.52→0.2, position [0,0,0], wallId unchanged.
+- Scene gotchas hit: scenes API GET returns 0 nodes during a live session
+  (desync — verify post-session or via inspector DOM); this scene's panel
+  spawns inside a window RO → select it via the SIGN PLATE (x≈0.18 proud).
+- NOT prod-shipped: host PR #665 awaits review/merge; plugin pin bump
+  ships through the normal chain afterwards.
+
 ## How I work (the loop) — for any fresh context picking this up
 1. Implement in small green increments (bunx tsc --noEmit + bun test after
    each; commit + push per green stage; NEVER pipe test output through
