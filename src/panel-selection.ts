@@ -8,6 +8,7 @@
  */
 
 import { extractWalls } from './core/wall-model'
+import { COURSE_HEIGHT, courseCount, snapCmuHeight } from './engines/cmu'
 import { studSizeFor } from './engines/wall-framing'
 import {
   type ComputeResult,
@@ -36,6 +37,9 @@ export type SelectedWallInfo = {
   /** The explicit per-wall override, if one is stored on the framing node —
    * a plain construction string or the mixed-wall object form. */
   override: WallOverride | undefined
+  /** The wall's architectural height (m) — the CMU height slider's frame
+   * of reference on both Engineering surfaces. */
+  wallHeightM: number
   /** What the wall is built from — '2x6 studs @ 16" o.c.', the CMU module,
    * or the skip notice. Always printable. */
   assembly: string
@@ -123,10 +127,75 @@ export function selectedWallInfo(
     curved: wall.curved,
     construction,
     override,
+    wallHeightM: wall.height,
     assembly,
     insulation,
     duplicateNote,
   }
+}
+
+/** Seam detail note shown under a PARTIAL-height CMU slider (both surfaces). */
+export const CMU_SEAM_NOTE = 'PT sill + anchor bolts at the seam — R403.1.6'
+
+/**
+ * Everything a CMU height slider needs, derived from the wall height and the
+ * stored override. Full-height CMU (plain 'cmu' string, an object with no
+ * height, or a jurisdiction default) reads 100%; a partial override reads
+ * its course-snapped height. Null when the wall is shorter than one course —
+ * there is nothing to lay, so no control renders.
+ */
+export type CmuHeightControl = {
+  /** Course-snapped CMU-zone height the slider shows (m). */
+  valueM: number
+  courses: number
+  totalCourses: number
+  /** Slider bounds/step: 1 course → the full wall height, one course per step. */
+  minM: number
+  maxM: number
+  stepM: number
+  /** True when only the bottom portion is block — the seam note applies. */
+  partial: boolean
+  /** '1.02m · 5 courses · 42%' */
+  readout: string
+}
+
+export function cmuHeightControl(
+  wallHeightM: number,
+  override: WallOverride | undefined,
+): CmuHeightControl | null {
+  const totalCourses = courseCount(wallHeightM)
+  if (totalCourses < 1) return null
+  const requested =
+    typeof override === 'object' && override.cmuHeightM !== undefined
+      ? override.cmuHeightM
+      : wallHeightM // no stored height = full-height CMU, today's default
+  const valueM = snapCmuHeight(requested, wallHeightM)
+  const courses = courseCount(valueM)
+  const partial = courses < totalCourses
+  const percent = Math.round((100 * courses) / totalCourses)
+  return {
+    valueM,
+    courses,
+    totalCourses,
+    minM: COURSE_HEIGHT,
+    maxM: wallHeightM,
+    stepM: COURSE_HEIGHT,
+    partial,
+    readout: `${valueM.toFixed(2)}m · ${courses} ${courses === 1 ? 'course' : 'courses'} · ${percent}%`,
+  }
+}
+
+/**
+ * The override value a CMU height-slider write stores. Full height (every
+ * course that fits, or beyond) collapses to the plain legacy 'cmu' string —
+ * BYTE-EQUAL to what the segmented control writes today — while a partial
+ * height stores the object form with the course-snapped height, so the
+ * persisted number is exactly what the engines build (S5).
+ */
+export function cmuHeightOverride(wallHeightM: number, requestedM: number): WallOverride {
+  const snapped = snapCmuHeight(requestedM, wallHeightM)
+  if (snapped <= 0 || courseCount(snapped) >= courseCount(wallHeightM)) return 'cmu'
+  return { construction: 'cmu', cmuHeightM: snapped }
 }
 
 /**

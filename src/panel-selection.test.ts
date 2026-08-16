@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { computeLevel } from './framing/compute'
+import type { WallSlice } from './core/types'
+import { COURSE_HEIGHT, snapCmuHeight } from './engines/cmu'
+import { computeLevel, resolveWallConstruction } from './framing/compute'
 import { FramingNode } from './framing/schema'
-import { selectedWallInfo, wallOverridePatch } from './panel-selection'
+import {
+  CMU_SEAM_NOTE,
+  cmuHeightControl,
+  cmuHeightOverride,
+  selectedWallInfo,
+  wallOverridePatch,
+} from './panel-selection'
 
 /** One level: exterior wall (thick, marked), interior partition, curved wall. */
 function makeScene(): Record<string, Record<string, unknown>> {
@@ -283,5 +291,92 @@ describe('wallOverridePatch', () => {
     expect(FramingNode.shape.wallOverrides.parse(patch.wallOverrides)).toEqual({
       wall_x: 'cmu',
     })
+  })
+})
+
+// GATES (mixed-wall UI, S5 write side): the height slider's write shape —
+// full height stays the plain legacy string, partial is the object form
+// with a course-snapped height the resolver reads straight back.
+describe('cmuHeightOverride / cmuHeightControl', () => {
+  const H = 2.5 // wall_ext height — 12 whole courses fit under it
+
+  test('full height writes the plain legacy string — byte-equal to today', () => {
+    expect(cmuHeightOverride(H, H)).toBe('cmu')
+    // at or above every fitting course also collapses to the string
+    expect(cmuHeightOverride(H, 12 * COURSE_HEIGHT)).toBe('cmu')
+    expect(cmuHeightOverride(H, 99)).toBe('cmu')
+    // degenerate wall (shorter than one course) never emits the object form
+    expect(cmuHeightOverride(0.1, 0.1)).toBe('cmu')
+  })
+
+  test('partial height writes the object form with a course-snapped height', () => {
+    const write = cmuHeightOverride(H, 1.0) // ~5 courses
+    expect(write).toEqual({ construction: 'cmu', cmuHeightM: 5 * COURSE_HEIGHT })
+    // the patch shape round-trips through the zod record the store validates
+    const patch = wallOverridePatch(makeConfig(), 'wall_ext', write)
+    expect(FramingNode.shape.wallOverrides.parse(patch.wallOverrides)).toEqual({
+      wall_ext: write,
+    })
+  })
+
+  test('snap round-trip: reading the written override back is stable', () => {
+    const write = cmuHeightOverride(H, 1.0)
+    const ctl = cmuHeightControl(H, write)
+    expect(ctl?.valueM).toBeCloseTo(5 * COURSE_HEIGHT, 10)
+    // snapping the control's own value is idempotent…
+    expect(snapCmuHeight(ctl?.valueM ?? 0, H)).toBeCloseTo(ctl?.valueM ?? 0, 10)
+    // …and writing it back produces the identical override
+    expect(cmuHeightOverride(H, ctl?.valueM ?? 0)).toEqual(write)
+  })
+
+  test('resolver reads the written height back off the patched config', () => {
+    const wall = { id: 'wall_ext', exterior: true } as WallSlice
+    const partial = makeConfig({ wallOverrides: { wall_ext: cmuHeightOverride(H, 1.0) } })
+    expect(resolveWallConstruction(wall, partial, 'framed')).toEqual({
+      construction: 'cmu',
+      cmuHeightM: 5 * COURSE_HEIGHT,
+    })
+    // the full-height string resolves with NO height carried — today's path
+    const full = makeConfig({ wallOverrides: { wall_ext: cmuHeightOverride(H, H) } })
+    expect(resolveWallConstruction(wall, full, 'framed')).toEqual({ construction: 'cmu' })
+  })
+
+  test("readout prints 'height · courses · percent'; partial gates the seam note", () => {
+    const ctl = cmuHeightControl(2.4384, { construction: 'cmu', cmuHeightM: 1.0 }) // 8ft wall
+    expect(ctl?.readout).toBe('1.02m · 5 courses · 42%')
+    expect(ctl?.partial).toBe(true)
+    const full = cmuHeightControl(2.4384, 'cmu')
+    expect(full?.readout).toBe('2.44m · 12 courses · 100%')
+    expect(full?.partial).toBe(false)
+    // no stored override (jurisdiction-default CMU) also reads full height
+    expect(cmuHeightControl(2.4384, undefined)?.readout).toBe('2.44m · 12 courses · 100%')
+    // singular course
+    expect(cmuHeightControl(0.25, { construction: 'cmu', cmuHeightM: 0.1 })?.readout).toBe(
+      '0.20m · 1 course · 100%',
+    )
+    // both surfaces share the exact seam wording (board spec verbatim)
+    expect(CMU_SEAM_NOTE).toBe('PT sill + anchor bolts at the seam — R403.1.6')
+  })
+
+  test('slider bounds: 1 course → full wall height, one course per step', () => {
+    const ctl = cmuHeightControl(H, 'cmu')
+    expect(ctl?.minM).toBe(COURSE_HEIGHT)
+    expect(ctl?.maxM).toBe(H)
+    expect(ctl?.stepM).toBe(COURSE_HEIGHT)
+    expect(ctl?.totalCourses).toBe(12)
+  })
+
+  test('wall shorter than one course has no control', () => {
+    expect(cmuHeightControl(0.15, 'cmu')).toBeNull()
+  })
+
+  test('selectedWallInfo carries the wall height + the stored partial override', () => {
+    const nodes = makeScene()
+    const write = cmuHeightOverride(H, 1.0)
+    const config = makeConfig({ wallOverrides: { wall_ext: write } })
+    const info = selectedWallInfo(nodes, select('wall_ext'), config, computeLevel(nodes, config))
+    expect(info?.wallHeightM).toBe(H)
+    expect(info?.construction).toBe('cmu')
+    expect(info?.override).toEqual(write)
   })
 })

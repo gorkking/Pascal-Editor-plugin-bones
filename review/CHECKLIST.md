@@ -57,9 +57,13 @@ AND a gate — a checklist line without a test is a wish.
   seam — verify detail') and frames as if fully in the taller zone. A height
   absent or at/above every fitting course = byte-equal to today's full-height
   CMU. Takeoff: blocks for the zone only, PT booked on its own `<size> PT`
-  row, seam bolts under Wall framing.
+  row, seam bolts under Wall framing. The WRITE side holds the same line:
+  the height slider on both Engineering surfaces (`cmuHeightOverride`)
+  stores the plain legacy 'cmu' string at full height and the object form
+  with a course-snapped height otherwise — never an unsnapped number.
   Gates: `src/engines/mixed-wall.test.ts` + mixed scenarios in
-  `interpenetration.test.ts`
+  `interpenetration.test.ts` + slider write shape / snap round-trip /
+  resolver read-back in `src/panel-selection.test.ts`
 
 ## M — Mechanical (HVAC)
 
