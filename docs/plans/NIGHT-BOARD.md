@@ -27,6 +27,34 @@ wall pattern). Spec:
   sill at seam, studs above, no overlap via SAT), crossing-opening flag,
   full-height unchanged vs today, takeoff deltas.
 
+## ACTIVE: full wall engineering panel (user ask, evening 2)
+The Engineering section shows the wall's complete engineering identity,
+editable per wall. Extend WallOverride object (schema union already
+supports objects): { construction, cmuHeightM?, studSize? ('2x4'|'2x6'),
+spacingIn? (16|24), insulation? ('none'|'batt'|'blown'|'spray-foam'),
+insulationR? (number, default = climate-zone requirement), cladding?
+(key of wall-assemblies.json exterior.claddings: stucco/vinyl/brick/
+fiber-cement/wood...) }.
+- ENGINES: frameWalls consumes per-wall studSize/spacingIn (falls back to
+  spec); wall-layers consumes per-wall cladding (falls back to state
+  default) and emits INSULATION BATTS in the stud bays (role 'insulation',
+  pink #e8b4c8) when insulation != 'none' — thickness from the batt data,
+  labeled with type + R; takeoff books batts by area/R + per-cladding
+  rows. CMU walls: insulation = furring/rigid note (v1 label only).
+- UI (both Engineering surfaces): under the construction control —
+  'Studs' (2x4/2x6 + 16/24), 'Insulation' (type select + R readout with
+  'code min R-13 (zone 2A)' hint), 'Exterior finish' (cladding select,
+  exterior walls only), each writing the override object; readouts stay
+  when at defaults ('per state code' hint).
+- Display extras: wall length · gross/net area · opening count; garage
+  fire-separation note when the wall bounds a garage (garageSeparation
+  data exists).
+- GATES: override plumb-through per field (members change: stud size
+  dims, spacing count, batt members present/absent + R label, cladding
+  role color/material), defaults untouched byte-equal, takeoff deltas.
+- Note: the old 'showInsulation toggle' scope is superseded — batts render
+  per-wall from the insulation field; a global toggle can come later.
+
 ## Next-session queue
 - User's Q1-Q8 answers (morning review file) still pending — gate street
   point (Q6), movable outlets (Q7), drawer stage 2 host menu (Q8).
