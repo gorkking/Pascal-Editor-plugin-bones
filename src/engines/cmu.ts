@@ -570,10 +570,24 @@ export function mixedWallInsets(
     } else continue
     // Oblique multiplier (round-14 convention): a square-cut run retreats
     // (1+|cosθ|)/sinθ half-thicknesses to clear the neighbor's sloped face.
+    // That multiplier is exact only when the retreating member is no wider
+    // than the neighbor's thickness — the general square-cut retreat is
+    // (neighborThickness + ownWidth·|cosθ|)/(2·sinθ). A mixed wall's widest
+    // corner member is the CMU block (7-5/8" deep — wider than a thin
+    // framed neighbor), so an acute corner undershot by the width
+    // difference and the block noses clipped the neighbor (skeptic
+    // 2026-08-16). Both zones share the joint, so the block-width retreat
+    // governs the whole butt. Same razor-angle guard and ×4 cap as
+    // frameWalls.
     const crossD = Math.abs(wall.dir[0] * other.dir[1] - wall.dir[1] * other.dir[0])
     const dotD = Math.abs(wall.dir[0] * other.dir[0] + wall.dir[1] * other.dir[1])
+    const ownWidth = Math.min(wall.thickness, BLOCK_DEPTH_ACTUAL)
     const k = crossD < 0.1 ? 1 : Math.min(4, (1 + dotD) / crossD)
-    claim(myEnd, (k * other.thickness) / 2)
+    const kOwn =
+      crossD < 0.1
+        ? 1
+        : Math.min(4, (other.thickness + ownWidth * dotD) / (crossD * other.thickness))
+    claim(myEnd, (Math.max(k, kOwn) * other.thickness) / 2)
   }
   for (const tee of detectTees(group)) {
     if (tee.stem.id !== wall.id) continue
