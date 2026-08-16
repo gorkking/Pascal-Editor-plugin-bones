@@ -24,10 +24,12 @@ import type { Member, OpeningSlice, WallSlice } from '../core/types'
 import { feet, formatIn, inches } from '../core/units'
 
 const EPS = 1e-6
-/** RO width beyond which each side gets a second trimmer (jack). */
-const DOUBLE_TRIMMER_SPAN = feet(6)
-/** Fire blocking required over 10 ft of concealed stud cavity (IRC R302.11). */
-const FIRE_BLOCK_HEIGHT = feet(10)
+/** RO width beyond which each side gets a second trimmer (jack). Exported so
+ * the layer engine's insulation batts clear the same opening-frame span. */
+export const DOUBLE_TRIMMER_SPAN = feet(6)
+/** Fire blocking required over 10 ft of concealed stud cavity (IRC R302.11).
+ * Exported so batts split around the same rows. */
+export const FIRE_BLOCK_HEIGHT = feet(10)
 /** Stock plate length — splices called out past this (min 24" lap, R602.3.2). */
 const PLATE_STOCK = feet(20)
 
