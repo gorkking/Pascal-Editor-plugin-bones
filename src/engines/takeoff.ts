@@ -393,10 +393,20 @@ export function computeTakeoff(
   // ---- wall assembly layers (round 14): sheet goods by AREA ----
   // Drywall/sheathing/WRB/cladding members carry [len, height, t] dims —
   // area = len × height. 4×8 sheets for board goods; sqft for membranes.
-  const layerTallies = new Map<string, { item: string; sqft: number }>()
+  // Insulation batts (engineering panel) book by area PER TYPE + R — the
+  // label prefix ('batt R-13') is the grouping key, so two walls at
+  // different R values buy on separate rows.
+  const layerTallies = new Map<string, { item: string; sqft: number; detail: string }>()
   const SQFT = 1 / 0.09290304
   for (const m of members) {
-    if (m.role !== 'drywall' && m.role !== 'sheathing' && m.role !== 'wrb' && m.role !== 'cladding') continue
+    if (
+      m.role !== 'drywall' &&
+      m.role !== 'sheathing' &&
+      m.role !== 'wrb' &&
+      m.role !== 'cladding' &&
+      m.role !== 'insulation'
+    )
+      continue
     const item =
       m.role === 'drywall'
         ? 'Drywall 1/2"'
@@ -404,8 +414,11 @@ export function computeTakeoff(
           ? 'Sheathing 7/16" WSP'
           : m.role === 'wrb'
             ? 'WRB (housewrap/felt)'
-            : `Cladding — ${(m.label ?? 'siding').split(' (')[0] ?? 'siding'}`
-    const tally = layerTallies.get(item) ?? { item, sqft: 0 }
+            : m.role === 'insulation'
+              ? `Insulation — ${(m.label ?? 'batt').split(' (')[0] ?? 'batt'}`
+              : `Cladding — ${(m.label ?? 'siding').split(' (')[0] ?? 'siding'}`
+    const detail = m.role === 'insulation' ? 'stud bays, by area' : 'net of openings'
+    const tally = layerTallies.get(item) ?? { item, sqft: 0, detail }
     tally.sqft += m.dims[0] * m.dims[1] * SQFT
     layerTallies.set(item, tally)
   }
@@ -413,7 +426,7 @@ export function computeTakeoff(
     const sheets = tally.item.startsWith('Drywall') || tally.item.startsWith('Sheathing')
       ? ` (~${Math.ceil(tally.sqft / 32)} 4x8 sheets)`
       : ''
-    push('Wall framing', tally.item, `net of openings${sheets}`, round1(tally.sqft), 'sqft')
+    push('Wall framing', tally.item, `${tally.detail}${sheets}`, round1(tally.sqft), 'sqft')
   }
 
   // Rebar: linear feet per system (steel role 'rebar' — CMU cells, bond

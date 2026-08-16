@@ -865,3 +865,69 @@ describe('trunk reducers pinned (round-4/5: label-contract classification)', () 
     expect(find(rows, 'Trunk reducers')?.section).toBe('HVAC')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Insulation batts + per-cladding rows (full wall engineering panel)
+// ---------------------------------------------------------------------------
+
+describe('insulation batts + per-wall cladding rows', () => {
+  const batt = (label: string, len = 0.35, h = 2.2): Member =>
+    mem({
+      role: 'insulation',
+      size: undefined,
+      dims: [len, h, 0.089],
+      length: len,
+      label,
+    })
+
+  test('batts book by AREA per type + R, in stud-bay detail', () => {
+    // 10 bays of 0.35×2.2m ≈ 7.7 m² ≈ 82.9 sqft
+    const members = Array.from({ length: 10 }, () => batt('batt R-13 (zone 2A)'))
+    const rows = computeTakeoff(members, [])
+    const row = find(rows, 'Insulation — batt R-13')
+    expect(row).toBeDefined()
+    expect(row?.section).toBe('Wall framing')
+    expect(row?.unit).toBe('sqft')
+    expect(row?.detail).toBe('stud bays, by area')
+    expect(row?.quantity).toBeCloseTo(10 * 0.35 * 2.2 * 10.7639, 0)
+  })
+
+  test('two walls at different R (or type) buy on separate rows', () => {
+    const rows = computeTakeoff(
+      [
+        batt('batt R-13 (zone 2A)'),
+        batt('batt R-21 (zone 5A)'),
+        batt('spray-foam R-21 (zone 5A)'),
+      ],
+      [],
+    )
+    expect(find(rows, 'Insulation — batt R-13')).toBeDefined()
+    expect(find(rows, 'Insulation — batt R-21')).toBeDefined()
+    expect(find(rows, 'Insulation — spray-foam R-21')).toBeDefined()
+  })
+
+  test('per-wall cladding overrides produce one row per finish family', () => {
+    const clad = (label: string): Member =>
+      mem({ role: 'cladding', size: undefined, dims: [3, 2.4, 0.02], length: 3, label })
+    const rows = computeTakeoff(
+      [
+        clad('vinyl siding, lap-profile bounding depth (2021 IRC R703.11)'),
+        clad('3-coat cement plaster over metal/wire lath: … (2021 IRC R703.7)'),
+      ],
+      [],
+    )
+    expect(find(rows, 'Cladding — vinyl siding, lap-profile bounding depth')).toBeDefined()
+    expect(
+      find(rows, 'Cladding — 3-coat cement plaster over metal/wire lath: …'),
+    ).toBeDefined()
+    // both keep the existing net-of-openings convention
+    for (const r of rows.filter((r) => r.item.startsWith('Cladding'))) {
+      expect(r.detail).toBe('net of openings')
+    }
+  })
+
+  test('no insulation members = no insulation rows (defaults untouched)', () => {
+    const rows = computeTakeoff([mem()], [])
+    expect(rows.some((r) => r.item.startsWith('Insulation'))).toBe(false)
+  })
+})
