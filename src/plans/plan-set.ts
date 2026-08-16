@@ -475,43 +475,53 @@ function planSheet(
   // couldn't trace a colored line back to its legend row without following
   // it to the panel (blueprint P4). Runs sharing a homerun spine anchor at
   // the SAME point (round-3 scorecard: LTG-3/LTG-4/GEN-3/GEN-4 stacked at
-  // one coordinate) — labels de-collide with the device-tag spiral pattern,
-  // and a label whose anchor sits on a device bubble is skipped rather than
-  // overprinted. Drawn AFTER the bubbles so `placed` holds their spots.
+  // one coordinate) — labels de-collide as RECTANGLES sized by their text
+  // (round-3 fixCheck: a fixed 16 px point nudge left ~30 px-wide bold
+  // labels overprinting as 'LTGGEN-3'). Spiral with growing radius, ~8
+  // tries per anchor, then fall back to the circuit's 2nd/3rd-longest
+  // segment — a bubble-parked anchor used to silently drop the label
+  // (gabled GEN-2). Drawn AFTER the bubbles so `placed` holds their spots.
   if (def.key === 'electrical') {
-    const longest = new Map<string, Member>()
+    const runs = new Map<string, Member[]>()
     for (const m of mine) {
       if (m.role !== 'wire-run') continue
-      const prev = longest.get(m.sourceId)
-      if (!prev || m.length > prev.length) longest.set(m.sourceId, m)
+      const list = runs.get(m.sourceId) ?? []
+      list.push(m)
+      runs.set(m.sourceId, list)
     }
-    const labelSpots: { x: number; y: number }[] = []
-    for (const [circuit, m] of longest) {
-      if (m.length * scale < 40) continue // too short to label legibly
-      const ax = X(m.position[0])
-      const ay = Z(m.position[2]) - 3
-      // anchor over a device bubble → skip (text-over-symbol is what P4 forbids)
-      if (placed.some((q) => Math.hypot(q.x - ax, q.y - ay) < 15)) continue
-      let px = ax
-      let py = ay
-      let clear = false
-      for (let attempt = 0; attempt < 12; attempt++) {
-        const clash =
-          labelSpots.some((q) => Math.hypot(q.x - px, q.y - py) < 14) ||
-          placed.some((q) => Math.hypot(q.x - px, q.y - py) < 15)
-        if (!clash) {
-          clear = true
-          break
+    // ~6.5 px/char at font-size 8 bold; glyph box ≈ 10 px tall
+    const LABEL_H = 10
+    const rects: { x: number; y: number; w: number }[] = []
+    const clashes = (x: number, y: number, w: number): boolean =>
+      rects.some(
+        (r) => Math.abs(r.x - x) < (r.w + w) / 2 + 2 && Math.abs(r.y - y) < LABEL_H + 2,
+      ) ||
+      // device bubbles are r=7 circles — keep the label rect clear of them
+      placed.some((q) => Math.abs(q.x - x) < w / 2 + 9 && Math.abs(q.y - y) < LABEL_H / 2 + 9)
+    for (const [circuit, list] of runs) {
+      list.sort((a, b2) => b2.length - a.length)
+      const w = circuit.length * 6.5
+      let spot: { x: number; y: number } | null = null
+      for (const m of list.slice(0, 3)) {
+        if (m.length * scale < 40) continue // too short to label legibly
+        const ax = X(m.position[0])
+        const ay = Z(m.position[2]) - 3
+        for (let attempt = 0; attempt < 8; attempt++) {
+          const r = attempt === 0 ? 0 : 10 + 7 * attempt
+          const ang = (attempt * Math.PI) / 3
+          const px = ax + r * Math.cos(ang)
+          const py = ay + r * Math.sin(ang)
+          if (!clashes(px, py, w)) {
+            spot = { x: px, y: py }
+            break
+          }
         }
-        const ang = (attempt * Math.PI) / 3
-        const r = 16 + 12 * Math.floor(attempt / 6)
-        px = ax + r * Math.cos(ang)
-        py = ay + r * Math.sin(ang)
+        if (spot) break
       }
-      if (!clear) continue // never overprint — drop the label instead
-      labelSpots.push({ x: px, y: py })
+      if (!spot) continue // every anchor crowded — drop rather than overprint
+      rects.push({ x: spot.x, y: spot.y, w })
       shapes.push(
-        `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${circuitColor(circuit)}" stroke="#fff" stroke-width="2" paint-order="stroke">${esc(circuit)}</text>`,
+        `<text x="${spot.x.toFixed(1)}" y="${spot.y.toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${circuitColor(circuit)}" stroke="#fff" stroke-width="2" paint-order="stroke">${esc(circuit)}</text>`,
       )
     }
   }
@@ -1004,27 +1014,58 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
   const inBand = (m: Member): boolean => Math.abs(m.position[0] - cutX) < BAND + xExtentOf(m)
   const proj = (p: [number, number, number]): [number, number] => [p[2], -p[1]]
   const depth = (p: [number, number, number]): number => p[0]
-  // Section poché (blueprint round-3): members the cut plane actually
-  // slices print FILLED dark; the rest of the band stays light 'beyond'
-  // line work at reduced opacity — standard cut vs beyond drafting.
-  const beyond: Seg[] = memberSegs(members, opts, proj, depth, (m) => inBand(m) && !crossesCut(m)).map(
-    (s) => ({ ...s, opacity: 0.6 }),
-  )
-  // Cut members keep the below-grade dashed convention (round-3: a cut
-  // frost-depth foundation printed as a solid black blob mountain).
-  const cut: Seg[] = memberSegs(members, opts, proj, depth, crossesCut).map((s) => ({
+  // Section poché (round-3 scorecard N3 rework): EVERY band member prints
+  // as light 'beyond' line work at reduced opacity; the cut cross-section
+  // is a separate explicit FILLED RECT at the plane∩member intersection.
+  // The old whole-member dark recolor made oblique plates print full-length
+  // ~1.9 m black bars, and end-on members vanished entirely (a zero-length
+  // butt-capped line draws no pixels).
+  const beyond: Seg[] = memberSegs(members, opts, proj, depth, inBand).map((s) => ({
     ...s,
-    color: '#222',
-    w: s.w * 1.3,
+    opacity: 0.6,
   }))
-  const f = fitSegs([...beyond, ...cut])
+  const f = fitSegs(beyond)
   if (!f) return null
+  // Cut poché rects: sized from dims + yaw — width ≈ the member's thickness
+  // across the view at the cut (an oblique crossing widens by 1/|planUx|,
+  // capped at the full projected extent), height ≈ its vertical extent at
+  // the cut; centered where the plane actually crosses the axis. Below-grade
+  // keeps the dash convention on the OUTLINE (fill stays dark).
+  const poche: string[] = []
+  for (const m of members) {
+    if (m.role === 'wire-run' || m.face) continue // mirror memberSegs
+    if (!crossesCut(m)) continue
+    const lift = m.levelId ? (opts.levelBaseY?.[m.levelId] ?? 0) : 0
+    const { a, b } = memberAxis(m, lift)
+    const dx = b[0] - a[0]
+    const dy = b[1] - a[1]
+    const dz = b[2] - a[2]
+    const t = Math.abs(dx) < 1e-9 ? 0.5 : Math.min(1, Math.max(0, (cutX - a[0]) / dx))
+    const cz = a[2] + t * dz
+    const cyW = a[1] + t * dy
+    const dims = m.dims
+    const axis = dims[0] >= dims[1] && dims[0] >= dims[2] ? 0 : dims[1] >= dims[2] ? 1 : 2
+    const hDim = axis === 0 ? dims[2] : dims[0] // plan cross thickness
+    const vDim = axis === 1 ? Math.min(dims[0], dims[2]) : dims[1] // vertical thickness
+    const planL = Math.hypot(dx, dz)
+    const ux = planL < 1e-9 ? 1 : Math.abs(dx) / planL
+    const pitchL = Math.hypot(dx, dy)
+    const cosPitch = pitchL < 1e-9 ? 1 : Math.abs(dx) / pitchL
+    const sliceW = Math.min(hDim / Math.max(ux, 0.35), Math.abs(dz) + hDim)
+    const sliceH = Math.min(vDim / Math.max(cosPitch, 0.35), Math.abs(dy) + vDim)
+    const wPx = Math.max(1.5, sliceW * f.scale)
+    const hPx = Math.max(1.5, sliceH * f.scale)
+    const dashed = m.system === 'foundation' ? ' stroke="#222" stroke-width="0.9" stroke-dasharray="5 3"' : ''
+    poche.push(
+      `<rect x="${(f.sx(cz) - wPx / 2).toFixed(1)}" y="${(f.sy(-cyW) - hPx / 2).toFixed(1)}" width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}" fill="#222"${dashed}/>`,
+    )
+  }
   const gy = f.sy(0)
   const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/>`
   const title = 'Section A-A (transverse)'
   return {
     title,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${segSvg(cut, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band (plane slid clear of along-plane walls) — dark = members the plane slices across, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${poche.join('')}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band (plane slid clear of along-plane walls) — dark rects = cut cross-sections the plane slices, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
   }
 }
 
@@ -1104,8 +1145,11 @@ function schedulesSheets(
   const perSheetLines = 2 * (maxLines - 1)
   // The flag block bottom-anchors on the LAST page — shrink that page's
   // line capacity so a full column never runs under the red list
-  // (quality round-3: row 41 and the flags overprinted at y≈673).
-  const flagRows = Math.min(flags.length, 6) + (flags.length > 6 ? 1 : 0)
+  // (quality round-3: row 41 and the flags overprinted at y≈673). EVERY
+  // flag prints: the reserve grows with the list (round-3 scorecard C5:
+  // '… +1 more flags' truncated exactly the new roof-coverage safety flag);
+  // pagination adds sheets when the shrunken cap overflows.
+  const flagRows = flags.length
   // Building characteristics print just above the flags on the same page:
   // title + 4 metric lines — reserved out of the last page's capacity too.
   const charLines = opts.characteristics ? 5 : 0
@@ -1176,21 +1220,17 @@ function schedulesSheets(
         line++
       }
     }
-    // Flags on the LAST page; overflow called out, never silently dropped
-    // (round-14: a 60-wall house lost 11 rows and most flags).
+    // Flags on the LAST page — ALL of them; the reserve above grew with the
+    // list, so nothing truncates (round-3 scorecard C5: the old '… +N more
+    // flags' line dropped exactly the newest safety flag).
     let flagText = ''
     if (page === pages - 1 && flags.length > 0) {
-      const shown = flags.slice(0, 6)
-      const parts = shown.map(
-        (f, i) =>
-          `<text x="${MARGIN}" y="${H - TITLE_H - 40 - (shown.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">⚑ ${esc(f)}</text>`,
-      )
-      if (flags.length > shown.length) {
-        parts.push(
-          `<text x="${MARGIN}" y="${H - TITLE_H - 40 + 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">… +${flags.length - shown.length} more flags — see the panel takeoff</text>`,
+      flagText = flags
+        .map(
+          (fl, i) =>
+            `<text x="${MARGIN}" y="${H - TITLE_H - 40 - (flags.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">⚑ ${esc(fl)}</text>`,
         )
-      }
-      flagText = parts.join('')
+        .join('')
     }
     // BUILDING CHARACTERISTICS block — last page, stacked above the flags
     // (whole-building metrics for HVAC dimensioning; assumptions inline).
@@ -1213,8 +1253,7 @@ function schedulesSheets(
         clip(`${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`, 130),
       ]
       // bottom-anchor above the flag block (or where flags would start)
-      const shownFlags = Math.min(flags.length, 6)
-      const flagsTopY = H - TITLE_H - 40 - Math.max(0, shownFlags - 1) * 13
+      const flagsTopY = H - TITLE_H - 40 - Math.max(0, flags.length - 1) * 13
       const bottomY = flags.length > 0 ? flagsTopY - 18 : H - TITLE_H - 40
       charText = [
         `<text x="${MARGIN}" y="${bottomY - lines.length * 13}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">BUILDING CHARACTERISTICS</text>`,

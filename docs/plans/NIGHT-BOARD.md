@@ -29,6 +29,33 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
+## Round-3 fixCheck NARROW FIX PASS — LANDED (2026-08-16, after d59d2f2)
+- Examiner fixCheck at d59d2f2 (scorecard fixCheckVerdict REVISE-narrow):
+  3 remaining items fixed + gated, 585 tests:
+- (1) P4 width-aware label de-collision (plan-set.ts electrical): labels
+  collide as RECTS (chars × 6.5px @ 8px bold, ~10px tall) vs labels AND
+  device bubbles; spiral with growing radius (8 tries), then fall back to
+  the circuit's 2nd/3rd-longest run — bubble-parked anchors get NUDGED
+  labels now, never silently dropped (gabled GEN-2). Gates: 4 coincident
+  anchors → pairwise rect separation ≥ label width, one label per circuit;
+  bubble-anchor circuit prints clear of the bubble.
+- (2) N3 filled-rect cut poché (sectionSheet): every band member prints as
+  0.6-opacity beyond linework; the plane∩member slice is an explicit dark
+  rect (#222) — width ≈ thickness/|planUx| capped at the projected extent,
+  height ≈ vertical extent at the cut, centered where the plane crosses
+  the axis; foundation rects keep the dash convention on the OUTLINE.
+  End-on members visible again (old zero-length butt caps drew nothing);
+  oblique members never whole-member dark. Gates: end-on CMU + footing →
+  3 visible rects incl. dashed outline; 20°-oblique 8m plate → dark ≤0.7m
+  (measured vs a 5m stud ruler); wall-along-plane gate stays green.
+- (3) C5 flag-list wrap (schedulesSheets): '… +N more flags' truncation
+  REMOVED — flagRows = flags.length, the last-page reserve grows (pages
+  grow when the cap overflows) so EVERY flag prints; characteristics
+  block anchor tracks the taller list. Gates: 7 flags all print, none
+  truncated; char block stacks above flag #1; takeoff rows stay clear.
+- NOT prod-shipped: same as the parent batch — adversarial loop (examiner
+  re-read) before any pin bump.
+
 ## Round-3 scorecard FIX BATCH — LANDED (2026-08-16, 5ea5913 + f1e42f7)
 - Scorecard review/scorecards/blueprint-round-3.json (verdict REVISE) items
   fixed + gated, 580 tests:
@@ -100,13 +127,15 @@
   unification (Q6 answer pending), power-entry routing (node places at the
   panel wall weatherhead; no engine consumer yet).
 
-## State right now (~05:30 — final polish pass running)
+## State right now (~05:30 → final fix pass LANDED green)
 - Connector skeptic: PASS (loop closed; ~2% predicate-halo grazes = 0.0mm
   physical penetration, future sampling refinement noted).
 - Examiner fix-check: N3 FAIL→FLAG (sections legible), C1+C5+N2 CLOSED;
-  narrow REVISE on 3 items → FINAL FIX AGENT RUNNING: width-aware label
-  de-collision, filled-rect cut poché, flag-list wrap (exact criteria in
-  its brief + scorecard fixCheck notes).
+  narrow REVISE on 3 items → FINAL FIX PASS LANDED (see 'NARROW FIX PASS'
+  section above): width-aware label de-collision, filled-rect cut poché,
+  flag-list wrap — all gated, 585 tests / 0 fail. The fix agent itself
+  did NOT ship (its brief: no prod pins, no editor) — the green-landing
+  ship steps below are the orchestrator's.
 - ON ITS GREEN LANDING: ship the round-3 batch through the prod chain
   (editor PR pin bump → merge → private-editor PR pin+submodule → merge),
   update ~/Downloads/bones-morning-review.txt (add: round-3 sheet polish +
