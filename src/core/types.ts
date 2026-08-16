@@ -59,6 +59,8 @@ export type MemberRole =
   | 'vent-stack'
   | 'duct-run'
   | 'wire-run'
+  /** Water-heater body (tank cylinder approximated as a box, or tankless cabinet). */
+  | 'water-heater'
   // fabrication (LOD 350/400)
   | 'rebar'
   | 'hanger'
@@ -150,6 +152,7 @@ export type FixtureKind =
   | 'return'
   | 'equipment'
   | 'water-heater'
+  | 'water-meter'
   | 'cleanout'
   | 'thermostat'
   | 'exhaust-fan'

@@ -679,12 +679,12 @@ const WIRE_SECTION = inches(0.5)
 /** Two wall ends within this distance share a junction (corner/tee). */
 const JUNCTION_TOL = 0.25
 
-type WallPoint = { wall: WallSlice; u: number }
+export type WallPoint = { wall: WallSlice; u: number }
 /** One junction on a wall: at `u`, you can hop onto `to.wall` at `to.u`. */
 type Junction = { u: number; to: WallPoint }
 
 /** Plan point of a wall-centerline coordinate. */
-const wallPlan = (p: WallPoint): Pt => [
+export const wallPlan = (p: WallPoint): Pt => [
   p.wall.start[0] + p.wall.dir[0] * p.u,
   p.wall.start[1] + p.wall.dir[1] * p.u,
 ]
@@ -695,7 +695,7 @@ const RUN_ZONE_TOP = WIRE_RUN_Y + 8 * 0.012 + inches(2)
 /** Snap a wall coordinate out of any rough opening crossing [y0, y1] —
  * cable can't drop through a doorway OR a window; it lands in the first
  * stud bay past the king studs. */
-function clearOfOpenings(wall: WallSlice, u: number, y0 = 0, y1 = RUN_ZONE_TOP): number {
+export function clearOfOpenings(wall: WallSlice, u: number, y0 = 0, y1 = RUN_ZONE_TOP): number {
   // Box edge + casing clearance, not just the point: 4in keeps a device
   // visibly off the RO trim (prod report: box kissing the door edge).
   const margin = inches(4)
@@ -711,7 +711,7 @@ function clearOfOpenings(wall: WallSlice, u: number, y0 = 0, y1 = RUN_ZONE_TOP):
 
 /** Nearest wall-centerline point to a plan position (never inside a rough
  * opening that the anchor's vertical leg [0, yTop] would cross). */
-function nearestWallPoint(walls: WallSlice[], p: Pt, yTop = RUN_ZONE_TOP): WallPoint | null {
+export function nearestWallPoint(walls: WallSlice[], p: Pt, yTop = RUN_ZONE_TOP): WallPoint | null {
   let best: WallPoint | null = null
   let bestDist = Number.POSITIVE_INFINITY
   for (const wall of walls) {
@@ -769,7 +769,7 @@ export function buildWallGraph(walls: WallSlice[]): Map<string, Junction[]> {
  * BFS a leg list from one wall point to another, travelling only along
  * walls: [{wall, u0, u1}, …]. Null when the walls are disconnected.
  */
-function wallPath(
+export function wallPath(
   graph: Map<string, Junction[]>,
   from: WallPoint,
   to: WallPoint,

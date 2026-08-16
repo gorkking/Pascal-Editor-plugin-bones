@@ -174,7 +174,7 @@ describe('elevation orientation + section membership (blueprint round-2)', () =>
   test('section includes walls whose extent crosses the cut band', () => {
     // long wall plate centered away from the cut midpoint but crossing it
     const members = [
-      member({ system: 'wall-framing', role: 'plate', dims: [10, 0.04, 0.09], position: [5, 0.02, 0], rotation: [0, 0, 0] }),
+      member({ system: 'wall-framing', role: 'bottom-plate', dims: [10, 0.04, 0.09], position: [5, 0.02, 0], rotation: [0, 0, 0] }),
       member({ system: 'wall-framing', role: 'stud', dims: [0.04, 2.4, 0.09], position: [0.2, 1.2, 4], rotation: [0, 0, 0] }),
     ]
     const sheets = buildPlanSet(members, [], {})

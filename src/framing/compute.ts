@@ -8,7 +8,13 @@
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Fixture, Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
-import { extractLevels, extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
+import {
+  extractLevels,
+  extractPlacedFixtures,
+  extractRooms,
+  extractSlabs,
+  extractWalls,
+} from '../core/wall-model'
 import { cmuWalls } from '../engines/cmu'
 import { layoutWallLayers } from '../engines/wall-layers'
 import { layoutElectrical, routeWiring } from '../engines/electrical'
@@ -294,9 +300,18 @@ function computeLevelUncached(
   }
 
   if (config.showPlumbing) {
-    const plumbing = layoutPlumbing(activeWalls, activeRooms, spec)
+    // Placed sanitary items (toilet/shower/sinks…) are the demand points;
+    // the engine's room-category inference is only the fallback.
+    const placedFixtures = extractPlacedFixtures(nodes, levelId)
+    const plumbing = layoutPlumbing(activeWalls, activeRooms, spec, placedFixtures)
     members.push(...plumbing.members)
     fixtures.push(...plumbing.fixtures)
+    // Cross-level stacks land later — each level owns its fixtures for now.
+    if (allLevels.some((l) => l.id !== levelId && extractPlacedFixtures(nodes, l.id).length > 0)) {
+      warnings.push(
+        'Placed plumbing fixtures on another storey — X-ray that level for its plumbing',
+      )
+    }
   }
 
   if (config.showHvac) {
