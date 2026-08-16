@@ -537,7 +537,9 @@ describe('count sanity — two-room plan (living + kitchen)', () => {
     expect(ofKind(fixtures, 'light')).toHaveLength(2)
     expect(ofKind(fixtures, 'smoke-alarm')).toHaveLength(0)
     expect(ofKind(fixtures, 'panel')).toHaveLength(1)
-    expect(fixtures).toHaveLength(20)
+    // street→meter→panel chain: one meter on the exterior face by the panel
+    expect(ofKind(fixtures, 'electric-meter')).toHaveLength(1)
+    expect(fixtures).toHaveLength(21)
   })
 
   test('exterior walls emit on the interior face only', () => {

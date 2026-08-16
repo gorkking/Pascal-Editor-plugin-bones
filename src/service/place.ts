@@ -4,7 +4,8 @@ import {
   extractSlabs,
   extractWalls,
 } from '../core/wall-model'
-import { placePanelSpot } from '../engines/electrical'
+import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
+import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeSewerExit, placeWhSpot } from '../engines/plumbing'
 import { SERVICE_TYPES, ServiceNode, type ServiceType } from './schema'
 
@@ -33,7 +34,8 @@ export function placedServiceTypes(
  * The "Place service points" panel action, as a pure function: build the
  * `bones:service` nodes to create on `levelId` — one per type, seeded at the
  * ENGINES' current auto positions (panelMountU garage rule, plumbing's
- * meter/WH/sewer-exit spots), so nothing moves until the user drags one.
+ * meter/WH/sewer-exit spots, hvac's thermostat/heat-pump spots, the electric
+ * meter beside the panel), so nothing moves until the user drags one.
  * Idempotent: types that already have a node on this level are skipped.
  */
 export function buildServicePointNodes(
@@ -75,11 +77,25 @@ export function buildServicePointNodes(
   )
   wallPoint('water-heater', placeWhSpot(walls, rooms))
   wallPoint('water-entry', placeMeterSpot(walls))
+  // Electric meter: the exterior face nearest the panel (street→meter→panel).
+  wallPoint('electric-meter', placeElectricMeterSpot(walls, rooms))
+  // Thermostat: interior wall face near the hvac return, 52" AFF.
+  wallPoint('thermostat', placeThermostatSpot(walls, rooms))
 
   if (!existing.has('sewer-exit')) {
     const exit = placeSewerExit(walls, rooms, placed)
     if (exit) {
       out.push(ServiceNode.parse({ serviceType: 'sewer-exit', position: [exit[0], 0, exit[1]] }))
+    }
+  }
+
+  // Heat pump: floor-placed pad 0.6 m outside the wall nearest the air
+  // handler — `position` is the anchor (like the sewer exit), so the node
+  // stands free and the lineset re-anchors wherever it's dragged.
+  if (!existing.has('heat-pump')) {
+    const pad = placeHeatPumpSpot(walls, rooms)
+    if (pad) {
+      out.push(ServiceNode.parse({ serviceType: 'heat-pump', position: [pad[0], 0, pad[1]] }))
     }
   }
 

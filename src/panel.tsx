@@ -238,9 +238,10 @@ function XraySection({
 
 /**
  * Service points — the draggable building/utility interfaces (electric
- * panel, water heater, water/sewer/power entries). One idempotent action
- * creates them at the engines' current auto positions; from then on THEY are
- * the truth and wires/pipes re-route to wherever they're moved.
+ * panel + meter, water heater, thermostat, heat pump, water/sewer/power
+ * entries). One idempotent action creates them at the engines' current auto
+ * positions; from then on THEY are the truth and wires/pipes/ducts re-route
+ * to wherever they're moved.
  */
 function ServicePointsSection({ activeLevelId }: { activeLevelId: string }) {
   // DISTINCT types present (visible nodes only) — a raw node count would let
@@ -277,8 +278,9 @@ function ServicePointsSection({ activeLevelId }: { activeLevelId: string }) {
       >
         {allPlaced ? 'All service points placed' : '⚡ Place service points'}
         <span className="block font-normal text-[10px] text-sidebar-foreground/50">
-          Panel, water heater, water/sewer/power entries — move one and the
-          wires &amp; pipes follow.
+          Panel, electric meter, water heater, thermostat, heat pump,
+          water/sewer/power entries — move one and the wires, pipes &amp;
+          ducts follow.
         </span>
       </button>
     </div>

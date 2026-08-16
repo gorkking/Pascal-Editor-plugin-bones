@@ -43,6 +43,10 @@ const FACE_OFFSET = inches(0.75)
 const SWITCH_LATCH_OFFSET = inches(8)
 /** Panel center at 60" AFF — keeps the top breaker under NEC 240.24(A)'s 6'-7" handle limit. */
 const PANEL_AFF = inches(60)
+/** Meter socket center ~55" AFF — utilities want the dial 4–6 ft above grade. */
+const METER_AFF = inches(55)
+/** Meter socket sits beside the panel's wall bay (enclosure half-width + working space). */
+const METER_PANEL_OFFSET = 0.6
 
 /**
  * NEC 210.8(A) GFCI locations we can resolve from RoomSlice.category alone:
@@ -402,6 +406,10 @@ export function layoutElectrical(
   const panel = placePanel(walls, rooms, overrides?.panel)
   if (panel) fixtures.push(panel)
 
+  // ---- electric meter: street → METER → panel is the standard chain ----
+  const meter = placeElectricMeter(walls, rooms, overrides?.electricMeter)
+  if (meter) fixtures.push(meter)
+
   // ---- circuiting (NEC 210.11/210.12/220.12) + 3-way switching ----
   assignCircuits(fixtures, rooms)
 
@@ -592,6 +600,70 @@ function placePanel(
     sourceId: wall.id,
     label: `Service panel (${rules.circuits.minServiceAmps}A min per NEC 230.79(C))`,
     meta: { minServiceAmps: rules.circuits.minServiceAmps },
+  }
+}
+
+/**
+ * AUTO spot for the electric meter: the EXTERIOR face nearest the panel —
+ * on the panel's own wall at `panelMountU ± 0.6 m` when that wall is
+ * exterior, else the nearest exterior wall point to the panel mount (a
+ * garage-divider panel still meters on the shell). RO-clear across the
+ * socket height. Exported so the Bones panel's "Place service points"
+ * action seeds a `bones:service` electric-meter node exactly where the
+ * engine auto-places.
+ */
+export function placeElectricMeterSpot(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+): { wall: WallSlice; u: number; heightAff: number } | null {
+  const panelSpot = placePanelSpot(walls, rooms)
+  if (!panelSpot) return null
+  let wall = panelSpot.wall
+  let u = panelSpot.u
+  if (wall.exterior) {
+    // Beside the panel bay, not on top of it — the service conductors stay
+    // short and the panel's working space stays clear.
+    u =
+      u + METER_PANEL_OFFSET <= wall.length - 0.2
+        ? u + METER_PANEL_OFFSET
+        : Math.max(0.2, u - METER_PANEL_OFFSET)
+  } else {
+    const exterior = walls.filter((w) => w.exterior && !w.curved && w.length >= 0.1)
+    if (exterior.length === 0) return null
+    const p = wallPlan({ wall, u })
+    const near = nearestWallPoint(exterior, p, Number.POSITIVE_INFINITY)
+    if (!near) return null
+    wall = near.wall
+    u = near.u
+  }
+  u = clearOfOpenings(wall, u, METER_AFF - 0.25, METER_AFF + 0.25)
+  return { wall, u, heightAff: METER_AFF }
+}
+
+/** The meter fixture on the EXTERIOR face of its wall — the override
+ * (`bones:service` electric-meter node) is authoritative, auto otherwise. */
+function placeElectricMeter(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  override?: ServicePointOverride,
+): Fixture | null {
+  const forced = overrideWallPoint(walls, override)
+  const spot = forced
+    ? { wall: forced.wall, u: forced.u, heightAff: override?.heightAff ?? METER_AFF }
+    : placeElectricMeterSpot(walls, rooms)
+  if (!spot) return null
+  // Exterior face = the opposite of the resolved interior face; when no
+  // room data resolves a side, +normal is the interior guess → use −.
+  const inFace = interiorFaces(spot.wall, rooms)[0] ?? faceOf(spot.wall, 1)
+  const face = faceOf(spot.wall, inFace.side === 1 ? -1 : 1)
+  const [x, z] = face.plan(spot.u)
+  return {
+    system: 'electrical',
+    kind: 'electric-meter',
+    position: [x, spot.heightAff, z],
+    rotationY: face.rotationY,
+    sourceId: spot.wall.id,
+    label: 'Electric meter — service entrance (NEC 230.66)',
   }
 }
 
@@ -1148,5 +1220,93 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       }
     }
   }
+
+  // ---- service entrance: street lateral → METER → panel feed ----
+  members.push(...routeServiceCable(fixtures, walls))
+
+  return members
+}
+
+/** Underground service lateral depth (NEC 300.5 direct-buried ≈ 18–24"). */
+const SERVICE_LATERAL_Y = -0.45
+/** SE cable drawn heavy (2 AWG Cu look) so the service chain reads at house scale. */
+const SERVICE_SECTION = 0.035
+/** Map-edge proxy: the street corridor runs this far outside the walls' bbox. */
+const STREET_EDGE_MARGIN = 4
+
+/**
+ * The standard residential chain is street → METER on the house side →
+ * panel. Route it as real geometry: an underground lateral from the nearest
+ * map-edge point to below the meter, a riser up the exterior face into the
+ * socket, then the meter→panel feed through the wall. The meter fixture is
+ * the anchor — a moved `bones:service` electric-meter node re-anchors the
+ * whole chain (checklist A4). Exported for the continuity gates.
+ */
+export function routeServiceCable(fixtures: Fixture[], walls: WallSlice[]): Member[] {
+  const members: Member[] = []
+  const meter = fixtures.find((f) => f.kind === 'electric-meter')
+  const panel = fixtures.find((f) => f.kind === 'panel')
+  if (!meter || !panel) return members
+
+  const heavy = (
+    from: readonly [number, number, number],
+    to: readonly [number, number, number],
+    note: string,
+  ): void => {
+    const dx = to[0] - from[0]
+    const dy = to[1] - from[1]
+    const dz = to[2] - from[2]
+    const len = Math.hypot(dx, dy, dz)
+    if (len < 0.02) return
+    const vertical = Math.abs(dy) > Math.hypot(dx, dz)
+    members.push({
+      system: 'electrical',
+      role: 'wire-run',
+      dims: vertical
+        ? [SERVICE_SECTION, len, SERVICE_SECTION]
+        : [len, SERVICE_SECTION, SERVICE_SECTION],
+      length: len,
+      position: [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2],
+      rotation: [0, vertical ? 0 : Math.atan2(-dz, dx), 0],
+      material: 'copper',
+      sourceId: 'service-entrance',
+      label: `Service entrance 2 AWG Cu — ${note}`,
+    })
+  }
+
+  // Nearest map-edge point: the walls' plan bbox pushed out by the street
+  // margin, then the closest point on that ring to the meter.
+  let minX = meter.position[0]
+  let maxX = meter.position[0]
+  let minZ = meter.position[2]
+  let maxZ = meter.position[2]
+  for (const w of walls) {
+    for (const p of [w.start, w.end]) {
+      minX = Math.min(minX, p[0])
+      maxX = Math.max(maxX, p[0])
+      minZ = Math.min(minZ, p[1])
+      maxZ = Math.max(maxZ, p[1])
+    }
+  }
+  const [mx, my, mz] = meter.position
+  const edges: [number, number][] = [
+    [minX - STREET_EDGE_MARGIN, mz],
+    [maxX + STREET_EDGE_MARGIN, mz],
+    [mx, minZ - STREET_EDGE_MARGIN],
+    [mx, maxZ + STREET_EDGE_MARGIN],
+  ]
+  const street = edges.reduce((best, e) =>
+    Math.hypot(e[0] - mx, e[1] - mz) < Math.hypot(best[0] - mx, best[1] - mz) ? e : best,
+  )
+
+  // Underground lateral (Manhattan), then the riser up into the socket.
+  heavy([street[0], SERVICE_LATERAL_Y, street[1]], [mx, SERVICE_LATERAL_Y, street[1]], 'street lateral (NEC 300.5)')
+  heavy([mx, SERVICE_LATERAL_Y, street[1]], [mx, SERVICE_LATERAL_Y, mz], 'street lateral (NEC 300.5)')
+  heavy([mx, SERVICE_LATERAL_Y, mz], [mx, my, mz], 'riser to meter')
+  // Meter → panel feed through the wall (NEC 230.66/230.70 service equipment).
+  const [px, py, pz] = panel.position
+  heavy([mx, my, mz], [mx, py, mz], 'meter → panel feed')
+  heavy([mx, py, mz], [px, py, mz], 'meter → panel feed')
+  heavy([px, py, mz], [px, py, pz], 'meter → panel feed')
   return members
 }

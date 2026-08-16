@@ -1,8 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import type { Fixture, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
+import { Vector3 } from 'three'
+import { DEFAULT_SPEC } from '../core/spec'
+import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import type { PlacedFixtureSlice } from '../core/wall-model'
-import { layoutElectrical, overrideWallPoint, placePanelSpot, routeWiring } from './electrical'
-import { unreachableDevices } from './electrical.test-helpers'
+import {
+  layoutElectrical,
+  overrideWallPoint,
+  placeElectricMeterSpot,
+  placePanelSpot,
+  routeWiring,
+} from './electrical'
+import { endpointsOf, segDist, unreachableDevices } from './electrical.test-helpers'
+import { layoutHvac, placeHeatPumpSpot, placeThermostatSpot } from './hvac'
 import { layoutPlumbing, placeSewerExit } from './plumbing'
 import {
   buildingDrainExit,
@@ -330,5 +339,212 @@ describe('A4 gate — meter + WH overrides keep the supplies continuous', () => 
     // w_n lerp would say [5,8] — the dragged position [9.5,7.5] must win
     expect(Math.hypot((exit?.x ?? 0) - 9.5, (exit?.z ?? 0) - 7.5)).toBeLessThan(0.1)
     expect(drainFailures(members, placed.map((f) => f.id))).toEqual([])
+  })
+})
+
+// ---- hvac: thermostat + heat-pump overrides ----------------------------------
+
+describe('A4 gate — thermostat + heat-pump service nodes drive the hvac engine', () => {
+  const { walls, rooms } = electricalPlan()
+
+  test('auto thermostat sits on an interior wall at 52" AFF', () => {
+    const spot = placeThermostatSpot(walls, rooms)
+    expect(spot).not.toBeNull()
+    expect(spot?.wall.exterior).toBe(false) // the divider, not the shell
+    expect(spot?.heightAff).toBeCloseTo(52 * 0.0254, 6)
+    const { fixtures } = layoutHvac(walls, rooms)
+    const tstat = fixtures.find((f) => f.kind === 'thermostat') as Fixture
+    expect(tstat.sourceId).toBe(spot?.wall.id ?? '')
+    expect(tstat.position[1]).toBeCloseTo(52 * 0.0254, 6)
+  })
+
+  test('thermostat wallId+wallT+heightAff override mounts it there, verbatim', () => {
+    const { fixtures } = layoutHvac(walls, rooms, DEFAULT_SPEC, {
+      thermostat: { wallId: 'w_e', wallT: 0.5, heightAff: 1.2, position: [0, 0, 0] },
+    })
+    const tstat = fixtures.find((f) => f.kind === 'thermostat') as Fixture
+    // w_e runs [8,0] → [8,4]; t=0.5 → [8,2]
+    expect(tstat.position[0]).toBeCloseTo(8, 6)
+    expect(tstat.position[2]).toBeCloseTo(2, 6)
+    expect(tstat.position[1]).toBeCloseTo(1.2, 6)
+    expect(tstat.sourceId).toBe('w_e')
+  })
+
+  test('gizmo-moved thermostat position snaps to the nearest wall', () => {
+    const { fixtures } = layoutHvac(walls, rooms, DEFAULT_SPEC, {
+      thermostat: { wallId: 'w_e', wallT: 0.5, position: [0.2, 1.3, 3.0] },
+    })
+    const tstat = fixtures.find((f) => f.kind === 'thermostat') as Fixture
+    // dragged next to w_w at x=0 — the w_e anchor must NOT win
+    expect(Math.abs(tstat.position[0])).toBeLessThan(0.15)
+    expect(Math.abs(tstat.position[2] - 3)).toBeLessThan(0.3)
+  })
+
+  test('heat-pump override re-anchors pad, cabinet AND lineset at ANY LOD', () => {
+    // default LOD (300): no override → no outdoor unit
+    const auto = layoutHvac(walls, rooms)
+    expect(auto.members.some((m) => m.label?.includes('lineset'))).toBe(false)
+    // override present → the whole outdoor block appears AT the node
+    const moved = layoutHvac(walls, rooms, DEFAULT_SPEC, {
+      heatPump: { position: [11, 0, 2] },
+    })
+    const condenser = moved.fixtures.find((f) => f.label?.includes('Condenser')) as Fixture
+    expect(condenser.position[0]).toBeCloseTo(11, 6)
+    expect(condenser.position[2]).toBeCloseTo(2, 6)
+    const pad = moved.members.find((m) => m.role === 'equipment' && m.material === 'concrete')
+    const unit = moved.members.find((m) => m.role === 'equipment' && m.material === 'steel')
+    expect(pad?.position[0]).toBeCloseTo(11, 6)
+    expect(unit?.position[0]).toBeCloseTo(11, 6)
+    // the lineset's far end lands at the pad (re-anchored, not the auto spot)
+    const lineset = moved.members.filter((m) => m.label?.includes('lineset'))
+    expect(lineset.length).toBeGreaterThan(0)
+    const reaches = lineset.some((m) =>
+      endpointsOf(m).some((e) => Math.hypot(e.x - 11, e.z - 2) < 0.05),
+    )
+    expect(reaches).toBe(true)
+  })
+
+  test('auto pad at LOD 400 stands 0.6 m outside the nearest exterior wall', () => {
+    const spot = placeHeatPumpSpot(walls, rooms)
+    expect(spot).not.toBeNull()
+    const at400 = layoutHvac(walls, rooms, { ...DEFAULT_SPEC, detail: '400' })
+    const condenser = at400.fixtures.find((f) => f.label?.includes('Condenser')) as Fixture
+    expect(condenser.position[0]).toBeCloseTo(spot?.[0] ?? 0, 6)
+    expect(condenser.position[2]).toBeCloseTo(spot?.[1] ?? 0, 6)
+    // outside the 8×4 shell
+    const [cx, , cz] = condenser.position
+    expect(cx > 0 && cx < 8 && cz > 0 && cz < 4).toBe(false)
+  })
+})
+
+// ---- electrical: METER + service cable (street → meter → panel) --------------
+
+/** Union-find continuity over the SE-cable members: true when `points` all
+ * live in one connected cable component. */
+function cableConnects(members: Member[], points: [number, number, number][]): boolean {
+  const cable = members.filter((m) => m.sourceId === 'service-entrance')
+  if (cable.length === 0) return false
+  const parent = cable.map((_, i) => i)
+  const find = (i: number): number => {
+    let r = i
+    while (parent[r] !== r) r = parent[r] as number
+    return r
+  }
+  const ends = cable.map(endpointsOf)
+  for (let i = 0; i < cable.length; i++) {
+    for (let j = i + 1; j < cable.length; j++) {
+      const [a1, a2] = ends[i] as [
+        ReturnType<typeof endpointsOf>[0],
+        ReturnType<typeof endpointsOf>[1],
+      ]
+      const [b1, b2] = ends[j] as [
+        ReturnType<typeof endpointsOf>[0],
+        ReturnType<typeof endpointsOf>[1],
+      ]
+      const touch =
+        a1.distanceTo(b1) < 0.03 ||
+        a1.distanceTo(b2) < 0.03 ||
+        a2.distanceTo(b1) < 0.03 ||
+        a2.distanceTo(b2) < 0.03 ||
+        segDist(a1, b1, b2) < 0.03 ||
+        segDist(a2, b1, b2) < 0.03
+      if (touch) parent[find(i)] = find(j)
+    }
+  }
+  const compAt = (p: [number, number, number]): number | null => {
+    const v = new Vector3(p[0], p[1], p[2])
+    for (let i = 0; i < cable.length; i++) {
+      const [a, b] = ends[i] as [ReturnType<typeof endpointsOf>[0], ReturnType<typeof endpointsOf>[1]]
+      if (v.distanceTo(a) < 0.05 || v.distanceTo(b) < 0.05 || segDist(v, a, b) < 0.05) {
+        return find(i)
+      }
+    }
+    return null
+  }
+  const comps = points.map(compAt)
+  return comps.every((c) => c !== null && c === comps[0])
+}
+
+describe('E gate — electric meter: street → METER → panel', () => {
+  const { walls, rooms } = electricalPlan()
+
+  test('auto meter lands on the EXTERIOR face beside the panel, RO-clear', () => {
+    const spot = placeElectricMeterSpot(walls, rooms)
+    expect(spot).not.toBeNull()
+    expect(spot?.wall.exterior).toBe(true)
+    const panelSpot = placePanelSpot(walls, rooms)
+    expect(spot?.wall.id).toBe(panelSpot?.wall.id ?? '')
+    expect(Math.abs((spot?.u ?? 0) - (panelSpot?.u ?? 0))).toBeCloseTo(0.6, 6)
+    const fixtures = layoutElectrical(walls, rooms)
+    const meter = fixtures.find((f) => f.kind === 'electric-meter') as Fixture
+    expect(meter).toBeDefined()
+    // exterior face of w_s (rooms fill z>0) → the meter hangs at z<0
+    expect(meter.position[2]).toBeLessThan(0)
+    expect(meter.position[1]).toBeCloseTo(55 * 0.0254, 6)
+  })
+
+  test('service cable is CONTINUOUS street-edge → meter → panel', () => {
+    const fixtures = layoutElectrical(walls, rooms)
+    const members = routeWiring(fixtures, walls)
+    const meter = fixtures.find((f) => f.kind === 'electric-meter') as Fixture
+    const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
+    const cable = members.filter((m) => m.sourceId === 'service-entrance')
+    expect(cable.length).toBeGreaterThanOrEqual(4)
+    // the lateral starts at a map-edge point OUTSIDE the walls' bbox…
+    const street = cable.find((m) => m.label?.includes('street lateral'))
+    expect(street).toBeDefined()
+    const escapes = cable.some((m) =>
+      endpointsOf(m).some((e) => e.x < -3.9 || e.x > 11.9 || e.z < -3.9 || e.z > 7.9),
+    )
+    expect(escapes).toBe(true)
+    // …runs underground, and one component carries street + meter + panel
+    expect(street?.position[1]).toBeLessThan(0)
+    expect(
+      cableConnects(members, [
+        [meter.position[0], meter.position[1], meter.position[2]],
+        [panel.position[0], panel.position[1], panel.position[2]],
+      ]),
+    ).toBe(true)
+    // …and the regular branch circuits still all reach the panel (E2)
+    expect(unreachableDevices(members, fixtures)).toEqual([])
+  })
+
+  test('moved meter re-anchors the whole feed (override authoritative)', () => {
+    const fixtures = layoutElectrical(walls, rooms, {
+      electricMeter: { wallId: 'w_n', wallT: 0.25, heightAff: 1.3, position: [0, 0, 0] },
+    })
+    const meter = fixtures.find((f) => f.kind === 'electric-meter') as Fixture
+    // w_n runs [8,4] → [0,4]; t=0.25 → [6,4] (± the face offset)
+    expect(Math.abs(meter.position[0] - 6)).toBeLessThan(0.05)
+    expect(Math.abs(meter.position[2] - 4)).toBeLessThan(0.2)
+    expect(meter.position[1]).toBeCloseTo(1.3, 6)
+    const members = routeWiring(fixtures, walls)
+    const panel = fixtures.find((f) => f.kind === 'panel') as Fixture
+    // the feed re-anchors: cable still one street→meter→panel component
+    expect(
+      cableConnects(members, [
+        [meter.position[0], meter.position[1], meter.position[2]],
+        [panel.position[0], panel.position[1], panel.position[2]],
+      ]),
+    ).toBe(true)
+    // …and some cable endpoint sits exactly at the NEW meter socket
+    const touchesMeter = members
+      .filter((m) => m.sourceId === 'service-entrance')
+      .some((m) =>
+        endpointsOf(m).some(
+          (e) =>
+            Math.hypot(e.x - meter.position[0], e.y - meter.position[1], e.z - meter.position[2]) <
+            0.03,
+        ),
+      )
+    expect(touchesMeter).toBe(true)
+  })
+
+  test('meter for an interior garage panel still lands on the shell', () => {
+    // Panel elects the longest garage wall — make it an interior divider.
+    const { walls: pw, rooms: pr } = plumbingPlan()
+    const spot = placeElectricMeterSpot(pw, pr)
+    expect(spot).not.toBeNull()
+    expect(spot?.wall.exterior).toBe(true)
   })
 })

@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
-import { placePanelSpot } from '../engines/electrical'
+import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
+import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
 import { buildServicePointNodes, placedServiceTypes } from './place'
 import { ServiceNode } from './schema'
 
 /**
- * The "Place service points" action: creates the five service nodes at the
+ * The "Place service points" action: creates all EIGHT service nodes at the
  * ENGINES' auto positions, idempotently (types already present are skipped).
  */
 
@@ -46,13 +47,16 @@ function scene(): Record<string, Record<string, unknown>> {
 }
 
 describe('buildServicePointNodes', () => {
-  test('creates all five service types at the engines’ auto spots', () => {
+  test('creates all eight service types at the engines’ auto spots', () => {
     const nodes = scene()
     const created = buildServicePointNodes(nodes, 'level_1')
     expect(created.map((n) => n.serviceType).sort()).toEqual([
+      'electric-meter',
+      'heat-pump',
       'panel',
       'power-entry',
       'sewer-exit',
+      'thermostat',
       'water-entry',
       'water-heater',
     ])
@@ -83,15 +87,46 @@ describe('buildServicePointNodes', () => {
     const meterNode = created.find((n) => n.serviceType === 'water-entry')
     expect(meterNode?.wallId).toBe(meterSpot?.wall.id ?? '')
 
-    // sewer exit is floor-placed: position only, no wall anchor
+    // electric meter mirrors the electrical engine's exterior-face spot
+    const eMeterSpot = placeElectricMeterSpot(walls, rooms)
+    const eMeterNode = created.find((n) => n.serviceType === 'electric-meter')
+    expect(eMeterSpot).not.toBeNull()
+    expect(eMeterNode?.wallId).toBe(eMeterSpot?.wall.id ?? '')
+    expect(eMeterNode?.wallT).toBeCloseTo(
+      (eMeterSpot?.u ?? 0) / (eMeterSpot?.wall.length ?? 1),
+      6,
+    )
+    expect(eMeterNode?.heightAff).toBeCloseTo(eMeterSpot?.heightAff ?? 0, 6)
+    // the meter wall is part of the shell (exterior)
+    expect(walls.find((w) => w.id === eMeterNode?.wallId)?.exterior).toBe(true)
+
+    // thermostat mirrors the hvac engine's interior-wall 52" spot
+    const tstatSpot = placeThermostatSpot(walls, rooms)
+    const tstatNode = created.find((n) => n.serviceType === 'thermostat')
+    expect(tstatSpot).not.toBeNull()
+    expect(tstatNode?.wallId).toBe(tstatSpot?.wall.id ?? '')
+    expect(tstatNode?.heightAff).toBeCloseTo(52 * 0.0254, 6)
+
+    // sewer exit + heat pump are floor-placed: position only, no wall anchor
     const sewer = created.find((n) => n.serviceType === 'sewer-exit')
     expect(sewer?.wallId).toBeUndefined()
     expect(sewer?.position).not.toEqual([0, 0, 0])
+
+    const hp = created.find((n) => n.serviceType === 'heat-pump')
+    const hpSpot = placeHeatPumpSpot(walls, rooms)
+    expect(hp?.wallId).toBeUndefined()
+    expect(hpSpot).not.toBeNull()
+    expect(hp?.position[0]).toBeCloseTo(hpSpot?.[0] ?? 0, 6)
+    expect(hp?.position[2]).toBeCloseTo(hpSpot?.[1] ?? 0, 6)
+    // …and the pad stands OUTSIDE the 10×8 shell
+    const [hx, , hz] = hp?.position ?? [0, 0, 0]
+    expect(hx > 0 && hx < 10 && hz > 0 && hz < 8).toBe(false)
   })
 
   test('idempotent: existing types are skipped, missing ones fill in', () => {
     const nodes = scene()
     const first = buildServicePointNodes(nodes, 'level_1')
+    expect(first).toHaveLength(8)
     // simulate the panel + sewer-exit already created on this level
     const panel = first.find((n) => n.serviceType === 'panel') as ServiceNode
     const sewer = first.find((n) => n.serviceType === 'sewer-exit') as ServiceNode
@@ -100,12 +135,15 @@ describe('buildServicePointNodes', () => {
 
     const second = buildServicePointNodes(nodes, 'level_1')
     expect(second.map((n) => n.serviceType).sort()).toEqual([
+      'electric-meter',
+      'heat-pump',
       'power-entry',
+      'thermostat',
       'water-entry',
       'water-heater',
     ])
 
-    // all five present → nothing to create
+    // all eight present → nothing to create
     for (const n of second) {
       nodes[n.id] = { ...n, parentId: 'level_1' } as unknown as Record<string, unknown>
     }
@@ -157,11 +195,14 @@ describe('placedServiceTypes', () => {
     const types = placedServiceTypes(nodes, 'level_1')
     expect(types.size).toBe(2)
     expect([...types].sort()).toEqual(['panel', 'water-heater'])
-    // …so the action still has three types to create
+    // …so the action still has six types to create
     const created = buildServicePointNodes({ ...scene(), ...nodes }, 'level_1')
     expect(created.map((n) => n.serviceType).sort()).toEqual([
+      'electric-meter',
+      'heat-pump',
       'power-entry',
       'sewer-exit',
+      'thermostat',
       'water-entry',
     ])
   })
