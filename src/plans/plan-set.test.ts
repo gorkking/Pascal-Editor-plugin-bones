@@ -288,6 +288,158 @@ describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
   })
 })
 
+describe('blueprint round-3 — poché, cut mark, legends, wrap, coverage, dowels', () => {
+  const stud = (x: number, z: number): Member =>
+    member({
+      system: 'wall-framing',
+      role: 'stud',
+      size: '2x4',
+      dims: [0.04, 2.4, 0.09],
+      position: [x, 1.2, z],
+      rotation: [0, 0, 0],
+    })
+
+  test('section poché: cut members print dark ×1.3, beyond stay light at 0.6', () => {
+    // cutX = (0+4)/2 = 2 — the x=2 stud is CUT (extent contains cutX), the
+    // x=1.5 stud is BEYOND (in band), x=0 / x=4 fall outside the band
+    const members = [stud(0, 0), stud(2, 1), stud(4, 2), stud(1.5, 3)]
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Section A-A'))?.svg ?? ''
+    const cut = /<line [^>]*stroke="#222" stroke-width="([\d.]+)" stroke-linecap="round"\/>/.exec(svg)
+    const beyond =
+      /<line [^>]*stroke="#caa06a" stroke-width="([\d.]+)" stroke-linecap="round" opacity="0.6"\/>/.exec(svg)
+    expect(cut).not.toBeNull()
+    expect(beyond).not.toBeNull()
+    expect(Number(cut?.[1])).toBeCloseTo(Number(beyond?.[1]) * 1.3, 0)
+    // out-of-band studs are not drawn: exactly the 2 member lines
+    expect([...svg.matchAll(/stroke-linecap="round"/g)]).toHaveLength(2)
+  })
+
+  test('A-A cut mark prints on the wall framing plan only, bubbled at both ends', () => {
+    const members = [stud(0, 0), stud(2, 1), stud(4, 2), member({})]
+    const sheets = buildPlanSet(members, [], {})
+    const wall = sheets.find((s) => s.title === 'Wall framing plan')?.svg ?? ''
+    expect(wall).toContain('stroke-dasharray="9 4"')
+    expect([...wall.matchAll(/>A<\/text>/g)]).toHaveLength(2)
+    const floor = sheets.find((s) => s.title === 'Floor framing plan')?.svg ?? ''
+    expect(floor).not.toContain('stroke-dasharray="9 4"')
+  })
+
+  test('cover/elevations/section carry stroke legends for the systems each draws', () => {
+    const members = [
+      stud(4.8, 0),
+      stud(5, 1),
+      stud(5.2, 2),
+      stud(0, 3),
+      member({
+        system: 'roof-framing',
+        role: 'rafter',
+        dims: [3, 0.14, 0.04],
+        position: [5, 2.8, 1],
+        rotation: [0, 0, 0.4],
+      }),
+      // vertical pipe OUT of the cut band (x=10; cutX stays 5)
+      member({
+        system: 'plumbing',
+        role: 'pipe-run',
+        size: undefined,
+        material: 'pvc',
+        dims: [0.05, 2, 0.05],
+        position: [10, 1, 1],
+      }),
+    ]
+    const sheets = buildPlanSet(members, [], {})
+    const south = sheets.find((s) => s.title.startsWith('South elevation'))?.svg ?? ''
+    expect(south).toContain('>wall framing</text>')
+    expect(south).toContain('>roof framing</text>')
+    expect(south).toContain('>plumbing</text>')
+    expect(south).toContain('fill="#6f8fa8"')
+    // the section legend lists only the systems inside the cut band
+    const section = sheets.find((s) => s.title.startsWith('Section A-A'))?.svg ?? ''
+    expect(section).toContain('>wall framing</text>')
+    expect(section).not.toContain('>plumbing</text>')
+    expect(sheets[0]?.svg ?? '').toContain('>wall framing</text>') // cover
+  })
+
+  test('long takeoff rows wrap at a word boundary — never a mid-word ellipsis', () => {
+    const bolts: Member[] = []
+    for (let i = 0; i < 12; i++) {
+      bolts.push(
+        member({
+          system: 'foundation',
+          role: 'anchor-bolt',
+          size: undefined,
+          material: 'steel',
+          dims: [0.016, 0.23, 0.016],
+          length: 0.23,
+          position: [i * 0.8, -0.05, 0],
+        }),
+      )
+    }
+    const svg =
+      buildPlanSet(bolts, [], {}).find((s) => s.title.startsWith('Schedules'))?.svg ?? ''
+    // the R403.1.6 citation survives intact on the wrapped second line
+    expect(svg).toContain('(R403.1.6))')
+    expect(svg).not.toMatch(/R40[^)<]*…/)
+    // continuation line is indented 14px into the column
+    expect(svg).toContain('<text x="62"')
+  })
+
+  test('roof plan flags <60% roof coverage; full coverage stays clean', () => {
+    const shell = [stud(0, 0), stud(10, 0), stud(10, 8), stud(0, 8)]
+    const rafter = (dims: [number, number, number], x: number, z: number, rz = 0): Member =>
+      member({ system: 'roof-framing', role: 'rafter', dims, position: [x, 2.6, z], rotation: [0, 0, rz] })
+    const sheets = buildPlanSet(
+      [...shell, rafter([2, 0.14, 0.04], 1, 0.5, 0.3), rafter([2, 0.14, 0.04], 1, 1.5, 0.3)],
+      [],
+      {},
+    )
+    const roof = sheets.find((s) => s.title === 'Roof framing plan')?.svg ?? ''
+    expect(roof).toContain('no roof members')
+    expect(roof).toContain('check roof coverage')
+    // the warning also joins the schedules flag block (opts.warnings path)
+    const sched = sheets.find((s) => s.title.startsWith('Schedules'))?.svg ?? ''
+    expect(sched).toContain('part of the plan has no roof members')
+    const clean = buildPlanSet(
+      [...shell, rafter([10.2, 0.14, 0.04], 5, 0), rafter([10.2, 0.14, 0.04], 5, 8)],
+      [],
+      {},
+    )
+    expect(clean.find((s) => s.title === 'Roof framing plan')?.svg ?? '').not.toContain(
+      'check roof coverage',
+    )
+  })
+
+  test('foundation plan: OPEN circles for rebar dowels, FILLED dots for bolts', () => {
+    const steel = (role: Member['role'], dims: [number, number, number], x: number): Member =>
+      member({
+        system: 'foundation',
+        role,
+        size: undefined,
+        material: 'steel',
+        dims,
+        length: Math.max(...dims),
+        position: [x, -0.2, 0],
+      })
+    const members = [
+      member({ system: 'foundation', role: 'footing', size: undefined, material: 'concrete', dims: [4, 0.2, 0.4], position: [2, -0.3, 0] }),
+      steel('anchor-bolt', [0.016, 0.23, 0.016], 1),
+      steel('anchor-bolt', [0.016, 0.23, 0.016], 3),
+      steel('rebar', [0.013, 0.55, 0.013], 1.5),
+      steel('rebar', [0.013, 0.55, 0.013], 2.5),
+      // horizontal continuous bar keeps its rect — only VERTICAL dowels circle
+      steel('rebar', [4, 0.013, 0.013], 2),
+    ]
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title === 'Foundation plan')?.svg ?? ''
+    // 2 dowels drawn open + 1 legend swatch
+    expect([...svg.matchAll(/r="2\.6" fill="none"/g)]).toHaveLength(3)
+    // 2 bolts drawn filled + 1 legend swatch
+    expect([...svg.matchAll(/r="2\.2" fill="#444"/g)]).toHaveLength(3)
+    expect(svg).toContain('vertical rebar dowels — 2 pcs')
+  })
+})
+
 describe('elevation orientation + section membership (blueprint round-2)', () => {
   test('east elevation puts north (−z) on screen-right; west mirrors it', () => {
     // two studs on an east wall: zNear=1, zFar=7 — standing EAST, the z=7

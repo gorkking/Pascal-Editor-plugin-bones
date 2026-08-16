@@ -397,6 +397,23 @@ function planSheet(
   const sorted = [...mine].sort((a, b2) => b2.dims[0] - a.dims[0])
   for (const m of sorted) {
     if (stroked.has(m)) continue
+    // Foundation hardware symbols (blueprint round-3): anchor bolts print as
+    // FILLED dots, vertical rebar dowels as OPEN circles — identical gray
+    // squares made the two anchorage systems indistinguishable on paper.
+    if (
+      def.key === 'foundation' &&
+      (m.role === 'anchor-bolt' ||
+        (m.role === 'rebar' && m.dims[1] > m.dims[0] && m.dims[1] > m.dims[2]))
+    ) {
+      const cx = X(m.position[0]).toFixed(1)
+      const cy = Z(m.position[2]).toFixed(1)
+      shapes.push(
+        m.role === 'anchor-bolt'
+          ? `<circle cx="${cx}" cy="${cy}" r="2.2" fill="#444"/>`
+          : `<circle cx="${cx}" cy="${cy}" r="2.6" fill="none" stroke="#444" stroke-width="0.9"/>`,
+      )
+      continue
+    }
     // Plan projection from the FULL euler (XYZ: M = Rx·Ry·Rz applied Rz
     // first): rolled members (outlookers) ignore neither rx nor the yaw —
     // round-14 caught 5.8° drift on yawed roofs from the yaw-only path.
@@ -597,7 +614,18 @@ function planSheet(
     if (bolts.length > 0) {
       const y = MARGIN + 14 + legendLines.length * 14
       legendLines.push(
-        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`1/2" anchor bolts @ 6'-0" o.c. max — ${bolts.length} pcs`)}</text>`,
+        `<circle cx="${MARGIN + 7}" cy="${y - 3}" r="2.2" fill="#444"/>` +
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`1/2" anchor bolts @ 6'-0" o.c. max — ${bolts.length} pcs`)}</text>`,
+      )
+    }
+    const dowels = mine.filter(
+      (m) => m.role === 'rebar' && m.dims[1] > m.dims[0] && m.dims[1] > m.dims[2],
+    )
+    if (dowels.length > 0) {
+      const y = MARGIN + 14 + legendLines.length * 14
+      legendLines.push(
+        `<circle cx="${MARGIN + 7}" cy="${y - 3}" r="2.6" fill="none" stroke="#444" stroke-width="0.9"/>` +
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`vertical rebar dowels — ${dowels.length} pcs`)}</text>`,
       )
     }
   }
@@ -606,6 +634,37 @@ function planSheet(
     legendLines.push(
       `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`STUDS @ ${opts.studSpacingIn}" O.C. U.N.O.`)}</text>`,
     )
+  }
+  // Printed roof-coverage flag (blueprint round-3): a wing without roof
+  // members is invisible on a per-sheet read — call it out on THIS sheet.
+  if (def.key === 'roof') {
+    const roofWarn = roofCoverageWarning(members)
+    if (roofWarn) {
+      const y = () => MARGIN + 14 + legendLines.length * 14
+      legendLines.push(
+        `<text x="${MARGIN + 4}" y="${y()}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#a03015">${esc('⚑ part of the plan has no roof members —')}</text>`,
+      )
+      legendLines.push(
+        `<text x="${MARGIN + 4}" y="${y()}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#a03015">${esc('check roof coverage')}</text>`,
+      )
+    }
+  }
+  // A-A cut mark (blueprint round-3): the section's cut plane printed on
+  // the wall framing plan — dashed line at the SHARED cutX with 'A' bubbles
+  // at both ends, so the section can be located on the plan.
+  if (def.key === 'wall') {
+    const cutX = sectionCutX(members)
+    if (cutX !== null) {
+      const cx = X(cutX)
+      const y0 = MARGIN + 14
+      const y1 = MARGIN + (H - 2 * MARGIN - TITLE_H) - 6
+      const bubble = (y: number): string =>
+        `<circle cx="${cx.toFixed(1)}" cy="${y.toFixed(1)}" r="10" fill="#fff" stroke="#222" stroke-width="1.4"/>` +
+        `<text x="${cx.toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="10" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#222">A</text>`
+      shapes.push(
+        `<line x1="${cx.toFixed(1)}" y1="${(y0 + 10).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${(y1 - 10).toFixed(1)}" stroke="#222" stroke-width="1.2" stroke-dasharray="9 4"/>${bubble(y0)}${bubble(y1)}`,
+      )
+    }
   }
 
   const legend =
@@ -624,7 +683,7 @@ function planSheet(
 // their longest local axis: honest line-art framing, no hidden-face solver.
 // ---------------------------------------------------------------------------
 
-type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string; butt?: boolean }
+type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string; butt?: boolean; opacity?: number }
 
 /** World-space endpoints of a member's longest axis + its stroke thickness. */
 function memberAxis(m: Member, lift: number): { a: [number, number, number]; b: [number, number, number]; w: number } {
@@ -667,6 +726,76 @@ const SYSTEM_STROKE: Record<string, string> = {
   electrical: '#c2803d',
   plumbing: '#6f8fa8',
   hvac: '#8fa8a0',
+}
+
+const STROKE_LEGEND_NAMES: Record<string, string> = {
+  foundation: 'foundation',
+  'wall-framing': 'wall framing',
+  'floor-framing': 'floor framing',
+  'roof-framing': 'roof framing',
+  electrical: 'electrical',
+  plumbing: 'plumbing',
+  hvac: 'HVAC',
+}
+
+/**
+ * The section's cut plane: mid X of the member x-position extents. ONE
+ * helper shared by sectionSheet and the wall-plan A-A cut mark (blueprint
+ * round-3: the mark must land exactly where the section actually cuts).
+ */
+function sectionCutX(members: Member[]): number | null {
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  for (const m of members) {
+    minX = Math.min(minX, m.position[0])
+    maxX = Math.max(maxX, m.position[0])
+  }
+  return Number.isFinite(minX) ? (minX + maxX) / 2 : null
+}
+
+/**
+ * Compact swatch legend of the SYSTEM_STROKE colors drawn on a line-art
+ * sheet (blueprint round-3: the examiner couldn't tell rafters from pipes on
+ * the elevations). `filter` mirrors the sheet's own memberSegs filter so the
+ * legend lists only what that sheet actually shows.
+ */
+function strokeLegend(members: Member[], filter?: (m: Member) => boolean, yOff = 0): string {
+  const systems = new Set<string>()
+  for (const m of members) {
+    if (m.role === 'wire-run' || m.face) continue // memberSegs skips these
+    if (filter && !filter(m)) continue
+    systems.add(m.system)
+  }
+  const present = Object.keys(STROKE_LEGEND_NAMES).filter((s) => systems.has(s))
+  if (present.length === 0) return ''
+  const rows = present.map((s, i) => {
+    const y = MARGIN + 14 + yOff + i * 14
+    return (
+      `<rect x="${MARGIN + 2}" y="${y - 8}" width="10" height="10" fill="${SYSTEM_STROKE[s]}" stroke="#444" stroke-width="0.5"/>` +
+      `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(STROKE_LEGEND_NAMES[s] ?? s)}</text>`
+    )
+  })
+  return `<rect x="${MARGIN - 4}" y="${MARGIN - 6 + yOff}" width="150" height="${present.length * 14 + 14}" fill="#ffffff" fill-opacity="0.92" stroke="#ccc" stroke-width="0.5"/>${rows.join('')}`
+}
+
+/**
+ * 'Wing has no roof' printed flag (blueprint round-3): roof members exist
+ * but their plan bbox covers <60% of the wall-plan bbox area — an L-wing or
+ * addition the roof engine missed. Printed on the roof sheet legend AND
+ * joined into the schedules flag block.
+ */
+function roofCoverageWarning(members: Member[]): string | null {
+  const roof = members.filter((m) => m.system === 'roof-framing')
+  const wall = members.filter((m) => m.system === 'wall-framing')
+  if (roof.length === 0 || wall.length === 0) return null
+  const rb = planBounds(roof, [])
+  const wb = planBounds(wall, [])
+  if (!rb || !wb) return null
+  const area = (b: Bounds): number => Math.max(0, b.maxX - b.minX) * Math.max(0, b.maxZ - b.minZ)
+  const wallArea = area(wb)
+  if (wallArea <= 1) return null
+  if (area(rb) >= 0.6 * wallArea) return null
+  return 'part of the plan has no roof members — check roof coverage'
 }
 
 function memberSegs(
@@ -724,10 +853,10 @@ function fitSegs(segs: Seg[], fixedRatio?: number): { sx: (x: number) => number;
 
 function segSvg(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string {
   return segs
-    .map(
-      (s) =>
-        `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="${s.butt ? 'butt' : 'round'}"${s.butt ? ' stroke-dasharray="5 3" opacity="0.75"' : ''}/>`,
-    )
+    .map((s) => {
+      const op = s.opacity ?? (s.butt ? 0.75 : null)
+      return `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="${s.butt ? 'butt' : 'round'}"${s.butt ? ' stroke-dasharray="5 3"' : ''}${op !== null ? ` opacity="${op}"` : ''}/>`
+    })
     .join('')
 }
 
@@ -755,7 +884,7 @@ function elevationSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
     const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/><text x="${MARGIN - 14}" y="${(gy + 14).toFixed(1)}" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#222">GRADE</text>`
     sheets.push({
       title: ev.title,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}${chrome(ev.title, opts, f.scale, '', { ratio: f.ratio, northArrow: false })}</svg>`,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}${chrome(ev.title, opts, f.scale, strokeLegend(members), { ratio: f.ratio, northArrow: false })}</svg>`,
     })
   }
   return sheets
@@ -763,35 +892,37 @@ function elevationSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
 
 function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null {
   if (members.length === 0) return null
-  let minX = Number.POSITIVE_INFINITY
-  let maxX = Number.NEGATIVE_INFINITY
-  for (const m of members) {
-    minX = Math.min(minX, m.position[0])
-    maxX = Math.max(maxX, m.position[0])
-  }
-  const cutX = (minX + maxX) / 2
+  const cutX = sectionCutX(members)
+  if (cutX === null) return null
   const BAND = 0.9
-  const segs = memberSegs(
-    members,
-    opts,
-    (p) => [p[2], -p[1]],
-    (p) => p[0],
-    (m) => {
-      // a member belongs to the section if its EXTENT crosses the cut band
-      // (round-2: center-only tests dropped the very walls the cut slices)
-      const yaw = m.rotation[1]
-      const ex = (Math.abs(Math.cos(yaw)) * m.dims[0] + Math.abs(Math.sin(yaw)) * m.dims[2]) / 2
-      return Math.abs(m.position[0] - cutX) < BAND + ex
-    },
+  // rotation-aware x half-extent (round-2: center-only tests dropped the
+  // very walls the cut slices)
+  const xExtent = (m: Member): number =>
+    (Math.abs(Math.cos(m.rotation[1])) * m.dims[0] + Math.abs(Math.sin(m.rotation[1])) * m.dims[2]) / 2
+  const crossesCut = (m: Member): boolean => Math.abs(m.position[0] - cutX) <= xExtent(m)
+  const inBand = (m: Member): boolean => Math.abs(m.position[0] - cutX) < BAND + xExtent(m)
+  const proj = (p: [number, number, number]): [number, number] => [p[2], -p[1]]
+  const depth = (p: [number, number, number]): number => p[0]
+  // Section poché (blueprint round-3): members the cut plane actually
+  // slices print FILLED dark; the rest of the band stays light 'beyond'
+  // line work at reduced opacity — standard cut vs beyond drafting.
+  const beyond: Seg[] = memberSegs(members, opts, proj, depth, (m) => inBand(m) && !crossesCut(m)).map(
+    (s) => ({ ...s, opacity: 0.6 }),
   )
-  const f = fitSegs(segs)
+  const cut: Seg[] = memberSegs(members, opts, proj, depth, crossesCut).map((s) => ({
+    ...s,
+    color: '#222',
+    w: s.w * 1.3,
+    butt: false,
+  }))
+  const f = fitSegs([...beyond, ...cut])
   if (!f) return null
   const gy = f.sy(0)
   const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/>`
   const title = 'Section A-A (transverse)'
   return {
     title,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band at plan midpoint — members within the band shown</text>${chrome(title, opts, f.scale, '', { ratio: f.ratio, northArrow: false })}</svg>`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${segSvg(cut, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band at plan midpoint — dark = cut by the plane, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
   }
 }
 
@@ -821,7 +952,7 @@ function coverSheet(members: Member[], opts: PlanSetOptions, index: string[]): P
     .join('')
   return {
     title: 'Cover',
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}<text x="${W - MARGIN - 236}" y="${MARGIN + 8}" font-size="12" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">SHEET INDEX</text><text x="${W - MARGIN}" y="${H - MARGIN}" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#555">__SHEET_NO__ · members drawn at model elevations</text>${indexRows}<text x="${MARGIN}" y="${H - MARGIN - 44}" font-size="30" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">${esc(title)}</text>${lines
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${strokeLegend(members)}<text x="${W - MARGIN - 236}" y="${MARGIN + 8}" font-size="12" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">SHEET INDEX</text><text x="${W - MARGIN}" y="${H - MARGIN}" text-anchor="end" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#555">__SHEET_NO__ · members drawn at model elevations</text>${indexRows}<text x="${MARGIN}" y="${H - MARGIN - 44}" font-size="30" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">${esc(title)}</text>${lines
       .map(
         (l, i) =>
           `<text x="${MARGIN}" y="${H - MARGIN - 22 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#444">${esc(l)}</text>`,
@@ -848,9 +979,29 @@ function schedulesSheets(
   const colW = (W - 2 * MARGIN) / 2
   const lineH = 15
   const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
-  const perSheet = 2 * maxLines
+  // Long rows WRAP to a second line at a word boundary (blueprint round-3:
+  // 'R403.1…' ellipsized mid-word) — capacities count LINES, a wrapped row
+  // costs 2, and one line of slack per column keeps a 2-line row from ever
+  // straddling into the reserved blocks.
+  const wrapRow = (text: string, max = 62): string[] => {
+    if (text.length <= max) return [text]
+    const cut = text.lastIndexOf(' ', max)
+    const at = cut > 24 ? cut : max
+    const head = text.slice(0, at)
+    let rest = text.slice(at).trim()
+    if (rest.length > max) {
+      const rcut = rest.lastIndexOf(' ', max - 1)
+      rest = `${rest.slice(0, rcut > 24 ? rcut : max - 1)}…`
+    }
+    return [head, rest]
+  }
+  const wrapped = rows.map((r) => {
+    const detail = r.detail && r.detail !== 'linear feet' ? ` (${r.detail})` : ''
+    return wrapRow(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}${detail}`)
+  })
+  const perSheetLines = 2 * (maxLines - 1)
   // The flag block bottom-anchors on the LAST page — shrink that page's
-  // row capacity so a full column never runs under the red list
+  // line capacity so a full column never runs under the red list
   // (quality round-3: row 41 and the flags overprinted at y≈673).
   const flagRows = Math.min(flags.length, 6) + (flags.length > 6 ? 1 : 0)
   // Building characteristics print just above the flags on the same page:
@@ -858,43 +1009,71 @@ function schedulesSheets(
   const charLines = opts.characteristics ? 5 : 0
   const lastPageCap =
     2 *
-    Math.max(
+    (Math.max(
       4,
       maxLines - (flagRows > 0 ? flagRows + 1 : 0) - (charLines > 0 ? charLines + 1 : 0),
-    )
-  const pages = (() => {
-    if (rows.length <= lastPageCap) return 1
-    let p = 2
-    while ((p - 1) * perSheet + lastPageCap < rows.length) p++
-    return p
-  })()
+    ) -
+      1)
+  const totalLines = wrapped.reduce((sum, w) => sum + w.length, 0)
+  let pages = 1
+  if (totalLines > lastPageCap) {
+    pages = 2
+    while ((pages - 1) * perSheetLines + lastPageCap < totalLines) pages++
+  }
   // Even distribution: filling early pages to 100% left a near-blank
   // flags-only sheet at the end (blueprint P1) — every page carries its
-  // share; the last stays under its flag-shrunk cap.
-  const basePerPage =
-    pages === 1
-      ? lastPageCap
-      : Math.max(
-          Math.ceil(rows.length / pages),
-          Math.ceil((rows.length - lastPageCap) / (pages - 1)),
-        )
+  // line share; the last stays under its flag-shrunk cap (page count grows
+  // if wrap fragmentation overflows it).
+  let placements: number[][] = []
+  for (;;) {
+    placements = []
+    let cursor = 0
+    let linesLeft = totalLines
+    for (let p = 0; p < pages - 1; p++) {
+      const share = Math.min(perSheetLines, Math.max(2, Math.ceil(linesLeft / (pages - p))))
+      const take: number[] = []
+      let used = 0
+      while (cursor < rows.length && used + (wrapped[cursor] as string[]).length <= share) {
+        used += (wrapped[cursor] as string[]).length
+        take.push(cursor)
+        cursor++
+      }
+      linesLeft -= used
+      placements.push(take)
+    }
+    const rest: number[] = []
+    let restLines = 0
+    while (cursor < rows.length) {
+      restLines += (wrapped[cursor] as string[]).length
+      rest.push(cursor)
+      cursor++
+    }
+    placements.push(rest)
+    if (restLines <= lastPageCap) break
+    pages++
+  }
   const sheets: PlanSheet[] = []
-  let cursorRow = 0
-  for (let page = 0; page < pages; page++) {
-    const cap = page === pages - 1 ? lastPageCap : basePerPage
-    const slice = rows.slice(cursorRow, cursorRow + cap)
-    cursorRow += slice.length
+  for (const [page, take] of placements.entries()) {
+    const pageLineCount = take.reduce((sum, i) => sum + (wrapped[i] as string[]).length, 0)
+    const colTarget = Math.ceil(pageLineCount / 2)
     const cells: string[] = []
-    const pageLines = Math.ceil(slice.length / 2)
-    slice.forEach((r, i) => {
-      const col = Math.floor(i / pageLines)
-      const x = MARGIN + col * colW
-      const y = MARGIN + 24 + (i % pageLines) * lineH
-      const detail = r.detail && r.detail !== 'linear feet' ? ` (${r.detail})` : ''
-      cells.push(
-        `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(clip(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}${detail}`, 62))}</text>`,
-      )
-    })
+    let col = 0
+    let line = 0
+    for (const i of take) {
+      const rowLines = wrapped[i] as string[]
+      if (col === 0 && line > 0 && line + rowLines.length > colTarget) {
+        col = 1
+        line = 0
+      }
+      for (const [k, text] of rowLines.entries()) {
+        const x = MARGIN + col * colW + (k > 0 ? 14 : 0)
+        const y = MARGIN + 24 + line * lineH
+        cells.push(
+          `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(text)}</text>`,
+        )
+        line++
+      }
+    }
     // Flags on the LAST page; overflow called out, never silently dropped
     // (round-14: a 60-wall house lost 11 rows and most flags).
     let flagText = ''
@@ -960,7 +1139,13 @@ export function buildPlanSet(
   sheets.push(...elevationSheets(members, opts))
   const section = sectionSheet(members, opts)
   if (section) sheets.push(section)
-  sheets.push(...schedulesSheets(members, fixtures, opts))
+  // The roof-coverage flag prints on the roof sheet AND joins the schedules
+  // flag block (opts.warnings handling) so it survives a text-only read.
+  const roofWarn = roofCoverageWarning(members)
+  const schedOpts = roofWarn
+    ? { ...opts, warnings: [...(opts.warnings ?? []), roofWarn] }
+    : opts
+  sheets.push(...schedulesSheets(members, fixtures, schedOpts))
   const cover = coverSheet(members, opts, sheets.map((sh) => sh.title))
   if (cover) sheets.unshift(cover)
   // SHEET n/N in every title block (blueprint C6) — patch the placeholder
