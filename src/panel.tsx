@@ -8,6 +8,7 @@ import { computeLevel } from './framing/compute'
 import { extractLevels } from './core/wall-model'
 import { FramingNode, type WallConstruction } from './framing/schema'
 import { buildPlanSet, planSetHtml } from './plans/plan-set'
+import { characteristicsCsv, characteristicsRows } from './engines/characteristics'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
@@ -67,6 +68,7 @@ export default function BonesPanel() {
 
       {framingNode && <WallOverrideSection framingNode={framingNode} />}
       {framingNode && result && <TakeoffSection result={result} />}
+      {framingNode && result && <CharacteristicsSection result={result} />}
 
       <LumberSection />
 
@@ -349,6 +351,75 @@ function TakeoffSection({ result }: { result: NonNullable<ReturnType<typeof comp
         ))}
       </div>
     </div>
+  )
+}
+
+/** Sidebar unit labels for the shared characteristics rows (CSV keeps ascii). */
+const CHARACTERISTIC_UNIT: Record<string, string> = {
+  m2: 'm²',
+  m3: 'm³',
+  count: '',
+  IECC: '',
+  'ft2·F·h/BTU': '',
+  'W/K': 'W/K',
+  W: 'W',
+  tons: 'ton',
+}
+
+/**
+ * Building characteristics — whole-building metrics (floor area, volume,
+ * envelope UA, design loads) in a compact drop-down under the takeoff.
+ * Helps dimension the HVAC; every number's assumption rides the footer.
+ */
+function CharacteristicsSection({
+  result,
+}: {
+  result: NonNullable<ReturnType<typeof computeLevel>>
+}) {
+  const c = result.characteristics
+  if (!c || result.members.length === 0) return null
+  const rows = characteristicsRows(c)
+  return (
+    <details className="group">
+      <summary className="flex cursor-pointer items-center justify-between font-medium text-xs">
+        Building characteristics
+        <button
+          className="rounded-md border border-sidebar-border/60 px-2 py-0.5 font-normal text-[10px] text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent"
+          onClick={(e) => {
+            // a click inside <summary> would also toggle the drawer
+            e.preventDefault()
+            e.stopPropagation()
+            navigator.clipboard?.writeText(characteristicsCsv(c))
+          }}
+          type="button"
+        >
+          Copy CSV
+        </button>
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-0.5">
+        {rows.map((row) => {
+          const unit = CHARACTERISTIC_UNIT[row.unit] ?? row.unit
+          return (
+            <div
+              className="flex items-baseline justify-between gap-2 text-[11px]"
+              key={row.metric}
+              title={`${row.metric}: ${row.value} ${row.unit}`}
+            >
+              <span className="min-w-0 flex-1 truncate text-sidebar-foreground/70">
+                {row.metric}
+              </span>
+              <span className="shrink-0 tabular-nums text-sidebar-foreground/90">
+                {row.value}
+                {unit ? ` ${unit}` : ''}
+              </span>
+            </div>
+          )
+        })}
+        <p className="mt-1 text-[10px] text-sidebar-foreground/40 leading-relaxed">
+          {c.notes.join(' · ')}
+        </p>
+      </div>
+    </details>
   )
 }
 
