@@ -146,3 +146,25 @@ describe('classifyRoom', () => {
     expect(classifyRoom('Living')).toBe('other')
   })
 })
+
+describe('extractPlacedFixtures — placed items are the plumbing demand points', () => {
+  const { extractPlacedFixtures } = require('./wall-model') as typeof import('./wall-model')
+  test('maps catalog asset ids to sanitary profiles (IRC P3004.1 / P3201.7)', () => {
+    const nodes = {
+      lvl: { id: 'lvl', type: 'level', level: 0, height: 2.5 },
+      t: { id: 't', type: 'item', parentId: 'lvl', position: [10.9, 0, 6.95], rotation: [0, Math.PI, 0], asset: { id: 'toilet' } },
+      s: { id: 's', type: 'item', parentId: 'lvl', position: [2, 0, 3], rotation: [0, 0, 0], asset: { id: 'shower-square' } },
+      chair: { id: 'chair', type: 'item', parentId: 'lvl', position: [5, 0, 5], rotation: [0, 0, 0], asset: { id: 'armchair' } },
+      other: { id: 'other', type: 'item', parentId: 'other-level', position: [1, 0, 1], rotation: [0, 0, 0], asset: { id: 'bathtub' } },
+    } as Record<string, Record<string, unknown>>
+    const placed = extractPlacedFixtures(nodes, 'lvl')
+    expect(placed.map((p) => p.kind).sort()).toEqual(['shower', 'toilet'])
+    const toilet = placed.find((p) => p.kind === 'toilet')
+    expect(toilet?.hot).toBe(false)
+    expect(toilet?.dfu).toBe(3)
+    expect(toilet?.drainIn).toBe(3)
+    expect(toilet?.plan).toEqual([10.9, 6.95])
+    const shower = placed.find((p) => p.kind === 'shower')
+    expect(shower?.hot).toBe(true)
+  })
+})

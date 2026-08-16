@@ -164,6 +164,58 @@ export function extractSlabs(nodes: NodesRecord, levelId: string): SlabSlice[] {
   return slabs
 }
 
+
+// ---------------------------------------------------------------------------
+// Placed sanitary fixtures — the items the USER dropped (toilet, shower…)
+// are the plumbing demand points; room-category guessing is the fallback.
+// ---------------------------------------------------------------------------
+
+export type PlacedFixtureSlice = {
+  id: string
+  kind: 'toilet' | 'lavatory' | 'shower' | 'bathtub' | 'clothes-washer' | 'kitchen-sink'
+  /** Level-local plan position of the item center. */
+  plan: readonly [number, number]
+  yaw: number
+  /** Needs a hot-water supply (toilets are cold-only). */
+  hot: boolean
+  /** Drainage fixture units (IRC P3004.1). */
+  dfu: number
+  /** Trap/drain size, inches (IRC P3201.7). */
+  drainIn: number
+}
+
+/** asset.id → sanitary profile. Kitchen counter blocks carry the sink. */
+const SANITARY_ASSETS: Record<string, Omit<PlacedFixtureSlice, 'id' | 'plan' | 'yaw'>> = {
+  toilet: { kind: 'toilet', hot: false, dfu: 3, drainIn: 3 },
+  'bathroom-sink': { kind: 'lavatory', hot: true, dfu: 1, drainIn: 1.25 },
+  'shower-square': { kind: 'shower', hot: true, dfu: 2, drainIn: 2 },
+  'shower-angle': { kind: 'shower', hot: true, dfu: 2, drainIn: 2 },
+  bathtub: { kind: 'bathtub', hot: true, dfu: 2, drainIn: 1.5 },
+  'washing-machine': { kind: 'clothes-washer', hot: true, dfu: 2, drainIn: 2 },
+  kitchen: { kind: 'kitchen-sink', hot: true, dfu: 2, drainIn: 1.5 },
+  'kitchen-counter': { kind: 'kitchen-sink', hot: true, dfu: 2, drainIn: 1.5 },
+}
+
+export function extractPlacedFixtures(nodes: NodesRecord, levelId: string): PlacedFixtureSlice[] {
+  const out: PlacedFixtureSlice[] = []
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'item' || node.parentId !== levelId) continue
+    if (node.visible === false) continue
+    const asset = node.asset as { id?: string } | undefined
+    const profile = asset?.id ? SANITARY_ASSETS[asset.id] : undefined
+    if (!profile) continue
+    const pos = Array.isArray(node.position) ? (node.position as number[]) : [0, 0, 0]
+    const rot = Array.isArray(node.rotation) ? (node.rotation as number[]) : [0, 0, 0]
+    out.push({
+      id: String(node.id ?? ''),
+      plan: [num(pos[0], 0), num(pos[2], 0)],
+      yaw: num(rot[1], 0),
+      ...profile,
+    })
+  }
+  return out
+}
+
 /** Ordered level ids (bottom → top) with their storey heights. */
 export type LevelSlice = {
   id: string
