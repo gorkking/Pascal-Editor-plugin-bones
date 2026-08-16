@@ -407,6 +407,113 @@ describe('resolveWallConstruction — mixed CMU/framed overrides', () => {
 })
 
 /**
+ * GATE (full wall engineering panel — schema + resolution): the object
+ * override carries the wall's full engineering identity (studSize/spacingIn/
+ * insulation/insulationR/cladding); every field is optional and rides
+ * through resolution VERBATIM, junk values are rejected, and an object with
+ * no engineering fields resolves exactly like today (byte-equal defaults).
+ */
+describe('WallEngineeringOverride — schema + resolution', () => {
+  const wall = (exterior: boolean): WallSlice => ({
+    id: 'w',
+    start: [0, 0],
+    end: [4, 0],
+    length: 4,
+    dir: [1, 0],
+    thickness: 0.15,
+    height: 2.5,
+    exterior,
+    openings: [],
+    curved: false,
+  })
+
+  test('schema parses every engineering field', () => {
+    const full = {
+      construction: 'framed' as const,
+      studSize: '2x6' as const,
+      spacingIn: 24 as const,
+      insulation: 'batt' as const,
+      insulationR: 21,
+      cladding: 'fiberCement' as const,
+    }
+    const parsed = FramingNode.parse({ wallOverrides: { w: full } })
+    expect(parsed.wallOverrides.w).toEqual(full)
+    // CMU walls carry engineering fields too (cladding note, insulation v1)
+    const cmu = FramingNode.parse({
+      wallOverrides: { w: { construction: 'cmu', cmuHeightM: 1.016, insulation: 'none' } },
+    })
+    expect(cmu.wallOverrides.w).toEqual({
+      construction: 'cmu',
+      cmuHeightM: 1.016,
+      insulation: 'none',
+    })
+  })
+
+  test('schema rejects junk field values', () => {
+    const bad = [
+      { construction: 'framed', studSize: '2x8' },
+      { construction: 'framed', spacingIn: 12 },
+      { construction: 'framed', insulation: 'wool' },
+      { construction: 'framed', insulationR: -5 },
+      { construction: 'framed', cladding: 'chrome' },
+    ]
+    for (const x of bad) {
+      expect(() => FramingNode.parse({ wallOverrides: { x } })).toThrow()
+    }
+  })
+
+  test('resolution carries every present field verbatim, nothing else', () => {
+    expect(
+      resolveWallConstruction(
+        wall(true),
+        {
+          wallOverrides: {
+            w: {
+              construction: 'framed',
+              studSize: '2x4',
+              spacingIn: 24,
+              insulation: 'batt',
+              insulationR: 15,
+              cladding: 'stucco',
+            },
+          },
+        },
+        'framed',
+      ),
+    ).toEqual({
+      construction: 'framed',
+      studSize: '2x4',
+      spacingIn: 24,
+      insulation: 'batt',
+      insulationR: 15,
+      cladding: 'stucco',
+    })
+    // partial object: only the present fields ride through
+    expect(
+      resolveWallConstruction(
+        wall(true),
+        { wallOverrides: { w: { construction: 'framed', spacingIn: 24 } } },
+        'framed',
+      ),
+    ).toEqual({ construction: 'framed', spacingIn: 24 })
+  })
+
+  test('object with no engineering fields ≡ the plain string (defaults untouched)', () => {
+    expect(
+      resolveWallConstruction(
+        wall(true),
+        { wallOverrides: { w: { construction: 'framed' } } },
+        'framed',
+      ),
+    ).toEqual({ construction: 'framed' })
+    // string + jurisdiction-default paths never grow engineering fields
+    expect(resolveWallConstruction(wall(true), { wallOverrides: {} }, 'cmu')).toEqual({
+      construction: 'cmu',
+    })
+  })
+})
+
+/**
  * GATE (extended service points): thermostat / heat-pump / electric-meter
  * nodes flow through computeLevel's extraction EXTENSION (compute.ts owns it
  * — wall-model.ts stays untouched) into the hvac + electrical engines, with

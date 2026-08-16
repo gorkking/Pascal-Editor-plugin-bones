@@ -45,7 +45,7 @@ import { frameWalls } from '../engines/wall-framing'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
 import type { TakeoffAreas } from '../engines/takeoff'
-import type { FramingNode, WallConstruction } from './schema'
+import type { FramingNode, WallConstruction, WallEngineeringOverride } from './schema'
 
 export type ComputeResult = {
   members: Member[]
@@ -65,11 +65,15 @@ export type ComputeResult = {
  * Fully-resolved construction for one wall. `cmuHeightM` is only carried for
  * a 'cmu' wall whose override requested a partial height (mixed CMU/framed —
  * the engines snap it to whole courses); undefined = full-height, as today.
+ * The engineering fields (studSize/spacingIn/insulation/insulationR/cladding)
+ * ride through VERBATIM when the object override carries them — every field
+ * stays absent otherwise, so a resolved default is byte-indistinguishable
+ * from today's and the engines' fallback paths stay untouched.
  */
-export type ResolvedWallConstruction = {
-  construction: WallConstruction
-  cmuHeightM?: number
-}
+export type ResolvedWallConstruction = { construction: WallConstruction } & Omit<
+  WallEngineeringOverride,
+  'construction'
+>
 
 /** Construction resolution for one wall: override → jurisdiction default → framed. */
 export function resolveWallConstruction(
@@ -80,9 +84,15 @@ export function resolveWallConstruction(
   const override = config.wallOverrides?.[wall.id]
   if (typeof override === 'string') return { construction: override }
   if (override) {
-    return override.cmuHeightM === undefined
-      ? { construction: override.construction }
-      : { construction: override.construction, cmuHeightM: override.cmuHeightM }
+    return {
+      construction: override.construction,
+      ...(override.cmuHeightM !== undefined ? { cmuHeightM: override.cmuHeightM } : {}),
+      ...(override.studSize !== undefined ? { studSize: override.studSize } : {}),
+      ...(override.spacingIn !== undefined ? { spacingIn: override.spacingIn } : {}),
+      ...(override.insulation !== undefined ? { insulation: override.insulation } : {}),
+      ...(override.insulationR !== undefined ? { insulationR: override.insulationR } : {}),
+      ...(override.cladding !== undefined ? { cladding: override.cladding } : {}),
+    }
   }
   if (wall.exterior && exteriorDefault === 'cmu') return { construction: 'cmu' }
   return { construction: 'framed' }
