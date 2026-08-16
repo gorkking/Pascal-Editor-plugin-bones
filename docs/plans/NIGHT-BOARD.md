@@ -33,7 +33,25 @@ D. HVAC: (1) thermostat + heat-pump added to bones:service serviceType
    28ga tie = ducts don't pass through plates; E/M1601 duct installation;
    practice = attic trunk + ceiling boots). New gate: no duct member OBB
    crosses any wall's plate band; register fixtures at ceiling plane.
-Batching: A+B one agent (small), D one agent (engine+service), C scout
+E. ELECTRIC METER (user, same morning): standard chain = street input →
+   METER on the house side → panel. Add serviceType 'electric-meter':
+   auto spot on the exterior face nearest the panel (outside), heavy
+   service cable street-edge → meter → panel feed; movable like the rest.
+   (Water meter already exists; sewer exit exists.)
+
+## FUTURE WORK — utility services exploration (user notes, do NOT build yet)
+- GAS: street line → gas meter on the house side → runs to WH/range/
+  furnace. Not all houses have gas — needs a per-project toggle. Yellow
+  CSST/black-iron runs, shutoff at the meter, appliance stubs.
+- INTERNET: street cable (aerial or underground) → entry point → modem +
+  router placement (movable), maybe structured-wiring panel. Cat6/coax runs.
+- PER-UTILITY ARRIVAL MODE: electricity + internet can arrive OVERHEAD
+  (weatherhead/drop from a pole) or UNDERGROUND (lateral) — each utility
+  independently editable; drains always toward the street (no choice).
+- SHARED STREET CORRIDOR: all services arrive near one street-side zone as
+  parallel-but-individually-editable runs (ties into Q6 street point).
+
+Batching: A+B one agent (small), D+E one agent (engine+service), C scout
 then implement. Loop after each; ship in 1-2 prod batches today.
 
 # Bones night board — 2026-08-16 (living file: update on every land/verdict)
