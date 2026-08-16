@@ -93,8 +93,11 @@ const DRAIN_Y = 0.08
 export const DRAIN_SLOPE = 1 / 48
 /** P3104.4: vents reconnect >= 6" above the fixture flood rim (~36" lav). */
 const VENT_RECONNECT_Y = inches(42)
-const SUPPLY_COLD_Y = 0.38
-const SUPPLY_HOT_Y = 0.44
+// Below the electrical drill band (WIRE_RUN_Y 0.457 + 12mm/circuit): hot
+// tops out at 0.34 + 5*0.008 = 0.38, leaving >= 6cm of stud between the
+// trades (verify round D2: hot homeruns interpenetrated circuit runs).
+const SUPPLY_COLD_Y = 0.28
+const SUPPLY_HOT_Y = 0.34
 
 /**
  * Drainage fixture units per wet-room group (Table P3004.1: WC 3 + lav 1 +
@@ -374,14 +377,16 @@ function pipeWallLeg(
     const blockedAt = (yy: number) =>
       openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
     let detourY: number | null = null
-    for (let yy = s.topY + inches(4); yy <= wall.height - 0.05; yy += inches(4)) {
+    // start 7in over the header (electrical crosses at +4in — verify round
+    // D2: coincident 0.95m pipe/wire segments over the same door)
+    for (let yy = s.topY + inches(7); yy <= wall.height - 0.05; yy += inches(4)) {
       if (!blockedAt(yy)) {
         detourY = yy
         break
       }
     }
     if (detourY === null) {
-      for (let yy = s.sillY - inches(4); yy >= 0.04; yy -= inches(4)) {
+      for (let yy = s.sillY - inches(7); yy >= 0.04; yy -= inches(4)) {
         if (!blockedAt(yy)) {
           detourY = yy
           break
@@ -634,16 +639,45 @@ function placedPlumbing(
     const drainSide = pipeSide(Math.max(a.f.drainIn, 1.25))
     const yNode = base + a.rise
     if (fab) {
-      // IRC P2705.1: WC centerline ≥ 30" center-to-center from neighbors.
+      // IRC P2705.1: WC centerline ≥ 30" center-to-center from neighbors —
+      // measured WITHIN a room: a wall between the two fixtures means
+      // back-to-back bathrooms, not a clearance violation (verify round D5).
+      const wallBetween = (pA: Pt, pB: Pt): boolean =>
+        walls.some((w) => {
+          const q1: Pt = w.start
+          const q2: Pt = [w.start[0] + w.dir[0] * w.length, w.start[1] + w.dir[1] * w.length]
+          const d = (o: Pt, e: Pt, pt: Pt) => (e[0] - o[0]) * (pt[1] - o[1]) - (e[1] - o[1]) * (pt[0] - o[0])
+          const d1 = d(pA, pB, q1)
+          const d2 = d(pA, pB, q2)
+          const d3 = d(q1, q2, pA)
+          const d4 = d(q1, q2, pB)
+          return d1 * d2 < 0 && d3 * d4 < 0
+        })
       const crowd =
         a.f.kind === 'toilet'
           ? placed.find(
               (o) =>
                 o.id !== a.f.id &&
-                Math.hypot(o.plan[0] - a.f.plan[0], o.plan[1] - a.f.plan[1]) < inches(30),
+                Math.hypot(o.plan[0] - a.f.plan[0], o.plan[1] - a.f.plan[1]) < inches(30) &&
+                !wallBetween(a.f.plan, o.plan),
             )
           : undefined
       const yArm = yNode + a.armLen * slopeFor(a.f.drainIn)
+      // A fixture dropped inside a door/window rough opening puts its trap
+      // riser THROUGH the RO — never silent (verify round D4: unflagged
+      // 1.25" riser through a doorway).
+      const riserTop = Math.max(DRAIN_CONN_Y[a.f.kind], 0.5)
+      const inRO = walls.some((w) => {
+        const dx = a.f.plan[0] - w.start[0]
+        const dz = a.f.plan[1] - w.start[1]
+        const u = dx * w.dir[0] + dz * w.dir[1]
+        const off = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
+        if (off > w.thickness / 2 + 0.06 || u < 0 || u > w.length) return false
+        return openingSpans(w, 0, riserTop).some((sp) => u > sp.lo && u < sp.hi)
+      })
+      const roFlag = inRO
+        ? `OPENING: ${KIND_LABEL[a.f.kind]} sits in a door/window rough opening — its trap riser crosses the RO; move the fixture`
+        : undefined
       riser(
         members,
         {
@@ -652,9 +686,11 @@ function placedPlumbing(
           role: 'pipe-run',
           sourceId: `dwv-trap-${a.f.id}`,
           label: `${a.f.drainIn}" P-trap + drop — ${KIND_LABEL[a.f.kind]} (P3201)`,
-          flag: crowd
-            ? `CLEARANCE: ${KIND_LABEL[crowd.kind]} sits within 30" of the WC centerline (P2705.1)`
-            : undefined,
+          flag:
+            roFlag ??
+            (crowd
+              ? `CLEARANCE: ${KIND_LABEL[crowd.kind]} sits within 30" of the WC centerline (P2705.1)`
+              : undefined),
         },
         a.f.plan,
         DRAIN_CONN_Y[a.f.kind],
@@ -717,7 +753,14 @@ function placedPlumbing(
   const drainTable = rules.plumbing?.dwv?.maxDfuBuildingDrainBySizeAtQuarterInSlope ?? {}
   const cap3 = drainTable['3'] ?? 42
   const cap4 = drainTable['4'] ?? 216
-  const mainSize = totalDfu > cap3 ? 4 : (rules.plumbing?.dwv?.buildingDrainIn ?? 3)
+  // No size reduction in the direction of flow (P3005.3 / module contract):
+  // the main is at least the largest branch discharging into the stack
+  // (verify round D3: a 4" branch fed a 3" main unflagged).
+  const maxBranchIn = anchored.reduce((m, a) => Math.max(m, a.edgeSize), 0)
+  const mainSize = Math.max(
+    totalDfu > cap3 ? 4 : (rules.plumbing?.dwv?.buildingDrainIn ?? 3),
+    maxBranchIn,
+  )
   manhattan(
     members,
     {
@@ -807,8 +850,16 @@ function placedPlumbing(
     .sort((p, q) => q.length - p.length)[0]
   const tank = garageWall !== undefined
   const whWall = garageWall ?? meterWall
-  const whURaw =
-    whWall === meterWall ? Math.min(whWall.length - 0.4, meterU + 1.2) : panelMountU(whWall)
+  const whURaw = (() => {
+    if (whWall === meterWall) return Math.min(whWall.length - 0.4, meterU + 1.2)
+    // The electrical panel claims panelMountU on this SAME wall (both
+    // trades elect the longest garage wall) — keep the tank a panel-width
+    // + NEC 110.26 working space away (verify round D1: the 50-gal tank
+    // ENGULFED the panel).
+    const panelU = panelMountU(whWall)
+    const off = 1.2
+    return panelU + off <= whWall.length - 0.4 ? panelU + off : Math.max(0.4, panelU - off)
+  })()
   const whU = clearOfOpenings(whWall, whURaw, 0, 2.1)
   const whAnchor: WallPoint = { wall: whWall, u: whU }
   const whWallPlan = wallPlan(whAnchor) as Pt

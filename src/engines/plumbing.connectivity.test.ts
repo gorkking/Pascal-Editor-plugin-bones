@@ -535,3 +535,101 @@ describe('P5 gate — placed path leaves the fallback intact', () => {
     expect(fixtures.some((f) => f.kind === 'stub-out')).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Verify-round defect gates (skeptic round 1, 2026-08-16)
+// ---------------------------------------------------------------------------
+
+describe('P5 gate — cross-trade coexistence (verify round)', () => {
+  const { walls, rooms } = housePlan()
+  const placed = [
+    pf('wc', 'toilet', [6.5, 0.6]),
+    pf('lav', 'lavatory', [7.6, 0.6]),
+    pf('shw', 'shower', [9.3, 0.7]),
+    pf('ks', 'kitchen-sink', [1.5, 7.6]),
+  ]
+  const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed)
+  const { layoutElectrical, routeWiring } = require('./electrical') as typeof import('./electrical')
+  const elecFixtures = layoutElectrical(walls, rooms)
+  const wires = routeWiring(elecFixtures, walls).filter((m) => m.role === 'wire-run')
+
+  test('D1: the water heater never engulfs the electrical panel', () => {
+    const wh = members.find((m) => m.role === 'water-heater')
+    const panel = elecFixtures.find((f) => f.kind === 'panel')
+    expect(wh).toBeDefined()
+    expect(panel).toBeDefined()
+    const w = wh as Member
+    const p = panel as Fixture
+    const inside =
+      Math.abs(p.position[0] - w.position[0]) < w.dims[0] / 2 + 0.05 &&
+      Math.abs(p.position[1] - w.position[1]) < w.dims[1] / 2 + 0.05 &&
+      Math.abs(p.position[2] - w.position[2]) < w.dims[2] / 2 + 0.05
+    expect(inside).toBe(false)
+  })
+
+  test('D2: no supply run shares a plane with a wire run (>=2cm separation on parallel co-linear pairs)', () => {
+    const supplies = members.filter(
+      (m) => m.role === 'pipe-run' && (m.sourceId.startsWith('hot-') || m.sourceId.startsWith('cold-')),
+    )
+    let worst = Number.POSITIVE_INFINITY
+    for (const pipe of supplies) {
+      for (const wire of wires) {
+        // parallel horizontal members on the same wall plane: compare when
+        // both are horizontal and overlap in plan
+        const pH = pipe.dims[0] >= pipe.dims[1]
+        const wH = wire.dims[0] >= wire.dims[1]
+        if (!pH || !wH) continue
+        const dYaw = Math.abs(pipe.rotation[1] - wire.rotation[1]) % Math.PI
+        if (dYaw > 0.05 && Math.abs(dYaw - Math.PI) > 0.05) continue
+        const planDist = Math.hypot(pipe.position[0] - wire.position[0], pipe.position[2] - wire.position[2])
+        if (planDist > (pipe.dims[0] + wire.dims[0]) / 2) continue
+        const dy = Math.abs(pipe.position[1] - wire.position[1])
+        // only co-planar candidates matter (same stud bay band)
+        if (planDist < 0.08) worst = Math.min(worst, dy)
+      }
+    }
+    expect(worst).toBeGreaterThan(0.02)
+  })
+})
+
+describe('P5 gate — DFU main sizing + RO riser + through-wall clearance (verify round)', () => {
+  test('D3: the building drain is never smaller than its largest branch', () => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [30, 0] }),
+      makeWall({ id: 'w_e', start: [30, 0], end: [30, 8] }),
+      makeWall({ id: 'w_n', start: [30, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+    ]
+    const rooms = [room('r', 'bathroom', [[0, 0], [30, 0], [30, 8], [0, 8]])]
+    const placed = [
+      ...[1, 1.5, 2, 2.5, 3, 3.5].map((x, i) => pf(`s${i}`, 'shower', [x, 0.5])),
+      ...[10, 11, 12, 13, 14, 15, 16].map((x, i) => pf(`t${i}`, 'toilet', [x, 0.5])),
+    ]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    const main = members.find((m) => m.sourceId === 'dwv-main')
+    const branchMax = Math.max(
+      ...members
+        .filter((m) => m.sourceId.startsWith('dwv-branch-'))
+        .map((m) => Math.min(m.dims[1], m.dims[2]) / 0.0254),
+    )
+    expect(main).toBeDefined()
+    const mainIn = Math.min((main as Member).dims[1], (main as Member).dims[2]) / 0.0254
+    expect(mainIn + 1e-6).toBeGreaterThanOrEqual(branchMax)
+  })
+
+  test('D4: a fixture inside a door RO gets an OPENING flag', () => {
+    const { walls, rooms } = housePlan()
+    const placed = [pf('lav', 'lavatory', [4, 0.05]), pf('wc', 'toilet', [6.5, 0.6])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    const flags = members.filter((m) => m.flag?.includes('OPENING')).map((m) => m.flag)
+    expect(flags.length).toBeGreaterThan(0)
+  })
+
+  test('D5: back-to-back toilets across a wall do NOT trigger the clearance flag', () => {
+    const { walls, rooms } = housePlan()
+    const placed = [pf('wc1', 'toilet', [4.8, 4]), pf('wc2', 'toilet', [5.2, 4])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    const clearanceFlags = members.filter((m) => m.flag?.includes('CLEARANCE'))
+    expect(clearanceFlags).toEqual([])
+  })
+})
