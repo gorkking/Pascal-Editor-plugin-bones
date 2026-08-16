@@ -27,6 +27,13 @@ wall pattern). Spec:
   sill at seam, studs above, no overlap via SAT), crossing-opening flag,
   full-height unchanged vs today, takeoff deltas.
 
+## EVENING BATCH SHIPPED (~23:50): prod main 48bcecd7
+Plugin b3a3a08 via editor #667+#668+#669 → private-editor #359. Contents:
+3-layer exploded (F1b closed), either/or wall Engineering card, mixed
+CMU/framed walls (corner chain closed through width-aware acute retreats).
+721 tests. Localhost = prod build. NEXT BATCH in flight: full wall
+engineering panel (pilot running — studs/insulation/cladding per wall).
+
 ## ACTIVE: full wall engineering panel (user ask, evening 2)
 The Engineering section shows the wall's complete engineering identity,
 editable per wall. Extend WallOverride object (schema union already
