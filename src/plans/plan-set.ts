@@ -672,6 +672,17 @@ function planSheet(
       `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`STUDS @ ${opts.studSpacingIn}" O.C. U.N.O.`)}</text>`,
     )
   }
+  // Rafter-spacing note (round-3 C4 carried item): stated from the dominant
+  // rafter gap when derivable, spec spacing + VERIFY otherwise.
+  if (def.key === 'roof') {
+    const note = rafterSpacingNote(mine, opts)
+    if (note) {
+      const y = MARGIN + 14 + legendLines.length * 14
+      legendLines.push(
+        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(note)}</text>`,
+      )
+    }
+  }
   // Printed roof-coverage flag (blueprint round-3): a wing without roof
   // members is invisible on a per-sheet read — call it out on THIS sheet.
   if (def.key === 'roof') {
@@ -904,6 +915,60 @@ function roofCoverageWarning(members: Member[]): string | null {
   return 'part of the plan has no roof members — check roof coverage'
 }
 
+/**
+ * Rafter-spacing note for the roof plan legend (round-3 C4 carried item).
+ * The spacing reads from the members themselves: rafters are grouped by
+ * plan direction (5° buckets, mod π), the dominant group's centers project
+ * onto the axis PERPENDICULAR to their run, and the modal gap between
+ * neighbours is the layout spacing. When that gap maps onto a standard
+ * o.c. spacing (12 / 16 / 19.2 / 24 in) and the mode carries at least half
+ * the gaps, the note states it as fact; anything else prints the spec stud
+ * spacing suffixed 'VERIFY' — a note an examiner can trust either way.
+ */
+function rafterSpacingNote(members: Member[], opts: PlanSetOptions): string | null {
+  const rafters = members.filter((m) => m.role === 'rafter')
+  if (rafters.length === 0) return null
+  const fallback = `RAFTERS @ ${opts.studSpacingIn ?? 16}" O.C. — VERIFY`
+  // plan yaw from the full euler — mirrors the plan sheet's projection
+  const planDir = (m: Member): [number, number] => {
+    const [rx, ry, rz] = m.rotation
+    const ax = Math.cos(ry) * Math.cos(rz)
+    const az = Math.sin(rx) * Math.sin(rz) - Math.cos(rx) * Math.sin(ry) * Math.cos(rz)
+    const len = Math.hypot(ax, az)
+    return len < 1e-9 ? [1, 0] : [ax / len, az / len]
+  }
+  const groups = new Map<number, Member[]>()
+  for (const r of rafters) {
+    const [dx, dz] = planDir(r)
+    const yaw = ((Math.atan2(dz, dx) % Math.PI) + Math.PI) % Math.PI // mod π: direction sign is layout-irrelevant
+    const key = Math.round((yaw * 36) / Math.PI) % 36 // 5° buckets
+    groups.set(key, [...(groups.get(key) ?? []), r])
+  }
+  const dom = [...groups.values()].sort((a, b) => b.length - a.length)[0] as Member[]
+  if (dom.length < 3) return fallback
+  const [dx, dz] = planDir(dom[0] as Member)
+  const offsets = dom
+    .map((m) => m.position[0] * -dz + m.position[2] * dx) // ⊥ the run axis
+    .sort((a, b) => a - b)
+  const gaps: number[] = []
+  for (let i = 1; i < offsets.length; i++) {
+    const gap = (offsets[i] as number) - (offsets[i - 1] as number)
+    if (gap > 0.02) gaps.push(gap) // doubled/sistered members aren't a bay
+  }
+  if (gaps.length < 2) return fallback
+  // modal gap: 5mm buckets, most frequent wins
+  const buckets = new Map<number, number[]>()
+  for (const g of gaps) {
+    const key = Math.round(g / 0.005)
+    buckets.set(key, [...(buckets.get(key) ?? []), g])
+  }
+  const mode = [...buckets.values()].sort((a, b) => b.length - a.length)[0] as number[]
+  if (mode.length * 2 < gaps.length) return fallback // no dominant gap
+  const inches = (mode.reduce((s, g) => s + g, 0) / mode.length) / 0.0254
+  const std = [12, 16, 19.2, 24].find((s) => Math.abs(inches - s) <= 0.6)
+  return std !== undefined ? `RAFTERS @ ${std}" O.C.` : fallback
+}
+
 function memberSegs(
   members: Member[],
   opts: PlanSetOptions,
@@ -953,7 +1018,12 @@ function fitSegs(segs: Seg[], fixedRatio?: number): { sx: (x: number) => number;
   const ratio = fixedRatio ?? (RATIOS.find((r) => ppm / r <= raw) ?? (RATIOS[RATIOS.length - 1] as number))
   const scale = ppm / ratio
   const ox = MARGIN + (availW - (maxX - minX) * scale) / 2
-  const oy = MARGIN + (availH - (maxY - minY) * scale) / 2
+  // Vertical centering in the TRUE free field (round-3 P1: elevations and
+  // sections parked the drawing as one band in the upper half): availH keeps
+  // its slack for the FIT, but the centering runs from the top margin down
+  // to just above the title block — not to the fitting reserve's bottom.
+  const fieldBottom = H - TITLE_H - 8 - 12 // title block top, 12px breathing
+  const oy = MARGIN + (fieldBottom - MARGIN - (maxY - minY) * scale) / 2
   return { sx: (x) => ox + (x - minX) * scale, sy: (y) => oy + (y - minY) * scale, scale, ratio }
 }
 
@@ -966,6 +1036,48 @@ function segSvg(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string
       return `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="butt"${s.dashed ? ' stroke-dasharray="5 3"' : ''}${op !== null ? ` opacity="${op}"` : ''}/>`
     })
     .join('')
+}
+
+/**
+ * Right-edge elevation datums (round-3 N2 carried item): GRADE 0.00m,
+ * T.O. PLATE +<max wall top> and RIDGE +<max member top> print as leader
+ * ticks + tags at the drawing field's right edge — the first thing a plans
+ * examiner reads on a side view. Heights come straight from the segs' y
+ * extents (projected y = −world y, lifts already applied by memberSegs).
+ * Degenerate tags skip: no wall segs → no PLATE; a tag whose tick would
+ * land within one text height of the previous kept tag never overprints.
+ */
+function elevationDatums(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string {
+  const topOf = (pred: (s: Seg) => boolean): number | null => {
+    let top = Number.NEGATIVE_INFINITY
+    for (const s of segs) {
+      if (!pred(s)) continue
+      top = Math.max(top, -s.y1, -s.y2)
+    }
+    return Number.isFinite(top) ? top : null
+  }
+  const wallTop = topOf((s) => s.color === SYSTEM_STROKE['wall-framing'])
+  const memberTop = topOf(() => true)
+  const tags: { h: number; label: string }[] = [{ h: 0, label: 'GRADE 0.00m' }]
+  if (wallTop !== null && wallTop > 0.05) {
+    tags.push({ h: wallTop, label: `T.O. PLATE +${wallTop.toFixed(2)}m` })
+  }
+  if (memberTop !== null && memberTop > Math.max(wallTop ?? 0, 0) + 0.05) {
+    tags.push({ h: memberTop, label: `RIDGE +${memberTop.toFixed(2)}m` })
+  }
+  const x0 = W - MARGIN - 258 + 14 // grade line's right end — the field edge
+  const parts: string[] = []
+  let lastY = Number.POSITIVE_INFINITY
+  for (const t of tags) {
+    const py = f.sy(-t.h)
+    if (Math.abs(lastY - py) < 11) continue // degenerate — would overprint
+    lastY = py
+    parts.push(
+      `<line x1="${x0}" y1="${py.toFixed(1)}" x2="${x0 + 16}" y2="${py.toFixed(1)}" stroke="#222" stroke-width="1.2"/>` +
+        `<text x="${x0 + 20}" y="${(py + 3).toFixed(1)}" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(t.label)}</text>`,
+    )
+  }
+  return parts.join('')
 }
 
 const ELEVATIONS: { key: string; title: string; proj: (p: [number, number, number]) => [number, number]; depth: (p: [number, number, number]) => number }[] = [
@@ -992,7 +1104,7 @@ function elevationSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
     const grade = `<line x1="${MARGIN - 14}" y1="${gy.toFixed(1)}" x2="${W - MARGIN - 258 + 14}" y2="${gy.toFixed(1)}" stroke="#222" stroke-width="2.5"/><text x="${MARGIN - 14}" y="${(gy + 14).toFixed(1)}" font-size="9" font-family="Helvetica, Arial, sans-serif" fill="#222">GRADE</text>`
     sheets.push({
       title: ev.title,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}${chrome(ev.title, opts, f.scale, strokeLegend(members), { ratio: f.ratio, northArrow: false })}</svg>`,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(segs, f)}${grade}${elevationDatums(segs, f)}${chrome(ev.title, opts, f.scale, strokeLegend(members), { ratio: f.ratio, northArrow: false })}</svg>`,
     })
   }
   return sheets
@@ -1149,17 +1261,24 @@ function schedulesSheets(
   // flag prints: the reserve grows with the list (round-3 scorecard C5:
   // '… +1 more flags' truncated exactly the new roof-coverage safety flag);
   // pagination adds sheets when the shrunken cap overflows.
-  const flagRows = flags.length
+  // Flag lines wrap at the column width (the blocks live in ONE column now)
+  // — flags still print VERBATIM, a long one just takes two lines.
+  const flagLines: { text: string; indent: boolean }[] = flags.flatMap((fl) =>
+    wrapRow(`⚑ ${fl}`, 92).map((text, k) => ({ text, indent: k > 0 })),
+  )
+  const flagRows = flagLines.length
   // Building characteristics print just above the flags on the same page:
   // title + 4 metric lines — reserved out of the last page's capacity too.
   const charLines = opts.characteristics ? 5 : 0
-  const lastPageCap =
-    2 *
-    (Math.max(
-      4,
-      maxLines - (flagRows > 0 ? flagRows + 1 : 0) - (charLines > 0 ? charLines + 1 : 0),
-    ) -
-      1)
+  // P1 balance (round-3 carried): the reserve consumes the SECOND column
+  // only — the flag/characteristics blocks bottom-anchor in the right
+  // column, the first column keeps its full height, and rows flow beside
+  // the blocks before any page is added. The old 2×(shrunk-cap) math
+  // halved BOTH columns and shipped ~2/3-empty takeoff sheets.
+  const reserve = (flagRows > 0 ? flagRows + 1 : 0) + (charLines > 0 ? charLines + 1 : 0)
+  const fullColCap = maxLines - 1
+  const reservedColCap = Math.max(4, maxLines - reserve) - 1
+  const lastPageCap = fullColCap + reservedColCap
   const totalLines = wrapped.reduce((sum, w) => sum + w.length, 0)
   let pages = 1
   if (totalLines > lastPageCap) {
@@ -1198,10 +1317,31 @@ function schedulesSheets(
     if (restLines <= lastPageCap) break
     pages++
   }
+  // Never ship a nearly-empty trailing sheet (round-3 P1: three ~2/3-empty
+  // demo sheets): a last page under 30% fill merges into its predecessor
+  // whenever the combined rows still fit the last-page cap.
+  const linesOf = (take: number[]): number =>
+    take.reduce((sum, i) => sum + (wrapped[i] as string[]).length, 0)
+  while (placements.length > 1) {
+    const last = placements[placements.length - 1] as number[]
+    const prev = placements[placements.length - 2] as number[]
+    if (linesOf(last) >= 0.3 * perSheetLines) break
+    if (linesOf(prev) + linesOf(last) > lastPageCap) break
+    placements.splice(placements.length - 2, 2, [...prev, ...last])
+  }
+  pages = placements.length
   const sheets: PlanSheet[] = []
   for (const [page, take] of placements.entries()) {
-    const pageLineCount = take.reduce((sum, i) => sum + (wrapped[i] as string[]).length, 0)
-    const colTarget = Math.ceil(pageLineCount / 2)
+    const pageLineCount = linesOf(take)
+    // Last page: the FIRST column may fill to full height; only the second
+    // column stops above the reserved blocks. Balanced when there's room.
+    const colTarget =
+      page === pages - 1
+        ? Math.min(
+            fullColCap,
+            Math.max(Math.ceil(pageLineCount / 2), pageLineCount - reservedColCap),
+          )
+        : Math.ceil(pageLineCount / 2)
     const cells: string[] = []
     let col = 0
     let line = 0
@@ -1220,15 +1360,16 @@ function schedulesSheets(
         line++
       }
     }
-    // Flags on the LAST page — ALL of them; the reserve above grew with the
-    // list, so nothing truncates (round-3 scorecard C5: the old '… +N more
-    // flags' line dropped exactly the newest safety flag).
+    // Flags on the LAST page — ALL of them, bottom-anchored in the SECOND
+    // column (the reserve consumes that column's capacity, P1); the reserve
+    // grows with the list, so nothing truncates (round-3 scorecard C5: the
+    // old '… +N more flags' line dropped exactly the newest safety flag).
     let flagText = ''
-    if (page === pages - 1 && flags.length > 0) {
-      flagText = flags
+    if (page === pages - 1 && flagLines.length > 0) {
+      flagText = flagLines
         .map(
-          (fl, i) =>
-            `<text x="${MARGIN}" y="${H - TITLE_H - 40 - (flags.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">⚑ ${esc(fl)}</text>`,
+          (l, i) =>
+            `<text x="${MARGIN + colW + (l.indent ? 12 : 0)}" y="${H - TITLE_H - 40 - (flagLines.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">${esc(l.text)}</text>`,
         )
         .join('')
     }
@@ -1250,16 +1391,19 @@ function schedulesSheets(
         noSlab
           ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
           : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
-        clip(`${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`, 130),
+        // 100 chars ≈ the column width at 9.5px — the block lives in one
+        // column now (the standard citation line is 99 chars, untouched)
+        clip(`${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`, 100),
       ]
-      // bottom-anchor above the flag block (or where flags would start)
-      const flagsTopY = H - TITLE_H - 40 - Math.max(0, flags.length - 1) * 13
-      const bottomY = flags.length > 0 ? flagsTopY - 18 : H - TITLE_H - 40
+      // bottom-anchor above the flag block (or where flags would start) —
+      // in the SECOND column, same as the flags (P1 reserve rework)
+      const flagsTopY = H - TITLE_H - 40 - Math.max(0, flagLines.length - 1) * 13
+      const bottomY = flagLines.length > 0 ? flagsTopY - 18 : H - TITLE_H - 40
       charText = [
-        `<text x="${MARGIN}" y="${bottomY - lines.length * 13}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">BUILDING CHARACTERISTICS</text>`,
+        `<text x="${MARGIN + colW}" y="${bottomY - lines.length * 13}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">BUILDING CHARACTERISTICS</text>`,
         ...lines.map(
           (l, i) =>
-            `<text x="${MARGIN}" y="${bottomY - (lines.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(l)}</text>`,
+            `<text x="${MARGIN + colW}" y="${bottomY - (lines.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(l)}</text>`,
         ),
       ].join('')
     }

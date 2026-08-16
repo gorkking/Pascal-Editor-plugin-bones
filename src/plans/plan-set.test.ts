@@ -796,6 +796,214 @@ describe('round-3 fixCheck — filled-rect cut poché + full flag list', () => {
   })
 })
 
+describe('round-3 carried cosmetics — P1 pagination balance, vertical centering, N2 datums, C4 rafter note', () => {
+  const stud = (x: number, z: number): Member =>
+    member({
+      system: 'wall-framing',
+      role: 'stud',
+      size: '2x4',
+      dims: [0.04, 2.4, 0.09],
+      position: [x, 1.2, z],
+      rotation: [0, 0, 0],
+    })
+
+  /** Small gabled house: studs + plates to 2.42, rafters, ridge at 4.4. */
+  const house = (rafterSpacingM = 0.6096, rafterCount = 16): Member[] => {
+    const members: Member[] = []
+    for (let x = 0; x <= 10.01; x += 2) for (const z of [0, 8]) members.push(stud(x, z))
+    members.push(member({ system: 'wall-framing', role: 'top-plate', dims: [10, 0.04, 0.09], position: [5, 2.42, 0] }))
+    members.push(member({ system: 'wall-framing', role: 'top-plate', dims: [10, 0.04, 0.09], position: [5, 2.42, 8] }))
+    for (let i = 0; i < rafterCount; i++) {
+      members.push(
+        member({
+          system: 'roof-framing',
+          role: 'rafter',
+          dims: [4.6, 0.14, 0.04],
+          position: [0.3 + i * rafterSpacingM, 3.4, 2],
+          rotation: [0, Math.PI / 2, 0.42],
+        }),
+      )
+    }
+    members.push(member({ system: 'roof-framing', role: 'ridge', dims: [10, 0.19, 0.04], position: [5, 4.4, 4] }))
+    return members
+  }
+
+  const characteristics: BuildingCharacteristics = {
+    floorAreaM2: 40,
+    volumeM3: 108,
+    envelopeAreaM2: 61.4,
+    windowCount: 1,
+    windowAreaM2: 1.8,
+    doorCount: 1,
+    insulation: { climateZone: '2A', wallR: 13, citation: '2021 IECC Table R402.1.3' },
+    uaWPerK: 30.1,
+    designHeatLossW: 662,
+    coolingTonsEstimate: 0.9,
+    notes: [],
+  }
+  const flags = ['flag A — alpha', 'flag B — bravo', 'part of the roof — charlie']
+
+  /** Deterministic takeoff generator (same triple-aggregation as the engine). */
+  const manyMembers = (n: number): Member[] => {
+    const systems = ['floor-framing', 'wall-framing', 'roof-framing'] as const
+    const many: Member[] = []
+    for (let i = 0; i < n; i++) {
+      const len = 0.5 + (i % 80) * 0.09
+      many.push(
+        member({
+          system: systems[i % 3],
+          role: i % 2 === 0 ? 'joist' : 'stud',
+          size: (['2x4', '2x6', '2x8', '2x10', '2x12', '4x4', '4x6', '4x8'] as const)[i % 8],
+          length: len,
+          dims: [len, 0.235, 0.038],
+          position: [i * 0.1, 0, 1],
+        }),
+      )
+    }
+    return many
+  }
+
+  const takeoffLineCount = (svg: string): number =>
+    [...svg.matchAll(/font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222"/g)].length
+
+  test('P1 gate: the reserve consumes the SECOND column — a takeoff past the old both-columns-shrunk cap stays on ONE sheet', () => {
+    // 68 takeoff lines + 3 flags + characteristics: the old cap was
+    // 2×(41−10−1) = 60 → TWO ~half-empty sheets; the reworked cap is
+    // 40 (full first column) + 30 (reserved second) = 70 → one sheet.
+    const sheets = buildPlanSet(manyMembers(40), [], { characteristics, warnings: flags }).filter(
+      (s) => s.title.startsWith('Schedules'),
+    )
+    expect(sheets).toHaveLength(1)
+    const svg = sheets[0]?.svg ?? ''
+    expect(takeoffLineCount(svg)).toBeGreaterThan(60) // pins: past the OLD cap
+    // the blocks live in the second column (x = MARGIN + colW = 528)…
+    expect(svg).toContain('<text x="528" y')
+    expect(svg).toMatch(/<text x="528" [^>]*>BUILDING CHARACTERISTICS<\/text>/)
+    for (const f of flags) expect(svg).toContain(f)
+    // …and no second-column row runs under the characteristics block
+    let maxCol1RowY = 0
+    for (const m of svg.matchAll(/<text x="(\d+)" y="(\d+)" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222"/g)) {
+      if (Number(m[1]) >= 528) maxCol1RowY = Math.max(maxCol1RowY, Number(m[2]))
+    }
+    const charTop = Number(/<text x="528" y="(\d+)" font-size="10" font-weight="bold"/.exec(svg)?.[1])
+    expect(Number.isFinite(charTop)).toBe(true)
+    expect(maxCol1RowY).toBeLessThan(charTop)
+  })
+
+  test('P1 gate: no schedules page under 30% fill — pagination distributes evenly (no ~2/3-empty sheets)', () => {
+    const sheets = buildPlanSet(manyMembers(400), [], { characteristics, warnings: flags }).filter(
+      (s) => s.title.startsWith('Schedules'),
+    )
+    expect(sheets.length).toBeGreaterThan(1)
+    // perSheetLines = 2×(41−1) = 80; the <30% fill signature never ships
+    for (const s of sheets) {
+      expect(takeoffLineCount(s.svg)).toBeGreaterThanOrEqual(0.3 * 80)
+    }
+  })
+
+  test('vertical centering gate: the elevation band centers in the free field, not parked in the upper half', () => {
+    const south =
+      buildPlanSet(house(), [], {}).find((s) => s.title.startsWith('South elevation'))?.svg ?? ''
+    const STROKES = ['#8b8f96', '#caa06a', '#b98d55', '#a97e48', '#c2803d', '#6f8fa8', '#8fa8a0']
+    const ys: number[] = []
+    for (const m of south.matchAll(/<line x1="(-?[\d.]+)" y1="(-?[\d.]+)" x2="(-?[\d.]+)" y2="(-?[\d.]+)" stroke="(#[0-9a-f]{6})"/g)) {
+      if (STROKES.includes(m[5] as string)) ys.push(Number(m[2]), Number(m[4]))
+    }
+    const top = Math.min(...ys)
+    const bottom = Math.max(...ys)
+    // free field: top margin 48 → title-block top minus breathing = 720;
+    // the band's gaps balance (the old oy centered in a 614px reserve and
+    // parked the drawing high — round-3 P1 'band in the upper half')
+    const gapTop = top - 48
+    const gapBottom = 720 - bottom
+    expect(Math.abs(gapTop - gapBottom)).toBeLessThanOrEqual(8)
+    expect((top + bottom) / 2).toBeGreaterThan(370) // never top-parked at ~355
+  })
+
+  test('N2 gate: right-edge datum tags with leader ticks — GRADE 0.00m, T.O. PLATE, RIDGE at the segs’ y extents', () => {
+    const south =
+      buildPlanSet(house(), [], {}).find((s) => s.title.startsWith('South elevation'))?.svg ?? ''
+    expect(south).toContain('>GRADE 0.00m</text>')
+    expect(south).toContain('>T.O. PLATE +2.42m</text>')
+    expect(south).toContain('>RIDGE +4.40m</text>')
+    // three leader ticks at the field's right edge (x = 764)
+    expect([...south.matchAll(/<line x1="764" /g)]).toHaveLength(3)
+    // stacked in elevation order on screen: ridge above plate above grade
+    const yOf = (label: string): number => {
+      const at = south.indexOf(label)
+      const m = /y="([\d.]+)"/.exec(south.slice(south.lastIndexOf('<text', at), at))
+      return m ? Number(m[1]) : Number.NaN
+    }
+    expect(yOf('RIDGE +4.40m')).toBeLessThan(yOf('T.O. PLATE +2.42m'))
+    expect(yOf('T.O. PLATE +2.42m')).toBeLessThan(yOf('GRADE 0.00m'))
+    // every elevation carries the datums
+    for (const dir of ['North', 'East', 'West']) {
+      const sheet = buildPlanSet(house(), [], {}).find((s) => s.title.startsWith(`${dir} elevation`))
+      expect(sheet?.svg).toContain('>GRADE 0.00m</text>')
+      expect(sheet?.svg).toContain('T.O. PLATE +2.42m')
+    }
+  })
+
+  test('N2 gate: degenerate datums skip — walls-only has no RIDGE, no wall framing has no T.O. PLATE', () => {
+    // walls only: member top == wall top → RIDGE would duplicate the plate
+    const wallsOnly = [stud(0, 0), stud(2, 0), stud(4, 0)]
+    const southWalls =
+      buildPlanSet(wallsOnly, [], {}).find((s) => s.title.startsWith('South elevation'))?.svg ?? ''
+    expect(southWalls).toContain('>GRADE 0.00m</text>')
+    expect(southWalls).toContain('T.O. PLATE +2.40m')
+    expect(southWalls).not.toContain('RIDGE')
+    // floor framing only (below grade): no wall segs → no plate tag; nothing
+    // above grade → no ridge tag; grade still prints
+    const southFloor =
+      buildPlanSet([member({})], [], {}).find((s) => s.title.startsWith('South elevation'))?.svg ??
+      ''
+    expect(southFloor).toContain('>GRADE 0.00m</text>')
+    expect(southFloor).not.toContain('T.O. PLATE')
+    expect(southFloor).not.toContain('RIDGE')
+  })
+
+  test('C4 gate: RAFTERS @ 24" O.C. prints on the roof plan legend when the dominant gap derives it', () => {
+    const roof =
+      buildPlanSet(house(0.6096), [], {}).find((s) => s.title === 'Roof framing plan')?.svg ?? ''
+    expect(roof).toContain('RAFTERS @ 24&quot; O.C.')
+    expect(roof).not.toContain('VERIFY')
+    // 16" o.c. layout derives 16
+    const roof16 =
+      buildPlanSet(house(0.4064), [], {}).find((s) => s.title === 'Roof framing plan')?.svg ?? ''
+    expect(roof16).toContain('RAFTERS @ 16&quot; O.C.')
+    expect(roof16).not.toContain('VERIFY')
+  })
+
+  test('C4 gate: irregular rafter gaps fall back to the spec stud spacing with VERIFY; no rafters → no note', () => {
+    const base = house(0.6096, 0).filter((m) => m.role !== 'rafter')
+    const irregular = [...base]
+    for (const off of [0.3, 0.9, 1.3, 2.4, 2.9]) {
+      irregular.push(
+        member({
+          system: 'roof-framing',
+          role: 'rafter',
+          dims: [4.6, 0.14, 0.04],
+          position: [off, 3.4, 2],
+          rotation: [0, Math.PI / 2, 0.42],
+        }),
+      )
+    }
+    const roof =
+      buildPlanSet(irregular, [], { studSpacingIn: 16 }).find((s) => s.title === 'Roof framing plan')
+        ?.svg ?? ''
+    expect(roof).toContain('RAFTERS @ 16&quot; O.C. — VERIFY')
+    // spec spacing follows the option
+    const roof24 =
+      buildPlanSet(irregular, [], { studSpacingIn: 24 }).find((s) => s.title === 'Roof framing plan')
+        ?.svg ?? ''
+    expect(roof24).toContain('RAFTERS @ 24&quot; O.C. — VERIFY')
+    // ridge only, no rafters → no note at all
+    const noRafters =
+      buildPlanSet(base, [], {}).find((s) => s.title === 'Roof framing plan')?.svg ?? ''
+    expect(noRafters).not.toContain('RAFTERS')
+  })
+})
+
 describe('elevation orientation + section membership (blueprint round-2)', () => {
   test('east elevation puts north (−z) on screen-right; west mirrors it', () => {
     // two studs on an east wall: zNear=1, zFar=7 — standing EAST, the z=7
