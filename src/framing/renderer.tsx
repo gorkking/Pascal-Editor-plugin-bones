@@ -141,6 +141,9 @@ export function buildGroups(
   for (const [levelId, list] of byLevel) {
     const g = buildGroup(list, [], seeThrough)
     g.name = `bones-foreign-${levelId}`
+    // Source level strictly ABOVE the owner (compute tags the members) —
+    // only these groups take the exploded roof stratum drop below.
+    g.userData.strataAbove = list.some((m) => m.strataAbove === true)
     foreign.set(levelId, g)
   }
   return { group, foreign }
@@ -287,15 +290,25 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   return group
 }
 
-/** Exploded-view stratum for the foreign roof group (day board A): drop the
+/** Exploded-view stratum for a foreign roof group (day board A): drop the
  * bones roof HALF an exploded slot below the roof shell so floor / trusses /
- * shingle shell read as three ~equal strata. The host's EXPLODED_GAP is 5 m
- * per ordinal (packages/viewer level explode), so half a slot = 2.5. Foreign
- * groups are level-LOCAL — this offset composes with the host's own level
- * lerp in every mode. `undefined` (viewer store not resolved yet) reads as
- * stacked. */
-export function explodedRoofOffset(levelMode: string | undefined): number {
-  return levelMode === 'exploded' ? -2.5 : 0
+ * shingle shell read as three ~equal strata — but ONLY for groups whose
+ * source level sits strictly ABOVE the owner's storey (`strataAbove`, tagged
+ * by compute): a ground-storey porch roof foreign to an upper owner drops
+ * INTO the storey below it otherwise (verify round 2026-08-16, F1). Intended
+ * limitation (checklist A3): an owner ON the roof level frames that roof as
+ * own-level members — no foreign group, no stratum in exploded view.
+ * DRIFT PIN: half a slot = EXPLODED_GAP / 2; the host constant lives at
+ * editor packages/viewer/src/systems/level/level-system.tsx
+ * (`const EXPLODED_GAP = 5`) — if that value moves, this one follows.
+ * Foreign groups are level-LOCAL — the offset composes with the host's own
+ * level lerp in every mode. `undefined` levelMode (viewer store not
+ * resolved yet) reads as stacked. */
+export function explodedRoofOffset(
+  levelMode: string | undefined,
+  strataAbove: boolean,
+): number {
+  return levelMode === 'exploded' && strataAbove ? -2.5 : 0
 }
 
 function disposeGroup(group: Group) {
@@ -348,15 +361,15 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // in stacked view (prod 2026-08-15 round 3). The level object may
   // register after us, so (re)attach lazily in the frame loop below.
   const attachForeign = () => {
-    // Exploded stratum: in exploded level mode the bones roof drops half a
-    // slot below the roof shell (floor / trusses / shell = three strata);
-    // any other mode — or the viewer store not resolved yet — sits flush.
+    // Exploded stratum: in exploded level mode a foreign roof group ABOVE
+    // the owner drops half a slot below the roof shell (floor / trusses /
+    // shell = three strata). Below-owner groups (a ground-storey porch
+    // roof), any other mode, or the viewer store not resolved yet: flush.
     const levelMode = viewerStore.current?.getState().levelMode
-    const strataY = explodedRoofOffset(levelMode)
     for (const [levelId, g] of built.foreign) {
       const levelObj = sceneRegistry.nodes.get(levelId as Parameters<typeof sceneRegistry.nodes.get>[0])
       if (levelObj && g.parent !== levelObj) levelObj.add(g)
-      g.position.y = strataY
+      g.position.y = explodedRoofOffset(levelMode, g.userData.strataAbove === true)
       // Imperative children don't unmount with the JSX — mirror the node's
       // visibility by hand (hiding the X-ray must hide the foreign roofs).
       g.visible = node.visible !== false

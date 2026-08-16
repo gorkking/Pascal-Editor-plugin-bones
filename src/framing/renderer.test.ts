@@ -217,14 +217,39 @@ describe('buildGroups — cross-level members split into foreign level groups', 
   })
 })
 
-describe('exploded roof stratum (day board A, 2026-08-16)', () => {
-  test('explodedRoofOffset: half an exploded slot (EXPLODED_GAP 5 → 2.5) below in exploded mode, flush otherwise', () => {
+describe('exploded roof stratum (day board A, 2026-08-16 + F1 verify round)', () => {
+  test('explodedRoofOffset: half an exploded slot (EXPLODED_GAP 5 → 2.5) for ABOVE-owner groups in exploded mode only', () => {
     const { explodedRoofOffset } = require('./renderer') as typeof import('./renderer')
-    expect(explodedRoofOffset('exploded')).toBe(-2.5)
-    expect(explodedRoofOffset('stacked')).toBe(0)
-    expect(explodedRoofOffset('solo')).toBe(0)
+    // above-owner roof group: drops in exploded mode
+    expect(explodedRoofOffset('exploded', true)).toBe(-2.5)
+    expect(explodedRoofOffset('stacked', true)).toBe(0)
+    expect(explodedRoofOffset('solo', true)).toBe(0)
     // viewer store not resolved yet (dynamic import pending) = stacked
-    expect(explodedRoofOffset(undefined)).toBe(0)
+    expect(explodedRoofOffset(undefined, true)).toBe(0)
+    // F1 gate: a BELOW-owner foreign group (ground-storey porch roof) is
+    // NEVER offset — pre-fix it dropped 2.5 m into the storey below it.
+    expect(explodedRoofOffset('exploded', false)).toBe(0)
+    expect(explodedRoofOffset('stacked', false)).toBe(0)
+    expect(explodedRoofOffset(undefined, false)).toBe(0)
+  })
+
+  test('buildGroups propagates the strataAbove tag per foreign group (F1)', () => {
+    const { buildGroups } = require('./renderer') as typeof import('./renderer')
+    const rafter = {
+      system: 'roof-framing' as const,
+      role: 'rafter' as const,
+      dims: [0.04, 0.2, 3] as const,
+      length: 3,
+      position: [1, 1.2, 0] as const,
+      rotation: [0.5, 0, 0] as const,
+      material: 'lumber' as const,
+      sourceId: 'roofseg',
+    }
+    const main = { ...rafter, levelId: 'lvlroof', strataAbove: true as const }
+    const porch = { ...rafter, sourceId: 'porchseg', levelId: 'lvl0' }
+    const { foreign } = buildGroups([main, porch], [], true)
+    expect(foreign.get('lvlroof')?.userData.strataAbove).toBe(true)
+    expect(foreign.get('lvl0')?.userData.strataAbove).toBe(false)
   })
 
   test('buildGroups foreign groups start flush at y 0 — the offset is frame-loop applied', () => {
@@ -239,6 +264,7 @@ describe('exploded roof stratum (day board A, 2026-08-16)', () => {
       material: 'lumber' as const,
       sourceId: 'roofseg',
       levelId: 'lvlroof',
+      strataAbove: true as const,
     }
     const { foreign } = buildGroups([rafter], [], true)
     expect(foreign.get('lvlroof')?.position.y).toBe(0)

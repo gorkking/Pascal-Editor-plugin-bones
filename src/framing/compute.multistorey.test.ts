@@ -86,6 +86,9 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     // renderer mounts them into the roof level's Object3D, so stacked,
     // exploded AND solo transforms all apply natively (round 3)
     expect(roof.every((m) => m.levelId === 'lvlroof')).toBe(true)
+    // roof level ABOVE the lvl0 owner → strataAbove: takes the exploded
+    // roof stratum drop (F1)
+    expect(roof.every((m) => m.strataAbove === true)).toBe(true)
     const maxY = Math.max(...roof.map((m) => m.position[1]))
     expect(maxY).toBeLessThan(4.0) // local, never pre-shifted to world
   })
@@ -101,6 +104,11 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     expect(roof.length).toBeGreaterThan(0)
     const minY = Math.min(...roof.map((m) => m.position[1]))
     expect(minY).toBeLessThan(5.0)
+    // F1b — INTENDED limitation (checklist A3): an owner ON the roof level
+    // frames the roof as own-level members: no levelId tag, no strataAbove,
+    // no foreign group — and therefore no stratum drop in exploded view.
+    expect(roof.every((m) => m.levelId === undefined)).toBe(true)
+    expect(roof.every((m) => m.strataAbove === undefined)).toBe(true)
   })
 
   test('a shared roof is framed by exactly one X-ray — the highest storey wins', () => {
@@ -470,6 +478,12 @@ describe('multi-storey — mixed roof levels (re-verify regression)', () => {
     // each tagged to ITS source level, positions level-local (unshifted)
     expect(porch.every((m) => m.levelId === 'lvl0')).toBe(true)
     expect(main.every((m) => m.levelId === 'lvlroof')).toBe(true)
+    // F1 gate (verify round 2026-08-16): the porch's source level sits
+    // BELOW the lvl1 owner — NO strataAbove, so the exploded roof stratum
+    // never drops it into the ground storey; the main roof (above the
+    // owner) carries the tag and takes the drop.
+    expect(porch.every((m) => m.strataAbove === undefined)).toBe(true)
+    expect(main.every((m) => m.strataAbove === true)).toBe(true)
   })
 
   test('single X-ray on the ground frames both roof levels too', () => {

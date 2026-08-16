@@ -93,7 +93,20 @@ AND a gate — a checklist line without a test is a wish.
   roof y=2.7 inside a stacked roof level: shell draws at 5.2, verified in
   the live three.js graph). Origin: prod report 2026-08-15 (two-storey
   starter house wore its roof at ground level).
-  Gate: `src/framing/compute.multistorey.test.ts` (10 scenarios)
+  EXPLODED EXCEPTION (day board A + F1 verify round 2026-08-16): in exploded
+  level mode a foreign roof group additionally drops half an exploded slot
+  (host EXPLODED_GAP 5 → −2.5; editor
+  packages/viewer/src/systems/level/level-system.tsx) so floor / trusses /
+  shingle shell read as three strata — ONLY for groups whose source level
+  sits strictly ABOVE the owner's storey (`Member.strataAbove`, tagged by
+  compute, propagated as group userData): a ground-storey porch roof foreign
+  to an upper owner is NEVER offset into the storey below it. INTENDED
+  limitation: an owner ON the roof level frames that roof as own-level
+  members (no foreign group), so it gets no stratum drop in exploded view.
+  Gates: `src/framing/compute.multistorey.test.ts` (scenario matrix incl.
+  strataAbove tagging + the own-level F1b pin) +
+  `src/framing/renderer.test.ts` (offset only when strataAbove; userData
+  propagation)
 
 - **A4 Service overrides are authoritative; routing follows.** A
   `bones:service` node on the level IS the location of its system point

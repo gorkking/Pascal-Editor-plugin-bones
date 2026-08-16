@@ -434,13 +434,24 @@ function computeLevelUncached(
         // cross-level members are TAGGED with their source level instead
         // and the renderer mounts them into that level's own Object3D
         // (prod 2026-08-15 rounds 1-2: roof at ground level, then trusses
-        // detached from the roof in exploded/solo).
+        // detached from the roof in exploded/solo). Foreign members whose
+        // source level sits strictly ABOVE this owner also carry
+        // strataAbove — the renderer's exploded roof stratum applies only
+        // to those (a ground-storey porch roof below the owner must never
+        // drop into the storey under it — verify round 2026-08-16, F1).
+        // Unknown owner ordinal (dangling parentId) = nothing above: flush
+        // is the safe default.
+        const myOrdinal = levels[levelIndex]?.level ?? Number.POSITIVE_INFINITY
         for (const { level, roofs } of levelRoofs) {
           const framed = frameRoofs(roofs, activeWalls, spec)
           members.push(
             ...(level.id === levelId
               ? framed
-              : framed.map((m) => ({ ...m, levelId: level.id }))),
+              : framed.map((m) =>
+                  level.level > myOrdinal
+                    ? { ...m, levelId: level.id, strataAbove: true as const }
+                    : { ...m, levelId: level.id },
+                )),
           )
         }
       }

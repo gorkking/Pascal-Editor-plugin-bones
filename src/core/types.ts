@@ -120,6 +120,12 @@ export type Member = {
    * the host's stacked/exploded/solo moves apply natively. Unset = the
    * node's own level. */
   levelId?: string
+  /** Set (with `levelId`) when the member's SOURCE level sits strictly
+   * ABOVE the owner X-ray's storey (the main roof adopted by a lower
+   * owner). Only these foreign groups take the exploded-view roof stratum
+   * drop — a ground-storey porch roof (levelId BELOW the owner) must never
+   * offset into the storey under it (verify round 2026-08-16, F1). */
+  strataAbove?: true
   /**
    * Informational note that is NOT a problem (e.g. "sized schematically —
    * verify with span/load design"). Kept apart from `flag` so advisory
