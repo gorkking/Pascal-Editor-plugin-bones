@@ -172,6 +172,67 @@ describe('resolveServicePlacement', () => {
     expect(p).toBeNull()
   })
 
+  // GATE (NaN guards): hostile numbers must never leak into the placement —
+  // NaN wallT → wall midpoint, NaN position components → treated as
+  // never-moved, NaN heightAff → the type default. No NaN in ANY output.
+  test('NaN wallT falls back to the wall midpoint, not a NaN lerp', () => {
+    const p = resolveServicePlacement(scene, {
+      serviceType: 'panel',
+      wallId: 'wall_1',
+      wallT: Number.NaN,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    })
+    expect(p?.wallMounted).toBe(true)
+    expect(p?.position[0]).toBeCloseTo(2, 6) // midpoint of [0,0]→[4,0]
+    for (const v of p?.position ?? []) expect(Number.isFinite(v)).toBe(true)
+  })
+
+  test('NaN position components count as never-moved: the wall anchor holds', () => {
+    const p = resolveServicePlacement(scene, {
+      serviceType: 'panel',
+      wallId: 'wall_1',
+      wallT: 0.25,
+      position: [Number.NaN, 0, Number.NaN],
+      rotation: [0, 0, 0],
+    })
+    expect(p?.wallMounted).toBe(true)
+    expect(p?.position[0]).toBeCloseTo(1, 6)
+    for (const v of p?.position ?? []) expect(Number.isFinite(v)).toBe(true)
+  })
+
+  test('NaN position + missing wall → null (never a NaN-positioned node)', () => {
+    const p = resolveServicePlacement({}, {
+      serviceType: 'sewer-exit',
+      position: [Number.NaN, Number.NaN, Number.NaN],
+      rotation: [0, 0, 0],
+    })
+    expect(p).toBeNull()
+  })
+
+  test('NaN heightAff and NaN rotation fall back to defaults', () => {
+    const p = resolveServicePlacement(scene, {
+      serviceType: 'water-entry',
+      wallId: 'wall_1',
+      wallT: 0.5,
+      heightAff: Number.NaN,
+      position: [0, 0, 0],
+      rotation: [0, Number.NaN, 0],
+    })
+    expect(p?.position[1]).toBeCloseTo(SERVICE_BODY['water-entry'].defaultAff, 6)
+    const free = resolveServicePlacement({}, {
+      serviceType: 'sewer-exit',
+      heightAff: Number.NaN,
+      position: [2, 0, 2],
+      rotation: [0, Number.NaN, 0],
+    })
+    expect(free?.position[1]).toBeCloseTo(SERVICE_BODY['sewer-exit'].defaultAff, 6)
+    expect(free?.rotationY).toBe(0)
+    for (const v of [...(p?.position ?? []), p?.rotationY ?? 0, free?.rotationY ?? 0]) {
+      expect(Number.isFinite(v)).toBe(true)
+    }
+  })
+
   test('foreign-level wall + default position → null (positions are level-local)', () => {
     const twoLevels = {
       wall_up: {

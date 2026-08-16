@@ -171,6 +171,30 @@ describe('A4 gate — panel override re-anchors the homeruns', () => {
     expect(unreachableDevices(members, fixtures)).toEqual([])
   })
 
+  // GATE (NaN guards, engine side): hostile wallT/position never produce a
+  // NaN mount — NaN wallT → wall midpoint; NaN position → never-moved.
+  test('overrideWallPoint guards NaN wallT and NaN position components', () => {
+    const wp = overrideWallPoint(walls, {
+      wallId: 'w_e',
+      wallT: Number.NaN,
+      position: [0, 0, 0],
+    })
+    expect(wp?.wall.id).toBe('w_e')
+    expect(wp?.u).toBeCloseTo(2, 6) // midpoint of the 4 m wall
+    // NaN position is unusable → treated as never-moved → wall anchor wins
+    const wp2 = overrideWallPoint(walls, {
+      wallId: 'w_e',
+      wallT: 0.25,
+      position: [Number.NaN, 0, 3],
+    })
+    expect(wp2?.wall.id).toBe('w_e')
+    expect(wp2?.u).toBeCloseTo(1, 6)
+    // NaN position + missing wall → no override at all
+    expect(
+      overrideWallPoint(walls, { wallId: 'w_gone', position: [Number.NaN, 0, Number.NaN] }),
+    ).toBeNull()
+  })
+
   test('overrideWallPoint: curved wall + never-moved position is NOT an override', () => {
     const curved = makeWall({ id: 'w_curve', curved: true })
     expect(
