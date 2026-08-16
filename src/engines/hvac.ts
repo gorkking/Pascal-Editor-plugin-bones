@@ -35,7 +35,13 @@ import mepRules from '../../data/mep-rules.json'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Fixture, Member, RoomSlice, ServiceOverrides, WallSlice } from '../core/types'
 import { inches, toFeet } from '../core/units'
-import { clearOfOpenings, overridePlanPoint, overrideWallPoint } from './electrical'
+import {
+  clearOfOpenings,
+  overridePlanPoint,
+  overrideWallPoint,
+  pointInPolygon,
+  polygonCentroid,
+} from './electrical'
 
 type Pt = readonly [number, number]
 
@@ -58,6 +64,15 @@ const EXHAUST_SIDE = inches(4)
 const TRUNK_ATTIC_CLEARANCE = rules.hvac?.attic?.trunkAboveWallTopM ?? 0.3
 /** Top-plate band no duct may enter: [wall.height − band, wall.height]. */
 const PLATE_BAND = rules.hvac?.attic?.topPlateBandM ?? 0.09
+/** Interior storeys (a storey stacked ABOVE) have no attic: the trunk caps
+ * below the ceiling as a dropped-soffit run at ceiling − this drop. */
+const SOFFIT_DROP = 0.35
+/** Register grille hangs just BELOW the host ceiling mesh (like a recessed
+ * light) — at/above the plane it disappears from inside the room (visual
+ * round 2026-08-16: bare ceilings from below). */
+const REGISTER_BELOW_CEILING = 0.04
+/** The boot drops through the plane to meet the grille. */
+const BOOT_BELOW_CEILING = 0.05
 /** Thermostat mount height (device center) — 48–52" practice band. */
 const TSTAT_AFF = inches(52)
 /** Heat-pump pad stands this far outside its exterior wall. */
@@ -98,6 +113,56 @@ function centroid(polygon: readonly Pt[]): Pt {
   }
   const n = Math.max(1, polygon.length)
   return [x / n, z / n]
+}
+
+/** Clearance a register drop point keeps off every wall centerline: half the
+ * wall body + the 6" boot's half section + working slack. */
+const REGISTER_WALL_MARGIN = 0.12
+
+/** The wall whose plan band (centerline ± thickness/2 + margin) holds `p`. */
+function wallBandAt(p: Pt, walls: WallSlice[], margin = REGISTER_WALL_MARGIN): WallSlice | null {
+  for (const w of walls) {
+    if (w.curved || w.length < 0.1) continue
+    const dx = p[0] - w.start[0]
+    const dz = p[1] - w.start[1]
+    const along = dx * w.dir[0] + dz * w.dir[1]
+    if (along < -margin || along > w.length + margin) continue
+    const off = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
+    if (off < w.thickness / 2 + margin) return w
+  }
+  return null
+}
+
+/**
+ * Interior drop point for a room's ceiling register: the AREA centroid
+ * (shoelace), nudged back inside the polygon and off every wall band. The
+ * old VERTEX-AVERAGE centroid drifted onto (or past) walls in concave/L
+ * rooms, so the supply boot bored through the plate band and the register
+ * printed inside the wall (skeptic round 2026-08-16). Search: growing radial
+ * ring (8 directions), then edge-midpoint pull-ins for degenerate slivers.
+ */
+export function roomInteriorPoint(polygon: readonly Pt[], walls: WallSlice[]): Pt {
+  const c = polygonCentroid(polygon)
+  const ok = (q: Pt): boolean => pointInPolygon(q, polygon) && wallBandAt(q, walls) === null
+  if (ok(c)) return c
+  for (let step = 0.15; step <= 1.66; step += 0.15) {
+    for (let k = 0; k < 8; k++) {
+      const ang = (k * Math.PI) / 4
+      const q: Pt = [c[0] + Math.cos(ang) * step, c[1] + Math.sin(ang) * step]
+      if (ok(q)) return q
+    }
+  }
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i] as Pt
+    const b = polygon[(i + 1) % polygon.length] as Pt
+    const mid: Pt = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]
+    const n = Math.max(1e-6, Math.hypot(b[0] - a[0], b[1] - a[1]))
+    for (const s of [1, -1] as const) {
+      const q: Pt = [mid[0] + (-(b[1] - a[1]) / n) * 0.3 * s, mid[1] + ((b[0] - a[0]) / n) * 0.3 * s]
+      if (ok(q)) return q
+    }
+  }
+  return c
 }
 
 /** Cooling tons from conditioned area, rounded up to the half ton, min 1.5. */
@@ -202,9 +267,10 @@ function projectOnto(a: Pt, b: Pt, p: Pt): Pt {
   return [a[0] + abx * t, a[1] + abz * t]
 }
 
-/** Nearest point on any exterior wall (exhaust/service terminations). */
-function nearestExteriorPoint(walls: WallSlice[], p: Pt): Pt | null {
-  let best: Pt | null = null
+/** Nearest point on any exterior wall (exhaust/service terminations) —
+ * carries the wall so exhaust heights can key off the EXIT wall's height. */
+function nearestExteriorExit(walls: WallSlice[], p: Pt): { at: Pt; wall: WallSlice } | null {
+  let best: { at: Pt; wall: WallSlice } | null = null
   let bestDist = Number.POSITIVE_INFINITY
   for (const wall of walls) {
     if (!wall.exterior || wall.curved) continue
@@ -213,10 +279,50 @@ function nearestExteriorPoint(walls: WallSlice[], p: Pt): Pt | null {
     const d = Math.hypot(point[0] - p[0], point[1] - p[1])
     if (d < bestDist) {
       bestDist = d
-      best = point
+      best = { at: point, wall }
     }
   }
   return best
+}
+
+/** True when the plan segment a→b passes through `w`'s body (sampled). */
+function segCrossesWall(a: Pt, b: Pt, w: WallSlice): boolean {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1])
+  const steps = Math.max(1, Math.ceil(len / 0.1))
+  for (let i = 0; i <= steps; i++) {
+    const p: Pt = [a[0] + ((b[0] - a[0]) * i) / steps, a[1] + ((b[1] - a[1]) * i) / steps]
+    const dx = p[0] - w.start[0]
+    const dz = p[1] - w.start[1]
+    const along = dx * w.dir[0] + dz * w.dir[1]
+    if (along < 0 || along > w.length) continue
+    if (Math.abs(-dx * w.dir[1] + dz * w.dir[0]) < w.thickness / 2 + 0.02) return true
+  }
+  return false
+}
+
+/**
+ * The height budget for an exhaust run: the LOWEST wall it must pass through
+ * — the exit wall plus every wall the Manhattan legs cross — capped at the
+ * room ceiling. Keying off room.ceilingHeight alone put the duct inside a
+ * SHORTER exit wall's own plate band (skeptic round 2026-08-16: 2.4 m wall
+ * under a 2.5 m ceiling).
+ */
+function minWallHeightAlong(
+  from: Pt,
+  to: Pt,
+  exitWall: WallSlice,
+  roomCeiling: number,
+  walls: WallSlice[],
+): number {
+  let minH = Math.min(roomCeiling, exitWall.height)
+  const elbow: Pt = [to[0], from[1]]
+  for (const w of walls) {
+    if (w.curved || w.length < 0.1) continue
+    if (segCrossesWall(from, elbow, w) || segCrossesWall(elbow, to, w)) {
+      minH = Math.min(minH, w.height)
+    }
+  }
+  return minH
 }
 
 /** Axis-aligned bounds of a polygon. */
@@ -294,7 +400,7 @@ export function placeThermostatSpot(
 export function placeHeatPumpSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
   if (rooms.length === 0) return null
   const equipAt = centroid(equipmentRoomOf(rooms).polygon)
-  const exit = nearestExteriorPoint(walls, equipAt)
+  const exit = nearestExteriorExit(walls, equipAt)?.at
   if (!exit) return null
   const ox = exit[0] - equipAt[0]
   const oz = exit[1] - equipAt[1]
@@ -307,15 +413,17 @@ export function layoutHvac(
   rooms: RoomSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
   overrides?: Pick<ServiceOverrides, 'thermostat' | 'heatPump'>,
-): { members: Member[]; fixtures: Fixture[] } {
+  context?: { hasLevelAbove?: boolean },
+): { members: Member[]; fixtures: Fixture[]; warnings: string[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
-  if (rooms.length === 0) return { members, fixtures }
+  const warnings: string[] = []
+  if (rooms.length === 0) return { members, fixtures, warnings }
   const fab = spec.detail !== '200'
 
   const conditioned = rooms.filter((r) => r.category !== 'garage')
   const habitable = conditioned.filter((r) => r.category !== 'hallway')
-  if (habitable.length === 0) return { members, fixtures }
+  if (habitable.length === 0) return { members, fixtures, warnings }
 
   const areaM2 = conditioned.reduce((sum, r) => sum + polygonArea(r.polygon), 0)
   const habitableArea = habitable.reduce((sum, r) => sum + polygonArea(r.polygon), 0)
@@ -327,8 +435,16 @@ export function layoutHvac(
   // boring (a >50% bored plate needs a 16 ga tie) and a duct never fits, so
   // practice is an attic trunk above the ceiling joists (M1601) with supply
   // boots dropping through the CEILING.
+  // INTERIOR STOREYS (a walled storey stacked above — skeptic 2026-08-16:
+  // the "attic" trunk rose INTO the storey above): there is no attic, so the
+  // trunk caps below this storey's ceiling as a dropped-soffit run and the
+  // level says so. Top storeys keep the attic routing.
   const wallTop = walls.reduce((m, w) => Math.max(m, w.height), ceiling)
-  const trunkY = wallTop + TRUNK_ATTIC_CLEARANCE
+  const interiorStorey = context?.hasLevelAbove === true
+  const trunkY = interiorStorey ? ceiling - SOFFIT_DROP : wallTop + TRUNK_ATTIC_CLEARANCE
+  if (interiorStorey) {
+    warnings.push('interior-storey ducts run in soffits/floor webs — verify')
+  }
 
   const equipRoom = equipmentRoomOf(rooms)
   const equipAt = centroid(equipRoom.polygon)
@@ -360,16 +476,17 @@ export function layoutHvac(
     meta: { grilleIn2, capacityCfm: returnCapacityCfm },
   })
 
-  // CEILING registers at habitable room centroids, cfm from the room's area
-  // share — each one is a boot dropping through the ceiling plane (like a
-  // recessed light), never a plate-band penetration.
+  // CEILING registers at habitable room AREA centroids (nudged off wall
+  // bands — roomInteriorPoint), cfm from the room's area share — each one is
+  // a boot dropping through the ceiling plane; the grille hangs just BELOW
+  // the plane (like a recessed light) so it's visible from inside the room.
   const registers: { room: RoomSlice; at: Pt; cfm: number }[] = habitable.map((room) => {
-    const at = centroid(room.polygon)
+    const at = roomInteriorPoint(room.polygon, walls)
     const cfm = Math.round((totalCfm * polygonArea(room.polygon)) / Math.max(1e-6, habitableArea))
     fixtures.push({
       system: 'hvac',
       kind: 'register',
-      position: [at[0], room.ceilingHeight - 0.02, at[1]],
+      position: [at[0], room.ceilingHeight - REGISTER_BELOW_CEILING, at[1]],
       rotationY: 0,
       sourceId: room.id,
       label: `Supply register — ${cfm} cfm (ceiling)`,
@@ -405,7 +522,7 @@ export function layoutHvac(
     TRUNK_W,
     TRUNK_H,
     equipRoom.id,
-    `Trunk riser ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — to attic (M1601)`,
+    `Trunk riser ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${interiorStorey ? 'to soffit (M1601)' : 'to attic (M1601)'}`,
   )
   if (riser) members.push(riser)
   const feed = duct(
@@ -460,7 +577,7 @@ export function layoutHvac(
     if (branch) members.push(branch)
     const boot = ductDrop(
       at,
-      room.ceilingHeight - 0.02,
+      room.ceilingHeight - BOOT_BELOW_CEILING,
       trunkY,
       BRANCH_SIDE,
       BRANCH_SIDE,
@@ -475,7 +592,7 @@ export function layoutHvac(
     for (const room of rooms) {
       if (room.category !== 'bathroom' && room.category !== 'laundry') continue
       const at = centroid(room.polygon)
-      const exit = nearestExteriorPoint(walls, at)
+      const exit = nearestExteriorExit(walls, at)
       if (room.category === 'bathroom') {
         fixtures.push({
           system: 'hvac',
@@ -487,13 +604,17 @@ export function layoutHvac(
           meta: { cfm: 50 },
         })
         if (exit) {
-          // High on the wall but BELOW the plate band: the 4" duct exits
-          // through a stud bay, never through a top plate (R602.6).
+          // High on the wall but BELOW the plate band of every wall the run
+          // passes through — the EXIT wall's OWN height governs, not the
+          // room ceiling (a shorter exit wall used to put the duct in ITS
+          // plate band). The 4" duct exits a stud bay, never a top plate
+          // (R602.6).
+          const cap = minWallHeightAlong(at, exit.at, exit.wall, room.ceilingHeight, walls)
           manhattanDuct(
             members,
             at,
-            exit,
-            room.ceilingHeight - (PLATE_BAND + EXHAUST_SIDE / 2 + 0.03),
+            exit.at,
+            cap - (PLATE_BAND + EXHAUST_SIDE / 2 + 0.03),
             EXHAUST_SIDE,
             EXHAUST_SIDE,
             room.id,
@@ -504,7 +625,7 @@ export function layoutHvac(
         manhattanDuct(
           members,
           at,
-          exit,
+          exit.at,
           0.35,
           EXHAUST_SIDE,
           EXHAUST_SIDE,
@@ -519,7 +640,7 @@ export function layoutHvac(
   // + outdoor unit on its pad + refrigerant lineset through the wall ----
   const hpPlan = overridePlanPoint(walls, overrides?.heatPump)
   if (spec.detail === '400' || hpPlan) {
-    const exit = nearestExteriorPoint(walls, equipAt)
+    const exit = nearestExteriorExit(walls, equipAt)?.at
     if (spec.detail === '400' && exit) {
       // Condensate falls 1/8" per foot toward the exterior (M1411.3.1) —
       // rendered with the actual pitch, chaining down across both legs.
@@ -631,5 +752,5 @@ export function layoutHvac(
     })
   }
 
-  return { members, fixtures }
+  return { members, fixtures, warnings }
 }

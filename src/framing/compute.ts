@@ -523,9 +523,22 @@ function computeLevelUncached(
   if (config.showHvac) {
     // Thermostat / heat-pump service nodes are authoritative here too —
     // the tstat re-mounts and the outdoor unit + lineset re-anchor.
-    const hvac = layoutHvac(activeWalls, activeRooms, spec, services)
+    // A WALLED level above means this is an interior storey: no attic —
+    // layoutHvac caps the trunk as a dropped-soffit run and warns
+    // (checklist M1; a bare roof level above still counts as attic space).
+    const hasLevelAbove =
+      levelIndex >= 0 &&
+      levels
+        .slice(levelIndex + 1)
+        .some((l) =>
+          Object.values(nodes).some(
+            (n) => n.type === 'wall' && n.parentId === l.id && n.visible !== false,
+          ),
+        )
+    const hvac = layoutHvac(activeWalls, activeRooms, spec, services, { hasLevelAbove })
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
+    warnings.push(...hvac.warnings)
   }
 
   // ---- gross sheet-goods areas for the takeoff ----

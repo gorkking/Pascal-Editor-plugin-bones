@@ -141,6 +141,65 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
   })
 })
 
+describe('interior-storey hvac routes in soffits (checklist M1)', () => {
+  // Skeptic 2026-08-16: the ground storey's "attic" trunk rose to y 3.10 —
+  // INSIDE the storey above (storey height 2.7). Interior storeys have no
+  // attic: the trunk caps below the ceiling as a dropped-soffit run.
+  function hvacScene() {
+    const nodes = twoStoreyScene()
+    nodes.z0 = {
+      id: 'z0',
+      type: 'zone',
+      parentId: 'lvl0',
+      name: 'Bedroom',
+      polygon: [[0, 0], [8, 0], [8, 5], [0, 5]],
+    }
+    nodes.z1 = {
+      id: 'z1',
+      type: 'zone',
+      parentId: 'lvl1',
+      name: 'Bedroom',
+      polygon: [[0, 0], [8, 0], [8, 5], [0, 5]],
+    }
+    return nodes
+  }
+  const hvacBones = (id: string, levelId: string) =>
+    FramingNode.parse({
+      id,
+      parentId: levelId,
+      jurisdiction: 'AUTO',
+      showHvac: true,
+    }) as FramingNode
+  const SOFFIT_WARNING = 'interior-storey ducts run in soffits/floor webs — verify'
+
+  test('ground storey under a walled storey: no duct member above its storey height', () => {
+    const nodes = hvacScene()
+    const node = hvacBones('bonesframing_h0', 'lvl0')
+    nodes.bonesframing_h0 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const ducts = result.members.filter((m) => m.system === 'hvac' && m.role === 'duct-run')
+    expect(ducts.length).toBeGreaterThan(0)
+    for (const m of ducts) {
+      expect(m.position[1] + m.dims[1] / 2).toBeLessThanOrEqual(2.7)
+    }
+    expect(result.warnings).toContain(SOFFIT_WARNING)
+  })
+
+  test('top walled storey (bare roof level above) keeps attic routing, warning-free', () => {
+    const nodes = hvacScene()
+    const node = hvacBones('bonesframing_h1', 'lvl1')
+    nodes.bonesframing_h1 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const trunk = result.members.filter(
+      (m) => m.system === 'hvac' && m.label?.startsWith('Trunk'),
+    )
+    expect(trunk.length).toBeGreaterThan(0)
+    // the attic plane sits above the wall top — that's the roof level's space
+    expect(Math.max(...trunk.map((m) => m.position[1] + m.dims[1] / 2))).toBeGreaterThan(2.5)
+    expect(result.warnings).not.toContain(SOFFIT_WARNING)
+  })
+})
+
 describe('multi-storey — verify-round defect gates', () => {
   test('height-less legacy levels stack at the host default 2.5, not 2.7', () => {
     const nodes = twoStoreyScene()

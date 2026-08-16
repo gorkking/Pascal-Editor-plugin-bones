@@ -253,18 +253,25 @@ describe('hvac — ducts never cross top plates (R602.6 + M1601 attic practice)'
     }
   })
 
-  test('supply registers are CEILING fixtures fed by drop boots', () => {
+  test('supply registers hang just BELOW the ceiling plane, fed by drop boots', () => {
     const registers = fixtures.filter((f) => f.kind === 'register')
     expect(registers.length).toBeGreaterThan(0)
     for (const reg of registers) {
       const home = rooms.find((r) => r.id === reg.sourceId) as RoomSlice
-      expect(reg.position[1]).toBeCloseTo(home.ceilingHeight - 0.02, 6)
+      // Visual round 2026-08-16: at/above the host ceiling mesh the grille
+      // is invisible from inside the room — it sits 4 cm below the plane
+      // (like a recessed light), the boot reaching 5 cm below to meet it.
+      expect(reg.position[1]).toBeCloseTo(home.ceilingHeight - 0.04, 6)
+      expect(reg.position[1]).toBeLessThan(home.ceilingHeight)
       expect(reg.meta?.ceiling).toBe(true)
     }
     const boots = members.filter((m) => m.role === 'duct-run' && m.label?.includes('boot'))
     expect(boots.length).toBe(registers.length)
     for (const boot of boots) {
       expect(boot.dims[1]).toBeGreaterThan(boot.dims[0]) // vertical
+      // the boot's low end drops through the plane to the grille
+      const low = boot.position[1] - boot.dims[1] / 2
+      expect(low).toBeCloseTo(2.5 - 0.05, 6)
     }
   })
 
@@ -298,5 +305,99 @@ describe('hvac — ducts never cross top plates (R602.6 + M1601 attic practice)'
   test('mep-rules carries the attic keys the engine routes by', () => {
     expect(ATTIC.trunkAboveWallTopM).toBeGreaterThan(ATTIC.ceilingJoistDepthM)
     expect(ATTIC.topPlateBandM).toBeCloseTo(0.09, 6)
+  })
+})
+
+describe('hvac — exhaust height keys off the EXIT wall, not the room ceiling', () => {
+  test('a 2.4 m exit wall under a 2.5 m ceiling keeps the duct out of ITS plate band', () => {
+    // The bathroom (7.5, 2) exits through w_south (nearest exterior) —
+    // shorten THAT wall: the old room.ceilingHeight-keyed elevation put the
+    // 4" run inside its [2.31, 2.4] plate band (skeptic 2026-08-16).
+    const short = plan({ w_south: 2.4 })
+    const out = layoutHvac(short.walls, short.rooms)
+    expect(plateViolations(out.members, short.walls)).toEqual([])
+    const exhaust = out.members.filter(
+      (m) => m.role === 'duct-run' && m.label?.includes('Bath exhaust'),
+    )
+    expect(exhaust.length).toBeGreaterThan(0)
+    for (const m of exhaust) {
+      expect(m.position[1] + m.dims[1] / 2).toBeLessThan(2.4 - ATTIC.topPlateBandM)
+    }
+  })
+})
+
+describe('hvac — concave rooms: the register drops INSIDE the room, off every wall band', () => {
+  // Skeptic repro: an L-shaped room whose vertex-average "centroid" lands in
+  // the notch (outside the polygon, kissing the reentrant walls) — the
+  // register printed inside the wall, the boot bored the plate band.
+  const L: [number, number][] = [[0, 0], [6, 0], [6, 2], [2, 2], [2, 6], [0, 6]]
+  const wallsL = [
+    wall('w_s', [0, 0], [6, 0], true),
+    wall('w_e', [6, 0], [6, 2], true),
+    wall('w_nx', [6, 2], [2, 2], true),
+    wall('w_nz', [2, 2], [2, 6], true),
+    wall('w_n', [2, 6], [0, 6], true),
+    wall('w_w', [0, 6], [0, 0], true),
+  ]
+  const roomsL = [room('r_l', 'Living', 'other', L)]
+
+  const inPoly = (p: [number, number], poly: [number, number][]): boolean => {
+    let inside = false
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const [xi, zi] = poly[i] as [number, number]
+      const [xj, zj] = poly[j] as [number, number]
+      if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) {
+        inside = !inside
+      }
+    }
+    return inside
+  }
+
+  test('register point is in the polygon and clear of every wall body', () => {
+    const { members, fixtures } = layoutHvac(wallsL, roomsL)
+    const reg = fixtures.find((f) => f.kind === 'register' && f.sourceId === 'r_l')
+    expect(reg).toBeDefined()
+    const p: [number, number] = [(reg as Fixture).position[0], (reg as Fixture).position[2]]
+    expect(inPoly(p, L)).toBe(true)
+    for (const w of wallsL) {
+      const dx = p[0] - w.start[0]
+      const dz = p[1] - w.start[1]
+      const along = dx * w.dir[0] + dz * w.dir[1]
+      if (along < -0.01 || along > w.length + 0.01) continue
+      const off = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
+      // clear by the boot's half-section — the drop never grazes a wall
+      expect(off).toBeGreaterThan(w.thickness / 2 + 0.076)
+    }
+    expect(plateViolations(members, wallsL)).toEqual([])
+    expect(unreachableRegisters(members, fixtures)).toEqual([])
+  })
+})
+
+describe('hvac — interior storeys route in soffits, never into the storey above (M1)', () => {
+  const { walls, rooms } = plan()
+
+  test('hasLevelAbove caps every duct below the storey ceiling and says so', () => {
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, undefined, { hasLevelAbove: true })
+    const ducts = out.members.filter((m) => m.role === 'duct-run')
+    expect(ducts.length).toBeGreaterThan(0)
+    for (const m of ducts) {
+      // top of every duct stays below this storey's ceiling plane
+      expect(m.position[1] + m.dims[1] / 2).toBeLessThanOrEqual(2.5)
+    }
+    expect(plateViolations(out.members, walls)).toEqual([])
+    expect(unreachableRegisters(out.members, out.fixtures)).toEqual([])
+    expect(out.warnings).toContain('interior-storey ducts run in soffits/floor webs — verify')
+  })
+
+  test('top storeys keep the attic routing, warning-free', () => {
+    const out = layoutHvac(walls, rooms)
+    expect(out.warnings).toEqual([])
+    const trunk = out.members.filter(
+      (m) => m.role === 'duct-run' && m.dims[0] >= m.dims[1] && m.label?.startsWith('Trunk'),
+    )
+    expect(trunk.length).toBeGreaterThan(0)
+    for (const m of trunk) {
+      expect(m.position[1] - m.dims[1] / 2).toBeGreaterThan(2.5)
+    }
   })
 })
