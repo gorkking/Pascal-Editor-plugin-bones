@@ -113,6 +113,7 @@ const FIXTURE_TAG: Record<string, string> = {
   'vent-stack': 'VS',
   'water-heater': 'WH',
   'water-meter': 'M',
+  'electric-meter': 'EM',
   equipment: 'AH',
   cleanout: 'CO',
 }
@@ -608,6 +609,7 @@ function planSheet(
       VS: 'vent stack',
       WH: 'water heater',
       M: 'water meter',
+      EM: 'electric meter',
       AH: 'air handler',
       CO: 'cleanout',
     }
@@ -638,9 +640,16 @@ function planSheet(
       const y = MARGIN + 14 + row * 14
       const amps = sample?.meta?.breakerA ?? '—'
       const awg = sample?.meta?.gaugeAwg ?? '—'
+      // The SE cable is not a branch circuit — it has no breaker/gauge meta,
+      // so the generic row printed '— —A/—AWG · service-entrance' (round-3
+      // fixCheck2). Name it like the takeoff books it.
+      const text =
+        circuit === 'service-entrance'
+          ? 'SE cable 2 AWG Cu — street → meter → panel (NEC 230)'
+          : `${circuit} — ${amps}A/${awg}AWG · ${circuitZoneHint(circuit)}`
       legendLines.push(
         `<rect x="${MARGIN + 2}" y="${y - 8}" width="10" height="10" fill="${circuitColor(circuit)}" stroke="#444" stroke-width="0.5"/>` +
-          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`${circuit} — ${amps}A/${awg}AWG · ${circuitZoneHint(circuit)}`)}</text>`,
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(text)}</text>`,
       )
       row++
       if (row > 22) break
@@ -1267,9 +1276,34 @@ function schedulesSheets(
     wrapRow(`⚑ ${fl}`, 92).map((text, k) => ({ text, indent: k > 0 })),
   )
   const flagRows = flagLines.length
-  // Building characteristics print just above the flags on the same page:
-  // title + 4 metric lines — reserved out of the last page's capacity too.
-  const charLines = opts.characteristics ? 5 : 0
+  // Building characteristics print just above the flags on the same page —
+  // built HERE so the reserve counts the real line total (the citation/notes
+  // line WRAPS at the column width instead of clipping, round-3 fixCheck2).
+  const charBlockLines: string[] = []
+  if (opts.characteristics) {
+    const c = opts.characteristics
+    // A slab-less model has NO floor area — printing 'Floor area 0.0 m² …
+    // Cooling ~0.0 ton' reads as computed fact (round-3 scorecard C5);
+    // the area-derived metrics say n/a and point at the no-slab flag.
+    const noSlab = c.floorAreaM2 <= 0
+    const na = 'n/a — no floor slabs (see flags)'
+    charBlockLines.push(
+      noSlab
+        ? `Floor area & volume ${na} · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`
+        : `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
+      `Windows ${c.windowCount} (${c.windowAreaM2.toFixed(1)} m²) · Doors ${c.doorCount} · Climate zone ${c.insulation.climateZone} · Wall cavity R-${c.insulation.wallR}`,
+      noSlab
+        ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
+        : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
+      // ~100 chars ≈ the column width at 9.5px — WRAPPED, never clipped
+      ...wrapRow(
+        `${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`,
+        100,
+      ),
+    )
+  }
+  // title + the block's real line count — reserved out of the last page too.
+  const charLines = charBlockLines.length > 0 ? charBlockLines.length + 1 : 0
   // P1 balance (round-3 carried): the reserve consumes the SECOND column
   // only — the flag/characteristics blocks bottom-anchor in the right
   // column, the first column keeps its full height, and rows flow beside
@@ -1375,35 +1409,19 @@ function schedulesSheets(
     }
     // BUILDING CHARACTERISTICS block — last page, stacked above the flags
     // (whole-building metrics for HVAC dimensioning; assumptions inline).
+    // Lines pre-built above (charBlockLines) so the reserve matches: the
+    // notes line WRAPS at the column width, never clips (round-3 fixCheck2).
     let charText = ''
-    if (page === pages - 1 && opts.characteristics) {
-      const c = opts.characteristics
-      // A slab-less model has NO floor area — printing 'Floor area 0.0 m² …
-      // Cooling ~0.0 ton' reads as computed fact (round-3 scorecard C5);
-      // the area-derived metrics say n/a and point at the no-slab flag.
-      const noSlab = c.floorAreaM2 <= 0
-      const na = 'n/a — no floor slabs (see flags)'
-      const lines = [
-        noSlab
-          ? `Floor area & volume ${na} · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`
-          : `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
-        `Windows ${c.windowCount} (${c.windowAreaM2.toFixed(1)} m²) · Doors ${c.doorCount} · Climate zone ${c.insulation.climateZone} · Wall cavity R-${c.insulation.wallR}`,
-        noSlab
-          ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
-          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
-        // 100 chars ≈ the column width at 9.5px — the block lives in one
-        // column now (the standard citation line is 99 chars, untouched)
-        clip(`${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`, 100),
-      ]
+    if (page === pages - 1 && charBlockLines.length > 0) {
       // bottom-anchor above the flag block (or where flags would start) —
       // in the SECOND column, same as the flags (P1 reserve rework)
       const flagsTopY = H - TITLE_H - 40 - Math.max(0, flagLines.length - 1) * 13
       const bottomY = flagLines.length > 0 ? flagsTopY - 18 : H - TITLE_H - 40
       charText = [
-        `<text x="${MARGIN + colW}" y="${bottomY - lines.length * 13}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">BUILDING CHARACTERISTICS</text>`,
-        ...lines.map(
+        `<text x="${MARGIN + colW}" y="${bottomY - charBlockLines.length * 13}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">BUILDING CHARACTERISTICS</text>`,
+        ...charBlockLines.map(
           (l, i) =>
-            `<text x="${MARGIN + colW}" y="${bottomY - (lines.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(l)}</text>`,
+            `<text x="${MARGIN + colW}" y="${bottomY - (charBlockLines.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(l)}</text>`,
         ),
       ].join('')
     }

@@ -306,6 +306,99 @@ describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
   })
 })
 
+describe('round-3 fixCheck2 — EM symbol, SE legend row, notes wrap', () => {
+  test('electric-meter tags EM on the electrical sheet, named in the legend (P4)', () => {
+    // pre-fix: FIXTURE_TAG lacked 'electric-meter' → plan symbol '⊙·' and a
+    // legend row literally named '·' (the one true P4 defect of the round)
+    const members = [
+      member({
+        system: 'electrical',
+        role: 'wire-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.013, 0.013],
+        label: 'NM-B 14/2 w/G — GEN-1',
+        sourceId: 'GEN-1',
+      }),
+    ]
+    const fixtures = [
+      fixture({ meta: { circuit: 'GEN-1', breakerA: 15, gaugeAwg: 14 } }),
+      fixture({ kind: 'electric-meter', position: [3, 1.4, 0] }),
+    ]
+    const elec = buildPlanSet(members, fixtures, {}).find((s) =>
+      s.title.startsWith('Electrical'),
+    )
+    const svg = elec?.svg ?? ''
+    expect(svg).toContain('>EM</text>')
+    expect(svg).toContain('electric meter')
+    expect(svg).not.toContain('>·</text>')
+  })
+
+  test('service-entrance legend row reads like the takeoff, never a placeholder', () => {
+    const members = [
+      member({
+        system: 'electrical',
+        role: 'wire-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.013, 0.013],
+        label: 'NM-B 14/2 w/G — GEN-1',
+        sourceId: 'GEN-1',
+        position: [2, 0.45, 1],
+      }),
+      member({
+        system: 'electrical',
+        role: 'wire-run',
+        size: undefined,
+        material: 'copper',
+        dims: [3, 0.035, 0.035],
+        label: 'Service entrance 2 AWG Cu — meter → panel feed',
+        sourceId: 'service-entrance',
+        position: [2, 1.4, 2],
+      }),
+    ]
+    const fixtures = [fixture({ meta: { circuit: 'GEN-1', breakerA: 15, gaugeAwg: 14 } })]
+    const elec = buildPlanSet(members, fixtures, {}).find((s) =>
+      s.title.startsWith('Electrical'),
+    )
+    const svg = elec?.svg ?? ''
+    expect(svg).toContain('SE cable 2 AWG Cu — street → meter → panel (NEC 230)')
+    expect(svg).not.toContain('—A/—AWG · service-entrance')
+    // branch circuits keep the breaker/gauge row format
+    expect(svg).toContain('GEN-1 — 15A/14AWG')
+  })
+
+  test('characteristics notes line WRAPS at the column width — the tail never clips', () => {
+    const characteristics: BuildingCharacteristics = {
+      floorAreaM2: 40,
+      volumeM3: 108,
+      envelopeAreaM2: 61.4,
+      windowCount: 1,
+      windowAreaM2: 1.8,
+      doorCount: 1,
+      insulation: {
+        climateZone: '7',
+        wallR: 21,
+        // long citation pushes the notes line past 100 chars — pre-fix it
+        // was clip()ed and the disclaimers fell off the sheet
+        citation: '2021 IECC Table R402.1.3 as amended by the state energy conservation construction code',
+      },
+      uaWPerK: 30.1,
+      designHeatLossW: 662,
+      coolingTonsEstimate: 0.9,
+      notes: [],
+    }
+    const sched = buildPlanSet([member({})], [], { characteristics }).find((s) =>
+      s.title.startsWith('Schedules'),
+    )
+    const svg = sched?.svg ?? ''
+    expect(svg).toContain('BUILDING CHARACTERISTICS')
+    // head AND tail of the wrapped notes line both print
+    expect(svg).toContain('2021 IECC Table R402.1.3 as amended')
+    expect(svg).toContain('not a Manual J')
+  })
+})
+
 describe('blueprint round-3 — poché, cut mark, legends, wrap, coverage, dowels', () => {
   const stud = (x: number, z: number): Member =>
     member({

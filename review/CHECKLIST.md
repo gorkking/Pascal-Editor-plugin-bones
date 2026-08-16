@@ -48,6 +48,27 @@ AND a gate — a checklist line without a test is a wish.
   (`extractWalls` hasLowerStorey).
   Gate: `src/framing/compute.multistorey.test.ts` (takeoff/member consistency)
 
+## M — Mechanical (HVAC)
+
+- **M1 Ducts never cross plate bands; interior storeys route in soffits.**
+  No duct-run member OBB enters any wall's top-plate band
+  [wall.height − topPlateBandM, wall.height] (IRC R602.6 — a duct never fits
+  the plate boring limits). Top storeys run the trunk at ATTIC elevation
+  above the tallest plate (M1601) with ceiling-boot registers whose grille
+  hangs just BELOW the ceiling plane (visible from inside, like a light);
+  storeys with a WALLED storey above have no attic — the trunk caps below
+  the ceiling as a dropped-soffit run and the level warns
+  ('interior-storey ducts run in soffits/floor webs — verify'). Exhaust
+  runs exit through stud bays below the LOWEST wall along their path (the
+  exit wall's own height governs, not the room ceiling); register drop
+  points are area centroids nudged inside the room and off every wall band
+  (concave/L rooms).
+  Origin: prod report + skeptic round 2026-08-16 (short exit wall, L-room
+  register in the wall, ground-storey trunk inside the storey above,
+  invisible grilles).
+  Gates: `src/engines/hvac.plates.test.ts` +
+  `src/framing/compute.multistorey.test.ts` (M1 soffit storey)
+
 ## P — Plans (the exported document)
 
 - **P1 One shared transform per sheet set** — same scale, same origin, so
@@ -109,21 +130,28 @@ AND a gate — a checklist line without a test is a wish.
   propagation)
 
 - **A4 Service overrides are authoritative; routing follows.** A
-  `bones:service` node on the level IS the location of its system point
-  (panel / water heater / water entry / sewer exit): the engines consume it
-  VERBATIM — wallId+wallT+heightAff resolved by wall lerp, or a plain
-  position snapped to the nearest wall point — instead of auto-placing.
-  Moving the panel re-anchors every homerun (E2 continuity still holds);
-  moving the meter/WH re-routes supplies (still continuous, P5); moving the
-  sewer exit re-slopes the drains (still strictly monotonic downhill,
-  P3005.3). Auto-placement applies ONLY when no node exists; the panel's
-  "Place service points" action is idempotent per level and seeds the nodes
-  at the engines' current auto spots so creation alone never moves anything.
+  `bones:service` node on the level IS the location of its system point —
+  all EIGHT service types: panel / water heater / water entry / sewer exit /
+  power entry / thermostat / heat pump / electric meter — and the engines
+  consume it VERBATIM — wallId+wallT+heightAff resolved by wall lerp, or a
+  plain position snapped to the nearest wall point — instead of
+  auto-placing. Moving the panel re-anchors every homerun (E2 continuity
+  still holds); moving the electric meter re-anchors the whole street →
+  meter → panel service chain; moving the water meter/WH re-routes supplies
+  (still continuous, P5); moving the sewer exit re-slopes the drains (still
+  strictly monotonic downhill, P3005.3); moving the thermostat re-mounts it;
+  moving the heat pump re-anchors pad + cabinet + lineset. Every verbatim
+  wall mount forced into a door/window RO warns (panel / WH / water entry /
+  thermostat / electric meter — parity, no silent RO squatters).
+  Auto-placement applies ONLY when no node exists; the panel's "Place
+  service points" action is idempotent per level and seeds the nodes at the
+  engines' current auto spots so creation alone never moves anything.
   Origin: service-nodes plan 2026-08-16 ("drag the panel like a door — the
   wires follow").
   Gates: `src/engines/service-overrides.test.ts` (override → re-route,
   continuity + downhill re-proofs) + `src/service/place.test.ts`
-  (idempotent placement at engine auto spots)
+  (idempotent placement at engine auto spots) +
+  `src/framing/compute.test.ts` (RO-warning parity)
 
 ## Process
 
