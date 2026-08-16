@@ -763,3 +763,27 @@ describe('P5 gate — re-verify round 4 (exhaustion flags, clamp re-check, wire 
     }
   })
 })
+
+describe('P5 gate — re-verify round 5 (jumper through a tee-spanning window)', () => {
+  test('sill-0.5 1.2m window over the tee: jumpers are flagged, never silent', () => {
+    const walls = [
+      makeWall({
+        id: 'w_s',
+        start: [0, 0],
+        end: [10, 0],
+        openings: [opening('door', 4, 0.95, 0, 2.15), opening('window', 5.09, 1.2, 0.5, 1.4)],
+      }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+      makeWall({ id: 'w_mid', start: [5, 0], end: [5, 8], exterior: false }),
+    ]
+    const rooms = [
+      room('r_bath', 'bathroom', [[5, 0], [10, 0], [10, 4], [5, 4]]),
+      room('r_kitchen', 'kitchen', [[0, 5], [5, 5], [5, 8], [0, 8]]),
+    ]
+    const placed = [pf('wc', 'toilet', [6.5, 0.6]), pf('ks', 'kitchen-sink', [1.5, 7.6])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    expect(pipesThroughOpenings(members, walls)).toEqual([])
+  })
+})

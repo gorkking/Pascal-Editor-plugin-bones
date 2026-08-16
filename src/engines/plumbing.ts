@@ -498,7 +498,16 @@ function routePipe(
         const a = wallPlan({ wall: l.wall, u: l.u1 })
         const b = wallPlan({ wall: next.wall, u: next.u0 })
         if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 0.015) {
-          leg(members, { ...spec, label: `${spec.label} (junction jumper)` }, a, b, runY, false, 0.01)
+          // the jumper bridges two snapped leg ends — if either sits in an
+          // RO the bridge crosses it too (verify round 5: the last silent
+          // crossing class — vent jumpers through a tee-spanning window)
+          const jumpIn =
+            allWalls.length > 0 &&
+            (pointInAnyRO(allWalls, a as Pt, runY) || pointInAnyRO(allWalls, b as Pt, runY))
+          const jumpSpec = jumpIn
+            ? { ...legSpec, flag: legSpec.flag ?? 'OPENING: junction jumper crosses a rough opening — reroute or move the opening' }
+            : legSpec
+          leg(members, { ...jumpSpec, label: `${spec.label} (junction jumper)` }, a, b, runY, false, 0.01)
         }
       }
     }
