@@ -29,6 +29,28 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
+## Round-3 scorecard FIX BATCH — LANDED (2026-08-16, 5ea5913 + f1e42f7)
+- Scorecard review/scorecards/blueprint-round-3.json (verdict REVISE) items
+  fixed + gated, 580 tests:
+- Connectors (5ea5913): (1) P5d — connectorArc segments sampled through
+  pointInAnyRO, OPENING flag on RO crossings (repro: lav in the door RO =
+  6 unflagged crossings); (2) per-hose ids conn-cold-<id>/conn-hot-<id>,
+  takeoff books 'Braided supply connector — N pcs' excluded from copper lf
+  AND fitting bends (gate: off-wall fixtures add zero copper lf/elbows);
+  (3) >0.6m hose → 'connector too long' flag; plumbingPipeColor maps
+  conn-cold-/conn-hot- to blue/red (3D + MEP legend).
+- Plan set (f1e42f7): N3 FAIL — sectionCutX slides off along-plane walls
+  (±0.3m steps, A-A mark follows), poché only axis-crossing members
+  (<60° to plane normal), parallel in-band = beyond 0.6, below-grade cut
+  keeps dashes; C1 — roof coverage now a ~1m grid over the wall bbox
+  (>25% unroofed cells warns; pinned vs synthetic demo wing that beat the
+  bbox proxy at 0.64); P4 — circuit labels spiral-nudge apart (≥12px gate)
+  + skip on device-bubble anchors; C5 — floorAreaM2==0 prints 'n/a — no
+  floor slabs (see flags)' in drawer + sheet; N2 cheap part — butt caps on
+  all elevation/section member strokes.
+- NOT prod-shipped: needs the adversarial loop (skeptic + examiner re-read)
+  before any pin bump.
+
 ## Task #17 blueprint round-3 flags — LANDED (2026-08-16, a152cf9)
 - All six examiner flags fixed + gated in plan-set.test.ts (565 tests at
   land): (1) section poché — cut members dark #222 ×1.3 width, beyond at
