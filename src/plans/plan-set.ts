@@ -516,10 +516,10 @@ function planSheet(
     // legacy room-category fallback keeps its single pipe tint.
     const pipes = mine.filter((m) => m.system === 'plumbing' && m.role === 'pipe-run')
     const entries: [string, string][] = []
-    if (pipes.some((m) => m.sourceId.startsWith('cold-'))) {
+    if (pipes.some((m) => plumbingPipeColor(m.sourceId) === PLUMBING_COLORS.cold)) {
       entries.push(['supply — cold water', PLUMBING_COLORS.cold])
     }
-    if (pipes.some((m) => m.sourceId.startsWith('hot-'))) {
+    if (pipes.some((m) => plumbingPipeColor(m.sourceId) === PLUMBING_COLORS.hot)) {
       entries.push(['supply — hot water', PLUMBING_COLORS.hot])
     }
     if (pipes.some((m) => m.sourceId.startsWith('dwv-'))) {

@@ -407,15 +407,25 @@ function riser(
   })
 }
 
+/** A braided hose longer than this wants a re-routed stub, not more hose. */
+const CONN_MAX = 0.6
+
 /**
  * Braided supply connector: a 3-segment sagging arc from the wall stub to
  * the fixture's connection point (user ask — a toilet standing off the wall
  * showed pipe dead-ending in air). Chained endpoints land EXACTLY on stub
  * and fixture so the connectivity harness sees continuous pipe. No new
- * roles: plain copper pipe-runs under sourceId `conn-<fixture id>`.
+ * roles: plain copper pipe-runs under sourceId `conn-<side>-<fixture id>`
+ * — ONE id per hose, so the takeoff counts hoses, never phantom pipe.
+ * Segments are sampled through the same RO logic as risers (P5d — a hose
+ * through a doorway is still pipe through an opening; round-3 scorecard:
+ * 6 unflagged crossings for a lav dropped in the door RO), and hoses over
+ * CONN_MAX carry a too-long flag instead of silently spanning the room.
  */
 function connectorArc(
   members: Member[],
+  walls: WallSlice[],
+  side: 'cold' | 'hot',
   id: string,
   from: readonly [number, number, number],
   to: readonly [number, number, number],
@@ -434,6 +444,31 @@ function connectorArc(
     ]
   }
   const pts = [pt(0), pt(1 / 3), pt(2 / 3), pt(1)]
+  // total hose length — the fixture is too far when the arc exceeds CONN_MAX
+  let hoseLen = 0
+  for (let i = 0; i < 3; i++) {
+    const a = pts[i] as [number, number, number]
+    const b = pts[i + 1] as [number, number, number]
+    hoseLen += Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])
+  }
+  const lenFlag =
+    hoseLen > CONN_MAX
+      ? 'connector too long — move the fixture closer or route the stub'
+      : undefined
+  // chord sampled every 3cm at its own heights against every RO volume
+  const crossesRO = (a: readonly number[], b: readonly number[]): boolean => {
+    const steps = Math.max(
+      2,
+      Math.ceil(Math.hypot(b[0]! - a[0]!, b[1]! - a[1]!, b[2]! - a[2]!) / 0.03),
+    )
+    for (let i = 0; i <= steps; i++) {
+      const x = a[0]! + ((b[0]! - a[0]!) * i) / steps
+      const y = a[1]! + ((b[1]! - a[1]!) * i) / steps
+      const z = a[2]! + ((b[2]! - a[2]!) * i) / steps
+      if (pointInAnyRO(walls, [x, z], y)) return true
+    }
+    return false
+  }
   for (let i = 0; i < 3; i++) {
     const a = pts[i] as [number, number, number]
     const b = pts[i + 1] as [number, number, number]
@@ -442,6 +477,9 @@ function connectorArc(
     const plan = Math.hypot(hi[0] - lo[0], hi[2] - lo[2])
     const drop = hi[1] - lo[1]
     const length = Math.hypot(plan, drop)
+    const roFlag = crossesRO(a, b)
+      ? 'OPENING: braided supply connector crosses a rough opening — move the fixture clear of the door/window'
+      : undefined
     members.push({
       system: 'plumbing',
       role: 'pipe-run',
@@ -450,8 +488,9 @@ function connectorArc(
       position: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2],
       rotation: [0, Math.atan2(-(hi[2] - lo[2]), hi[0] - lo[0]), Math.atan2(drop, Math.max(1e-6, plan))],
       material: 'copper',
-      sourceId: `conn-${id}`,
+      sourceId: `conn-${side}-${id}`,
       label: 'braided supply connector',
+      flag: roFlag ?? lenFlag,
     })
   }
 }
@@ -1201,6 +1240,8 @@ function placedPlumbing(
         // Visible braided connector stub → fixture (islands keep air runs).
         connectorArc(
           members,
+          walls,
+          'cold',
           a.f.id,
           [a.plan[0], a.stubY, a.plan[1]],
           [a.f.plan[0], CONN_HEIGHT[a.f.kind], a.f.plan[1]],
@@ -1238,6 +1279,8 @@ function placedPlumbing(
           // the wall as the hot drop, so red and blue hoses never z-fight.
           connectorArc(
             members,
+            walls,
+            'hot',
             a.f.id,
             [hotAt[0], a.stubY, hotAt[1]],
             [

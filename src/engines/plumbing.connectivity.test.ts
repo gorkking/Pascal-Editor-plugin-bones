@@ -603,7 +603,7 @@ describe('flexible connectors — off-wall fixtures get braided supply arcs (tas
   test('toilet 0.3m off the wall → conn members chain stub → tank inlet', () => {
     const placed = [pf('wc', 'toilet', [6.5, 0.3])]
     const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed)
-    const conns = members.filter((m) => m.sourceId === 'conn-wc')
+    const conns = members.filter((m) => m.sourceId === 'conn-cold-wc')
     // 2-3 short chained members, no new roles, plain copper
     expect(conns.length).toBeGreaterThanOrEqual(2)
     expect(conns.length).toBeLessThanOrEqual(3)
@@ -635,16 +635,17 @@ describe('flexible connectors — off-wall fixtures get braided supply arcs (tas
       expect(gap).toBeLessThan(0.005)
     }
     // toilet is cold-only: no hot connector doubles the arc
-    expect(conns.length).toBeLessThanOrEqual(3)
+    expect(members.filter((m) => m.sourceId === 'conn-hot-wc')).toHaveLength(0)
   })
 
   test('hot fixture off the wall gets BOTH hoses; flush fixture gets none', () => {
     const placed = [pf('lav', 'lavatory', [7.6, 0.4]), pf('wc', 'toilet', [6.5, 0.0])]
     const { members } = layoutPlumbing(walls, rooms, undefined, placed)
-    // lav: cold arc + hot arc = 6 segments under one conn id
-    expect(members.filter((m) => m.sourceId === 'conn-lav')).toHaveLength(6)
+    // lav: cold arc + hot arc = 3 segments under each per-hose conn id
+    expect(members.filter((m) => m.sourceId === 'conn-cold-lav')).toHaveLength(3)
+    expect(members.filter((m) => m.sourceId === 'conn-hot-lav')).toHaveLength(3)
     // flush toilet (plan point ON the wall line): no connector at all
-    expect(members.filter((m) => m.sourceId === 'conn-wc')).toHaveLength(0)
+    expect(members.filter((m) => m.sourceId.startsWith('conn-') && m.sourceId.endsWith('-wc'))).toHaveLength(0)
   })
 
   test('island fixture keeps its flagged air run — no connector doubles it', () => {
@@ -656,9 +657,9 @@ describe('flexible connectors — off-wall fixtures get braided supply arcs (tas
     ]
     const placed = [pf('island', 'kitchen-sink', [4, 4]), pf('wc', 'toilet', [8, 0.6])]
     const { members } = layoutPlumbing(islandWalls, [], undefined, placed)
-    expect(members.filter((m) => m.sourceId === 'conn-island')).toHaveLength(0)
+    expect(members.filter((m) => m.sourceId.endsWith('-island') && m.sourceId.startsWith('conn-'))).toHaveLength(0)
     // the wall-adjacent toilet still gets its hose
-    expect(members.filter((m) => m.sourceId === 'conn-wc').length).toBeGreaterThan(0)
+    expect(members.filter((m) => m.sourceId === 'conn-cold-wc').length).toBeGreaterThan(0)
   })
 
   test('connectivity harness stays green with connectors in the member set', () => {
@@ -677,11 +678,77 @@ describe('flexible connectors — off-wall fixtures get braided supply arcs (tas
     const coldPlus = members.filter(
       (m) =>
         m.role === 'pipe-run' &&
-        (m.sourceId.startsWith('cold-') || m.sourceId.startsWith('conn-')),
+        (m.sourceId.startsWith('cold-') || m.sourceId.startsWith('conn-cold-')),
     )
     expect(
       unreachableFrom(coldPlus, meter.position, 0.12, [{ id: 'wc-inlet', position: [6.5, 0.2, 0.3] }], 0.03),
     ).toEqual([])
+  })
+})
+
+describe('connector defects — round-3 scorecard fix batch', () => {
+  const { walls, rooms } = housePlan()
+
+  test('P5d: a hose through the door RO is FLAGGED — never a silent crossing', () => {
+    // repro from the scorecard: lav dropped IN the door RO (u=4 on w_s) put
+    // 6 unflagged connector samples through the opening
+    const placed = [pf('lav', 'lavatory', [4.0, 0.03]), pf('wc', 'toilet', [6.5, 0.6])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    expect(pipesThroughOpenings(members, walls)).toEqual([])
+    const conns = members.filter((m) => m.sourceId.startsWith('conn-'))
+    expect(conns.length).toBeGreaterThan(0)
+    expect(conns.some((m) => m.flag?.includes('OPENING'))).toBe(true)
+  })
+
+  test('clean hoses stay unflagged (wall-adjacent fixtures, no RO nearby)', () => {
+    const placed = [pf('wc', 'toilet', [6.5, 0.3]), pf('lav', 'lavatory', [7.6, 0.4])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    const conns = members.filter((m) => m.sourceId.startsWith('conn-'))
+    expect(conns.length).toBeGreaterThan(0)
+    for (const c of conns) expect(c.flag).toBeUndefined()
+  })
+
+  test('hose over 0.6 m carries the too-long flag', () => {
+    // 0.9m off the wall: still under ISLAND_DIST (1.2) so it gets a hose,
+    // but the arc runs past CONN_MAX
+    const placed = [pf('wc', 'toilet', [6.5, 0.9])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    const conns = members.filter((m) => m.sourceId === 'conn-cold-wc')
+    expect(conns.length).toBeGreaterThan(0)
+    for (const c of conns) expect(c.flag).toContain('connector too long')
+  })
+
+  test('takeoff: off-wall fixtures add ZERO copper lf + zero elbows; hoses count as pcs', () => {
+    const { computeTakeoff } = require('./takeoff') as typeof import('./takeoff')
+    const flush = layoutPlumbing(walls, rooms, undefined, [
+      pf('wc', 'toilet', [6.5, 0.0]),
+      pf('lav', 'lavatory', [7.6, 0.0]),
+    ])
+    const off = layoutPlumbing(walls, rooms, undefined, [
+      pf('wc', 'toilet', [6.5, 0.3]),
+      pf('lav', 'lavatory', [7.6, 0.4]),
+    ])
+    const a = computeTakeoff(flush.members, flush.fixtures)
+    const b = computeTakeoff(off.members, off.fixtures)
+    const copperLf = (rows: typeof a) =>
+      rows.filter((r) => r.item.startsWith('Copper') && r.unit === 'lf').reduce((s, r) => s + r.quantity, 0)
+    const copperElbows = (rows: typeof a) =>
+      rows.filter((r) => r.item.startsWith('Copper') && r.item.includes('fittings')).reduce((s, r) => s + r.quantity, 0)
+    // same anchors, same homeruns — the hoses add no billable pipe or bends
+    expect(copperLf(b)).toBeCloseTo(copperLf(a), 3)
+    expect(copperElbows(b)).toBe(copperElbows(a))
+    // and the hoses show up as a piece count: wc cold + lav cold + lav hot
+    const hoses = b.find((r) => r.item === 'Braided supply connector')
+    expect(hoses?.quantity).toBe(3)
+    expect(hoses?.unit).toBe('pcs')
+    expect(a.find((r) => r.item === 'Braided supply connector')).toBeUndefined()
+  })
+
+  test('hoses read cold-blue / hot-red in 3D and on the MEP sheet', () => {
+    const { PLUMBING_COLORS, plumbingPipeColor } =
+      require('../plans/circuit-colors') as typeof import('../plans/circuit-colors')
+    expect(plumbingPipeColor('conn-cold-lav')).toBe(PLUMBING_COLORS.cold)
+    expect(plumbingPipeColor('conn-hot-lav')).toBe(PLUMBING_COLORS.hot)
   })
 })
 

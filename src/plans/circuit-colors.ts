@@ -21,8 +21,12 @@ export const PLUMBING_COLORS = {
 } as const
 
 export function plumbingPipeColor(sourceId: string): string | null {
-  if (sourceId.startsWith('cold-')) return PLUMBING_COLORS.cold
-  if (sourceId.startsWith('hot-')) return PLUMBING_COLORS.hot
+  if (sourceId.startsWith('cold-') || sourceId.startsWith('conn-cold-')) {
+    return PLUMBING_COLORS.cold
+  }
+  if (sourceId.startsWith('hot-') || sourceId.startsWith('conn-hot-')) {
+    return PLUMBING_COLORS.hot
+  }
   if (sourceId.startsWith('dwv-')) return PLUMBING_COLORS.dwv
   return null
 }

@@ -458,10 +458,17 @@ export function computeTakeoff(
   const pipeTallies = new Map<string, { section: string; item: string; lf: number }>()
   const ductTallies = new Map<string, { section: string; item: string; lf: number }>()
   const wireTallies = new Map<string, number>()
+  // Braided supply connectors are BOUGHT hoses, not cut pipe: one pc per
+  // sourceId (`conn-cold-<id>` / `conn-hot-<id>` — one id per hose), never
+  // copper lineal feet and never elbow fittings (round-3 scorecard: two
+  // off-wall fixtures booked phantom pipe + phantom bends).
+  const connectorHoses = new Set<string>()
   for (const m of members) {
     if (m.role === 'wire-run') {
       const gauge = m.label?.match(/(\d+)\/2/)?.[1] ?? '14'
       wireTallies.set(gauge, (wireTallies.get(gauge) ?? 0) + toFeet(m.length))
+    } else if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) {
+      connectorHoses.add(m.sourceId)
     } else if (m.role === 'pipe-run' || m.role === 'vent-stack') {
       const sizeIn = Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
       const materialName = m.material === 'copper' ? 'Copper' : m.material === 'pvc' ? 'PVC' : 'Pipe'
@@ -490,6 +497,15 @@ export function computeTakeoff(
   for (const tally of pipeTallies.values()) {
     push(tally.section, tally.item, 'linear feet', round1(tally.lf), 'lf')
   }
+  if (connectorHoses.size > 0) {
+    push(
+      'Plumbing',
+      'Braided supply connector',
+      'stub-to-fixture hoses, counted each',
+      connectorHoses.size,
+      'pcs',
+    )
+  }
   for (const tally of ductTallies.values()) {
     push(tally.section, tally.item, 'linear feet', round1(tally.lf), 'lf')
   }
@@ -504,6 +520,7 @@ export function computeTakeoff(
   // construction — couplings on straight >20ft sticks are not counted.
   const fittingChains = new Map<string, { section: string; item: string; legs: number }>()
   for (const m of members) {
+    if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) continue // hoses bend freely — no elbows
     if (m.role === 'pipe-run') {
       const sizeIn = Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
       const materialName = m.material === 'copper' ? 'Copper' : m.material === 'pvc' ? 'PVC' : 'Pipe'
