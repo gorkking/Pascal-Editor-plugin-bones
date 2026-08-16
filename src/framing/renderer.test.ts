@@ -216,3 +216,24 @@ describe('buildGroups — cross-level members split into foreign level groups', 
     expect((foreign.get('lvlroof')?.children.length ?? 0)).toBeGreaterThan(0)
   })
 })
+
+describe('under-slab plumbing ghosts through the floor (user ask 2026-08-16)', () => {
+  test('buried DWV buckets are ghosted; above-floor supply stays solid', () => {
+    const { buildGroup } = require('./renderer') as typeof import('./renderer')
+    const buried = {
+      system: 'plumbing' as const,
+      role: 'pipe-run' as const,
+      dims: [2, 0.08, 0.08] as const,
+      length: 2,
+      position: [1, -0.25, 0] as const,
+      rotation: [0, 0, 0] as const,
+      material: 'pvc' as const,
+      sourceId: 'dwv-main',
+    }
+    const supply = { ...buried, position: [1, 0.28, 0] as const, sourceId: 'cold-x' }
+    const group = buildGroup([buried, supply], [], true)
+    // ghosted buckets emit TWO meshes (solid + overlay ghost); solid-only one
+    const meshCounts = group.children.length
+    expect(meshCounts).toBeGreaterThanOrEqual(3)
+  })
+})

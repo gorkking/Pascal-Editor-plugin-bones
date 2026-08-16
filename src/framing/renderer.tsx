@@ -185,8 +185,14 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     // Ghost copies only make sense where no dollhouse opening can reveal
     // the members: below grade / under the floor. Wall, roof and MEP
     // members read through the OPENED near faces instead — ghosting them
-    // made every wall look transparent (round-13 user report).
-    const ghostless = member.system !== 'foundation' && member.system !== 'floor-framing'
+    // made every wall look transparent (round-13 user report). UNDER-SLAB
+    // plumbing (buried DWV, top of pipe below the floor line) ghosts like
+    // the foundation so the whole drainage tree reads through the slab to
+    // the sewer exit — 'crawl-space at a glance' (user ask 2026-08-16).
+    const buried =
+      member.system === 'plumbing' && member.position[1] + member.dims[1] / 2 < 0.02
+    const ghostless =
+      member.system !== 'foundation' && member.system !== 'floor-framing' && !buried
     push(`${color}|${ghostless ? 'solid' : 'ghosted'}`, color, member.dims, member.position, member.rotation, undefined, ghostless)
   }
   for (const fixture of fixtures) {
