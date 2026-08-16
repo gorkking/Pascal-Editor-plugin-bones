@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Euler, Matrix4, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
-import { cmuWall, cmuWalls } from './cmu'
+import { COURSE_HEIGHT, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
@@ -146,6 +146,12 @@ const ALLOWED: ReadonlySet<string> = new Set(
     ['rebar', 'footing'],
     ['rebar', 'stemwall'],
     ['rebar', 'slab-edge'],
+    // Mixed-wall seam bolts embed 7" into the grouted bond beam (R403.1.6)
+    // exactly where its horizontal bars run — a J-bolt sits beside/around
+    // the bar inside the grout (tie-wired in practice). Thin walls carry a
+    // single CENTERED beam bar, so the box-vs-box model cannot offset the
+    // two apart; the coexistence is the detailing intent, not a clash.
+    ['anchor-bolt', 'rebar'],
   ].map(([x, y]) => pairKey(x as string, y as string)),
 )
 
@@ -492,5 +498,36 @@ describe('interpenetration gate — structural members never share volume', () =
 
   test('CMU: wall with a window', () => {
     expect(violations(cmuWall(wall({ height: 2.4, openings: [window_(2)] }), spec400))).toEqual([])
+  })
+
+  test('mixed CMU/framed wall: 50% split, knee wall + crossing door, zoned windows (board 2026-08-16)', () => {
+    const H = COURSE_HEIGHT
+    // plain 50% split — thin wall exercises the single centered beam bar
+    expect(violations(mixedCmuWall(wall({ height: 2.44 }), spec400, 1.22).members)).toEqual([])
+    // 8"-nominal block wall, same split
+    expect(
+      violations(mixedCmuWall(wall({ height: 2.44, thickness: 0.2032 }), spec400, 1.22).members),
+    ).toEqual([])
+    // 3-course knee wall with a full-height door CROSSING the seam — the
+    // framed zone frames it, the blockwork jamb-cuts around it
+    expect(
+      violations(
+        mixedCmuWall(wall({ height: 2.44, thickness: 0.2, openings: [door(3)] }), spec400, 3 * H)
+          .members,
+      ),
+    ).toEqual([])
+    // window fully ABOVE a knee-wall seam (framed-zone king/trimmer/sill)
+    expect(
+      violations(
+        mixedCmuWall(wall({ height: 2.44, openings: [window_(4.2)] }), spec400, 3 * H).members,
+      ),
+    ).toEqual([])
+    // window CROSSING a high seam (CMU zone taller — jamb cuts, no lintel)
+    expect(
+      violations(
+        mixedCmuWall(wall({ height: 2.44, thickness: 0.2, openings: [window_(3)] }), spec400, 9 * H)
+          .members,
+      ),
+    ).toEqual([])
   })
 })
