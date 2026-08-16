@@ -6,7 +6,13 @@
  */
 
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
-import type { Fixture, Member, ServicePointOverride, WallSlice } from '../core/types'
+import type {
+  Fixture,
+  Member,
+  ServiceOverrides,
+  ServicePointOverride,
+  WallSlice,
+} from '../core/types'
 import { inches } from '../core/units'
 import {
   extractLevels,
@@ -111,6 +117,62 @@ function serviceOverrideRoWarning(
   return inRo
     ? `Service point “${label}” sits in a door/window rough opening — move it clear${suffix}`
     : null
+}
+
+/**
+ * serviceType → override slot for the service types added AFTER the core five
+ * (thermostat / heat-pump / electric-meter). The extraction extension lives
+ * HERE rather than in wall-model.ts — same lowest-id-wins, visible-only and
+ * NaN-guard contract as `extractServiceOverrides`, but kept out of that file
+ * so the parallel exterior-fallback rework there never collides with it.
+ */
+const EXTRA_SERVICE_KEY: Record<string, 'thermostat' | 'heatPump' | 'electricMeter'> = {
+  thermostat: 'thermostat',
+  'heat-pump': 'heatPump',
+  'electric-meter': 'electricMeter',
+}
+
+function extractExtraServiceOverrides(
+  nodes: Record<string, Record<string, unknown>>,
+  levelId: string,
+): { overrides: Pick<ServiceOverrides, 'thermostat' | 'heatPump' | 'electricMeter'>; duplicates: string[] } {
+  const winners = new Map<
+    'thermostat' | 'heatPump' | 'electricMeter',
+    { id: string; node: Record<string, unknown> }
+  >()
+  const duplicates = new Set<string>()
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'bones:service' || node.parentId !== levelId) continue
+    if (node.visible === false) continue
+    const serviceType = String(node.serviceType)
+    const key = EXTRA_SERVICE_KEY[serviceType]
+    if (!key) continue
+    const id = String(node.id ?? '')
+    const current = winners.get(key)
+    if (!current) {
+      winners.set(key, { id, node })
+      continue
+    }
+    duplicates.add(serviceType)
+    if (id < current.id) winners.set(key, { id, node })
+  }
+  const num = (v: unknown, fallback: number): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : fallback
+  const overrides: Pick<ServiceOverrides, 'thermostat' | 'heatPump' | 'electricMeter'> = {}
+  for (const [key, { node }] of winners) {
+    const override: ServicePointOverride = {}
+    if (typeof node.wallId === 'string' && node.wallId.length > 0) override.wallId = node.wallId
+    if (typeof node.wallT === 'number' && Number.isFinite(node.wallT)) override.wallT = node.wallT
+    if (typeof node.heightAff === 'number' && Number.isFinite(node.heightAff)) {
+      override.heightAff = node.heightAff
+    }
+    const pos = Array.isArray(node.position) ? (node.position as number[]) : null
+    if (pos && pos.length >= 3) {
+      override.position = [num(pos[0], 0), num(pos[1], 0), num(pos[2], 0)]
+    }
+    overrides[key] = override
+  }
+  return { overrides, duplicates: [...duplicates].sort() }
 }
 
 function computeLevelUncached(
@@ -358,8 +420,10 @@ function computeLevelUncached(
   // to them instead of auto-placing (checklist A4); reactivity is free since
   // computeLevel re-runs on any node change. Duplicate nodes of one type:
   // lowest id wins, the extras are called out.
-  const { overrides: services, duplicates } = extractServiceOverrides(nodes, levelId)
-  for (const dup of duplicates) {
+  const core = extractServiceOverrides(nodes, levelId)
+  const extra = extractExtraServiceOverrides(nodes, levelId)
+  const services: ServiceOverrides = { ...core.overrides, ...extra.overrides }
+  for (const dup of [...core.duplicates, ...extra.duplicates].sort()) {
     warnings.push(`duplicate service point (${dup}) — extra node ignored`)
   }
 
@@ -411,7 +475,9 @@ function computeLevelUncached(
   }
 
   if (config.showHvac) {
-    const hvac = layoutHvac(activeWalls, activeRooms, spec)
+    // Thermostat / heat-pump service nodes are authoritative here too —
+    // the tstat re-mounts and the outdoor unit + lineset re-anchor.
+    const hvac = layoutHvac(activeWalls, activeRooms, spec, services)
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
   }

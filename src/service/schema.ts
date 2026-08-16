@@ -23,6 +23,9 @@ export const SERVICE_TYPES = [
   'water-entry',
   'sewer-exit',
   'power-entry',
+  'thermostat',
+  'heat-pump',
+  'electric-meter',
 ] as const
 
 export const ServiceType = z.enum(SERVICE_TYPES)
@@ -43,9 +46,9 @@ export const ServiceNode = BaseNode.extend({
   rotation: z.tuple([z.number(), z.number(), z.number()]).default([0, 0, 0]),
 }).describe(
   `Bones service point — a building/utility interface the systems route to.
-  - serviceType: panel (electric service panel) | water-heater | water-entry (meter + shut-off) | sewer-exit | power-entry
-  - wallId + wallT (0..1 along the wall) + heightAff: wall-mounted anchor; move it and wires/pipes re-route
-  - position: level-local spot for floor-placed types (sewer exit); once moved off [0,0,0] (gizmo drag) it outranks the wall anchor
+  - serviceType: panel (electric service panel) | water-heater | water-entry (meter + shut-off) | sewer-exit | power-entry | thermostat | heat-pump (outdoor unit pad) | electric-meter
+  - wallId + wallT (0..1 along the wall) + heightAff: wall-mounted anchor; move it and wires/pipes/ducts re-route
+  - position: level-local spot for floor-placed types (sewer exit, heat pump); once moved off [0,0,0] (gizmo drag) it outranks the wall anchor
   Engines treat an existing node as authoritative; delete it to return to auto-placement.`,
 )
 
@@ -58,4 +61,7 @@ export const SERVICE_LABEL: Record<ServiceType, string> = {
   'water-entry': 'Water entry',
   'sewer-exit': 'Sewer exit',
   'power-entry': 'Power entry',
+  thermostat: 'Thermostat',
+  'heat-pump': 'Heat pump',
+  'electric-meter': 'Electric meter',
 }

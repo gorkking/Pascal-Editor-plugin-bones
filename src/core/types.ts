@@ -61,6 +61,8 @@ export type MemberRole =
   | 'wire-run'
   /** Water-heater body (tank cylinder approximated as a box, or tankless cabinet). */
   | 'water-heater'
+  /** MEP equipment bodies that aren't pipe/duct (heat-pump outdoor unit + its pad). */
+  | 'equipment'
   // fabrication (LOD 350/400)
   | 'rebar'
   | 'hanger'
@@ -156,6 +158,7 @@ export type FixtureKind =
   | 'cleanout'
   | 'thermostat'
   | 'exhaust-fan'
+  | 'electric-meter'
 
 export type Fixture = {
   system: BonesSystem
@@ -194,6 +197,9 @@ export type ServiceOverrides = {
   waterEntry?: ServicePointOverride
   sewerExit?: ServicePointOverride
   powerEntry?: ServicePointOverride
+  thermostat?: ServicePointOverride
+  heatPump?: ServicePointOverride
+  electricMeter?: ServicePointOverride
 }
 
 /** A door/window opening extracted from a wall's children, wall-local. */

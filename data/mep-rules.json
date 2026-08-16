@@ -170,6 +170,12 @@
       ],
       "roomBtuNote": "ENERGY STAR room-AC sizing table (8-ft ceilings); usable as per-room mini-split head first guess before Manual J."
     },
+    "attic": {
+      "trunkAboveWallTopM": 0.3,
+      "ceilingJoistDepthM": 0.24,
+      "topPlateBandM": 0.09,
+      "basis": "IRC R602.6 / R602.6.1: top plates may only be drilled/notched within strict limits (a plate bored more than 50% of its width requires a 0.054-in / 16 ga metal tie strapped across) — a supply duct never fits those limits, so ducts do NOT pass through top plates. IRC M1601 (duct installation) + residential practice: the supply trunk runs in the attic above the ceiling joists (~0.24 m deep 2x10s) and each supply register is a boot dropping through the CEILING plane like a recessed light. trunkAboveWallTopM = joist depth + working clearance above the tallest plate; topPlateBandM = the doubled 2x plate band [wall.height - 0.09, wall.height] no duct member may enter."
+    },
     "ducted": {
       "cfmPerTon": 400,
       "cfmPerTonNote": "Industry baseline; ~350 in hot-humid (latent priority) to ~450 in hot-dry climates; manufacturers publish an acceptable 350-450 band (hvacprocalculator, MEP Academy, ACCA discussion).",

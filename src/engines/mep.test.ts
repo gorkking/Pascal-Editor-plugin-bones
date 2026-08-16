@@ -160,10 +160,10 @@ describe('layoutHvac', () => {
     }
   })
 
-  test('return near the unit, thermostat on a wall at 60 inches', () => {
+  test('return near the unit, thermostat on a wall at 52 inches', () => {
     expect(byKind(fixtures, 'return')).toHaveLength(1)
     const tstat = byKind(fixtures, 'thermostat')[0] as Fixture
-    expect(tstat.position[1]).toBeCloseTo(60 * 0.0254, 5)
+    expect(tstat.position[1]).toBeCloseTo(52 * 0.0254, 5)
     expect(walls.some((w) => w.id === tstat.sourceId)).toBe(true)
   })
 

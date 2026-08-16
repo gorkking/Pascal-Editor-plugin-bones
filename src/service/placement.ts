@@ -18,23 +18,29 @@ export type BodySpec = {
 }
 
 /** Equipment look per type — panel grey enclosure, WH per the engine's tank,
- * water entry valve box, sewer 4" stub at the floor, power cable head. */
+ * water entry valve box, sewer 4" stub at the floor, power cable head,
+ * thermostat puck, heat-pump outdoor cabinet on its pad, meter socket. */
 export const SERVICE_BODY: Record<ServiceType, BodySpec> = {
   panel: { dims: [0.4, 0.6, 0.1], color: '#8f8f8f', defaultAff: inches(60), sign: 'PANEL' },
   'water-heater': { dims: [0.6, 1.5, 0.6], color: '#c7c9cc', defaultAff: 1.2, sign: 'WH' },
   'water-entry': { dims: [0.2, 0.2, 0.14], color: '#3f6fae', defaultAff: 0.3, sign: 'WATER' },
   'sewer-exit': { dims: [inches(4), 0.3, inches(4)], color: '#5b6670', defaultAff: 0.15, sign: 'SEWER' },
   'power-entry': { dims: [0.12, 0.28, 0.12], color: '#3a3a3e', defaultAff: 2.2, sign: 'POWER' },
+  thermostat: { dims: [0.09, 0.12, 0.03], color: '#e9e9e6', defaultAff: inches(52), sign: 'TSTAT' },
+  'heat-pump': { dims: [0.9, 0.8, 0.4], color: '#b9bec4', defaultAff: 0.5, sign: 'HP' },
+  'electric-meter': { dims: [0.2, 0.3, 0.15], color: '#9aa1a9', defaultAff: inches(55), sign: 'METER' },
 }
 
 /** Types that live on a wall face — a gizmo-moved `position` snaps back to
  * the nearest wall (mirroring the engines' nearestWallPoint override rule);
- * floor types (sewer exit) stand free wherever they're dropped. */
+ * floor types (sewer exit, heat-pump pad) stand free wherever they're dropped. */
 export const WALL_MOUNTED_TYPES: ReadonlySet<ServiceType> = new Set<ServiceType>([
   'panel',
   'water-heater',
   'water-entry',
   'power-entry',
+  'thermostat',
+  'electric-meter',
 ])
 
 export type ServicePlacement = {

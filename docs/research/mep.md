@@ -116,6 +116,16 @@ Source: [IRC ch.15](https://up.codes/viewer/pennsylvania/irc-2021/chapter/15/exh
 
 Same M1305.1 rules as water heaters: 30×30 in working space, 24-in access doors, 18-in garage ignition elevation, attic passageway limits ([IRC ch.13](https://up.codes/viewer/pennsylvania/irc-2021/chapter/13/general-mechanical-system-requirements)).
 
+### 3.6 Ducts vs. the structure — why the trunk lives in the ATTIC (prod report 2026-08-16)
+
+A user's production scene showed the supply trunk boring straight through wall **top plates**. That is not a thing framers or mechanicals do, and the code chain says why:
+
+- **IRC R602.6 (drilling/notching of studs) + R602.6.1 (top plate)**: where a top plate is cut, drilled or notched **more than 50 % of its width**, a galvanized metal tie **not less than 0.054 in thick (16 ga) and 1½ in wide** must be fastened across the opening with eight 10d nails each side. Those limits exist for *pipes* — a 14×8 in (or even 6 in round) supply duct can never satisfy a plate-boring limit, so **ducts simply do not pass through top plates**. (IRC 2021 ch. 6, wall construction — same UpCodes source family as the rest of this file.)
+- **IRC M1601 (duct systems)**: duct installation rules (M1601.4 support/joints; R-value per N1103.3 when outside conditioned space). Nothing in M1601 offers a plate-penetration path; installation guidance assumes ducts run in **open framing cavities: attics, floor trusses, dropped chases**.
+- **Residential practice** (Manual D guidance, §4 item 6 above): single-storey slab homes run the **rectangular trunk in the attic above the ceiling joists**, branches tee off at attic elevation, and each supply register is a **ceiling boot** dropping through the ceiling plane between joists — geometrically identical to a recessed-light rough-in. Two-storey supply alternatives (floor-truss webs, dropped hallway soffits) still never cross a plate: they run *below* it or *above* it.
+
+**Engine model (dataset `hvac.attic`):** trunk + branches route at `wall.height + trunkAboveWallTopM` (0.30 m ≈ ceiling-joist depth 0.24 m + clearance); supply registers sit at the ceiling plane (`meta ceiling:true`) fed by short vertical boots; bath/dryer exhaust exits through a **stud bay** below the plate band. Gate: no duct-run member's OBB may enter any wall's top-plate band `[wall.height − topPlateBandM, wall.height]` (0.09 m ≈ doubled 2x plate).
+
 ---
 
 ## 4. Spatial placement — how an inference engine should lay this out

@@ -217,6 +217,7 @@ const FIXTURE_ROWS: Record<FixtureKind, { item: string; detail: string }> = {
   cleanout: { item: 'Cleanouts', detail: 'IRC P3005.2' },
   'exhaust-fan': { item: 'Exhaust fans', detail: 'bath/dryer ventilation (M1505)' },
   thermostat: { item: 'Thermostats', detail: 'zone control' },
+  'electric-meter': { item: 'Electric meters', detail: 'service entrance (NEC 230.66)' },
 }
 
 /** Stable panel ordering for fixture rows (matches FixtureKind declaration). */
@@ -237,6 +238,7 @@ const FIXTURE_ORDER: readonly FixtureKind[] = [
   'cleanout',
   'thermostat',
   'exhaust-fan',
+  'electric-meter',
 ]
 
 // ---------------------------------------------------------------------------
@@ -463,8 +465,13 @@ export function computeTakeoff(
   // copper lineal feet and never elbow fittings (round-3 scorecard: two
   // off-wall fixtures booked phantom pipe + phantom bends).
   const connectorHoses = new Set<string>()
+  // Service-entrance cable (street → meter → panel) is SE/USE conductor, not
+  // NM-B — booked on its own line, never under a phantom NM gauge.
+  let seCableLf = 0
   for (const m of members) {
-    if (m.role === 'wire-run') {
+    if (m.role === 'wire-run' && m.sourceId === 'service-entrance') {
+      seCableLf += toFeet(m.length)
+    } else if (m.role === 'wire-run') {
       const gauge = m.label?.match(/(\d+)\/2/)?.[1] ?? '14'
       wireTallies.set(gauge, (wireTallies.get(gauge) ?? 0) + toFeet(m.length))
     } else if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) {
@@ -511,6 +518,9 @@ export function computeTakeoff(
   }
   for (const [gauge, lf] of wireTallies) {
     push('Electrical', `NM-B ${gauge}/2 w/G`, 'homeruns + branch chains', round1(lf), 'lf')
+  }
+  if (seCableLf > 0) {
+    push('Electrical', 'SE cable 2 AWG Cu', 'street → meter → panel (NEC 230)', round1(seCableLf), 'lf')
   }
 
   // ---- MEP fittings (LOD 400): elbows at each bend, boots, collars ----
