@@ -259,48 +259,56 @@ export function computeTakeoff(
     nails.set(type, (nails.get(type) ?? 0) + count)
 
   // ---- LUMBER: pieces per (system × size × stock length) + board feet ----
-  const bySystem = new Map<string, Map<LumberSize, Member[]>>()
+  // Pressure-treated stock is a DIFFERENT SKU (ground/masonry contact — the
+  // mixed-wall seam sill on its bond beam, mudsills): PT members book on
+  // their own `<size> PT` rows instead of blending into the untreated count.
+  const bySystem = new Map<string, Map<string, Member[]>>()
   for (const m of members) {
     if (!m.size || !WOOD_MATERIALS.has(m.material)) continue
     const section = SECTION_OF[m.system]
-    const sizes = bySystem.get(section) ?? new Map<LumberSize, Member[]>()
-    const bucket = sizes.get(m.size)
+    const key = m.material === 'pt-lumber' ? `${m.size} PT` : m.size
+    const sizes = bySystem.get(section) ?? new Map<string, Member[]>()
+    const bucket = sizes.get(key)
     if (bucket) bucket.push(m)
-    else sizes.set(m.size, [m])
+    else sizes.set(key, [m])
     bySystem.set(section, sizes)
   }
 
   for (const section of SECTION_ORDER) {
     const bySize = bySystem.get(section)
     if (!bySize) continue
-    // Iterate the catalog order so rows read 2x4 → 2x6 → … → 6x6.
+    // Iterate the catalog order so rows read 2x4 → 2x6 → … → 6x6, with a
+    // size's PT variant right after its untreated rows.
     for (const size of LUMBER_SIZES) {
-      const pieces = bySize.get(size)
-      if (!pieces) continue
-      const plain = new Map<number, number>() // stockFt → sticks
-      const spliced = new Map<number, number>() // stockFt → sticks (over-length)
-      let boardFeet = 0
-      const bfPerFt = boardFeetPerFoot(size)
-      for (const member of pieces) {
-        const pick = stockFor(member.length)
-        const tally = pick.splice ? spliced : plain
-        tally.set(pick.stockFt, (tally.get(pick.stockFt) ?? 0) + pick.pieces)
-        // Board feet are billed on the PURCHASED stick — you pay for the drop.
-        boardFeet += pick.pieces * pick.stockFt * bfPerFt
+      for (const item of [size, `${size} PT`]) {
+        const pieces = bySize.get(item)
+        if (!pieces) continue
+        const ptNote = item.endsWith(' PT') ? ' (pressure-treated)' : ''
+        const plain = new Map<number, number>() // stockFt → sticks
+        const spliced = new Map<number, number>() // stockFt → sticks (over-length)
+        let boardFeet = 0
+        const bfPerFt = boardFeetPerFoot(size)
+        for (const member of pieces) {
+          const pick = stockFor(member.length)
+          const tally = pick.splice ? spliced : plain
+          tally.set(pick.stockFt, (tally.get(pick.stockFt) ?? 0) + pick.pieces)
+          // Board feet are billed on the PURCHASED stick — you pay for the drop.
+          boardFeet += pick.pieces * pick.stockFt * bfPerFt
+        }
+        for (const stockFt of [...plain.keys()].sort((a, b) => a - b)) {
+          push(section, item, `${stockFt} ft stock${ptNote}`, plain.get(stockFt) ?? 0, 'pcs')
+        }
+        for (const stockFt of [...spliced.keys()].sort((a, b) => a - b)) {
+          push(
+            section,
+            item,
+            `${stockFt} ft stock (field splice — run exceeds 20 ft)${ptNote}`,
+            spliced.get(stockFt) ?? 0,
+            'pcs',
+          )
+        }
+        push(section, item, 'board feet', round1(boardFeet), 'bd-ft')
       }
-      for (const stockFt of [...plain.keys()].sort((a, b) => a - b)) {
-        push(section, size, `${stockFt} ft stock`, plain.get(stockFt) ?? 0, 'pcs')
-      }
-      for (const stockFt of [...spliced.keys()].sort((a, b) => a - b)) {
-        push(
-          section,
-          size,
-          `${stockFt} ft stock (field splice — run exceeds 20 ft)`,
-          spliced.get(stockFt) ?? 0,
-          'pcs',
-        )
-      }
-      push(section, size, 'board feet', round1(boardFeet), 'bd-ft')
     }
   }
 
@@ -428,7 +436,6 @@ export function computeTakeoff(
   // ---- STEEL hardware: counted by ROLE (never label regex) ----
   const roleCount = (role: Member['role']): number =>
     members.filter((m) => m.role === role).length
-  const anchorBolts = roleCount('anchor-bolt')
   const holdDowns = roleCount('hold-down')
   const plateWashers = roleCount('plate-washer')
   const hangers = roleCount('hanger')
@@ -437,8 +444,27 @@ export function computeTakeoff(
   const hurricaneTies = members.filter(
     (m) => m.role === 'blocking' && m.material === 'steel' && m.system === 'roof-framing',
   ).length
-  if (anchorBolts > 0) {
-    push('Foundation', 'Anchor bolts', 'mudsill anchorage (R403.1.6)', anchorBolts, 'pcs')
+  // Anchor bolts book PER SYSTEM: the foundation's mudsill anchorage and the
+  // mixed wall's seam-sill bolts (PT sill on the bond beam) are separate
+  // hardware lines — both answer to R403.1.6.
+  const anchorBoltsBySection = new Map<string, number>()
+  for (const m of members) {
+    if (m.role !== 'anchor-bolt') continue
+    const section = SECTION_OF[m.system]
+    anchorBoltsBySection.set(section, (anchorBoltsBySection.get(section) ?? 0) + 1)
+  }
+  for (const section of SECTION_ORDER) {
+    const bolts = anchorBoltsBySection.get(section)
+    if (!bolts) continue
+    push(
+      section,
+      'Anchor bolts',
+      section === 'Wall framing'
+        ? 'seam sill to bond beam (R403.1.6)'
+        : 'mudsill anchorage (R403.1.6)',
+      bolts,
+      'pcs',
+    )
   }
   if (plateWashers > 0) {
     push('Foundation', 'Plate washers 3x3', 'SDC D₀–D₂ (R602.11.1)', plateWashers, 'pcs')

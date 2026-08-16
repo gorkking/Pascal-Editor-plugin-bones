@@ -5,6 +5,8 @@ import { inches } from '../core/units'
 import { FramingNode } from '../framing/schema'
 import { computeLevel } from '../framing/compute'
 import { anchorBoltPositions } from './foundation'
+import { computeTakeoff, cutList, type TakeoffRow } from './takeoff'
+import { frameWall } from './wall-framing'
 import {
   COURSE_HEIGHT,
   SEAM_CROSSING_FLAG,
@@ -322,5 +324,68 @@ describe('computeLevel — mixed wall dispatch', () => {
     const viaFull = computeLevel(scene(), config({ wall_a: { construction: 'cmu', cmuHeightM: 2.44 } }))
     const viaString = computeLevel(scene(), config({ wall_a: 'cmu' }))
     expect(viaFull.members).toEqual(viaString.members)
+  })
+})
+
+/**
+ * GATE — takeoff deltas (board spec): block count for the CMU zone only,
+ * studs shortened to the framed zone, the PT sill + its R403.1.6 bolts
+ * booked, and the crossing flag surfacing in the Flags section.
+ */
+describe('mixed wall — takeoff deltas', () => {
+  const wall = makeWall() // 6m × 2.44m, 0.2 thick → 2x6 framing
+  const mixed = mixedCmuWall(wall, spec, 1.22).members
+  const mixedRows = computeTakeoff(mixed, [])
+  const fullCmuRows = computeTakeoff(cmuWall(wall, spec), [])
+  const find = (rows: TakeoffRow[], item: string, detail?: string) =>
+    rows.find((r) => r.item === item && (detail === undefined || r.detail.includes(detail)))
+
+  test('block count books the CMU zone only — fewer than the full-height wall', () => {
+    const zoneBlocks = find(mixedRows, 'CMU block')?.quantity ?? 0
+    const fullBlocks = find(fullCmuRows, 'CMU block')?.quantity ?? 0
+    expect(zoneBlocks).toBe(byRole(mixed, 'block').length) // counted, not estimated
+    expect(zoneBlocks).toBeGreaterThan(0)
+    expect(zoneBlocks).toBeLessThan(fullBlocks)
+    // mortar follows the block count down too
+    const zoneMortar = find(mixedRows, 'Mortar (Type S)')?.quantity ?? 0
+    const fullMortar = find(fullCmuRows, 'Mortar (Type S)')?.quantity ?? 0
+    expect(zoneMortar).toBeLessThanOrEqual(fullMortar)
+  })
+
+  test('PT sill books on its own pressure-treated line (one 20-ft stick for 6m)', () => {
+    const pt = find(mixedRows, '2x6 PT', 'ft stock (pressure-treated)')
+    expect(pt?.quantity).toBe(1)
+    expect(pt?.section).toBe('Wall framing')
+    // and it never inflates the untreated 2x6 stick count for that stock
+    expect(find(fullCmuRows, '2x6 PT')).toBeUndefined()
+  })
+
+  test('seam anchor bolts book under Wall framing with the R403.1.6 cite', () => {
+    const bolts = find(mixedRows, 'Anchor bolts', 'seam sill to bond beam (R403.1.6)')
+    expect(bolts?.section).toBe('Wall framing')
+    expect(bolts?.quantity).toBe(byRole(mixed, 'anchor-bolt').length)
+    expect(bolts?.quantity).toBe(
+      anchorBoltPositions(wall.length, spec.anchorBoltSpacing, spec.anchorBoltEndDistance).length,
+    )
+    // the full-height CMU wall has no seam hardware
+    expect(find(fullCmuRows, 'Anchor bolts')).toBeUndefined()
+  })
+
+  test('studs are SHORTENED: the cut list carries zone-height studs, not full-height', () => {
+    const seam = snapCmuHeight(1.22, wall.height)
+    const zoneStudHeight = wall.height - seam - SILL_T - 3 * SILL_T // sill + bottom + 2 top plates
+    const mixedStuds = cutList(mixed).filter((r) => r.role === 'stud')
+    expect(mixedStuds).toHaveLength(1)
+    expect(mixedStuds[0]?.lengthM).toBeCloseTo(zoneStudHeight, 3)
+    const fullStuds = cutList(frameWall(wall, spec)).filter((r) => r.role === 'stud')
+    expect(fullStuds[0]?.lengthM).toBeCloseTo(wall.height - 3 * SILL_T, 3)
+    expect(mixedStuds[0]?.lengthM ?? 0).toBeLessThan(fullStuds[0]?.lengthM ?? 0)
+  })
+
+  test('a crossing opening surfaces as a Flags line', () => {
+    const crossing = mixedCmuWall(makeWall({ openings: [door(3)] }), spec, 3 * H).members
+    const rows = computeTakeoff(crossing, [])
+    const flag = rows.find((r) => r.section === 'Flags' && r.detail === SEAM_CROSSING_FLAG)
+    expect(flag?.quantity).toBe(1)
   })
 })

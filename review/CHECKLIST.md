@@ -47,6 +47,19 @@ AND a gate — a checklist line without a test is a wish.
   rendered. The attic rule now requires a storey BELOW in the same building
   (`extractWalls` hasLowerStorey).
   Gate: `src/framing/compute.multistorey.test.ts` (takeoff/member consistency)
+- **S5 A mixed CMU/framed wall seams on a whole course and tops out at its
+  architectural height.** The override `{ construction: 'cmu', cmuHeightM }`
+  splits the wall at `snapCmuHeight` (8" module, R606 coursing): bond beam as
+  the CMU zone's top course, PT sill anchor-bolted to it (R403.1.6 layout,
+  7" embed), shortened framed zone with its own bottom/top plates above —
+  zones never share volume (S1 matrix covers the seam), openings zone per
+  the seam, a CROSSING opening always flags ('opening crosses the CMU/framing
+  seam — verify detail') and frames as if fully in the taller zone. A height
+  absent or at/above every fitting course = byte-equal to today's full-height
+  CMU. Takeoff: blocks for the zone only, PT booked on its own `<size> PT`
+  row, seam bolts under Wall framing.
+  Gates: `src/engines/mixed-wall.test.ts` + mixed scenarios in
+  `interpenetration.test.ts`
 
 ## M — Mechanical (HVAC)
 

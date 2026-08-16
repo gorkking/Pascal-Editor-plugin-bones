@@ -183,7 +183,7 @@ describe('lumber row ordering', () => {
     expect(rows.map((r) => r.detail)).toEqual(['8 ft stock', '10 ft stock', 'board feet'])
   })
 
-  test('pressure-treated mudsills count as lumber; steel and concrete never do', () => {
+  test('pressure-treated mudsills count as lumber ON THEIR OWN PT row; steel and concrete never do', () => {
     const rows = computeTakeoff(
       [
         lumber('2x6', 2.3, { material: 'pt-lumber', role: 'mudsill', system: 'foundation' }),
@@ -192,9 +192,26 @@ describe('lumber row ordering', () => {
       ],
       [],
     )
-    expect(find(rows, '2x6', '8 ft stock')?.quantity).toBe(1)
+    // PT is a different SKU — never blended into the untreated count.
+    expect(find(rows, '2x6 PT', '8 ft stock (pressure-treated)')?.quantity).toBe(1)
+    expect(find(rows, '2x6', '8 ft stock')).toBeUndefined()
     // exactly one lumber size section (one board-feet row)
     expect(rows.filter((r) => r.detail === 'board feet')).toHaveLength(1)
+  })
+
+  test('PT and untreated sticks of one size book side by side, PT after untreated', () => {
+    const rows = computeTakeoff(
+      [
+        lumber('2x6', 2.3),
+        lumber('2x6', 2.3, { material: 'pt-lumber', role: 'mudsill' }),
+      ],
+      [],
+    )
+    expect(find(rows, '2x6', '8 ft stock')?.quantity).toBe(1)
+    expect(find(rows, '2x6 PT', '8 ft stock (pressure-treated)')?.quantity).toBe(1)
+    const items = rows.filter((r) => r.detail.startsWith('8 ft stock')).map((r) => r.item)
+    expect(items).toEqual(['2x6', '2x6 PT'])
+    expect(rows.filter((r) => r.detail === 'board feet')).toHaveLength(2)
   })
 
   test('members without a nominal size are not lumber rows', () => {
@@ -288,6 +305,23 @@ describe('steel hardware', () => {
     for (const item of ['Anchor bolts', 'Hold-downs', 'Hurricane ties']) {
       expect(find(rows, item)?.unit).toBe('pcs')
     }
+  })
+
+  test('anchor bolts split per system: foundation mudsill vs mixed-wall seam sill', () => {
+    const foundationBolt = mem({
+      system: 'foundation',
+      role: 'anchor-bolt',
+      material: 'steel',
+      size: undefined,
+      length: 0.25,
+    })
+    const rows = computeTakeoff([bolt, bolt, foundationBolt, foundationBolt, foundationBolt], [])
+    const seam = rows.find((r) => r.item === 'Anchor bolts' && r.section === 'Wall framing')
+    const mudsill = rows.find((r) => r.item === 'Anchor bolts' && r.section === 'Foundation')
+    expect(seam?.quantity).toBe(2)
+    expect(seam?.detail).toBe('seam sill to bond beam (R403.1.6)')
+    expect(mudsill?.quantity).toBe(3)
+    expect(mudsill?.detail).toBe('mudsill anchorage (R403.1.6)')
   })
 
   test('hardware rows are omitted when absent', () => {
