@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
 import { extractLevels } from './core/wall-model'
 import { FramingNode, type WallConstruction } from './framing/schema'
+import { selectedWallInfo, wallOverridePatch } from './panel-selection'
 import { buildPlanSet, planSetHtml } from './plans/plan-set'
 import { characteristicsCsv, characteristicsRows } from './engines/characteristics'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
@@ -66,10 +67,13 @@ export default function BonesPanel() {
         </p>
       </header>
 
+      {framingNode && result && (
+        <SelectedWallCard framingNode={framingNode} nodes={nodes} result={result} />
+      )}
+
       <XraySection activeLevelId={activeLevelId ?? null} framingNode={framingNode} result={result} />
 
       {framingNode && activeLevelId && <ServicePointsSection activeLevelId={activeLevelId} />}
-      {framingNode && <WallOverrideSection framingNode={framingNode} />}
       {framingNode && result && <TakeoffSection result={result} />}
       {framingNode && result && <CharacteristicsSection result={result} />}
 
@@ -287,40 +291,71 @@ function ServicePointsSection({ activeLevelId }: { activeLevelId: string }) {
   )
 }
 
-/** Per-wall construction override, bound to the current selection. */
-function WallOverrideSection({
+/**
+ * Per-element drawer, stage 1 — select a wall in the scene and its
+ * engineering surfaces at the top of the panel: what it is (exterior/
+ * interior), how it's built (framed/CMU/skip — writes the per-wall
+ * override), and what the code gives it (stud recipe, cavity insulation
+ * for the climate zone). Replaces the old WallOverrideSection (same
+ * override write, richer readout). Hidden unless the host selection is a
+ * wall on the active level.
+ */
+function SelectedWallCard({
   framingNode,
+  nodes,
+  result,
 }: {
   framingNode: FramingNode & { id: string }
+  nodes: Record<string, unknown>
+  result: NonNullable<ReturnType<typeof computeLevel>>
 }) {
+  const levelId = useViewer((s) => s.selection.levelId)
   const selectedIds = useViewer((s) => s.selection.selectedIds)
-  const selectedWall = useScene((s) => {
-    const id = selectedIds?.[0]
-    if (!id) return undefined
-    const node = s.nodes[id as AnyNodeId]
-    return node && (node.type as string) === 'wall' ? node : undefined
-  })
+  const info = useMemo(
+    () =>
+      selectedWallInfo(
+        nodes as Record<string, Record<string, unknown>>,
+        { levelId, selectedIds },
+        framingNode,
+        result,
+      ),
+    [nodes, levelId, selectedIds, framingNode, result],
+  )
 
-  if (!selectedWall) return null
-  const wallId = selectedWall.id as string
-  const current: WallConstruction = framingNode.wallOverrides?.[wallId] ?? 'framed'
-
+  if (!info) return null
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border border-sidebar-border/50 bg-sidebar-accent/30 p-2.5">
-      <span className="font-medium text-xs">Selected wall construction</span>
+    <div className="flex flex-col gap-2 rounded-md border border-sidebar-ring/60 bg-sidebar-accent/30 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-medium text-xs" title={info.wallId}>
+          {info.label}
+        </span>
+        <span className="shrink-0 rounded-full bg-sidebar-accent px-2 py-0.5 text-[10px] text-sidebar-foreground/60">
+          {info.exterior ? 'Exterior' : 'Interior'}
+        </span>
+      </div>
       <SegmentedControl
         onChange={(v: WallConstruction) =>
-          useScene.getState().updateNode(framingNode.id as AnyNodeId, {
-            wallOverrides: { ...framingNode.wallOverrides, [wallId]: v },
-          } as Partial<AnyNode> as never)
+          useScene
+            .getState()
+            .updateNode(
+              framingNode.id as AnyNodeId,
+              wallOverridePatch(framingNode, info.wallId, v) as Partial<AnyNode> as never,
+            )
         }
         options={[
           { label: 'Framed', value: 'framed' },
           { label: 'CMU', value: 'cmu' },
           { label: 'Skip', value: 'skip' },
         ]}
-        value={current}
+        value={info.construction}
       />
+      <div className="text-[11px] text-sidebar-foreground/60 leading-relaxed">
+        <span className="block">{info.assembly}</span>
+        {info.insulation && <span className="block">{info.insulation}</span>}
+        {info.curved && (
+          <span className="block text-amber-500/80">Curved — framing lands later</span>
+        )}
+      </div>
     </div>
   )
 }
