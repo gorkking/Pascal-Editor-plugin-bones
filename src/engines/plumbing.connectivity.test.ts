@@ -713,3 +713,53 @@ describe('P5 gate — re-verify round 3 (mulled-opening riser clearance)', () =>
     expect(bad).toEqual([])
   })
 })
+
+describe('P5 gate — re-verify round 4 (exhaustion flags, clamp re-check, wire skin)', () => {
+  const wideWalls = (windowW: number, sill: number) => [
+    makeWall({
+      id: 'w_s',
+      start: [0, 0],
+      end: [10, 0],
+      openings: [opening('door', 4, 0.95, 0, 2.15), opening('window', 4.49 + windowW / 2 + 0.0, windowW, sill, 1.4)],
+    }),
+    makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+    makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+    makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+    makeWall({ id: 'w_mid', start: [5, 0], end: [5, 8], exterior: false }),
+  ]
+  const roomsFor = () => [
+    room('r_bath', 'bathroom', [[5, 0], [10, 0], [10, 4], [5, 4]]),
+    room('r_kitchen', 'kitchen', [[0, 5], [5, 5], [5, 8], [0, 8]]),
+  ]
+
+  test('1.2m mulled window: risers are clear OR carry the OPENING flag — never silent', () => {
+    const walls = wideWalls(1.2, 0.7)
+    const placed = [pf('wc', 'toilet', [6.5, 0.6]), pf('ks', 'kitchen-sink', [1.5, 7.6])]
+    const { members } = layoutPlumbing(walls, roomsFor(), undefined, placed)
+    // pipesThroughOpenings ignores flagged members; unflagged crossings = 0
+    expect(pipesThroughOpenings(members, walls)).toEqual([])
+  })
+
+  test('narrow window: cleared risers stay >=2cm from the RO edge (electrical stands there)', () => {
+    const walls = wideWalls(0.465, 0.5)
+    const placed = [pf('wc', 'toilet', [6.5, 0.6]), pf('ks', 'kitchen-sink', [1.5, 7.6])]
+    const { members } = layoutPlumbing(walls, roomsFor(), undefined, placed)
+    expect(pipesThroughOpenings(members, walls)).toEqual([])
+    const risers = members.filter(
+      (m) => m.role === 'pipe-run' && m.dims[1] > m.dims[0] && !m.flag &&
+        (m.sourceId.startsWith('cold-') || m.sourceId.startsWith('hot-')),
+    )
+    for (const r of risers) {
+      const u = r.position[0] // w_s runs along +x from origin
+      if (Math.abs(r.position[2]) > 0.1) continue
+      for (const w of wideWalls(0.465, 0.5).slice(0, 1)) {
+        const { openingSpans } = require('./electrical') as typeof import('./electrical')
+        for (const sp of openingSpans(w, 0.02, w.height - 0.02)) {
+          if (u > sp.lo - 0.02 && u < sp.hi + 0.02) {
+            throw new Error(`riser ${r.sourceId} at u=${u.toFixed(3)} within 2cm of RO [${sp.lo},${sp.hi}]`)
+          }
+        }
+      }
+    }
+  })
+})

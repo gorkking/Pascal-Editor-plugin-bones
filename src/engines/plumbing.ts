@@ -378,17 +378,33 @@ function pipeWallLeg(
     // height (re-verify round 3: a mulled window 1.5cm past the door edge
     // swallowed the blindly-shifted riser) — step outward until clear.
     const EDGE_OFF = 0.045
-    const riserU = (start: number, step: number): number => {
+    // 2.5cm skin: also clears the ELECTRICAL risers standing exactly on the
+    // RO edges (verify round 4: 1cm skin left 1.5cm pipe/wire separation).
+    // Clearance is tested on the CLAMPED value each step; exhaustion (24
+    // steps = 1.2m, the widest common window) returns ok:false and the
+    // risers are emitted FLAGGED — never a silent crossing.
+    const riserU = (start: number, step: number): { u: number; ok: boolean } => {
       const allSpans = openingSpans(wall, 0.02, wall.height - 0.02)
+      const isClear = (u: number) => !allSpans.some((sp) => u > sp.lo - 0.025 && u < sp.hi + 0.025)
       let u = start
-      for (let i = 0; i < 10; i++) {
-        if (!allSpans.some((sp) => u > sp.lo - 0.01 && u < sp.hi + 0.01)) return u
+      let prev = Number.NaN
+      for (let i = 0; i < 24; i++) {
+        const c = clamp(u)
+        if (isClear(c)) return { u: c, ok: true }
+        if (c === prev) break // pinned at a leg boundary — hopeless
+        prev = c
         u += step
       }
-      return start
+      return { u: clamp(start), ok: false }
     }
-    const near = clamp(riserU(dir > 0 ? s.lo - EDGE_OFF : s.hi + EDGE_OFF, dir > 0 ? -0.05 : 0.05))
-    const far = clamp(riserU(dir > 0 ? s.hi + EDGE_OFF : s.lo - EDGE_OFF, dir > 0 ? 0.05 : -0.05))
+    const nearR = riserU(dir > 0 ? s.lo - EDGE_OFF : s.hi + EDGE_OFF, dir > 0 ? -0.05 : 0.05)
+    const farR = riserU(dir > 0 ? s.hi + EDGE_OFF : s.lo - EDGE_OFF, dir > 0 ? 0.05 : -0.05)
+    const near = nearR.u
+    const far = farR.u
+    const roFlag =
+      nearR.ok && farR.ok
+        ? undefined
+        : 'OPENING: pipe riser has no clear stud bay beside the opening — crosses the RO; review routing'
     const blockedAt = (yy: number) =>
       openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
     let detourY: number | null = null
@@ -423,9 +439,9 @@ function pipeWallLeg(
       continue
     }
     leg(members, spec, at(cursor), at(near), runY, false, 0.015)
-    riser(members, spec, at(near), runY, detourY)
+    riser(members, roFlag ? { ...spec, flag: spec.flag ?? roFlag } : spec, at(near), runY, detourY)
     leg(members, spec, at(near), at(far), detourY, false, 0.015)
-    riser(members, spec, at(far), detourY, runY)
+    riser(members, roFlag ? { ...spec, flag: spec.flag ?? roFlag } : spec, at(far), detourY, runY)
     cursor = far
   }
   leg(members, spec, at(cursor), at(u1), runY, false, 0.015)
@@ -437,6 +453,23 @@ function pipeWallLeg(
  * junction gaps explicitly. Disconnected wall islands fall back to flagged
  * Manhattan air legs.
  */
+/** A plan point inside ANY wall's rough-opening volume at height y — the
+ * cross-wall tee case pipeWallLeg can't see (verify round 4: a w_mid vent
+ * leg ended at a junction sitting inside w_s's window RO). */
+function pointInAnyRO(walls: WallSlice[], pt: Pt, y: number): boolean {
+  for (const w of walls) {
+    const dx = pt[0] - w.start[0]
+    const dz = pt[1] - w.start[1]
+    const u = dx * w.dir[0] + dz * w.dir[1]
+    const off = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
+    if (off > w.thickness / 2 + 0.03 || u < 0 || u > w.length) continue
+    if (openingSpans(w, y - 0.02, y + 0.02).some((sp) => u > sp.lo + 0.01 && u < sp.hi - 0.01)) {
+      return true
+    }
+  }
+  return false
+}
+
 function routePipe(
   members: Member[],
   spec: PipeSpec,
@@ -444,12 +477,22 @@ function routePipe(
   from: WallPoint,
   to: WallPoint,
   runY: number,
+  allWalls: WallSlice[] = [],
 ): void {
   const legs = wallPath(graph, from, to)
   if (legs) {
     for (let i = 0; i < legs.length; i++) {
       const l = legs[i] as { wall: WallSlice; u0: number; u1: number }
-      pipeWallLeg(members, spec, l.wall, l.u0, l.u1, runY)
+      // a leg whose ENDPOINT sits inside another wall's RO can't detour —
+      // emit it flagged (never silent)
+      const endIn =
+        allWalls.length > 0 &&
+        (pointInAnyRO(allWalls, wallPlan({ wall: l.wall, u: l.u0 }) as Pt, runY) ||
+          pointInAnyRO(allWalls, wallPlan({ wall: l.wall, u: l.u1 }) as Pt, runY))
+      const legSpec = endIn
+        ? { ...spec, flag: spec.flag ?? 'OPENING: run ends inside a rough opening at a wall junction — reroute or move the opening' }
+        : spec
+      pipeWallLeg(members, legSpec, l.wall, l.u0, l.u1, runY)
       const next = legs[i + 1]
       if (next) {
         const a = wallPlan({ wall: l.wall, u: l.u1 })
@@ -823,7 +866,7 @@ function placedPlumbing(
         label: '1½" re-vent — reconnects 6" above flood rim (P3104.4)',
       }
       riser(members, ventSpec, a.plan, base + a.rise, VENT_RECONNECT_Y)
-      routePipe(members, ventSpec, graph, a.anchor, stackAnchor, VENT_RECONNECT_Y)
+      routePipe(members, ventSpec, graph, a.anchor, stackAnchor, VENT_RECONNECT_Y, walls)
     }
   }
 
@@ -932,7 +975,7 @@ function placedPlumbing(
       label: 'Cold main ¾" — water service (P2903.7)',
     }
     riser(members, mainSpec, meterPlan, METER_Y, SUPPLY_COLD_Y)
-    routePipe(members, mainSpec, graph, meterAnchor, whAnchor, SUPPLY_COLD_Y)
+    routePipe(members, mainSpec, graph, meterAnchor, whAnchor, SUPPLY_COLD_Y, walls)
     // Manifold riser at the WH wall bay: crosses every stepped cold plane,
     // then feeds the tank inlet.
     riser(members, mainSpec, whWallPlan, SUPPLY_COLD_Y, whCenterY)
@@ -959,7 +1002,7 @@ function placedPlumbing(
         sourceId: `cold-${a.f.id}`,
         label: `Cold ½" — ${KIND_LABEL[a.f.kind]}`,
       }
-      routePipe(members, cold, graph, whAnchor, a.anchor, coldY)
+      routePipe(members, cold, graph, whAnchor, a.anchor, coldY, walls)
       riser(members, cold, a.plan, coldY, a.stubY)
       if (a.island) {
         manhattan(
@@ -990,7 +1033,7 @@ function placedPlumbing(
           a.plan[0] + a.anchor.wall.dir[0] * 0.025,
           a.plan[1] + a.anchor.wall.dir[1] * 0.025,
         ]
-        routePipe(members, hot, graph, whAnchor, a.anchor, hotY)
+        routePipe(members, hot, graph, whAnchor, a.anchor, hotY, walls)
         leg(members, hot, a.plan, hotAt, hotY, false, 0.01)
         riser(members, hot, hotAt, hotY, a.stubY)
         if (a.island) {
