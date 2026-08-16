@@ -7,23 +7,82 @@
  * Pure (no React, no stores) so the whole path is testable headlessly.
  */
 
-import { extractWalls } from './core/wall-model'
+import assemblies from '../data/wall-assemblies.json'
+import { extractRooms, extractWalls } from './core/wall-model'
 import { COURSE_HEIGHT, courseCount, snapCmuHeight } from './engines/cmu'
 import { studSizeFor } from './engines/wall-framing'
 import {
   type ComputeResult,
   dedupeColinearWalls,
   probeSlabsFor,
-  wallConstruction,
+  resolveWallConstruction,
 } from './framing/compute'
-import type { FramingNode, WallConstruction, WallOverride } from './framing/schema'
+import type {
+  FramingNode,
+  WallCladding,
+  WallConstruction,
+  WallEngineeringOverride,
+  WallInsulation,
+  WallOverride,
+  WallSpacingIn,
+  WallStudSize,
+} from './framing/schema'
 import { profileFor } from './jurisdiction/profiles'
 
 const METERS_PER_INCH = 0.0254
 
+const CLADDING_DATA = (assemblies as unknown as {
+  exterior: { defaultCladdingByState: Record<string, string> }
+}).exterior
+
 export type SelectionLike = {
   levelId?: string | null
   selectedIds?: readonly string[] | null
+}
+
+/** Cladding select entries — every exterior.claddings key, display-labeled. */
+export const CLADDING_OPTIONS: { value: WallCladding; label: string }[] = [
+  { value: 'vinyl', label: 'Vinyl siding' },
+  { value: 'fiberCement', label: 'Fiber cement' },
+  { value: 'stucco', label: 'Stucco' },
+  { value: 'brickVeneer', label: 'Brick veneer' },
+  { value: 'wood', label: 'Wood siding' },
+  { value: 'eifs', label: 'EIFS' },
+]
+
+/** Insulation type select entries (short labels fit both surfaces). */
+export const INSULATION_OPTIONS: { value: WallInsulation; label: string }[] = [
+  { value: 'none', label: 'None' },
+  { value: 'batt', label: 'Batt' },
+  { value: 'blown', label: 'Blown' },
+  { value: 'spray-foam', label: 'Foam' },
+]
+
+/** Insulation line for CMU walls — v1 is a note, no batt geometry. */
+export const CMU_INSULATION_NOTE =
+  'CMU: insulate with rigid board on furring strips — note only (v1)'
+
+/** Both surfaces print this when the wall bounds a garage room (R302.6). */
+export const GARAGE_SEPARATION_NOTE =
+  'Bounds a garage — ½" gypsum on the garage side (dwelling/garage separation, IRC R302.6)'
+
+/**
+ * Resolved engineering the panel's framed-wall rows print/edit: every value
+ * is the OVERRIDE when stored, else the state-code default — with a
+ * default flag per row so the surfaces can hang the 'per state code' hint.
+ */
+export type WallEngineeringInfo = {
+  studSize: WallStudSize
+  spacingIn: WallSpacingIn
+  /** Neither studSize nor spacingIn stored — the recipe is the state code's. */
+  studsDefault: boolean
+  insulation: WallInsulation
+  /** R the batts carry: insulationR override, else the code minimum. */
+  insulationR: number
+  /** 'code min R-13 (zone 2A)' — the climate zone's prescriptive floor. */
+  codeMinHint: string
+  cladding: WallCladding
+  claddingDefault: boolean
 }
 
 export type SelectedWallInfo = {
@@ -51,6 +110,12 @@ export type SelectedWallInfo = {
    * twin — a duplicate's own engineering would be a lie (it is never framed)
    * and an override on its id would be inert. */
   duplicateNote: string | null
+  /** Editable engineering rows — framed walls only, null for CMU/skip. */
+  engineering: WallEngineeringInfo | null
+  /** 'length · gross/net area · openings' readout, identical on both surfaces. */
+  dimensions: string
+  /** GARAGE_SEPARATION_NOTE when the wall bounds a garage room, else null. */
+  garageNote: string | null
 }
 
 /**
@@ -90,16 +155,23 @@ export function selectedWallInfo(
   if (!wall) return null
 
   const override = framingNode.wallOverrides?.[wall.id]
-  const construction = wallConstruction(
+  const resolved = resolveWallConstruction(
     wall,
     framingNode,
     profileFor(result.jurisdiction).exteriorWallDefault,
   )
+  const construction = resolved.construction
 
-  const spacingIn = Math.round(result.spec.studSpacing / METERS_PER_INCH)
+  // Per-wall stud recipe: the override when stored, else the state code's
+  // (thickness-picked size + config spacing) — same resolution the engines
+  // frame with, so the printed recipe is what the 3D members are.
+  const defaultStudSize = studSizeFor(wall, result.spec) as WallStudSize
+  const defaultSpacingIn = Math.round(result.spec.studSpacing / METERS_PER_INCH) as WallSpacingIn
+  const studSize = resolved.studSize ?? defaultStudSize
+  const spacingIn = resolved.spacingIn ?? defaultSpacingIn
   const assembly =
     construction === 'framed'
-      ? `${studSizeFor(wall, result.spec)} studs @ ${spacingIn}" o.c.`
+      ? `${studSize} studs @ ${spacingIn}" o.c.`
       : construction === 'cmu'
         ? '8" CMU block · running bond'
         : 'Skipped — excluded from every system'
@@ -109,6 +181,44 @@ export function selectedWallInfo(
     construction === 'framed' && wall.exterior && ins
       ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}`
       : null
+
+  const codeMinR = ins?.wallR ?? 13
+  const engineering: WallEngineeringInfo | null =
+    construction === 'framed'
+      ? {
+          studSize,
+          spacingIn,
+          studsDefault: resolved.studSize === undefined && resolved.spacingIn === undefined,
+          insulation: resolved.insulation ?? 'none',
+          insulationR: resolved.insulationR ?? codeMinR,
+          codeMinHint: `code min R-${codeMinR}${ins ? ` (zone ${ins.climateZone})` : ''}`,
+          cladding:
+            resolved.cladding ??
+            ((CLADDING_DATA.defaultCladdingByState[result.jurisdiction] ??
+              'vinyl') as WallCladding),
+          claddingDefault: resolved.cladding === undefined,
+        }
+      : null
+
+  // length · gross/net area · openings — the display extras both surfaces
+  // print under the controls.
+  const grossM2 = wall.length * wall.height
+  const openingsM2 = wall.openings.reduce((sum, o) => sum + o.width * o.height, 0)
+  const netM2 = Math.max(0, grossM2 - openingsM2)
+  const count = wall.openings.length
+  const dimensions =
+    count === 0
+      ? `${wall.length.toFixed(2)} m · ${grossM2.toFixed(1)} m² · no openings`
+      : `${wall.length.toFixed(2)} m · ${grossM2.toFixed(1)} m² gross / ${netM2.toFixed(1)} m² net · ${count} opening${count > 1 ? 's' : ''}`
+
+  // Garage fire separation (R302.6): the wall bounds a garage room — either
+  // under its kept id or the selected duplicate's own id.
+  const boundsGarage = extractRooms(nodes, levelId).some(
+    (room) =>
+      room.category === 'garage' &&
+      (room.boundaryWallIds.includes(wall.id) || room.boundaryWallIds.includes(id)),
+  )
+  const garageNote = boundsGarage ? GARAGE_SEPARATION_NOTE : null
 
   // Label the wall whose engineering the card SHOWS — the kept twin when
   // the selection was a duplicate.
@@ -131,6 +241,9 @@ export function selectedWallInfo(
     assembly,
     insulation,
     duplicateNote,
+    engineering,
+    dimensions,
+    garageNote,
   }
 }
 
@@ -208,4 +321,79 @@ export function wallOverridePatch(
   construction: WallOverride,
 ): { wallOverrides: Record<string, WallOverride> } {
   return { wallOverrides: { ...framingNode.wallOverrides, [wallId]: construction } }
+}
+
+/**
+ * The MINIMAL stored form of an override object: drop undefined fields and
+ * collapse a fields-less object to the plain legacy string — the write side
+ * of the byte-equal guarantee (an override that says nothing beyond its
+ * construction persists exactly like the segmented control always did).
+ */
+function normalizeOverride(o: WallEngineeringOverride): WallOverride {
+  const out: WallEngineeringOverride = {
+    construction: o.construction,
+    ...(o.cmuHeightM !== undefined ? { cmuHeightM: o.cmuHeightM } : {}),
+    ...(o.studSize !== undefined ? { studSize: o.studSize } : {}),
+    ...(o.spacingIn !== undefined ? { spacingIn: o.spacingIn } : {}),
+    ...(o.insulation !== undefined ? { insulation: o.insulation } : {}),
+    ...(o.insulationR !== undefined ? { insulationR: o.insulationR } : {}),
+    ...(o.cladding !== undefined ? { cladding: o.cladding } : {}),
+  }
+  return Object.keys(out).length === 1 ? out.construction : out
+}
+
+/**
+ * Construction change that PRESERVES the wall's stored engineering fields
+ * (studs/insulation/cladding survive a framed↔cmu flip); `cmuHeightM` is
+ * dropped when leaving CMU (the schema rejects it elsewhere). A string or
+ * absent override keeps writing the plain string — byte-equal to today.
+ */
+export function constructionOverride(
+  current: WallOverride | undefined,
+  next: WallConstruction,
+): WallOverride {
+  if (typeof current !== 'object' || current === null) return next
+  const merged: WallEngineeringOverride = { ...current, construction: next }
+  if (next !== 'cmu') merged.cmuHeightM = undefined
+  return normalizeOverride(merged)
+}
+
+/**
+ * One engineering-field write (Studs / Insulation / Exterior finish rows):
+ * merges into the stored object (or opens one anchored on the RESOLVED
+ * construction), normalizes to the minimal form. A field explicitly set to
+ * undefined is REMOVED — back to 'per state code'.
+ */
+export function engineeringOverride(
+  current: WallOverride | undefined,
+  construction: WallConstruction,
+  patch: Partial<Omit<WallEngineeringOverride, 'construction'>>,
+): WallOverride {
+  const base: WallEngineeringOverride =
+    typeof current === 'object' && current !== null
+      ? { ...current }
+      : { construction: typeof current === 'string' ? current : construction }
+  return normalizeOverride({ ...base, ...patch })
+}
+
+/**
+ * The CMU height slider's write, engineering-fields preserved: full height
+ * collapses per `cmuHeightOverride` (plain 'cmu' when nothing else is
+ * stored), a partial height merges the course-snapped value into the
+ * existing object.
+ */
+export function cmuHeightWrite(
+  current: WallOverride | undefined,
+  wallHeightM: number,
+  requestedM: number,
+): WallOverride {
+  const write = cmuHeightOverride(wallHeightM, requestedM)
+  const base = typeof current === 'object' && current !== null ? { ...current } : {}
+  return normalizeOverride({
+    ...base,
+    construction: 'cmu',
+    // full height: drop the stored height (legacy-string collapse when
+    // nothing else is stored); partial: the course-snapped value.
+    cmuHeightM: typeof write === 'string' ? undefined : write.cmuHeightM,
+  })
 }

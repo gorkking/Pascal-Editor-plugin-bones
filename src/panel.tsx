@@ -6,11 +6,22 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
 import { extractLevels } from './core/wall-model'
-import { FramingNode, type WallConstruction, type WallOverride } from './framing/schema'
 import {
+  FramingNode,
+  type WallCladding,
+  type WallConstruction,
+  type WallInsulation,
+  type WallOverride,
+} from './framing/schema'
+import {
+  CLADDING_OPTIONS,
+  CMU_INSULATION_NOTE,
   CMU_SEAM_NOTE,
   cmuHeightControl,
-  cmuHeightOverride,
+  cmuHeightWrite,
+  constructionOverride,
+  engineeringOverride,
+  INSULATION_OPTIONS,
   selectedWallInfo,
   wallOverridePatch,
 } from './panel-selection'
@@ -336,9 +347,12 @@ function SelectedWallCard({
         framingNode.id as AnyNodeId,
         wallOverridePatch(framingNode, info.wallId, value) as Partial<AnyNode> as never,
       )
+  const writeField = (patch: Parameters<typeof engineeringOverride>[2]) =>
+    writeOverride(engineeringOverride(info.override, info.construction, patch))
   // CMU walls grow a height control: full height (100%) by default, drag
   // down to block only the bottom courses (knee/stem wall) — framed above.
   const cmuHeight = info.construction === 'cmu' ? cmuHeightControl(info.wallHeightM, info.override) : null
+  const eng = info.engineering
   return (
     <div className="flex flex-col gap-2 rounded-md border border-sidebar-ring/60 bg-sidebar-accent/30 p-2.5">
       <div className="flex items-center justify-between gap-2">
@@ -350,7 +364,7 @@ function SelectedWallCard({
         </span>
       </div>
       <SegmentedControl
-        onChange={(v: WallConstruction) => writeOverride(v)}
+        onChange={(v: WallConstruction) => writeOverride(constructionOverride(info.override, v))}
         options={[
           { label: 'Framed', value: 'framed' },
           { label: 'CMU', value: 'cmu' },
@@ -364,7 +378,7 @@ function SelectedWallCard({
             label="Block height"
             max={cmuHeight.maxM}
             min={cmuHeight.minM}
-            onChange={(v: number) => writeOverride(cmuHeightOverride(info.wallHeightM, v))}
+            onChange={(v: number) => writeOverride(cmuHeightWrite(info.override, info.wallHeightM, v))}
             precision={2}
             step={cmuHeight.stepM}
             unit="m"
@@ -378,9 +392,78 @@ function SelectedWallCard({
           )}
         </div>
       )}
+      {eng && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
+            Studs
+          </span>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <SegmentedControl
+                onChange={(v: string) => writeField({ studSize: v as '2x4' | '2x6' })}
+                options={[
+                  { label: '2x4', value: '2x4' },
+                  { label: '2x6', value: '2x6' },
+                ]}
+                value={eng.studSize}
+              />
+            </div>
+            <div className="w-24">
+              <SegmentedControl
+                onChange={(v: string) => writeField({ spacingIn: Number(v) as 16 | 24 })}
+                options={[
+                  { label: '16"', value: '16' },
+                  { label: '24"', value: '24' },
+                ]}
+                value={String(eng.spacingIn)}
+              />
+            </div>
+          </div>
+          {eng.studsDefault && (
+            <span className="text-[10px] text-sidebar-foreground/40">per state code</span>
+          )}
+          <span className="mt-1 text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
+            Insulation
+          </span>
+          <SegmentedControl
+            onChange={(v: WallInsulation) => writeField({ insulation: v })}
+            options={INSULATION_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
+            value={eng.insulation}
+          />
+          <span className="text-[10px] text-sidebar-foreground/50 tabular-nums">
+            {eng.insulation === 'none' ? eng.codeMinHint : `R-${eng.insulationR} · ${eng.codeMinHint}`}
+          </span>
+          {info.exterior && (
+            <>
+              <span className="mt-1 text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
+                Exterior finish
+              </span>
+              <select
+                className="w-full rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-sidebar-foreground text-xs outline-none"
+                onChange={(e) => writeField({ cladding: e.target.value as WallCladding })}
+                value={eng.cladding}
+              >
+                {CLADDING_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              {eng.claddingDefault && (
+                <span className="text-[10px] text-sidebar-foreground/40">per state code</span>
+              )}
+            </>
+          )}
+        </div>
+      )}
       <div className="text-[11px] text-sidebar-foreground/60 leading-relaxed">
         <span className="block">{info.assembly}</span>
         {info.insulation && <span className="block">{info.insulation}</span>}
+        {info.construction === 'cmu' && (
+          <span className="block">{CMU_INSULATION_NOTE}</span>
+        )}
+        <span className="block tabular-nums">{info.dimensions}</span>
+        {info.garageNote && <span className="block text-amber-500/80">{info.garageNote}</span>}
         {info.duplicateNote && (
           <span className="block text-amber-500/80">{info.duplicateNote}</span>
         )}

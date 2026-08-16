@@ -4,9 +4,14 @@ import { COURSE_HEIGHT, snapCmuHeight } from './engines/cmu'
 import { computeLevel, resolveWallConstruction } from './framing/compute'
 import { FramingNode } from './framing/schema'
 import {
+  CMU_INSULATION_NOTE,
   CMU_SEAM_NOTE,
   cmuHeightControl,
   cmuHeightOverride,
+  cmuHeightWrite,
+  constructionOverride,
+  engineeringOverride,
+  GARAGE_SEPARATION_NOTE,
   selectedWallInfo,
   wallOverridePatch,
 } from './panel-selection'
@@ -378,5 +383,190 @@ describe('cmuHeightOverride / cmuHeightControl', () => {
     expect(info?.wallHeightM).toBe(H)
     expect(info?.construction).toBe('cmu')
     expect(info?.override).toEqual(write)
+  })
+})
+
+/**
+ * GATES (full wall engineering panel — resolver read side): the card's
+ * engineering rows resolve override → state default with per-row default
+ * flags, the dimensions readout prints length · gross/net · openings, and
+ * bounding a garage room hangs the R302.6 separation note.
+ */
+describe('selectedWallInfo — engineering rows', () => {
+  test('framed defaults: state recipe, insulation none @ code min, default flags', () => {
+    const nodes = makeScene()
+    const config = makeConfig({ jurisdiction: 'TX' }) // zone 2A → R-13
+    const result = computeLevel(nodes, config)
+    const info = selectedWallInfo(nodes, select('wall_ext'), config, result)
+    const eng = info?.engineering
+    expect(eng).not.toBeNull()
+    expect(eng?.studSize).toBe('2x6') // 0.15m ≥ thick threshold
+    expect(eng?.spacingIn).toBe(16)
+    expect(eng?.studsDefault).toBe(true)
+    expect(eng?.insulation).toBe('none')
+    expect(eng?.insulationR).toBe(13)
+    expect(eng?.codeMinHint).toBe('code min R-13 (zone 2A)')
+    expect(eng?.cladding).toBe('brickVeneer') // TX default
+    expect(eng?.claddingDefault).toBe(true)
+  })
+
+  test('override fields surface with default flags off; assembly follows', () => {
+    const nodes = makeScene()
+    const config = makeConfig({
+      wallOverrides: {
+        wall_ext: {
+          construction: 'framed',
+          studSize: '2x4',
+          spacingIn: 24,
+          insulation: 'batt',
+          insulationR: 15,
+          cladding: 'stucco',
+        },
+      },
+    })
+    const result = computeLevel(nodes, config)
+    const info = selectedWallInfo(nodes, select('wall_ext'), config, result)
+    const eng = info?.engineering
+    expect(eng?.studSize).toBe('2x4')
+    expect(eng?.spacingIn).toBe(24)
+    expect(eng?.studsDefault).toBe(false)
+    expect(eng?.insulation).toBe('batt')
+    expect(eng?.insulationR).toBe(15)
+    expect(eng?.cladding).toBe('stucco')
+    expect(eng?.claddingDefault).toBe(false)
+    // the printed recipe is the per-wall one the engines frame with
+    expect(info?.assembly).toBe('2x4 studs @ 24" o.c.')
+  })
+
+  test('CMU / skip walls carry no engineering rows (v1 note constant exists)', () => {
+    const nodes = makeScene()
+    const config = makeConfig({ wallOverrides: { wall_ext: 'cmu', wall_int: 'skip' } })
+    const result = computeLevel(nodes, config)
+    expect(selectedWallInfo(nodes, select('wall_ext'), config, result)?.engineering).toBeNull()
+    expect(selectedWallInfo(nodes, select('wall_int'), config, result)?.engineering).toBeNull()
+    expect(CMU_INSULATION_NOTE).toContain('furring')
+  })
+
+  test('dimensions readout: length · gross/net · openings (and the no-opening form)', () => {
+    const nodes = makeScene()
+    // give the exterior wall a door + window (children hold node IDS)
+    nodes.door_1 = { id: 'door_1', type: 'door', width: 0.9, height: 2.1, position: [2, 0, 0] }
+    nodes.win_1 = { id: 'win_1', type: 'window', width: 1.2, height: 1.2, position: [4, 1.5, 0] }
+    ;(nodes.wall_ext as Record<string, unknown>).children = ['door_1', 'win_1']
+    const config = makeConfig()
+    const result = computeLevel(nodes, config)
+    const info = selectedWallInfo(nodes, select('wall_ext'), config, result)
+    // 6m × 2.5m = 15.0 gross; − (0.9·2.1 + 1.2·1.2) = 15 − 3.33 = 11.7 net
+    expect(info?.dimensions).toBe('6.00 m · 15.0 m² gross / 11.7 m² net · 2 openings')
+    const plain = selectedWallInfo(nodes, select('wall_int'), config, result)
+    expect(plain?.dimensions).toBe('4.00 m · 10.0 m² · no openings')
+  })
+
+  test('garage-bounding wall carries the R302.6 separation note', () => {
+    const nodes = makeScene()
+    nodes.zone_garage = {
+      id: 'zone_garage',
+      type: 'zone',
+      parentId: 'level_1',
+      name: 'Garage',
+      polygon: [
+        [0, 0],
+        [6, 0],
+        [6, 4],
+        [0, 4],
+      ],
+      boundaryWallIds: ['wall_ext', 'wall_int'],
+    }
+    const config = makeConfig()
+    const result = computeLevel(nodes, config)
+    const info = selectedWallInfo(nodes, select('wall_ext'), config, result)
+    expect(info?.garageNote).toBe(GARAGE_SEPARATION_NOTE)
+    expect(info?.garageNote).toContain('R302.6')
+    // a wall that bounds no garage prints nothing
+    const curved = selectedWallInfo(nodes, select('wall_curved'), config, result)
+    expect(curved?.garageNote).toBeNull()
+  })
+})
+
+/**
+ * GATES (full wall engineering panel — write side): field writes merge into
+ * the stored object anchored on the resolved construction, collapse to the
+ * minimal form (plain string when nothing else is stored), survive
+ * construction flips, and round-trip the zod schema.
+ */
+describe('engineeringOverride / constructionOverride / cmuHeightWrite', () => {
+  test('first field write opens the object anchored on the resolved construction', () => {
+    expect(engineeringOverride(undefined, 'framed', { studSize: '2x6' })).toEqual({
+      construction: 'framed',
+      studSize: '2x6',
+    })
+    // a stored string keeps ITS construction
+    expect(engineeringOverride('cmu', 'framed', { cladding: 'stucco' })).toEqual({
+      construction: 'cmu',
+      cladding: 'stucco',
+    })
+  })
+
+  test('writes merge without dropping sibling fields', () => {
+    const one = engineeringOverride(undefined, 'framed', { insulation: 'batt' })
+    const two = engineeringOverride(one, 'framed', { spacingIn: 24 })
+    expect(two).toEqual({ construction: 'framed', insulation: 'batt', spacingIn: 24 })
+  })
+
+  test('clearing the last field collapses back to the plain string', () => {
+    const one = engineeringOverride(undefined, 'framed', { studSize: '2x4' })
+    expect(engineeringOverride(one, 'framed', { studSize: undefined })).toBe('framed')
+  })
+
+  test('construction flip preserves engineering fields, drops cmuHeightM off-CMU', () => {
+    const stored = {
+      construction: 'cmu' as const,
+      cmuHeightM: 1.016,
+      cladding: 'stucco' as const,
+    }
+    expect(constructionOverride(stored, 'framed')).toEqual({
+      construction: 'framed',
+      cladding: 'stucco',
+    })
+    // string / absent overrides keep writing the plain string — today's shape
+    expect(constructionOverride(undefined, 'cmu')).toBe('cmu')
+    expect(constructionOverride('framed', 'skip')).toBe('skip')
+    // fields-less object collapses on flip
+    expect(constructionOverride({ construction: 'cmu', cmuHeightM: 1.016 }, 'framed')).toBe(
+      'framed',
+    )
+  })
+
+  test('cmuHeightWrite: string collapse at full height, merge with fields kept', () => {
+    const H = 2.5
+    // no other fields: byte-equal to the legacy slider write
+    expect(cmuHeightWrite(undefined, H, H)).toBe('cmu')
+    expect(cmuHeightWrite('cmu', H, 1.0)).toEqual(cmuHeightOverride(H, 1.0))
+    // stored engineering fields survive both directions
+    const withCladding = { construction: 'cmu' as const, cladding: 'stucco' as const }
+    expect(cmuHeightWrite(withCladding, H, 1.0)).toEqual({
+      construction: 'cmu',
+      cmuHeightM: 5 * COURSE_HEIGHT,
+      cladding: 'stucco',
+    })
+    expect(cmuHeightWrite({ ...withCladding, cmuHeightM: 1.016 }, H, H)).toEqual({
+      construction: 'cmu',
+      cladding: 'stucco',
+    })
+  })
+
+  test('every write shape round-trips the schema record', () => {
+    const shapes = [
+      engineeringOverride(undefined, 'framed', { insulation: 'blown', insulationR: 21 }),
+      engineeringOverride(undefined, 'cmu', { cladding: 'fiberCement' }),
+      constructionOverride(
+        { construction: 'framed', studSize: '2x6', spacingIn: 24 },
+        'cmu',
+      ),
+      cmuHeightWrite({ construction: 'cmu', insulation: 'none' }, 2.5, 1.0),
+    ]
+    for (const s of shapes) {
+      expect(FramingNode.shape.wallOverrides.parse({ w: s })).toEqual({ w: s })
+    }
   })
 })
