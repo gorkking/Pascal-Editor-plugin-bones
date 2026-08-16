@@ -1,0 +1,90 @@
+# Bones night board — 2026-08-16 (living file: update on every land/verdict)
+
+## How I work (the loop) — for any fresh context picking this up
+1. Implement in small green increments (bunx tsc --noEmit + bun test after
+   each; commit + push per green stage; NEVER pipe test output through
+   tail/grep in a && chain — it masks the exit code).
+2. Every change goes through the ADVERSARIAL LOOP before prod:
+   - code skeptic agent: tries to REFUTE with scratch bun tests (repo root,
+     imports source, deletes after). FAIL = concrete failing scenario.
+   - visual QA agent: builds a scene via POST /api/scenes (see
+     /tmp/qa-*/build_scene(s).py patterns; host has a scene-wipe bug — GET
+     after POST, re-PUT if 0 nodes), ONE Playwright session
+     (executablePath ~/Library/Caches/ms-playwright/chromium_headless_shell-1228/...,
+     run from ~/Documents/GitHub/private-editor), screenshots, judges.
+   - blueprint examiner for anything touching plan-set (review/BLUEPRINTS.md).
+   - Fix every FAIL + add a GATE test per defect, then RE-VERIFY (resume the
+     same skeptic via SendMessage — context intact).
+3. Reviewers walk review/CHECKLIST.md (invariant rows E/S/P/A + P5); new
+   invariant ⇒ new row + gate in the same commit.
+4. Localhost: pin sha in ~/Documents/GitHub/private-editor/editor/apps/editor/package.json,
+   bun install, restart dev server on :3002 (kill listener, PORT=3002 nohup
+   bun run dev from apps/editor). NEVER restart while a visual agent is mid-session.
+5. Prod chain (when loop green, standing authorization): editor repo PR from
+   ~/Documents/GitHub/private-editor/editor (branch off origin/main, pin bump
+   apps/editor/package.json + bun.lock; gh pr create/merge after CI) → then
+   private-editor PR (apps/community pin + editor submodule gitlink via
+   `git -C editor checkout <editor-main-sha>`; CI incl. E2E ~8min; merge).
+   Restore feat/plugin-bones + stash after.
+6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
+   Attribute inspiration to IRC/NEC building codes only.
+
+## State right now
+- Plugin master 711c401, 508 tests green. Localhost :3002 pinned c592fa7
+  (STALE — re-pin to 711c401 before visual work).
+- Prod: bones 4cd28a0 + editor fb221460 (lerp fix). NOT yet in prod:
+  blueprint round-2 fixes, plumbing rebuild (stages 1-4 + 7 verify fixes),
+  characteristics drawer/sheet. SHIP THIS BATCH after plumbing re-verify #3.
+- Two re-verify defects (riser colinearity D2b, short-garage D1b) fixed at
+  711c401 — needs ONE more skeptic pass (resume agent ad147b8f670d56e12) on
+  those two fixes only, then ship prod batch.
+
+## Queue (small tasks, knock down one by one)
+1. [BLOCKING PROD] Skeptic re-verify #3 of D1b/D2b at 711c401 → prod chain.
+2. Task #18 leftovers: (a) flexible connectors — curved supply line from
+   wall stub to fixture when not flush (braided-hose arc, chrome); (b)
+   under-slab visibility — DWV members y<0 render on the ghost/overlay pass
+   like below-grade foundation ('crawl-space at a glance' — user asked 2x).
+3. Task #19 service nodes (docs/plans/service-nodes.md + additions):
+   lightning-bolt icon on the panel, similar icon for WH; ONE street
+   connection point at a map edge feeding power+water+sewer entries (all
+   draggable); movable outlets/switches (per-device overrides on
+   FramingNode, snap to stud-bay edges from framed studs, mid-bay auto-adds
+   blocking + advisory, RO exclusion, wires re-route). Keep it SIMPLE per
+   user ('weeds of detail complexify — not needed').
+4. NEW user idea (design answer owed): per-element engineering drawer —
+   when a wall is selected in Pascal, its little context menu gains the
+   Bones hammer icon; clicking opens THAT element's engineering: 2x4/2x6,
+   framed/CMU ('this one is cinder blocks'), insulation on/off/type.
+   Bones ALREADY has per-wall overrides (FramingNode.wallOverrides +
+   panel WallOverrideSection) — this is about surfacing them on the
+   element selection UI. Scout: does the host let plugins contribute to
+   the item/wall selection menu (packages/editor selection menu code)? If
+   not, fallback: selecting a wall while Bones panel is open scrolls/
+   highlights that wall's override row (cheap, no host changes).
+5. Task #17 round-3 blueprint flags: section poché + A-A cut mark on plans,
+   stroke legends on cover/elevations/section, pair elevations 2-per-sheet,
+   rebar dowel symbol vs anchor bolts, takeoff row word-wrap, 'wing has no
+   roof' printed flag.
+6. Task #12 (old): electrical round-12 phases 1-3 (staples/nail plates,
+   switch legs, smoke 14/3 interconnect); MEP wall-relative routing for
+   HVAC; E4 air-jumpers row (Manhattan-route the connectivity jumpers).
+7. Insulation batts toggle (from old task #13 scope, still unbuilt):
+   showInsulation → pink batts in stud bays from insulationByClimateZone.
+8. MORNING REVIEW FILE (write LAST, ~/Downloads/bones-morning-review.txt):
+   what shipped + exact test steps per feature + questions (alpha chip
+   keep/kill? street-point UX? per-element drawer mock ok?) + PR links.
+
+## Key repo facts (save re-discovery)
+- Engines pure; extraction in src/core/wall-model.ts (extractWalls/Slabs/
+  Rooms/Levels(baseY,buildingId)/PlacedFixtures).
+- Electrical exports reused by plumbing: buildWallGraph, openingSpans,
+  clearOfOpenings, nearestWallPoint, panelMountU, wallPath, wallPlan.
+- Cross-level members: Member.levelId tag + renderer buildGroups foreign
+  mounting into level Object3D via sceneRegistry (checklist A3).
+- Plan set: 12 sheets (cover/plans/elevations/section/schedules); shared
+  SetTransform for plans, fitSegs family ratio for elevations.
+- Host quirks: scene-wipe desync (GET returns empty during live session —
+  host bug, reported); LevelSystem lerp fixed in editor fb221460.
+- Demo scene fc866f2f271b: roof level ordinal 1 h=0.35, roof group y=2.7
+  INSIDE it (host draws shell at baseY+y — scene data floats the roof).
