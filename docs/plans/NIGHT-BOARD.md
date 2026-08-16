@@ -1,3 +1,41 @@
+# Bones day board — 2026-08-16 (morning directives; night board below)
+
+## Today's four items (user, verbatim intent) — 6h+ loop directive
+A. EXPLODED ROOF LAYER: exploded view should read floor / trusses / shingle
+   shell as ~equal strata. Impl: renderer attachForeign offsets the foreign
+   roof group position.y −= EXPLODED_GAP/2 (2.5) when useViewer levelMode
+   === 'exploded' (cache getState after the existing dynamic import; reset
+   to 0 otherwise). Visual gate: exploded screenshot, three strata.
+B. GABLE EXTERIOR (prod bug): roof-level gable walls frame as INTERIOR —
+   applyExteriorFallback probes slabs and roof levels have none, so no
+   sheathing/WRB/cladding. Fix in wall-model/compute: when a level has no
+   slabs, probe against the union of slab polygons from LOWER levels of the
+   same building (plan projection; extractSlabs per lower level id); if
+   still nothing, walls on a level with zero rooms+slabs = exterior. Gates:
+   gable wall on slab-less level above a slabbed level → exterior true →
+   layers emitted; interior partition below stays interior.
+C. SERVICE-POINT DRAG UX: hover highlight + drag-along-wall like doors.
+   Scout FIRST (Explore agent): how the host door/window drag works
+   (packages/editor tools + useNodeEvents + live overrides), whether plugin
+   renderers can register pointer handlers the same way (lumber
+   placement.tsx already does host interaction). Then: onPointerOver
+   emissive highlight; drag = raycast to the wall plane → live wallT
+   preview → updateNode commit on release → engines recompute (free).
+D. HVAC: (1) thermostat + heat-pump added to bones:service serviceType
+   enum + auto spots in 'Place service points' (thermostat: hallway/living
+   interior wall 52in AFF near the return; heat-pump: exterior pad outside
+   the wall nearest the air handler, lineset stub through wall) + hvac
+   engine consumes overrides; (2) DUCT CODE FIX: trunk/branches route at
+   ATTIC elevation (above wall.height + ceiling-joist depth), supply boots
+   drop through the CEILING as ceiling registers (like light fixtures);
+   never intersect the top-plate band [wall.height−0.09, wall.height] of
+   any wall (research anchors: IRC R602.6 top-plate notching >50% needs a
+   28ga tie = ducts don't pass through plates; E/M1601 duct installation;
+   practice = attic trunk + ceiling boots). New gate: no duct member OBB
+   crosses any wall's plate band; register fixtures at ceiling plane.
+Batching: A+B one agent (small), D one agent (engine+service), C scout
+then implement. Loop after each; ship in 1-2 prod batches today.
+
 # Bones night board — 2026-08-16 (living file: update on every land/verdict)
 
 ## How I work (the loop) — for any fresh context picking this up
