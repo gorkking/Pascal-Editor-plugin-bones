@@ -237,14 +237,41 @@ const SERVICE_OVERRIDE_KEY: Record<string, keyof ServiceOverrides> = {
   'power-entry': 'powerEntry',
 }
 
-/** Collect the service overrides on `levelId` (first node per type wins). */
-export function extractServiceOverrides(nodes: NodesRecord, levelId: string): ServiceOverrides {
-  const out: ServiceOverrides = {}
+export type ServiceOverrideExtraction = {
+  overrides: ServiceOverrides
+  /** serviceTypes that had more than one node on the level (extras ignored). */
+  duplicates: string[]
+}
+
+/**
+ * Collect the service overrides on `levelId`. Duplicate nodes of one type:
+ * the LOWEST id wins — deterministic across hosts (object insertion order is
+ * not a contract) — and the type lands in `duplicates` so computeLevel can
+ * warn that the extra node is ignored.
+ */
+export function extractServiceOverrides(
+  nodes: NodesRecord,
+  levelId: string,
+): ServiceOverrideExtraction {
+  const winners = new Map<keyof ServiceOverrides, { id: string; node: AnyRecord }>()
+  const duplicates = new Set<string>()
   for (const node of Object.values(nodes)) {
     if (node.type !== 'bones:service' || node.parentId !== levelId) continue
     if (node.visible === false) continue
-    const key = SERVICE_OVERRIDE_KEY[String(node.serviceType)]
-    if (!key || out[key]) continue
+    const serviceType = String(node.serviceType)
+    const key = SERVICE_OVERRIDE_KEY[serviceType]
+    if (!key) continue
+    const id = String(node.id ?? '')
+    const current = winners.get(key)
+    if (!current) {
+      winners.set(key, { id, node })
+      continue
+    }
+    duplicates.add(serviceType)
+    if (id < current.id) winners.set(key, { id, node })
+  }
+  const overrides: ServiceOverrides = {}
+  for (const [key, { node }] of winners) {
     const override: ServicePointOverride = {}
     if (typeof node.wallId === 'string' && node.wallId.length > 0) override.wallId = node.wallId
     if (typeof node.wallT === 'number' && Number.isFinite(node.wallT)) override.wallT = node.wallT
@@ -255,9 +282,9 @@ export function extractServiceOverrides(nodes: NodesRecord, levelId: string): Se
     if (pos && pos.length >= 3) {
       override.position = [num(pos[0], 0), num(pos[1], 0), num(pos[2], 0)]
     }
-    out[key] = override
+    overrides[key] = override
   }
-  return out
+  return { overrides, duplicates: [...duplicates].sort() }
 }
 
 /** Ordered level ids (bottom → top) with their storey heights. */

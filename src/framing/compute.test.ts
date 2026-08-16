@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { WallSlice } from '../core/types'
+import { extractServiceOverrides } from '../core/wall-model'
 import { FramingNode } from './schema'
 import { computeLevel, wallConstruction } from './compute'
 
@@ -203,6 +204,67 @@ describe('computeLevel — service override in a rough opening warns', () => {
       makeConfig({ showElectrical: true, showPlumbing: true }),
     )
     expect(result.warnings.some((w) => w.includes('Service point'))).toBe(false)
+  })
+})
+
+/**
+ * GATE (duplicate service nodes): two nodes of one type on a level must not
+ * resolve by object insertion order (host-dependent) — the LOWEST id wins,
+ * deterministically, and computeLevel says the extra is ignored.
+ */
+describe('computeLevel — duplicate service points', () => {
+  function dupScene(): Record<string, Record<string, unknown>> {
+    const wall = (id: string, start: [number, number], end: [number, number]) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      thickness: 0.114,
+      height: 2.5,
+      frontSide: 'exterior',
+      children: [],
+    })
+    const panel = (id: string, wallT: number) => ({
+      id,
+      type: 'bones:service',
+      parentId: 'level_1',
+      serviceType: 'panel',
+      wallId: 'w_s',
+      wallT,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    })
+    return {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: wall('w_s', [0, 0], [8, 0]),
+      w_e: wall('w_e', [8, 0], [8, 6]),
+      w_n: wall('w_n', [8, 6], [0, 6]),
+      w_w: wall('w_w', [0, 6], [0, 0]),
+      // inserted FIRST but higher id — must NOT win
+      svc_z: panel('svc_z', 0.2),
+      svc_a: panel('svc_a', 0.9),
+    }
+  }
+
+  test('extraction: lowest id wins, the type is reported as duplicated', () => {
+    const { overrides, duplicates } = extractServiceOverrides(dupScene(), 'level_1')
+    expect(duplicates).toEqual(['panel'])
+    expect(overrides.panel?.wallT).toBeCloseTo(0.9, 6) // svc_a, not first-inserted svc_z
+  })
+
+  test('computeLevel warns and mounts the panel at the winner', () => {
+    const result = computeLevel(dupScene(), makeConfig({ showElectrical: true }))
+    expect(result.warnings).toContain('duplicate service point (panel) — extra node ignored')
+    const panel = result.fixtures.find((f) => f.kind === 'panel')
+    expect(panel?.position[0]).toBeCloseTo(0.9 * 8, 1) // svc_a's wallT on the 8 m wall
+  })
+
+  test('a single node per type stays warning-free', () => {
+    const nodes = dupScene()
+    delete nodes.svc_z
+    const result = computeLevel(nodes, makeConfig({ showElectrical: true }))
+    expect(result.warnings.some((w) => w.includes('duplicate service point'))).toBe(false)
   })
 })
 

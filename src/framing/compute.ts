@@ -334,8 +334,12 @@ function computeLevelUncached(
 
   // bones:service nodes on this level are AUTHORITATIVE — the engines route
   // to them instead of auto-placing (checklist A4); reactivity is free since
-  // computeLevel re-runs on any node change.
-  const services = extractServiceOverrides(nodes, levelId)
+  // computeLevel re-runs on any node change. Duplicate nodes of one type:
+  // lowest id wins, the extras are called out.
+  const { overrides: services, duplicates } = extractServiceOverrides(nodes, levelId)
+  for (const dup of duplicates) {
+    warnings.push(`duplicate service point (${dup}) — extra node ignored`)
+  }
 
   if (config.showElectrical) {
     const electrical = layoutElectrical(activeWalls, activeRooms, services)
