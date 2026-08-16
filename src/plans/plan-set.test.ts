@@ -155,6 +155,55 @@ describe('cover / elevations / section (round: standard set)', () => {
   })
 })
 
+describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)', () => {
+  // Distinct positions — identical (role, position, dims) triples would be
+  // collapsed by the sheet's dedupeShapes pass.
+  let pipeZ = 0
+  const pipe = (sourceId: string): Member =>
+    member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: sourceId.startsWith('dwv') ? 'pvc' : 'copper',
+      dims: [2, 0.02, 0.02],
+      position: [2, 0.4, (pipeZ += 0.5)],
+      sourceId,
+    })
+
+  test('cold/hot/DWV runs carry their prefix colors; legend + slope note print', () => {
+    const members = [pipe('cold-lav'), pipe('hot-lav'), pipe('dwv-main')]
+    const fixtures = [
+      fixture({
+        system: 'plumbing',
+        kind: 'water-meter',
+        position: [0, 0.3, 0],
+        sourceId: 'w_s',
+      }),
+    ]
+    const { PLUMBING_COLORS } = require('./circuit-colors') as typeof import('./circuit-colors')
+    const mep = buildPlanSet(members, fixtures, {}).find((s) => s.title.startsWith('Plumbing'))
+    expect(mep).toBeDefined()
+    const svg = mep?.svg ?? ''
+    for (const color of Object.values(PLUMBING_COLORS)) expect(svg).toContain(color)
+    // every color on the sheet appears in its legend (invariant P2)
+    expect(svg).toContain('supply — cold water')
+    expect(svg).toContain('supply — hot water')
+    expect(svg).toContain('DWV drain / vent')
+    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)')
+    // the meter tags with M and the tag is named in the legend
+    expect(svg).toContain('>M</text>')
+    expect(svg).toContain('water meter')
+  })
+
+  test('room-category fallback keeps the single pipe tint (no phantom legend rows)', () => {
+    const mep = buildPlanSet([pipe('r_bath')], [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    expect(svg).toContain('supply / DWV pipe')
+    expect(svg).not.toContain('supply — cold water')
+    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)') // plumbing present → note prints
+  })
+})
+
 describe('elevation orientation + section membership (blueprint round-2)', () => {
   test('east elevation puts north (−z) on screen-right; west mirrors it', () => {
     // two studs on an east wall: zNear=1, zFar=7 — standing EAST, the z=7

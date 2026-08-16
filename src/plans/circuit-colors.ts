@@ -9,6 +9,24 @@
  * so up to ~8 circuits per family stay tellable apart.
  */
 
+/**
+ * Plumbing run colors keyed by the engine's sourceId prefix — cold/hot
+ * supply and DWV read identically in 3D and on the MEP sheet (same
+ * contract as circuit colors). Null for legacy room-sourced fallback runs.
+ */
+export const PLUMBING_COLORS = {
+  cold: '#4a7dbf',
+  hot: '#c0504d',
+  dwv: '#8fb0c4',
+} as const
+
+export function plumbingPipeColor(sourceId: string): string | null {
+  if (sourceId.startsWith('cold-')) return PLUMBING_COLORS.cold
+  if (sourceId.startsWith('hot-')) return PLUMBING_COLORS.hot
+  if (sourceId.startsWith('dwv-')) return PLUMBING_COLORS.dwv
+  return null
+}
+
 const FAMILY: Record<string, { hint: string; hue: number }> = {
   SA: { hint: 'kitchen small-appliance', hue: 21 },
   BA: { hint: 'bathroom', hue: 210 },

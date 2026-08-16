@@ -15,7 +15,7 @@ import {
 } from 'three'
 import type { Fixture, Member } from '../core/types'
 import { inches } from '../core/units'
-import { circuitColor } from '../plans/circuit-colors'
+import { circuitColor, plumbingPipeColor } from '../plans/circuit-colors'
 import { computeLevel } from './compute'
 import type { FramingNode } from './schema'
 
@@ -32,6 +32,13 @@ function colorOf(member: Member): string {
   // as its zone in the building exactly like on the exported plan.
   if (member.system === 'electrical' && member.role === 'wire-run') {
     return circuitColor(member.sourceId)
+  }
+  // Plumbing runs color by SYSTEM (sourceId prefix): cold blue, hot red,
+  // DWV slate — identical to the exported MEP sheet. The room-category
+  // fallback's room-sourced runs keep their material colors below.
+  if (member.system === 'plumbing' && member.role === 'pipe-run') {
+    const pipe = plumbingPipeColor(member.sourceId)
+    if (pipe) return pipe
   }
   switch (member.role) {
     case 'drywall':

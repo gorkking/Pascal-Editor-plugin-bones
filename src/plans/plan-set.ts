@@ -12,7 +12,7 @@
 
 import type { Fixture, Member } from '../core/types'
 import { computeTakeoff } from '../engines/takeoff'
-import { circuitColor, circuitZoneHint } from './circuit-colors'
+import { PLUMBING_COLORS, circuitColor, circuitZoneHint, plumbingPipeColor } from './circuit-colors'
 
 export type PlanSheet = { title: string; svg: string }
 
@@ -80,7 +80,13 @@ const PLAN_SHEETS: {
     key: 'mep',
     title: 'Plumbing + HVAC plan',
     systems: ['plumbing', 'hvac'],
-    fill: { 'duct-run': '#9aa7b0', 'vent-stack': '#6e8fa0', 'pipe-run': '#8fb0c4', default: '#8fb0c4' },
+    fill: {
+      'duct-run': '#9aa7b0',
+      'vent-stack': '#6e8fa0',
+      'pipe-run': '#8fb0c4',
+      'water-heater': '#b5aa97',
+      default: '#8fb0c4',
+    },
   },
 ]
 
@@ -102,6 +108,7 @@ const FIXTURE_TAG: Record<string, string> = {
   'stub-out': 'SO',
   'vent-stack': 'VS',
   'water-heater': 'WH',
+  'water-meter': 'M',
   equipment: 'AH',
   cleanout: 'CO',
 }
@@ -405,10 +412,15 @@ function planSheet(
     const planLen = Math.max(0.02, m.dims[0] * planFrac)
     const w = planLen * scale
     const h = Math.max(1.2, m.dims[2] * scale)
+    // Per-member colors: wires by circuit; plumbing runs by system —
+    // cold blue / hot red / DWV slate via the sourceId prefix (identical
+    // to the 3D X-ray, invariant E3's spirit).
     const fill =
       m.system === 'electrical' && m.role === 'wire-run'
         ? circuitColor(m.sourceId)
-        : (def.fill[m.role] ?? def.fill.default ?? '#ddd')
+        : (m.system === 'plumbing' && m.role === 'pipe-run'
+            ? plumbingPipeColor(m.sourceId)
+            : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
     shapes.push(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="#444" stroke-width="0.6" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
@@ -479,25 +491,47 @@ function planSheet(
         `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
     )
   if (def.key === 'mep') {
-    const seenRoles = new Map<string, string>()
-    for (const m of mine) {
-      if (!seenRoles.has(m.role)) {
-        seenRoles.set(m.role, def.fill[m.role] ?? def.fill.default ?? '#8fb0c4')
+    // Supply/DWV split by sourceId prefix (placed-fixture engine); the
+    // legacy room-category fallback keeps its single pipe tint.
+    const pipes = mine.filter((m) => m.system === 'plumbing' && m.role === 'pipe-run')
+    const entries: [string, string][] = []
+    if (pipes.some((m) => m.sourceId.startsWith('cold-'))) {
+      entries.push(['supply — cold water', PLUMBING_COLORS.cold])
+    }
+    if (pipes.some((m) => m.sourceId.startsWith('hot-'))) {
+      entries.push(['supply — hot water', PLUMBING_COLORS.hot])
+    }
+    if (pipes.some((m) => m.sourceId.startsWith('dwv-'))) {
+      entries.push(['DWV drain / vent', PLUMBING_COLORS.dwv])
+    }
+    if (pipes.some((m) => plumbingPipeColor(m.sourceId) === null)) {
+      entries.push(['supply / DWV pipe', def.fill['pipe-run'] ?? '#8fb0c4'])
+    }
+    const NAMES: Record<string, string> = {
+      'vent-stack': 'vent stack',
+      'duct-run': 'duct',
+      'water-heater': 'water heater',
+    }
+    for (const role of Object.keys(NAMES)) {
+      if (mine.some((m) => m.role === role)) {
+        entries.push([NAMES[role] as string, def.fill[role] ?? def.fill.default ?? '#8fb0c4'])
       }
     }
     let row = legendLines.length
-    const NAMES: Record<string, string> = {
-      'pipe-run': 'supply / DWV pipe',
-      'vent-stack': 'vent stack',
-      'duct-run': 'duct',
-    }
-    for (const [role, color] of seenRoles) {
+    for (const [name, color] of entries) {
       const y = MARGIN + 14 + row * 14
       legendLines.push(
         `<rect x="${MARGIN + 2}" y="${y - 8}" width="10" height="10" fill="${color}" stroke="#444" stroke-width="0.5"/>` +
-          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(NAMES[role] ?? role)}</text>`,
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(name)}</text>`,
       )
       row++
+    }
+    // Horizontal drainage falls — the drafter's standing note (P3005.3).
+    if (mine.some((m) => m.system === 'plumbing')) {
+      const y = MARGIN + 14 + row * 14
+      legendLines.push(
+        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">DWV SLOPE 1/4 IN/FT (P3005.3)</text>`,
+      )
     }
   }
   if (def.key === 'electrical' || def.key === 'mep') {
@@ -515,6 +549,7 @@ function planSheet(
       SO: 'stub-out',
       VS: 'vent stack',
       WH: 'water heater',
+      M: 'water meter',
       AH: 'air handler',
       CO: 'cleanout',
     }
