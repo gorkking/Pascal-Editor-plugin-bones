@@ -43,7 +43,7 @@ import type { Member, OpeningSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { anchorBoltPositions } from './foundation'
-import { detectCorners, frameWall, studSizeFor } from './wall-framing'
+import { detectCorners, detectTees, frameWall, studSizeFor } from './wall-framing'
 
 const EPS = 1e-6
 
@@ -523,7 +523,63 @@ const SEAM_BOLT_EMBEDMENT = inches(7)
 /** Canonical crossing-opening flag (board spec verbatim) — gates grep it. */
 export const SEAM_CROSSING_FLAG = 'opening crosses the CMU/framing seam — verify detail'
 
+/** Canonical corner-butt advisory (board spec verbatim) — gates grep it. */
+export const MIXED_CORNER_FLAG = 'mixed wall butts at corners — verify tie detail'
+
 export type MixedWallResult = { members: Member[]; warnings: string[] }
+
+/**
+ * Corner/tee butt insets for a mixed wall. A mixed wall joins NEITHER
+ * corner-fabrication group (the framed and CMU groups each run their own
+ * cross-wall pass), so without this its courses/bond beam/PT sill/plates ran
+ * to the centerline corner point and interpenetrated the neighbor (skeptic
+ * 2026-08-16, S1). The mixed wall always BUTTS — never through-runs — at
+ * every shared corner AND as the stem of a tee: both zones stop at the
+ * neighbor's near face (k half-thicknesses back from the centerline, same
+ * oblique multiplier as frameWalls/cmuWalls; tees mirror frameWalls' plain
+ * thickness/2). Each junction is a per-corner advisory: the butt joint
+ * carries no interlock/California corner, so the tie detail (corner bars,
+ * strap, cap lap) is the builder's to verify.
+ */
+export function mixedWallInsets(
+  wall: WallSlice,
+  neighbors: WallSlice[],
+): { startInset: number; endInset: number; junctions: ('start' | 'end')[] } {
+  let startInset = 0
+  let endInset = 0
+  const junctions: ('start' | 'end')[] = []
+  const others = neighbors.filter((n) => n.id !== wall.id && !n.curved)
+  if (others.length === 0) return { startInset, endInset, junctions }
+  const group = [wall, ...others]
+  const claim = (end: 'start' | 'end', inset: number): void => {
+    junctions.push(end)
+    if (end === 'start') startInset = Math.max(startInset, inset)
+    else endInset = Math.max(endInset, inset)
+  }
+  for (const corner of detectCorners(group)) {
+    // Only corners THIS wall participates in — either role, it butts.
+    let myEnd: 'start' | 'end'
+    let other: WallSlice
+    if (corner.through.id === wall.id) {
+      myEnd = corner.throughEnd
+      other = corner.butting
+    } else if (corner.butting.id === wall.id) {
+      myEnd = corner.buttingEnd
+      other = corner.through
+    } else continue
+    // Oblique multiplier (round-14 convention): a square-cut run retreats
+    // (1+|cosθ|)/sinθ half-thicknesses to clear the neighbor's sloped face.
+    const crossD = Math.abs(wall.dir[0] * other.dir[1] - wall.dir[1] * other.dir[0])
+    const dotD = Math.abs(wall.dir[0] * other.dir[0] + wall.dir[1] * other.dir[1])
+    const k = crossD < 0.1 ? 1 : Math.min(4, (1 + dotD) / crossD)
+    claim(myEnd, (k * other.thickness) / 2)
+  }
+  for (const tee of detectTees(group)) {
+    if (tee.stem.id !== wall.id) continue
+    claim(tee.stemEnd, tee.through.thickness / 2)
+  }
+  return { startInset, endInset, junctions }
+}
 
 /**
  * Lay up one MIXED wall: CMU coursing from the floor to a course-snapped
@@ -545,16 +601,20 @@ export type MixedWallResult = { members: Member[]; warnings: string[] }
  *    the head is above the zone).
  *
  * ASSUMPTIONS (v1): mixed walls do not interlock corners with neighboring
- * walls (they are laid up standalone — the framed and CMU groups run their
- * own cross-wall fabrication separately); the bond beam and PT sill run
- * continuous across a crossing opening (real details splice the tie beam and
- * cut the plate at the door — the crossing flag covers it); assembly layers
- * are unchanged per wall (no sheathing/drywall split at the seam).
+ * walls — at every shared corner/tee BOTH zones butt at the neighbor's near
+ * face instead (mixedWallInsets from the `neighbors` context; the framed and
+ * CMU groups still run their own cross-wall fabrication separately) and a
+ * per-corner MIXED_CORNER_FLAG advisory is returned; the bond beam and PT
+ * sill run continuous across a crossing opening (real details splice the tie
+ * beam and cut the plate at the door — the crossing flag covers it);
+ * assembly layers are unchanged per wall (no sheathing/drywall split at the
+ * seam).
  */
 export function mixedCmuWall(
   wall: WallSlice,
   spec: FramingSpec,
   cmuHeightM: number,
+  neighbors: WallSlice[] = [],
 ): MixedWallResult {
   const warnings: string[] = []
   if (wall.curved) return { members: [], warnings } // flagged upstream
@@ -567,6 +627,13 @@ export function mixedCmuWall(
 
   const { yaw, place } = frameOf(wall)
   const len = wall.length
+
+  // ---- corner/tee butt joints: both zones stop at the neighbor's face ----
+  const { startInset, endInset, junctions } = mixedWallInsets(wall, neighbors)
+  for (const end of junctions) {
+    warnings.push(`${MIXED_CORNER_FLAG} (wall ${wall.id}, ${end})`)
+  }
+  const runLen = len - startInset - endInset
   const studSize = studSizeFor(wall, spec)
   const [sillT, sillW] = LUMBER_CROSS_SECTIONS[studSize] // 1.5" plate stock
   const framedBase = seam + sillT
@@ -607,7 +674,21 @@ export function mixedCmuWall(
   }
 
   // ---- CMU zone: courses + bond beam topping out exactly at the seam ----
-  const members = cmuWall({ ...wall, height: seam, openings: cmuOpenings }, spec)
+  // The zone slice is the wall SHORTENED to the butt run [startInset,
+  // len − endInset]: start/end/length shift so the coursing, bond beam,
+  // lintels and bar layout all live inside the run (openings re-based onto
+  // the new start). A wall crushed between two thick neighbors can leave no
+  // run at all — nothing to lay.
+  if (runLen <= EPS) return { members: [], warnings }
+  const zone: WallSlice = {
+    ...wall,
+    start: [wall.start[0] + wall.dir[0] * startInset, wall.start[1] + wall.dir[1] * startInset],
+    end: [wall.end[0] - wall.dir[0] * endInset, wall.end[1] - wall.dir[1] * endInset],
+    length: runLen,
+    height: seam,
+    openings: cmuOpenings.map((o) => ({ ...o, u: o.u - startInset })),
+  }
+  const members = cmuWall(zone, spec)
   if (crossings > 0) {
     // The bond beam is the seam element — it carries the canonical flag so
     // the takeoff's Flags section surfaces the crossing (one line per wall).
@@ -621,9 +702,9 @@ export function mixedCmuWall(
     system: 'wall-framing',
     role: 'mudsill',
     size: studSize,
-    dims: [len, sillT, sillW],
-    length: len,
-    position: place(len / 2, seam + sillT / 2),
+    dims: [runLen, sillT, sillW],
+    length: runLen,
+    position: place(startInset + runLen / 2, seam + sillT / 2),
     rotation: [0, yaw, 0],
     material: 'pt-lumber',
     sourceId: wall.id,
@@ -636,13 +717,13 @@ export function mixedCmuWall(
   // never fewer than two. 7" embedment stays inside the 8" beam course; the
   // shank tops out flush with the sill top (nut + washer land on the plate).
   const boltHeight = SEAM_BOLT_EMBEDMENT + sillT
-  for (const u of anchorBoltPositions(len, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
+  for (const u of anchorBoltPositions(runLen, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
     members.push({
       system: 'wall-framing',
       role: 'anchor-bolt',
       dims: [SEAM_BOLT_SIDE, boltHeight, SEAM_BOLT_SIDE],
       length: boltHeight,
-      position: place(u, seam - SEAM_BOLT_EMBEDMENT + boltHeight / 2),
+      position: place(startInset + u, seam - SEAM_BOLT_EMBEDMENT + boltHeight / 2),
       rotation: [0, yaw, 0],
       material: 'steel',
       sourceId: wall.id,
@@ -653,7 +734,12 @@ export function mixedCmuWall(
   // ---- framed zone: shortened wall with its own bottom/top plates ----
   // frameWall runs in zone-local coordinates (y=0 on the PT sill top); the
   // members shift up by framedBase so the top plate lands at wall.height.
-  const framedMembers = frameWall({ ...wall, height: framedHeight, openings: framedOpenings }, spec)
+  // Corner butts pass through as run insets (frameWall's own hint contract).
+  const framedMembers = frameWall(
+    { ...wall, height: framedHeight, openings: framedOpenings },
+    spec,
+    { startInset, endInset },
+  )
   for (const m of framedMembers) {
     members.push({
       ...m,

@@ -360,9 +360,10 @@ function computeLevelUncached(
   if (config.showWalls) {
     // Route walls as GROUPS so cross-wall fabrication (corner assemblies,
     // partition backing, CMU corner interlock) can see its neighbors.
-    // MIXED walls (CMU below a course-snapped seam, framed above) are laid
-    // up standalone by mixedCmuWall — they join neither group's corner
-    // fabrication (v1 assumption, documented on the engine).
+    // MIXED walls (CMU below a course-snapped seam, framed above) join
+    // neither group's corner fabrication — they BUTT at shared corners/tees
+    // instead (both zones inset to the neighbor's near face, per-corner
+    // advisory), so mixedCmuWall gets the full active-wall neighbor context.
     const framed: WallSlice[] = []
     const masonry: WallSlice[] = []
     const mixed: { wall: WallSlice; seam: number }[] = []
@@ -397,7 +398,8 @@ function computeLevelUncached(
     members.push(...layoutWallLayers(framed, activeRooms, spec, code, probeSlabs))
     members.push(...cmuWalls(masonry, spec))
     for (const { wall, seam } of mixed) {
-      const result = mixedCmuWall(wall, spec, seam)
+      const neighbors = activeWalls.filter((w) => w.id !== wall.id && !w.curved)
+      const result = mixedCmuWall(wall, spec, seam, neighbors)
       members.push(...result.members)
       warnings.push(...result.warnings)
     }
