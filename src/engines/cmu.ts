@@ -39,9 +39,11 @@
  */
 
 import type { FramingSpec } from '../core/spec'
-import type { Member, WallSlice } from '../core/types'
+import type { Member, OpeningSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
-import { detectCorners } from './wall-framing'
+import { LUMBER_CROSS_SECTIONS } from '../lumber'
+import { anchorBoltPositions } from './foundation'
+import { detectCorners, frameWall, studSizeFor } from './wall-framing'
 
 const EPS = 1e-6
 
@@ -507,4 +509,157 @@ export function cmuWalls(walls: WallSlice[], spec: FramingSpec): Member[] {
     members.push(...cmuWall(wall, spec, hints.get(wall.id)))
   }
   return members
+}
+
+// ---------------------------------------------------------------------------
+// Mixed CMU/framed wall (knee/stem wall pattern)
+// ---------------------------------------------------------------------------
+
+/** Seam anchor bolt: 5/8" J-bolt (R403.1.6 prescribes 1/2" minimum). */
+const SEAM_BOLT_SIDE = inches(5 / 8)
+/** R403.1.6: bolts extend ≥ 7" into the masonry — here the grouted bond beam. */
+const SEAM_BOLT_EMBEDMENT = inches(7)
+
+/** Canonical crossing-opening flag (board spec verbatim) — gates grep it. */
+export const SEAM_CROSSING_FLAG = 'opening crosses the CMU/framing seam — verify detail'
+
+export type MixedWallResult = { members: Member[]; warnings: string[] }
+
+/**
+ * Lay up one MIXED wall: CMU coursing from the floor to a course-snapped
+ * seam, stud framing above — the knee/stem wall pattern (block base, framed
+ * top). Anatomy, bottom to top:
+ *
+ *   body courses → grouted bond beam as the CMU zone's top course (the seam
+ *   collector, FBC tie-beam practice) → PT sill plate anchor-bolted to the
+ *   bond beam (R403.1.6 spacing: ≤6' o.c., within 12" of ends, ≥2 bolts) →
+ *   the shortened framed zone with its own bottom plate, studs and top
+ *   plates, topping out exactly at the wall's architectural height.
+ *
+ * Openings:
+ *  - entirely below the seam → CMU zone (precast lintel logic as today);
+ *  - entirely above → framed zone (king/trimmer/header logic), translated;
+ *  - CROSSING the seam → flagged (SEAM_CROSSING_FLAG on the bond beam +
+ *    a returned warning) and framed as if fully in the TALLER zone; the
+ *    blockwork still cuts clear of the rough opening (jamb cuts, no lintel —
+ *    the head is above the zone).
+ *
+ * ASSUMPTIONS (v1): mixed walls do not interlock corners with neighboring
+ * walls (they are laid up standalone — the framed and CMU groups run their
+ * own cross-wall fabrication separately); the bond beam and PT sill run
+ * continuous across a crossing opening (real details splice the tie beam and
+ * cut the plate at the door — the crossing flag covers it); assembly layers
+ * are unchanged per wall (no sheathing/drywall split at the seam).
+ */
+export function mixedCmuWall(
+  wall: WallSlice,
+  spec: FramingSpec,
+  cmuHeightM: number,
+): MixedWallResult {
+  const warnings: string[] = []
+  if (wall.curved) return { members: [], warnings } // flagged upstream
+  const seam = snapCmuHeight(cmuHeightM, wall.height)
+  if (seam <= 0) return { members: cmuWall(wall, spec), warnings } // < 1 course — today's path ([])
+  if (courseCount(seam) >= courseCount(wall.height)) {
+    // Snapped to every course that fits = full-height CMU, exactly as today.
+    return { members: cmuWall(wall, spec), warnings }
+  }
+
+  const { yaw, place } = frameOf(wall)
+  const len = wall.length
+  const studSize = studSizeFor(wall, spec)
+  const [sillT, sillW] = LUMBER_CROSS_SECTIONS[studSize] // 1.5" plate stock
+  const framedBase = seam + sillT
+  const framedHeight = wall.height - framedBase
+
+  // ---- zone the openings ----
+  const roExtent = (o: OpeningSlice): [number, number] =>
+    o.kind === 'door' ? [0, o.roughHeight] : [o.sillHeight, o.sillHeight + o.roughHeight]
+  /** Translate an opening into the framed zone's local frame (y=0 at the
+   * plate line above the PT sill). A sill landing inside the sill-plate band
+   * clamps to the zone floor; roughHeight preserves the TRUE head height. */
+  const toFramedZone = (o: OpeningSlice): OpeningSlice => {
+    const [roBottom, roTop] = roExtent(o)
+    const bottom = Math.max(0, roBottom - framedBase)
+    return { ...o, sillHeight: bottom, roughHeight: roTop - framedBase - bottom }
+  }
+  const cmuOpenings: OpeningSlice[] = []
+  const framedOpenings: OpeningSlice[] = []
+  let crossings = 0
+  for (const o of wall.openings) {
+    const [roBottom, roTop] = roExtent(o)
+    if (roTop <= seam + EPS) {
+      cmuOpenings.push(o) // fully in the blockwork — lintel logic as today
+    } else if (roBottom >= seam - EPS) {
+      framedOpenings.push(toFramedZone(o)) // fully in the framed zone
+    } else {
+      // Crossing: structural home is the TALLER zone; flag either way.
+      crossings += 1
+      warnings.push(`${SEAM_CROSSING_FLAG} (${o.kind} ${o.id})`)
+      // The blockwork always cuts clear of the RO (jamb cuts; the head is
+      // above the zone so cmuWall emits no lintel for it).
+      cmuOpenings.push(o)
+      const framedTaller = framedHeight >= seam
+      if (framedTaller && roTop > framedBase + sillT) {
+        framedOpenings.push(toFramedZone(o))
+      }
+    }
+  }
+
+  // ---- CMU zone: courses + bond beam topping out exactly at the seam ----
+  const members = cmuWall({ ...wall, height: seam, openings: cmuOpenings }, spec)
+  if (crossings > 0) {
+    // The bond beam is the seam element — it carries the canonical flag so
+    // the takeoff's Flags section surfaces the crossing (one line per wall).
+    for (const m of members) {
+      if (m.role === 'bond-beam') m.flag = SEAM_CROSSING_FLAG
+    }
+  }
+
+  // ---- PT sill plate on the bond beam (mudsill, R403.1.6 anchorage) ----
+  members.push({
+    system: 'wall-framing',
+    role: 'mudsill',
+    size: studSize,
+    dims: [len, sillT, sillW],
+    length: len,
+    position: place(len / 2, seam + sillT / 2),
+    rotation: [0, yaw, 0],
+    material: 'pt-lumber',
+    sourceId: wall.id,
+    label: 'PT sill plate on bond beam — anchor-bolted (R403.1.6)',
+  })
+
+  // ---- anchor bolts through the sill into the grouted bond beam ----
+  // R403.1.6 layout (shared with the foundation engine): max spacing 6' o.c.
+  // (tighter via jurisdiction), first/last within 12" of the plate ends,
+  // never fewer than two. 7" embedment stays inside the 8" beam course; the
+  // shank tops out flush with the sill top (nut + washer land on the plate).
+  const boltHeight = SEAM_BOLT_EMBEDMENT + sillT
+  for (const u of anchorBoltPositions(len, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
+    members.push({
+      system: 'wall-framing',
+      role: 'anchor-bolt',
+      dims: [SEAM_BOLT_SIDE, boltHeight, SEAM_BOLT_SIDE],
+      length: boltHeight,
+      position: place(u, seam - SEAM_BOLT_EMBEDMENT + boltHeight / 2),
+      rotation: [0, yaw, 0],
+      material: 'steel',
+      sourceId: wall.id,
+      label: '5/8" anchor bolt — sill to bond beam (R403.1.6)',
+    })
+  }
+
+  // ---- framed zone: shortened wall with its own bottom/top plates ----
+  // frameWall runs in zone-local coordinates (y=0 on the PT sill top); the
+  // members shift up by framedBase so the top plate lands at wall.height.
+  const framedMembers = frameWall({ ...wall, height: framedHeight, openings: framedOpenings }, spec)
+  for (const m of framedMembers) {
+    members.push({
+      ...m,
+      position: [m.position[0], m.position[1] + framedBase, m.position[2]] as const,
+    })
+  }
+
+  return { members, warnings }
 }

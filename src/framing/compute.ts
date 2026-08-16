@@ -24,7 +24,7 @@ import {
   extractWalls,
   type LevelSlice,
 } from '../core/wall-model'
-import { cmuWalls } from '../engines/cmu'
+import { cmuWalls, courseCount, mixedCmuWall, snapCmuHeight } from '../engines/cmu'
 import {
   type BuildingCharacteristics,
   computeCharacteristics,
@@ -360,14 +360,31 @@ function computeLevelUncached(
   if (config.showWalls) {
     // Route walls as GROUPS so cross-wall fabrication (corner assemblies,
     // partition backing, CMU corner interlock) can see its neighbors.
+    // MIXED walls (CMU below a course-snapped seam, framed above) are laid
+    // up standalone by mixedCmuWall — they join neither group's corner
+    // fabrication (v1 assumption, documented on the engine).
     const framed: WallSlice[] = []
     const masonry: WallSlice[] = []
+    const mixed: { wall: WallSlice; seam: number }[] = []
     for (const wall of activeWalls) {
       if (wall.curved) {
         warnings.push(`Curved wall skipped (framing for curved walls lands later)`)
         continue
       }
-      const construction = wallConstruction(wall, config, profile.exteriorWallDefault)
+      const { construction, cmuHeightM } = resolveWallConstruction(
+        wall,
+        config,
+        profile.exteriorWallDefault,
+      )
+      if (construction === 'cmu' && cmuHeightM !== undefined) {
+        // Snap HERE so a height at/above every course that fits routes the
+        // wall down today's full-height path (regression guarantee).
+        const seam = snapCmuHeight(cmuHeightM, wall.height)
+        if (seam > 0 && courseCount(seam) < courseCount(wall.height)) {
+          mixed.push({ wall, seam })
+          continue
+        }
+      }
       if (construction === 'cmu') masonry.push(wall)
       else framed.push(wall)
     }
@@ -379,6 +396,18 @@ function computeLevelUncached(
     // inside/outside signal the exterior fallback used.
     members.push(...layoutWallLayers(framed, activeRooms, spec, code, probeSlabs))
     members.push(...cmuWalls(masonry, spec))
+    for (const { wall, seam } of mixed) {
+      const result = mixedCmuWall(wall, spec, seam)
+      members.push(...result.members)
+      warnings.push(...result.warnings)
+    }
+    if (mixed.length > 0) {
+      // Layers v1: unchanged per wall — a mixed wall keeps the CMU
+      // treatment (no framed-zone sheathing/drywall split at the seam).
+      warnings.push(
+        `${mixed.length} mixed CMU/framed wall${mixed.length > 1 ? 's' : ''}: assembly layers follow the CMU treatment for the whole wall (v1)`,
+      )
+    }
   }
 
   // Rooms with no flooring at all deserve a call-out regardless of level
