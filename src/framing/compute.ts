@@ -6,7 +6,7 @@
  */
 
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
-import type { Fixture, Member, WallSlice } from '../core/types'
+import type { Fixture, Member, ServicePointOverride, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import {
   extractLevels,
@@ -22,7 +22,12 @@ import {
   computeCharacteristics,
 } from '../engines/characteristics'
 import { layoutWallLayers } from '../engines/wall-layers'
-import { layoutElectrical, routeWiring } from '../engines/electrical'
+import {
+  layoutElectrical,
+  openingSpans,
+  overrideWallPoint,
+  routeWiring,
+} from '../engines/electrical'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
@@ -80,6 +85,32 @@ export function computeLevel(
   const result = computeLevelUncached(nodes, config)
   memo.set(config, { nodes, result })
   return result
+}
+
+/**
+ * A service-point override landing inside a door/window rough opening is
+ * honored VERBATIM (checklist A4 — the node is the truth), but never
+ * silently: the forced mount skips the engines' clearance scans
+ * (panelMountU, placeMeterSpot), so the collision must surface as a level
+ * warning (visual round: an unflagged window-RO panel at wallT 0.52).
+ * `y` is the mounted device-center height (the routed fixture's Y).
+ */
+function serviceOverrideRoWarning(
+  walls: WallSlice[],
+  override: ServicePointOverride | undefined,
+  label: string,
+  y: number,
+  suffix = '',
+): string | null {
+  if (!override) return null
+  const wp = overrideWallPoint(walls, override)
+  if (!wp) return null
+  const inRo = openingSpans(wp.wall, y - 0.02, y + 0.02).some(
+    (sp) => wp.u > sp.lo + 0.01 && wp.u < sp.hi - 0.01,
+  )
+  return inRo
+    ? `Service point “${label}” sits in a door/window rough opening — move it clear${suffix}`
+    : null
 }
 
 function computeLevelUncached(
@@ -309,6 +340,19 @@ function computeLevelUncached(
   if (config.showElectrical) {
     const electrical = layoutElectrical(activeWalls, activeRooms, services)
     fixtures.push(...electrical)
+    // Panel override forced into a door/window RO → explicit warning
+    // (NEC 110.26 working space — placePanel skips panelMountU's scan).
+    const panelFx = electrical.find((f) => f.kind === 'panel')
+    if (panelFx) {
+      const warn = serviceOverrideRoWarning(
+        activeWalls,
+        services.panel,
+        'panel',
+        panelFx.position[1],
+        ' (NEC 110.26)',
+      )
+      if (warn) warnings.push(warn)
+    }
     // LOD 400: homerun + branch wiring following the walls to the panel.
     if (spec.detail === '400') members.push(...routeWiring(electrical, activeWalls))
   }
@@ -320,6 +364,18 @@ function computeLevelUncached(
     const plumbing = layoutPlumbing(activeWalls, activeRooms, spec, placedFixtures, services)
     members.push(...plumbing.members)
     fixtures.push(...plumbing.fixtures)
+    // WH / water-entry overrides forced into an RO → same explicit warning
+    // (the pipe legs already flag, but the service POINT must too).
+    const roChecks = [
+      { override: services.waterHeater, kind: 'water-heater', label: 'water-heater' },
+      { override: services.waterEntry, kind: 'water-meter', label: 'water-entry' },
+    ] as const
+    for (const { override, kind, label } of roChecks) {
+      const fx = plumbing.fixtures.find((f) => f.kind === kind)
+      if (!fx) continue
+      const warn = serviceOverrideRoWarning(activeWalls, override, label, fx.position[1])
+      if (warn) warnings.push(warn)
+    }
     // Cross-level stacks land later — each level owns its fixtures for now.
     if (allLevels.some((l) => l.id !== levelId && extractPlacedFixtures(nodes, l.id).length > 0)) {
       warnings.push(

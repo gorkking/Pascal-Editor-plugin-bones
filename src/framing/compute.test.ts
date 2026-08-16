@@ -87,6 +87,125 @@ describe('computeLevel', () => {
   })
 })
 
+/**
+ * GATE (silent RO/compliance bypass): a `bones:service` override is honored
+ * verbatim (A4), but forcing the point into a door/window rough opening MUST
+ * surface a warning — placePanel's forced branch skips panelMountU's
+ * clearance scan (visual round: unflagged window-RO panel at wallT 0.52).
+ */
+describe('computeLevel — service override in a rough opening warns', () => {
+  // 8×6 shell; w_s carries a door at u=2 and a window at u=4.16 (wallT 0.52).
+  function roScene(service: Record<string, Record<string, unknown>> = {}) {
+    const wall = (id: string, start: [number, number], end: [number, number], children: string[] = []) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      thickness: 0.114,
+      height: 2.5,
+      frontSide: 'exterior',
+      backSide: 'interior',
+      children,
+    })
+    return {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: wall('w_s', [0, 0], [8, 0], ['door_1', 'win_1']),
+      w_e: wall('w_e', [8, 0], [8, 6]),
+      w_n: wall('w_n', [8, 6], [0, 6]),
+      w_w: wall('w_w', [0, 6], [0, 0]),
+      door_1: { id: 'door_1', type: 'door', position: [2, 1.05, 0], width: 0.9, height: 2.1 },
+      win_1: { id: 'win_1', type: 'window', position: [4.16, 1.5, 0], width: 1.2, height: 1.5 },
+      z_bath: {
+        id: 'z_bath',
+        type: 'zone',
+        parentId: 'level_1',
+        name: 'Bathroom',
+        polygon: [[5, 0], [8, 0], [8, 4], [5, 4]],
+      },
+      fx_wc: {
+        id: 'fx_wc',
+        type: 'item',
+        parentId: 'level_1',
+        asset: { id: 'toilet' },
+        position: [7.5, 0, 0.5],
+        rotation: [0, 0, 0],
+      },
+      ...service,
+    }
+  }
+  const svc = (
+    id: string,
+    serviceType: string,
+    wallT: number,
+    heightAff?: number,
+  ): Record<string, unknown> => ({
+    id,
+    type: 'bones:service',
+    parentId: 'level_1',
+    serviceType,
+    wallId: 'w_s',
+    wallT,
+    ...(heightAff === undefined ? {} : { heightAff }),
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+  })
+  const PANEL_RO_WARNING =
+    'Service point “panel” sits in a door/window rough opening — move it clear (NEC 110.26)'
+
+  test('panel override inside the window RO → explicit warning', () => {
+    const result = computeLevel(
+      roScene({ svc_p: svc('svc_p', 'panel', 0.52) }),
+      makeConfig({ showElectrical: true }),
+    )
+    expect(result.warnings).toContain(PANEL_RO_WARNING)
+  })
+
+  test('panel override clear of every RO → no warning', () => {
+    const result = computeLevel(
+      roScene({ svc_p: svc('svc_p', 'panel', 0.9) }),
+      makeConfig({ showElectrical: true }),
+    )
+    expect(result.warnings).not.toContain(PANEL_RO_WARNING)
+  })
+
+  test('water-entry override inside the door RO → explicit warning', () => {
+    // u = 0.25 × 8 = 2 — dead center of the door; meter mounts at 0.3 m AFF.
+    const result = computeLevel(
+      roScene({ svc_m: svc('svc_m', 'water-entry', 0.25) }),
+      makeConfig({ showPlumbing: true }),
+    )
+    expect(result.warnings).toContain(
+      'Service point “water-entry” sits in a door/window rough opening — move it clear',
+    )
+  })
+
+  test('water-heater override inside the window RO → explicit warning; clear → none', () => {
+    const inRo = computeLevel(
+      roScene({ svc_wh: svc('svc_wh', 'water-heater', 0.52, 1.5) }),
+      makeConfig({ showPlumbing: true }),
+    )
+    expect(inRo.warnings).toContain(
+      'Service point “water-heater” sits in a door/window rough opening — move it clear',
+    )
+    const clear = computeLevel(
+      roScene({ svc_wh: svc('svc_wh', 'water-heater', 0.9, 1.5) }),
+      makeConfig({ showPlumbing: true }),
+    )
+    expect(
+      clear.warnings.some((w) => w.includes('Service point “water-heater”')),
+    ).toBe(false)
+  })
+
+  test('no override → auto placement never triggers the service-point warning', () => {
+    const result = computeLevel(
+      roScene(),
+      makeConfig({ showElectrical: true, showPlumbing: true }),
+    )
+    expect(result.warnings.some((w) => w.includes('Service point'))).toBe(false)
+  })
+})
+
 describe('wallConstruction', () => {
   const wall = (exterior: boolean): WallSlice => ({
     id: 'w',
