@@ -291,3 +291,24 @@ describe('under-slab plumbing ghosts through the floor (user ask 2026-08-16)', (
     expect(meshCounts).toBeGreaterThanOrEqual(3)
   })
 })
+
+describe('mountLevelId — render-only mount grouping (F1b closing nit)', () => {
+  test('a mountLevelId-only member lands in a foreign group with strataAbove userData', () => {
+    const { buildGroups } = require('./renderer') as typeof import('./renderer')
+    const rafter = {
+      system: 'roof-framing' as const,
+      role: 'rafter' as const,
+      dims: [3, 0.04, 0.09] as const,
+      length: 3,
+      position: [2, 0.5, 1] as const,
+      rotation: [0, 0, 0.5] as const,
+      material: 'lumber' as const,
+      sourceId: 'roof1',
+      mountLevelId: 'lvlattic',
+      strataAbove: true as const,
+    }
+    const { foreign } = buildGroups([rafter], [], true)
+    expect(foreign.has('lvlattic')).toBe(true)
+    expect(foreign.get('lvlattic')?.userData.strataAbove).toBe(true)
+  })
+})
