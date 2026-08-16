@@ -446,24 +446,6 @@ function planSheet(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="#444" stroke-width="0.6" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
   }
-  // Circuit-ID text on each circuit's longest horizontal run — the examiner
-  // couldn't trace a colored line back to its legend row without following
-  // it to the panel (blueprint P4).
-  if (def.key === 'electrical') {
-    const longest = new Map<string, Member>()
-    for (const m of mine) {
-      if (m.role !== 'wire-run') continue
-      const prev = longest.get(m.sourceId)
-      if (!prev || m.length > prev.length) longest.set(m.sourceId, m)
-    }
-    for (const [circuit, m] of longest) {
-      if (m.length * scale < 40) continue // too short to label legibly
-      shapes.push(
-        `<text x="${X(m.position[0]).toFixed(1)}" y="${(Z(m.position[2]) - 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${circuitColor(circuit)}" stroke="#fff" stroke-width="2" paint-order="stroke">${esc(circuit)}</text>`,
-      )
-    }
-  }
-
   // Device tags: dedupe identical (kind, position) fixtures and nudge
   // colliding bubbles apart in a small spiral (quality A6/C3: six tags
   // overprinted into a blob; the panel symbol printed twice).
@@ -487,6 +469,51 @@ function planSheet(
     shapes.push(
       `<g transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle r="7" fill="#fff" stroke="#a05c10" stroke-width="1.2"/><text y="3.5" font-size="8" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text></g>`,
     )
+  }
+
+  // Circuit-ID text on each circuit's longest horizontal run — the examiner
+  // couldn't trace a colored line back to its legend row without following
+  // it to the panel (blueprint P4). Runs sharing a homerun spine anchor at
+  // the SAME point (round-3 scorecard: LTG-3/LTG-4/GEN-3/GEN-4 stacked at
+  // one coordinate) — labels de-collide with the device-tag spiral pattern,
+  // and a label whose anchor sits on a device bubble is skipped rather than
+  // overprinted. Drawn AFTER the bubbles so `placed` holds their spots.
+  if (def.key === 'electrical') {
+    const longest = new Map<string, Member>()
+    for (const m of mine) {
+      if (m.role !== 'wire-run') continue
+      const prev = longest.get(m.sourceId)
+      if (!prev || m.length > prev.length) longest.set(m.sourceId, m)
+    }
+    const labelSpots: { x: number; y: number }[] = []
+    for (const [circuit, m] of longest) {
+      if (m.length * scale < 40) continue // too short to label legibly
+      const ax = X(m.position[0])
+      const ay = Z(m.position[2]) - 3
+      // anchor over a device bubble → skip (text-over-symbol is what P4 forbids)
+      if (placed.some((q) => Math.hypot(q.x - ax, q.y - ay) < 15)) continue
+      let px = ax
+      let py = ay
+      let clear = false
+      for (let attempt = 0; attempt < 12; attempt++) {
+        const clash =
+          labelSpots.some((q) => Math.hypot(q.x - px, q.y - py) < 14) ||
+          placed.some((q) => Math.hypot(q.x - px, q.y - py) < 15)
+        if (!clash) {
+          clear = true
+          break
+        }
+        const ang = (attempt * Math.PI) / 3
+        const r = 16 + 12 * Math.floor(attempt / 6)
+        px = ax + r * Math.cos(ang)
+        py = ay + r * Math.sin(ang)
+      }
+      if (!clear) continue // never overprint — drop the label instead
+      labelSpots.push({ x: px, y: py })
+      shapes.push(
+        `<text x="${px.toFixed(1)}" y="${py.toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${circuitColor(circuit)}" stroke="#fff" stroke-width="2" paint-order="stroke">${esc(circuit)}</text>`,
+      )
+    }
   }
 
   // Callouts: most common size per role, top-left legend — and on the
@@ -683,7 +710,7 @@ function planSheet(
 // their longest local axis: honest line-art framing, no hidden-face solver.
 // ---------------------------------------------------------------------------
 
-type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string; butt?: boolean; opacity?: number }
+type Seg = { x1: number; y1: number; x2: number; y2: number; w: number; depth: number; color: string; dashed?: boolean; opacity?: number }
 
 /** World-space endpoints of a member's longest axis + its stroke thickness. */
 function memberAxis(m: Member, lift: number): { a: [number, number, number]; b: [number, number, number]; w: number } {
@@ -738,10 +765,35 @@ const STROKE_LEGEND_NAMES: Record<string, string> = {
   hvac: 'HVAC',
 }
 
+/** Rotation-aware x half-extent of a member (yaw only — plan projection). */
+function xExtentOf(m: Member): number {
+  return (
+    (Math.abs(Math.cos(m.rotation[1])) * m.dims[0] +
+      Math.abs(Math.sin(m.rotation[1])) * m.dims[2]) /
+    2
+  )
+}
+
+/** |x-component| of the member's unit long axis. Below AXIS_CROSS_MIN the
+ * axis lies parallel-ish to the section plane (angle to the plane normal
+ * ≥ 60°) — a wall run or stud, not a stick the plane slices across. */
+function axisXFrac(m: Member): number {
+  const { a, b } = memberAxis(m, 0)
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])
+  return len < 1e-9 ? 0 : Math.abs(b[0] - a[0]) / len
+}
+
+/** cos 60° — members whose axis makes < 60° with the plane normal CROSS it. */
+const AXIS_CROSS_MIN = 0.5
+
 /**
- * The section's cut plane: mid X of the member x-position extents. ONE
- * helper shared by sectionSheet and the wall-plan A-A cut mark (blueprint
- * round-3: the mark must land exactly where the section actually cuts).
+ * The section's cut plane: mid X of the member x-position extents, SLID off
+ * any member whose axis lies along the plane (blueprint round-3 N3 FAIL: the
+ * plan-midpoint plane coincided with the 9 m spine wall's axis and the whole
+ * wall + foundation printed as one black silhouette). Steps ±0.3 m up to
+ * ±2 m; the nearest offset with the fewest parallel-axis members touching
+ * the plane wins — a clear stud bay when one exists. ONE helper shared by
+ * sectionSheet and the wall-plan A-A cut mark, so the mark follows the slide.
  */
 function sectionCutX(members: Member[]): number | null {
   let minX = Number.POSITIVE_INFINITY
@@ -750,7 +802,24 @@ function sectionCutX(members: Member[]): number | null {
     minX = Math.min(minX, m.position[0])
     maxX = Math.max(maxX, m.position[0])
   }
-  return Number.isFinite(minX) ? (minX + maxX) / 2 : null
+  if (!Number.isFinite(minX)) return null
+  const mid = (minX + maxX) / 2
+  const parallelAt = (cutX: number): number =>
+    members.filter(
+      (m) => axisXFrac(m) < AXIS_CROSS_MIN && Math.abs(m.position[0] - cutX) <= xExtentOf(m),
+    ).length
+  let best = mid
+  let bestCount = parallelAt(mid)
+  for (let step = 0.3; step <= 2.0001 && bestCount > 0; step += 0.3) {
+    for (const cand of [mid + step, mid - step]) {
+      const count = parallelAt(cand)
+      if (count < bestCount) {
+        best = cand
+        bestCount = count
+      }
+    }
+  }
+  return best
 }
 
 /**
@@ -779,22 +848,49 @@ function strokeLegend(members: Member[], filter?: (m: Member) => boolean, yOff =
 }
 
 /**
- * 'Wing has no roof' printed flag (blueprint round-3): roof members exist
- * but their plan bbox covers <60% of the wall-plan bbox area — an L-wing or
- * addition the roof engine missed. Printed on the roof sheet legend AND
- * joined into the schedules flag block.
+ * 'Wing has no roof' printed flag (blueprint round-3, reworked round-3
+ * scorecard C1): the wall-plan bbox is rasterized into ~1 m cells and a
+ * cell counts 'roofed' when ANY roof member's rotation-aware plan bbox
+ * overlaps it; >25% unroofed cells fires the warning. The old bbox-AREA
+ * ratio could not see an unroofed wing overlapping the roofed body's
+ * extents — the demo's 8×5 m west wing evaluated 0.72 ≥ 0.6 and passed
+ * silently. Printed on the roof sheet legend AND joined into the schedules
+ * flag block.
  */
 function roofCoverageWarning(members: Member[]): string | null {
   const roof = members.filter((m) => m.system === 'roof-framing')
   const wall = members.filter((m) => m.system === 'wall-framing')
   if (roof.length === 0 || wall.length === 0) return null
-  const rb = planBounds(roof, [])
   const wb = planBounds(wall, [])
-  if (!rb || !wb) return null
-  const area = (b: Bounds): number => Math.max(0, b.maxX - b.minX) * Math.max(0, b.maxZ - b.minZ)
-  const wallArea = area(wb)
-  if (wallArea <= 1) return null
-  if (area(rb) >= 0.6 * wallArea) return null
+  if (!wb) return null
+  const spanX = Math.max(0, wb.maxX - wb.minX)
+  const spanZ = Math.max(0, wb.maxZ - wb.minZ)
+  if (spanX * spanZ <= 1) return null
+  const nx = Math.max(1, Math.round(spanX))
+  const nz = Math.max(1, Math.round(spanZ))
+  const boxes: Bounds[] = roof.map((m) => {
+    const yaw = m.rotation[1]
+    const ex = (Math.abs(Math.cos(yaw)) * m.dims[0] + Math.abs(Math.sin(yaw)) * m.dims[2]) / 2
+    const ez = (Math.abs(Math.sin(yaw)) * m.dims[0] + Math.abs(Math.cos(yaw)) * m.dims[2]) / 2
+    return {
+      minX: m.position[0] - ex,
+      maxX: m.position[0] + ex,
+      minZ: m.position[2] - ez,
+      maxZ: m.position[2] + ez,
+    }
+  })
+  let unroofed = 0
+  for (let i = 0; i < nx; i++) {
+    for (let j = 0; j < nz; j++) {
+      const x0 = wb.minX + (i * spanX) / nx
+      const x1 = wb.minX + ((i + 1) * spanX) / nx
+      const z0 = wb.minZ + (j * spanZ) / nz
+      const z1 = wb.minZ + ((j + 1) * spanZ) / nz
+      const roofed = boxes.some((b) => x1 > b.minX && x0 < b.maxX && z1 > b.minZ && z0 < b.maxZ)
+      if (!roofed) unroofed++
+    }
+  }
+  if (unroofed / (nx * nz) <= 0.25) return null
   return 'part of the plan has no roof members — check roof coverage'
 }
 
@@ -821,8 +917,8 @@ function memberSegs(
       w,
       depth: (depthOf(a) + depthOf(b)) / 2,
       color: SYSTEM_STROKE[m.system] ?? '#9a9a9a',
-      // below-grade work prints dashed with butt caps ('hidden' convention)
-      butt: m.system === 'foundation',
+      // below-grade work prints dashed ('hidden' convention)
+      dashed: m.system === 'foundation',
     })
   }
   return segs.sort((p, q) => p.depth - q.depth)
@@ -852,10 +948,12 @@ function fitSegs(segs: Seg[], fixedRatio?: number): { sx: (x: number) => number;
 }
 
 function segSvg(segs: Seg[], f: NonNullable<ReturnType<typeof fitSegs>>): string {
+  // butt caps for EVERY member stroke (blueprint N2/P3, third round: round
+  // caps bulged CMU courses into logs and merged section poché into blobs).
   return segs
     .map((s) => {
-      const op = s.opacity ?? (s.butt ? 0.75 : null)
-      return `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="${s.butt ? 'butt' : 'round'}"${s.butt ? ' stroke-dasharray="5 3"' : ''}${op !== null ? ` opacity="${op}"` : ''}/>`
+      const op = s.opacity ?? (s.dashed ? 0.75 : null)
+      return `<line x1="${f.sx(s.x1).toFixed(1)}" y1="${f.sy(s.y1).toFixed(1)}" x2="${f.sx(s.x2).toFixed(1)}" y2="${f.sy(s.y2).toFixed(1)}" stroke="${s.color}" stroke-width="${Math.max(0.7, s.w * f.scale).toFixed(1)}" stroke-linecap="butt"${s.dashed ? ' stroke-dasharray="5 3"' : ''}${op !== null ? ` opacity="${op}"` : ''}/>`
     })
     .join('')
 }
@@ -895,12 +993,15 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
   const cutX = sectionCutX(members)
   if (cutX === null) return null
   const BAND = 0.9
-  // rotation-aware x half-extent (round-2: center-only tests dropped the
-  // very walls the cut slices)
-  const xExtent = (m: Member): number =>
-    (Math.abs(Math.cos(m.rotation[1])) * m.dims[0] + Math.abs(Math.sin(m.rotation[1])) * m.dims[2]) / 2
-  const crossesCut = (m: Member): boolean => Math.abs(m.position[0] - cutX) <= xExtent(m)
-  const inBand = (m: Member): boolean => Math.abs(m.position[0] - cutX) < BAND + xExtent(m)
+  // Poché membership (round-3 N3 rework): the plane must SLICE ACROSS the
+  // stick — its extent touches the plane AND its axis is perpendicular-ish
+  // to it (angle to the plane normal < 60°). A wall lying along the plane
+  // (plates along z, vertical studs) is never solid-poché'd: it renders as
+  // beyond-work like the rest of the band. Extents stay rotation-aware
+  // (round-2: center-only tests dropped the very walls the cut slices).
+  const crossesCut = (m: Member): boolean =>
+    Math.abs(m.position[0] - cutX) <= xExtentOf(m) && axisXFrac(m) >= AXIS_CROSS_MIN
+  const inBand = (m: Member): boolean => Math.abs(m.position[0] - cutX) < BAND + xExtentOf(m)
   const proj = (p: [number, number, number]): [number, number] => [p[2], -p[1]]
   const depth = (p: [number, number, number]): number => p[0]
   // Section poché (blueprint round-3): members the cut plane actually
@@ -909,11 +1010,12 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
   const beyond: Seg[] = memberSegs(members, opts, proj, depth, (m) => inBand(m) && !crossesCut(m)).map(
     (s) => ({ ...s, opacity: 0.6 }),
   )
+  // Cut members keep the below-grade dashed convention (round-3: a cut
+  // frost-depth foundation printed as a solid black blob mountain).
   const cut: Seg[] = memberSegs(members, opts, proj, depth, crossesCut).map((s) => ({
     ...s,
     color: '#222',
     w: s.w * 1.3,
-    butt: false,
   }))
   const f = fitSegs([...beyond, ...cut])
   if (!f) return null
@@ -922,7 +1024,7 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
   const title = 'Section A-A (transverse)'
   return {
     title,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${segSvg(cut, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band at plan midpoint — dark = cut by the plane, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${segSvg(cut, f)}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band (plane slid clear of along-plane walls) — dark = members the plane slices across, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
   }
 }
 
@@ -1095,10 +1197,19 @@ function schedulesSheets(
     let charText = ''
     if (page === pages - 1 && opts.characteristics) {
       const c = opts.characteristics
+      // A slab-less model has NO floor area — printing 'Floor area 0.0 m² …
+      // Cooling ~0.0 ton' reads as computed fact (round-3 scorecard C5);
+      // the area-derived metrics say n/a and point at the no-slab flag.
+      const noSlab = c.floorAreaM2 <= 0
+      const na = 'n/a — no floor slabs (see flags)'
       const lines = [
-        `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
+        noSlab
+          ? `Floor area & volume ${na} · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`
+          : `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
         `Windows ${c.windowCount} (${c.windowAreaM2.toFixed(1)} m²) · Doors ${c.doorCount} · Climate zone ${c.insulation.climateZone} · Wall cavity R-${c.insulation.wallR}`,
-        `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
+        noSlab
+          ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
+          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
         clip(`${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`, 130),
       ]
       // bottom-anchor above the flag block (or where flags would start)

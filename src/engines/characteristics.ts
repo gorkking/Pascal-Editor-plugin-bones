@@ -240,13 +240,23 @@ export function computeCharacteristics(
   }
 }
 
-/** One display row per metric — the panel and the CSV share this shape. */
+/** One display row per metric — the panel and the CSV share this shape.
+ * Area-derived metrics on a slab-less model print 'n/a — no floor slabs'
+ * instead of absurd zeros (round-3 scorecard C5: 'Floor area 0.0 m² …
+ * Cooling ~0.0 ton' printed as fact). */
+const NO_SLAB_NA = 'n/a — no floor slabs (see flags)'
+
 export function characteristicsRows(
   c: BuildingCharacteristics,
 ): { metric: string; value: string; unit: string }[] {
+  const noSlab = c.floorAreaM2 <= 0
   return [
-    { metric: 'Floor area', value: c.floorAreaM2.toFixed(1), unit: 'm2' },
-    { metric: 'Volume', value: c.volumeM3.toFixed(1), unit: 'm3' },
+    noSlab
+      ? { metric: 'Floor area', value: NO_SLAB_NA, unit: '' }
+      : { metric: 'Floor area', value: c.floorAreaM2.toFixed(1), unit: 'm2' },
+    noSlab
+      ? { metric: 'Volume', value: NO_SLAB_NA, unit: '' }
+      : { metric: 'Volume', value: c.volumeM3.toFixed(1), unit: 'm3' },
     { metric: 'Envelope area (net)', value: c.envelopeAreaM2.toFixed(1), unit: 'm2' },
     { metric: 'Windows', value: String(c.windowCount), unit: 'count' },
     { metric: 'Window area', value: c.windowAreaM2.toFixed(1), unit: 'm2' },
@@ -259,11 +269,13 @@ export function characteristicsRows(
       value: c.designHeatLossW.toFixed(0),
       unit: 'W',
     },
-    {
-      metric: 'Cooling estimate (rule of thumb)',
-      value: c.coolingTonsEstimate.toFixed(1),
-      unit: 'tons',
-    },
+    noSlab
+      ? { metric: 'Cooling estimate (rule of thumb)', value: NO_SLAB_NA, unit: '' }
+      : {
+          metric: 'Cooling estimate (rule of thumb)',
+          value: c.coolingTonsEstimate.toFixed(1),
+          unit: 'tons',
+        },
   ]
 }
 

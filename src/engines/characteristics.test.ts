@@ -206,6 +206,26 @@ describe('computeCharacteristics — fallbacks', () => {
   })
 })
 
+describe('characteristicsRows — slab-less n/a (round-3 scorecard C5)', () => {
+  test('zero floor area prints n/a for the area-derived metrics, numbers elsewhere', () => {
+    const c = computeCharacteristics(WALLS, [ROOM], [], DEFAULT_SPEC, 'FL')
+    if (!c) throw new Error('expected characteristics')
+    const zero = { ...c, floorAreaM2: 0, volumeM3: 0, coolingTonsEstimate: 0 }
+    const rows = characteristicsRows(zero)
+    const val = (metric: string) => rows.find((r) => r.metric === metric)?.value
+    const NA = 'n/a — no floor slabs (see flags)'
+    expect(val('Floor area')).toBe(NA)
+    expect(val('Volume')).toBe(NA)
+    expect(val('Cooling estimate (rule of thumb)')).toBe(NA)
+    // envelope metrics keep their numbers; the pinned 11-row order holds
+    expect(val('Envelope area (net)')).toBe('61.4')
+    expect(val('Envelope UA')).toBe('30.1')
+    expect(rows).toHaveLength(11)
+    // no zero ever leaks into the drawer for those metrics
+    expect(rows.some((r) => r.value === '0.0')).toBe(false)
+  })
+})
+
 describe('characteristics CSV — pinned shape', () => {
   const c = computeCharacteristics(WALLS, [ROOM], [], DEFAULT_SPEC, 'FL')
   if (!c) throw new Error('expected characteristics')

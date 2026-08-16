@@ -259,6 +259,24 @@ describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
     expect(yOf('2021 IECC Table R402.1.3')).toBeLessThan(yOf('ENGINEERED BEAM REQUIRED'))
   })
 
+  test('slab-less model prints n/a — never Floor area 0.0 / Cooling ~0.0 (round-3 C5)', () => {
+    const noSlab: BuildingCharacteristics = {
+      ...characteristics,
+      floorAreaM2: 0,
+      volumeM3: 0,
+      coolingTonsEstimate: 0,
+    }
+    const sched = buildPlanSet([member({})], [], { characteristics: noSlab }).find((s) =>
+      s.title.startsWith('Schedules'),
+    )
+    const svg = sched?.svg ?? ''
+    expect(svg).toContain('n/a — no floor slabs (see flags)')
+    expect(svg).not.toContain('Floor area 0.0')
+    expect(svg).not.toContain('Cooling ~0.0')
+    // envelope-derived metrics still print as numbers
+    expect(svg).toContain('Envelope UA 30.1 W/K')
+  })
+
   test('multi-page takeoff: block prints on the LAST schedules page only', () => {
     // enough distinct (system × size × stock length) rows to overflow one
     // schedules page — rows aggregate on that triple
@@ -299,20 +317,33 @@ describe('blueprint round-3 — poché, cut mark, legends, wrap, coverage, dowel
       rotation: [0, 0, 0],
     })
 
-  test('section poché: cut members print dark ×1.3, beyond stay light at 0.6', () => {
-    // cutX = (0+4)/2 = 2 — the x=2 stud is CUT (extent contains cutX), the
-    // x=1.5 stud is BEYOND (in band), x=0 / x=4 fall outside the band
-    const members = [stud(0, 0), stud(2, 1), stud(4, 2), stud(1.5, 3)]
+  test('section poché: members the plane slices ACROSS print dark ×1.3, beyond stay light at 0.6', () => {
+    // the plate runs along X — the plane slices across it (poché); studs are
+    // vertical (axis parallel to the plane) so they only ever print as
+    // beyond-work; far studs fall outside the band entirely
+    const members = [
+      member({
+        system: 'wall-framing',
+        role: 'bottom-plate',
+        size: '2x4',
+        dims: [4, 0.04, 0.09],
+        position: [2, 0.02, 1],
+        rotation: [0, 0, 0],
+      }),
+      stud(3.3, 3),
+      stud(1.9, 2),
+      stud(5.8, 4),
+    ]
     const svg =
       buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Section A-A'))?.svg ?? ''
-    const cut = /<line [^>]*stroke="#222" stroke-width="([\d.]+)" stroke-linecap="round"\/>/.exec(svg)
+    const cut = /<line [^>]*stroke="#222" stroke-width="([\d.]+)" stroke-linecap="butt"\/>/.exec(svg)
     const beyond =
-      /<line [^>]*stroke="#caa06a" stroke-width="([\d.]+)" stroke-linecap="round" opacity="0.6"\/>/.exec(svg)
+      /<line [^>]*stroke="#caa06a" stroke-width="([\d.]+)" stroke-linecap="butt" opacity="0.6"\/>/.exec(svg)
     expect(cut).not.toBeNull()
     expect(beyond).not.toBeNull()
     expect(Number(cut?.[1])).toBeCloseTo(Number(beyond?.[1]) * 1.3, 0)
-    // out-of-band studs are not drawn: exactly the 2 member lines
-    expect([...svg.matchAll(/stroke-linecap="round"/g)]).toHaveLength(2)
+    // out-of-band studs are not drawn: exactly the cut plate + 1 beyond stud
+    expect([...svg.matchAll(/stroke-linecap="butt"/g)]).toHaveLength(2)
   })
 
   test('A-A cut mark prints on the wall framing plan only, bubbled at both ends', () => {
@@ -385,7 +416,7 @@ describe('blueprint round-3 — poché, cut mark, legends, wrap, coverage, dowel
     expect(svg).toContain('<text x="62"')
   })
 
-  test('roof plan flags <60% roof coverage; full coverage stays clean', () => {
+  test('roof plan flags grid-coverage gaps; full rafter coverage stays clean', () => {
     const shell = [stud(0, 0), stud(10, 0), stud(10, 8), stud(0, 8)]
     const rafter = (dims: [number, number, number], x: number, z: number, rz = 0): Member =>
       member({ system: 'roof-framing', role: 'rafter', dims, position: [x, 2.6, z], rotation: [0, 0, rz] })
@@ -400,12 +431,46 @@ describe('blueprint round-3 — poché, cut mark, legends, wrap, coverage, dowel
     // the warning also joins the schedules flag block (opts.warnings path)
     const sched = sheets.find((s) => s.title.startsWith('Schedules'))?.svg ?? ''
     expect(sched).toContain('part of the plan has no roof members')
-    const clean = buildPlanSet(
-      [...shell, rafter([10.2, 0.14, 0.04], 5, 0), rafter([10.2, 0.14, 0.04], 5, 8)],
-      [],
-      {},
-    )
+    // rafters every 0.8 m across the whole footprint → every ~1m grid cell
+    // sees roof, no warning
+    const full: Member[] = []
+    for (let z = 0; z <= 8.01; z += 0.8) full.push(rafter([10.2, 0.14, 0.04], 5, z))
+    const clean = buildPlanSet([...shell, ...full], [], {})
     expect(clean.find((s) => s.title === 'Roof framing plan')?.svg ?? '').not.toContain(
+      'check roof coverage',
+    )
+  })
+
+  test('C1 gate: unroofed wing INSIDE the roofed body extents fires; roofing the wing silences it', () => {
+    // synthetic reproduction of the demo shape: main rect x 0..14 / z 0..9
+    // fully roofed, attached wing x -8..0 / z 0..5 unroofed. The old
+    // bbox-AREA proxy scores 128/200 = 0.64 ≥ 0.6 and passed silently
+    // (demo scored 0.72) — the ~1m grid sees the naked wing cells.
+    const shell = [
+      stud(-8, 0),
+      stud(-8, 5),
+      stud(0, 5),
+      stud(0, 0),
+      stud(14, 0),
+      stud(14, 9),
+      stud(0, 9),
+    ]
+    const rafter = (dims: [number, number, number], x: number, z: number): Member =>
+      member({ system: 'roof-framing', role: 'rafter', dims, position: [x, 2.6, z], rotation: [0, 0, 0] })
+    const mainRoof: Member[] = []
+    for (let z = 0; z <= 9.01; z += 0.75) mainRoof.push(rafter([14.2, 0.14, 0.04], 7, z))
+    const sheets = buildPlanSet([...shell, ...mainRoof], [], {})
+    expect(sheets.find((s) => s.title === 'Roof framing plan')?.svg ?? '').toContain(
+      'check roof coverage',
+    )
+    expect(sheets.find((s) => s.title.startsWith('Schedules'))?.svg ?? '').toContain(
+      'part of the plan has no roof members',
+    )
+    // roof the wing too → silent
+    const wingRoof: Member[] = []
+    for (let z = 0; z <= 5.01; z += 0.75) wingRoof.push(rafter([8.2, 0.14, 0.04], -4, z))
+    const covered = buildPlanSet([...shell, ...mainRoof, ...wingRoof], [], {})
+    expect(covered.find((s) => s.title === 'Roof framing plan')?.svg ?? '').not.toContain(
       'check roof coverage',
     )
   })
@@ -437,6 +502,126 @@ describe('blueprint round-3 — poché, cut mark, legends, wrap, coverage, dowel
     // 2 bolts drawn filled + 1 legend swatch
     expect([...svg.matchAll(/r="2\.2" fill="#444"/g)]).toHaveLength(3)
     expect(svg).toContain('vertical rebar dowels — 2 pcs')
+  })
+})
+
+describe('round-3 scorecard fix batch — N3 poché granularity, P4 label nudge, N2 butt caps', () => {
+  const stud = (x: number, z: number): Member =>
+    member({
+      system: 'wall-framing',
+      role: 'stud',
+      size: '2x4',
+      dims: [0.04, 2.4, 0.09],
+      position: [x, 1.2, z],
+      rotation: [0, 0, 0],
+    })
+
+  test('N3 gate: a wall ALONG the cut plane never renders dark; the plane slides clear; a joist crossing it pochés', () => {
+    const zStud = (z: number): Member =>
+      member({
+        system: 'wall-framing',
+        role: 'stud',
+        dims: [0.04, 2.4, 0.09],
+        position: [2, 1.2, z],
+        rotation: [0, Math.PI / 2, 0],
+      })
+    const members = [
+      // wall running along Z at x=2 — plate + studs, every axis parallel
+      // to the would-be midpoint plane (the gabled spine-wall regression)
+      member({
+        system: 'wall-framing',
+        role: 'bottom-plate',
+        dims: [4, 0.04, 0.09],
+        position: [2, 0.02, 2],
+        rotation: [0, Math.PI / 2, 0],
+      }),
+      zStud(1),
+      zStud(3),
+      // floor joist along X crossing the whole extent
+      member({}),
+    ]
+    const sheets = buildPlanSet(members, [], {})
+    const section = sheets.find((s) => s.title.startsWith('Section A-A'))?.svg ?? ''
+    // exactly ONE dark poché line — the joist the plane slices across; the
+    // wall members print as 0.6-opacity beyond work, never solid
+    const dark = [...section.matchAll(/stroke="#222" stroke-width="[\d.]+" stroke-linecap="butt"/g)]
+    expect(dark).toHaveLength(1)
+    const beyond = [
+      ...section.matchAll(/stroke="#caa06a" stroke-width="[\d.]+" stroke-linecap="butt" opacity="0.6"/g),
+    ]
+    expect(beyond).toHaveLength(3)
+    // the shared cutX helper slid the plane OFF the wall's axis — the A-A
+    // mark on the wall plan no longer sits at the wall's x
+    const wallSheet = sheets.find((s) => s.title === 'Wall framing plan')?.svg ?? ''
+    const markX = Number(/<line x1="([\d.]+)" [^>]*stroke-dasharray="9 4"/.exec(wallSheet)?.[1])
+    const wallX = Number(/translate\(([\d.]+) /.exec(wallSheet)?.[1])
+    expect(Number.isFinite(markX)).toBe(true)
+    expect(Number.isFinite(wallX)).toBe(true)
+    expect(Math.abs(markX - wallX)).toBeGreaterThan(5)
+  })
+
+  test('N2 gate: elevation/section member strokes use butt caps; below-grade stays dashed', () => {
+    const members = [
+      stud(1, 0),
+      stud(3, 2),
+      member({
+        system: 'foundation',
+        role: 'stemwall',
+        size: undefined,
+        material: 'concrete',
+        dims: [4, 0.6, 0.2],
+        position: [2, -0.45, 1],
+      }),
+    ]
+    const sheets = buildPlanSet(members, [], {})
+    for (const s of sheets) {
+      expect(s.svg).not.toContain('stroke-linecap="round"')
+    }
+    const south = sheets.find((s) => s.title.startsWith('South elevation'))?.svg ?? ''
+    expect(south).toContain('stroke-linecap="butt" stroke-dasharray="5 3"')
+  })
+
+  const wire = (id: string, dz: number): Member =>
+    member({
+      system: 'electrical',
+      role: 'wire-run',
+      size: undefined,
+      material: 'copper',
+      dims: [3, 0.013, 0.013],
+      length: 3,
+      position: [5, 0.5, 3 + dz],
+      sourceId: id,
+      label: `NM-B 14/2 w/G — ${id}`,
+    })
+
+  test('P4 gate: stacked circuit run labels nudge apart — no two within 12px', () => {
+    // four circuits share the homerun spine → identical anchors (the demo
+    // printed LTG-3/LTG-4/GEN-3/GEN-4 at one coordinate)
+    const members = [wire('LTG-3', 0), wire('LTG-4', 0.001), wire('GEN-3', 0.002), wire('GEN-4', 0.003)]
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
+    const labels = [...svg.matchAll(/<text x="([\d.]+)" y="([\d.]+)" font-size="8" font-weight="bold"/g)].map(
+      (m) => [Number(m[1]), Number(m[2])] as const,
+    )
+    expect(labels).toHaveLength(4)
+    for (let i = 0; i < labels.length; i++) {
+      for (let j = i + 1; j < labels.length; j++) {
+        const a = labels[i] as readonly [number, number]
+        const b = labels[j] as readonly [number, number]
+        expect(Math.hypot(a[0] - b[0], a[1] - b[1])).toBeGreaterThanOrEqual(12)
+      }
+    }
+  })
+
+  test('P4 gate: a label whose anchor sits on a device bubble is skipped, never overprinted', () => {
+    const members = [wire('GEN-2', 0)]
+    const fixtures = [fixture({ kind: 'receptacle', position: [5, 0.38, 3] })]
+    const svg =
+      buildPlanSet(members, fixtures, {}).find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
+    // the run label is dropped (anchor within 15px of the R bubble)…
+    expect(svg).not.toContain('>GEN-2</text>')
+    // …but the circuit legend still carries the id for traceability
+    expect(svg).toContain('GEN-2 —')
   })
 })
 
