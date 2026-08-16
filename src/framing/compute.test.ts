@@ -293,3 +293,104 @@ describe('wallConstruction', () => {
     expect(wallConstruction(wall(true), { wallOverrides: {} }, 'framed')).toBe('framed')
   })
 })
+
+/**
+ * GATE (extended service points): thermostat / heat-pump / electric-meter
+ * nodes flow through computeLevel's extraction EXTENSION (compute.ts owns it
+ * — wall-model.ts stays untouched) into the hvac + electrical engines, with
+ * the same lowest-id duplicate rule as the core five.
+ */
+describe('computeLevel — thermostat / heat-pump / electric-meter nodes', () => {
+  function hvacScene(service: Record<string, Record<string, unknown>> = {}) {
+    const wall = (id: string, start: [number, number], end: [number, number]) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      thickness: 0.114,
+      height: 2.5,
+      frontSide: 'exterior',
+      backSide: 'interior',
+      children: [],
+    })
+    return {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: wall('w_s', [0, 0], [8, 0]),
+      w_e: wall('w_e', [8, 0], [8, 6]),
+      w_n: wall('w_n', [8, 6], [0, 6]),
+      w_w: wall('w_w', [0, 6], [0, 0]),
+      z_bed: {
+        id: 'z_bed',
+        type: 'zone',
+        parentId: 'level_1',
+        name: 'Bedroom',
+        polygon: [[0, 0], [8, 0], [8, 6], [0, 6]],
+      },
+      ...service,
+    }
+  }
+  const svc = (id: string, serviceType: string, extra: Record<string, unknown>) => ({
+    id,
+    type: 'bones:service',
+    parentId: 'level_1',
+    serviceType,
+    position: [0, 0, 0],
+    rotation: [0, 0, 0],
+    ...extra,
+  })
+
+  test('thermostat node re-mounts the tstat fixture (verbatim wall anchor)', () => {
+    const result = computeLevel(
+      hvacScene({ svc_t: svc('svc_t', 'thermostat', { wallId: 'w_e', wallT: 0.5, heightAff: 1.3 }) }),
+      makeConfig({ showHvac: true }),
+    )
+    const tstat = result.fixtures.find((f) => f.kind === 'thermostat')
+    expect(tstat).toBeDefined()
+    // w_e runs [8,0] → [8,6]; t=0.5 → [8,3]
+    expect(tstat?.position[0]).toBeCloseTo(8, 6)
+    expect(tstat?.position[2]).toBeCloseTo(3, 6)
+    expect(tstat?.position[1]).toBeCloseTo(1.3, 6)
+  })
+
+  test('heat-pump node re-anchors the outdoor unit + lineset', () => {
+    const result = computeLevel(
+      hvacScene({ svc_hp: svc('svc_hp', 'heat-pump', { position: [10, 0, 3] }) }),
+      makeConfig({ showHvac: true }),
+    )
+    const condenser = result.fixtures.find((f) => f.label?.includes('Condenser'))
+    expect(condenser?.position[0]).toBeCloseTo(10, 6)
+    expect(condenser?.position[2]).toBeCloseTo(3, 6)
+    expect(result.members.some((m) => m.label?.includes('lineset'))).toBe(true)
+    expect(
+      result.members.some((m) => m.role === 'equipment' && m.material === 'concrete'),
+    ).toBe(true)
+  })
+
+  test('electric-meter node re-mounts the meter (electrical engine consumer)', () => {
+    const result = computeLevel(
+      hvacScene({ svc_em: svc('svc_em', 'electric-meter', { wallId: 'w_n', wallT: 0.25, heightAff: 1.4 }) }),
+      makeConfig({ showElectrical: true }),
+    )
+    const meter = result.fixtures.find((f) => f.kind === 'electric-meter')
+    expect(meter).toBeDefined()
+    // w_n runs [8,6] → [0,6]; t=0.25 → [6,6] (± the exterior-face offset)
+    expect(Math.abs((meter?.position[0] ?? 0) - 6)).toBeLessThan(0.05)
+    expect(Math.abs((meter?.position[2] ?? 0) - 6)).toBeLessThan(0.2)
+    expect(meter?.position[1]).toBeCloseTo(1.4, 6)
+  })
+
+  test('duplicate thermostat nodes: lowest id wins + warning (extension parity)', () => {
+    const result = computeLevel(
+      hvacScene({
+        // inserted first but HIGHER id — must not win
+        svc_z: svc('svc_z', 'thermostat', { wallId: 'w_e', wallT: 0.1 }),
+        svc_a: svc('svc_a', 'thermostat', { wallId: 'w_e', wallT: 0.9 }),
+      }),
+      makeConfig({ showHvac: true }),
+    )
+    expect(result.warnings).toContain('duplicate service point (thermostat) — extra node ignored')
+    const tstat = result.fixtures.find((f) => f.kind === 'thermostat')
+    expect(tstat?.position[2]).toBeCloseTo(0.9 * 6, 6) // svc_a's wallT on the 6 m wall
+  })
+})
