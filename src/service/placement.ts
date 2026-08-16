@@ -83,29 +83,19 @@ export type ServicePlacementNode = Pick<
   'serviceType' | 'wallId' | 'wallT' | 'heightAff' | 'position' | 'rotation'
 > & { parentId?: string | null }
 
-type WallGeom = {
+export type WallGeom = {
   start: readonly [number, number]
   end: readonly [number, number]
   thickness: number
 }
 
 /**
- * A usable straight wall for anchoring on the node's own level. Missing,
- * non-wall, CURVED (the lerp is a chord — wrong), FOREIGN-level (positions
- * are level-local) or degenerate walls are NOT anchors → null.
+ * Pure geometric usability of a wall node: a straight (the lerp on a curved
+ * wall is a chord — wrong), non-degenerate wall with plan endpoints. Level
+ * scoping is the caller's job — see {@link usableWall}.
  */
-function usableWall(
-  wall: Record<string, unknown> | undefined,
-  node: ServicePlacementNode,
-): WallGeom | null {
+export function wallGeom(wall: Record<string, unknown> | undefined): WallGeom | null {
   if (!wall || wall.type !== 'wall') return null
-  if (
-    typeof node.parentId === 'string' &&
-    typeof wall.parentId === 'string' &&
-    wall.parentId !== node.parentId
-  ) {
-    return null
-  }
   if (Math.abs(num(wall.curveOffset, 0)) > 1e-6) return null
   const start = pair(wall.start)
   const end = pair(wall.end)
@@ -114,20 +104,83 @@ function usableWall(
   return { start, end, thickness: num(wall.thickness, 0.1) }
 }
 
-function wallLerp(geom: WallGeom, t: number, y: number): ServicePlacement {
-  const { start, end } = geom
-  const x = start[0] + (end[0] - start[0]) * t
-  const z = start[1] + (end[1] - start[1]) * t
-  const dx = end[0] - start[0]
-  const dz = end[1] - start[1]
+/**
+ * A usable straight wall for anchoring on the node's own level. Missing,
+ * non-wall, CURVED, FOREIGN-level (positions are level-local) or degenerate
+ * walls are NOT anchors → null.
+ */
+export function usableWall(
+  wall: Record<string, unknown> | undefined,
+  node: Pick<ServicePlacementNode, 'parentId'>,
+): WallGeom | null {
+  if (!wall) return null
+  if (
+    typeof node.parentId === 'string' &&
+    typeof wall.parentId === 'string' &&
+    wall.parentId !== node.parentId
+  ) {
+    return null
+  }
+  return wallGeom(wall)
+}
+
+/** Clamped normalized coordinate of plan point `p` projected onto the wall axis. */
+export function projectWallT(geom: WallGeom, p: readonly [number, number]): number {
+  const dx = geom.end[0] - geom.start[0]
+  const dz = geom.end[1] - geom.start[1]
+  const len2 = dx * dx + dz * dz || 1
+  return Math.max(0, Math.min(1, ((p[0] - geom.start[0]) * dx + (p[1] - geom.start[1]) * dz) / len2))
+}
+
+/** Plan point on the wall axis at normalized coordinate `t`. */
+export function wallPointAt(geom: WallGeom, t: number): [number, number] {
+  return [
+    geom.start[0] + (geom.end[0] - geom.start[0]) * t,
+    geom.start[1] + (geom.end[1] - geom.start[1]) * t,
+  ]
+}
+
+/** Plan Y-rotation of the wall axis (matches {@link wallLerp}'s rotationY). */
+export function wallAngle(geom: WallGeom): number {
+  const dx = geom.end[0] - geom.start[0]
+  const dz = geom.end[1] - geom.start[1]
   const len = Math.hypot(dx, dz) || 1
+  return Math.atan2(-dz / len, dx / len)
+}
+
+function wallLerp(geom: WallGeom, t: number, y: number): ServicePlacement {
+  const [x, z] = wallPointAt(geom, t)
   // Local +Z points along the wall's +normal [-dz, dx] (engine convention).
   return {
     position: [x, y, z],
-    rotationY: Math.atan2(-dz / len, dx / len),
+    rotationY: wallAngle(geom),
     wallThickness: geom.thickness,
     wallMounted: true,
   }
+}
+
+/** The usable wall whose axis passes closest to plan point `p` — shared by
+ * the nearest-wall visual snap and the drag frame's parent resolution
+ * (both must agree on which wall a moved node belongs to). */
+export function nearestUsableWall(
+  nodes: Record<string, Record<string, unknown>>,
+  node: Pick<ServicePlacementNode, 'parentId'>,
+  p: readonly [number, number],
+): { wallId: string; geom: WallGeom; t: number } | null {
+  let best: { wallId: string; geom: WallGeom; t: number } | null = null
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const [id, cand] of Object.entries(nodes)) {
+    const geom = usableWall(cand, node)
+    if (!geom) continue
+    const t = projectWallT(geom, p)
+    const [x, z] = wallPointAt(geom, t)
+    const d = Math.hypot(x - p[0], z - p[1])
+    if (d < bestDist) {
+      bestDist = d
+      best = { wallId: id, geom, t }
+    }
+  }
+  return best
 }
 
 /** Nearest point on any usable wall to plan point `p` — the renderer's analog
@@ -139,26 +192,8 @@ function nearestWallSnap(
   p: readonly [number, number],
   y: number,
 ): ServicePlacement | null {
-  let best: ServicePlacement | null = null
-  let bestDist = Number.POSITIVE_INFINITY
-  for (const cand of Object.values(nodes)) {
-    const geom = usableWall(cand, node)
-    if (!geom) continue
-    const dx = geom.end[0] - geom.start[0]
-    const dz = geom.end[1] - geom.start[1]
-    const len2 = dx * dx + dz * dz
-    const t = Math.max(
-      0,
-      Math.min(1, ((p[0] - geom.start[0]) * dx + (p[1] - geom.start[1]) * dz) / len2),
-    )
-    const placement = wallLerp(geom, t, y)
-    const d = Math.hypot(placement.position[0] - p[0], placement.position[2] - p[1])
-    if (d < bestDist) {
-      bestDist = d
-      best = placement
-    }
-  }
-  return best
+  const hit = nearestUsableWall(nodes, node, p)
+  return hit ? wallLerp(hit.geom, hit.t, y) : null
 }
 
 /**

@@ -525,12 +525,13 @@ const overrideT = (o: ServicePointOverride): number =>
 
 /**
  * Resolve a `bones:service` override to the engine's WallPoint form.
- * Precedence: a NON-default `position` (host gizmo write) OUTRANKS the wall
- * anchor and maps to the nearest wall point — otherwise gizmo drags of a
- * wall-anchored node would silently no-op; the default [0,0,0] means "never
- * moved" → `wallId`+`wallT` verbatim (0..1 → u along the wall). An
- * unresolvable wall with a never-moved position is NOT an override.
- * Null = no override → auto-place.
+ * Precedence: a NON-default `position` (a manual inspector/MCP write —
+ * editor drags of wall types commit `wallT` and reset position to the
+ * default, see service/frame.ts) OUTRANKS the wall anchor and maps to the
+ * nearest wall point; the default [0,0,0] means the wall anchor rules →
+ * `wallId`+`wallT` verbatim (0..1 → u along the wall). An unresolvable wall
+ * with a default position is NOT an override. Null = no override →
+ * auto-place.
  */
 export function overrideWallPoint(
   walls: WallSlice[],

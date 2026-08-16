@@ -10,12 +10,15 @@ import type { ServiceNode } from './schema'
 /**
  * Renderer for a `bones:service` point: an equipment box per type plus an
  * identifying SIGN plate (canvas-texture label, double-sided) offset off the
- * wall face. A gizmo-written `position` (non-default) OUTRANKS the wall
- * anchor (wall types snap to the nearest wall); otherwise wall-mounted types
- * resolve from `wallId + wallT + heightAff` (wall start/end lerp — live, so
- * sliding `wallT` moves the node along its wall). No usable anchor → a bare
- * selectable stub. The engines consume the same node as a routing override,
- * so wherever this renders, the wires/pipes follow.
+ * wall face. A non-default `position` (a live drag override or a manual
+ * inspector/MCP write) OUTRANKS the wall anchor (wall types snap to the
+ * nearest wall — during a parentFrame drag the override point rides the
+ * wall axis, so the box slides along its wall live); otherwise wall-mounted
+ * types resolve from `wallId + wallT + heightAff` (wall start/end lerp —
+ * live, so sliding `wallT` moves the node along its wall; drags re-arm this
+ * anchor on commit). No usable anchor → a bare selectable stub. The engines
+ * consume the same node as a routing override, so wherever this renders,
+ * the wires/pipes follow.
  */
 
 /** Draw the sign label (+ bolt glyph for the panel) onto a canvas texture. */

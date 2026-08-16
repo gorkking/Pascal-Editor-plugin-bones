@@ -10,11 +10,13 @@ import { z } from 'zod'
  * exists they auto-place exactly as before.
  *
  * Wall-mounted types mirror the host item wall contract (`wallId` + `wallT`
- * 0..1 along the wall + `heightAff`) so host tools can slide them along a
- * wall. `position` is the level-local spot for floor-placed types (sewer
- * exit) AND the standard gizmo's write target: once moved off the default
- * [0,0,0] it OUTRANKS the wall anchor (wall types snap to the nearest wall),
- * so a drag is never a silent no-op.
+ * 0..1 along the wall + `heightAff`); the host move tool slides them
+ * door-style along the wall (movable.parentFrame in frame.ts) and every
+ * drag commits `wallT` + resets `position` to the [0,0,0] default, so the
+ * wall anchor stays authoritative. `position` is the level-local spot for
+ * floor-placed types (sewer exit) and the manual escape hatch: written off
+ * the default (inspector / MCP) it OUTRANKS the wall anchor (wall types
+ * snap to the nearest wall).
  */
 
 export const SERVICE_TYPES = [
@@ -47,8 +49,8 @@ export const ServiceNode = BaseNode.extend({
 }).describe(
   `Bones service point — a building/utility interface the systems route to.
   - serviceType: panel (electric service panel) | water-heater | water-entry (meter + shut-off) | sewer-exit | power-entry | thermostat | heat-pump (outdoor unit pad) | electric-meter
-  - wallId + wallT (0..1 along the wall) + heightAff: wall-mounted anchor; move it and wires/pipes/ducts re-route
-  - position: level-local spot for floor-placed types (sewer exit, heat pump); once moved off [0,0,0] (gizmo drag) it outranks the wall anchor
+  - wallId + wallT (0..1 along the wall) + heightAff: wall-mounted anchor; drags slide along the wall and commit wallT (position resets to [0,0,0]); wires/pipes/ducts re-route
+  - position: level-local spot for floor-placed types (sewer exit, heat pump); manually written off [0,0,0] it outranks the wall anchor (nearest-wall snap)
   Engines treat an existing node as authoritative; delete it to return to auto-placement.`,
 )
 
