@@ -14,6 +14,21 @@ B. GABLE EXTERIOR (prod bug): roof-level gable walls frame as INTERIOR —
    still nothing, walls on a level with zero rooms+slabs = exterior. Gates:
    gable wall on slab-less level above a slabbed level → exterior true →
    layers emitted; interior partition below stays interior.
+C-SCOUT DIGEST (implementation map, full detail in session transcript):
+   - Hover/select/outline: ALREADY WORKING for bones:service (selectable
+     capability + useNodeEvents spread + useRegistry — host outline pass
+     keys on those three). Move cursor free via capabilities.movable.
+   - DRAG: implement capabilities.movable.parentFrame (MovableParentFrame,
+     core registry/types.ts:1919-1966: resolveParent/localToPlan/
+     planToLocal/magneticSnap/onCommit) — the generic MoveRegistryNodeTool
+     then does door-style slide: plan cursor → wall-local, live preview
+     via useLiveNodeOverrides (service renderer already merges overrides),
+     ONE updateNode on commit. planToLocal projects onto the wall axis →
+     write wallT; onCommit ALSO zeroes position (fixes the 'wallT dead
+     after gizmo drag' quirk). Floor types keep plain moves. magneticSnap:
+     clamp 0..1. No @pascal-app/nodes vendoring needed.
+   - Recompute on updateNode confirmed (new nodes identity every call).
+   - WAIT for D+E agent to finish src/service/* before implementing.
 C. SERVICE-POINT DRAG UX: hover highlight + drag-along-wall like doors.
    Scout FIRST (Explore agent): how the host door/window drag works
    (packages/editor tools + useNodeEvents + live overrides), whether plugin
