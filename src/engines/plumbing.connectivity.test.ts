@@ -684,3 +684,32 @@ describe('P5 gate — re-verify round 2 (riser colinearity, short garage wall)',
     }
   })
 })
+
+describe('P5 gate — re-verify round 3 (mulled-opening riser clearance)', () => {
+  test('D2c: a window 1.5cm past the door edge never swallows the shifted risers', () => {
+    const walls = [
+      makeWall({
+        id: 'w_s',
+        start: [0, 0],
+        end: [10, 0],
+        openings: [
+          opening('door', 4, 0.95, 0, 2.15),
+          opening('window', 4.69, 0.4, 0.5, 1.4), // RO [4.49, 4.89], sill above the run plane
+        ],
+      }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+      makeWall({ id: 'w_mid', start: [5, 0], end: [5, 8], exterior: false }),
+    ]
+    const rooms = [
+      room('r_bath', 'bathroom', [[5, 0], [10, 0], [10, 4], [5, 4]]),
+      room('r_kitchen', 'kitchen', [[0, 5], [5, 5], [5, 8], [0, 8]]),
+    ]
+    const placed = [pf('wc', 'toilet', [6.5, 0.6]), pf('ks', 'kitchen-sink', [1.5, 7.6])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    // no unflagged supply member point inside either RO volume
+    const bad = pipesThroughOpenings(members, walls)
+    expect(bad).toEqual([])
+  })
+})
