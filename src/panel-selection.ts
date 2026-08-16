@@ -9,7 +9,12 @@
 
 import { extractWalls } from './core/wall-model'
 import { studSizeFor } from './engines/wall-framing'
-import { type ComputeResult, probeSlabsFor, wallConstruction } from './framing/compute'
+import {
+  type ComputeResult,
+  dedupeColinearWalls,
+  probeSlabsFor,
+  wallConstruction,
+} from './framing/compute'
 import type { FramingNode, WallConstruction } from './framing/schema'
 import { profileFor } from './jurisdiction/profiles'
 
@@ -36,6 +41,11 @@ export type SelectedWallInfo = {
   /** 'R-13 cavity · IECC zone 2A' — exterior framed walls only (interior
    * partitions and CMU have no prescriptive cavity batt), null otherwise. */
   insulation: string | null
+  /** Set when the SELECTED wall is a colinear duplicate compute's dedupe
+   * skips: the card shows (and `wallId` writes overrides against) the KEPT
+   * twin — a duplicate's own engineering would be a lie (it is never framed)
+   * and an override on its id would be inert. */
+  duplicateNote: string | null
 }
 
 /**
@@ -64,7 +74,14 @@ export function selectedWallInfo(
   // roof levels read exterior, not interior), attic rule gated on a storey
   // below.
   const { probeSlabs, hasLowerStorey } = probeSlabsFor(nodes, levelId)
-  const wall = extractWalls(nodes, levelId, probeSlabs, hasLowerStorey).find((w) => w.id === id)
+  // …and the SHARED colinear dedupe: a selected duplicate resolves to its
+  // KEPT twin — the twin's engineering is what's actually framed, and the
+  // override write must target the id the engines consume (a duplicate's
+  // override is inert). Same A4 parity rule as the probe above.
+  const extracted = extractWalls(nodes, levelId, probeSlabs, hasLowerStorey)
+  const { walls: keptWalls, duplicateOf } = dedupeColinearWalls(extracted)
+  const keptId = duplicateOf.get(id) ?? id
+  const wall = keptWalls.find((w) => w.id === keptId)
   if (!wall) return null
 
   const override = framingNode.wallOverrides?.[wall.id]
@@ -88,8 +105,15 @@ export function selectedWallInfo(
       ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}`
       : null
 
-  const name = typeof node.name === 'string' ? node.name.trim() : ''
-  const label = name !== '' ? name : `Wall ${id.length > 10 ? `…${id.slice(-6)}` : id}`
+  // Label the wall whose engineering the card SHOWS — the kept twin when
+  // the selection was a duplicate.
+  const keptNode = nodes[wall.id] ?? node
+  const name = typeof keptNode.name === 'string' ? keptNode.name.trim() : ''
+  const label = name !== '' ? name : `Wall ${wall.id.length > 10 ? `…${wall.id.slice(-6)}` : wall.id}`
+  const duplicateNote =
+    keptId !== id
+      ? `Duplicate overlapping wall — showing the framed twin (${label}); edits apply to it`
+      : null
 
   return {
     wallId: wall.id,
@@ -100,6 +124,7 @@ export function selectedWallInfo(
     override,
     assembly,
     insulation,
+    duplicateNote,
   }
 }
 

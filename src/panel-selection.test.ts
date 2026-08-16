@@ -129,9 +129,16 @@ describe('selectedWallInfo', () => {
     const result = computeLevel(nodes, config)
     const info = selectedWallInfo(nodes, select('wall_int'), config, result)
     expect(info?.label).toBe('Wall wall_int')
-    // long host ids get truncated to a tail
+    // long host ids get truncated to a tail (own segment — a cloned
+    // position would be a colinear duplicate and resolve to the twin)
     const longId = 'wall_0123456789abcdef'
-    nodes[longId] = { ...(nodes.wall_int as Record<string, unknown>), id: longId, name: undefined }
+    nodes[longId] = {
+      ...(nodes.wall_int as Record<string, unknown>),
+      id: longId,
+      name: undefined,
+      start: [6, 0],
+      end: [6, 4],
+    }
     const long = selectedWallInfo(nodes, select(longId), config, computeLevel(nodes, makeConfig()))
     expect(long?.label).toBe('Wall …abcdef')
   })
@@ -213,6 +220,46 @@ describe('selectedWallInfo', () => {
     const result = computeLevel(nodes, config)
     const info = selectedWallInfo(nodes, select('wall_curved'), config, result)
     expect(info?.curved).toBe(true)
+    expect(info?.duplicateNote).toBeNull()
+  })
+
+  // GATE (skeptic 2026-08-16): compute's colinear dedupe drops overlapping
+  // twins — the card used to claim a stud recipe for the NEVER-FRAMED
+  // duplicate and write an inert override against its id. A selected
+  // duplicate now resolves to the KEPT twin: its engineering, its id.
+  test('coincident duplicate wall resolves to the KEPT twin (same dedupe as compute)', () => {
+    const nodes = makeScene()
+    // shorter colinear twin overlapping wall_ext's centerline
+    nodes.wall_dup = {
+      id: 'wall_dup',
+      type: 'wall',
+      parentId: 'level_1',
+      start: [1, 0],
+      end: [5, 0],
+      thickness: 0.15,
+      height: 2.5,
+      frontSide: 'exterior',
+      backSide: 'interior',
+      children: [],
+    }
+    const config = makeConfig()
+    const result = computeLevel(nodes, config)
+    // compute itself says the twin is skipped
+    expect(result.warnings.some((w) => w.includes('duplicate overlapping wall'))).toBe(true)
+    const info = selectedWallInfo(nodes, select('wall_dup'), config, result)
+    expect(info).not.toBeNull()
+    // engineering + override target = the framed twin, not the duplicate
+    expect(info?.wallId).toBe('wall_ext')
+    expect(info?.label).toBe('South wall')
+    expect(info?.assembly).toBe('2x6 studs @ 16" o.c.')
+    expect(info?.duplicateNote).toContain('South wall')
+    // the override write lands on the id the engines consume
+    const patch = wallOverridePatch(config, info?.wallId ?? '', 'cmu')
+    expect(patch.wallOverrides.wall_ext).toBe('cmu')
+    expect(patch.wallOverrides.wall_dup).toBeUndefined()
+    // the kept wall itself carries no note
+    const kept = selectedWallInfo(nodes, select('wall_ext'), config, result)
+    expect(kept?.duplicateNote).toBeNull()
   })
 })
 

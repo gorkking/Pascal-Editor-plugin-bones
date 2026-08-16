@@ -218,6 +218,43 @@ export function probeSlabsFor(
   return { slabs, probeSlabs, hasLowerStorey: levelIndex > 0 }
 }
 
+/**
+ * Duplicate colinear walls (host scenes routinely carry overlapping
+ * segments) framed TWICE: z-fighting studs, doubled plates, ~20% phantom
+ * lumber in the takeoff (quality round-1 A5). Keep the longer of any
+ * near-coincident pair; `duplicateOf` maps every dropped id to its kept
+ * twin. Exported so the per-element drawer (panel-selection.ts) resolves a
+ * selected duplicate to the wall that IS framed — the card used to claim
+ * studs for a never-framed wall and write inert overrides against its id
+ * (skeptic 2026-08-16).
+ */
+export function dedupeColinearWalls(rawWalls: WallSlice[]): {
+  walls: WallSlice[]
+  duplicateOf: Map<string, string>
+} {
+  const walls: WallSlice[] = []
+  const duplicateOf = new Map<string, string>()
+  for (const w of [...rawWalls].sort((a, b) => b.length - a.length)) {
+    const dup = walls.find((kept) => {
+      if (Math.abs(kept.thickness - w.thickness) > 0.03) return false
+      const cross = Math.abs(kept.dir[0] * w.dir[1] - kept.dir[1] * w.dir[0])
+      if (cross > 0.05) return false
+      // both endpoints of w lie on kept's centerline band
+      const on = (p: readonly [number, number]): boolean => {
+        const dx = p[0] - kept.start[0]
+        const dz = p[1] - kept.start[1]
+        const along = dx * kept.dir[0] + dz * kept.dir[1]
+        const off = Math.abs(-dx * kept.dir[1] + dz * kept.dir[0])
+        return along > -0.05 && along < kept.length + 0.05 && off < kept.thickness / 2
+      }
+      return on(w.start) && on(w.end)
+    })
+    if (dup) duplicateOf.set(w.id, dup.id)
+    else walls.push(w)
+  }
+  return { walls, duplicateOf }
+}
+
 function computeLevelUncached(
   nodes: Record<string, Record<string, unknown>>,
   config: FramingNode,
@@ -270,33 +307,10 @@ function computeLevelUncached(
   // books sheathing the layer engine can't render (checklist S4).
   const { slabs, probeSlabs, hasLowerStorey } = probeSlabsFor(nodes, levelId, levels)
   const rawWalls = extractWalls(nodes, levelId, probeSlabs, hasLowerStorey)
-  // Duplicate colinear walls (host scenes routinely carry overlapping
-  // segments) framed TWICE: z-fighting studs, doubled plates, ~20% phantom
-  // lumber in the takeoff (quality round-1 A5). Keep the longer of any
-  // near-coincident pair and say so.
-  const walls: typeof rawWalls = []
-  const dropped: string[] = []
-  for (const w of [...rawWalls].sort((a, b) => b.length - a.length)) {
-    const dup = walls.find((kept) => {
-      if (Math.abs(kept.thickness - w.thickness) > 0.03) return false
-      const cross = Math.abs(kept.dir[0] * w.dir[1] - kept.dir[1] * w.dir[0])
-      if (cross > 0.05) return false
-      // both endpoints of w lie on kept's centerline band
-      const on = (p: readonly [number, number]): boolean => {
-        const dx = p[0] - kept.start[0]
-        const dz = p[1] - kept.start[1]
-        const along = dx * kept.dir[0] + dz * kept.dir[1]
-        const off = Math.abs(-dx * kept.dir[1] + dz * kept.dir[0])
-        return along > -0.05 && along < kept.length + 0.05 && off < kept.thickness / 2
-      }
-      return on(w.start) && on(w.end)
-    })
-    if (dup) dropped.push(w.id)
-    else walls.push(w)
-  }
-  if (dropped.length > 0) {
+  const { walls, duplicateOf } = dedupeColinearWalls(rawWalls)
+  if (duplicateOf.size > 0) {
     warnings.push(
-      `${dropped.length} duplicate overlapping wall${dropped.length > 1 ? 's' : ''} skipped (framed once, not twice)`,
+      `${duplicateOf.size} duplicate overlapping wall${duplicateOf.size > 1 ? 's' : ''} skipped (framed once, not twice)`,
     )
   }
   const rooms = extractRooms(nodes, levelId)
@@ -489,6 +503,19 @@ function computeLevelUncached(
       )
       if (warn) warnings.push(warn)
     }
+    // Electric-meter override parity: the meter mounts verbatim too, so an
+    // override into a window RO must warn exactly like the panel's (skeptic
+    // 2026-08-16: tstat + meter overrides sat in ROs silently).
+    const meterFx = electrical.find((f) => f.kind === 'electric-meter')
+    if (meterFx) {
+      const warn = serviceOverrideRoWarning(
+        activeWalls,
+        services.electricMeter,
+        'electric-meter',
+        meterFx.position[1],
+      )
+      if (warn) warnings.push(warn)
+    }
     // LOD 400: homerun + branch wiring following the walls to the panel.
     if (spec.detail === '400') members.push(...routeWiring(electrical, activeWalls))
   }
@@ -539,6 +566,18 @@ function computeLevelUncached(
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
     warnings.push(...hvac.warnings)
+    // Thermostat override parity: same RO warning the panel/WH/water-entry
+    // overrides get — the tstat mounts verbatim, never silently in a window.
+    const tstatFx = hvac.fixtures.find((f) => f.kind === 'thermostat')
+    if (tstatFx) {
+      const warn = serviceOverrideRoWarning(
+        activeWalls,
+        services.thermostat,
+        'thermostat',
+        tstatFx.position[1],
+      )
+      if (warn) warnings.push(warn)
+    }
   }
 
   // ---- gross sheet-goods areas for the takeoff ----

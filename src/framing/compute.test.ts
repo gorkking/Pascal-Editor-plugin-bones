@@ -205,6 +205,39 @@ describe('computeLevel — service override in a rough opening warns', () => {
     )
     expect(result.warnings.some((w) => w.includes('Service point'))).toBe(false)
   })
+
+  // RO-warning PARITY (skeptic 2026-08-16): thermostat + electric-meter
+  // overrides used to mount silently inside window ROs while panel/WH/
+  // water-entry warned — every verbatim service mount gets the same gate.
+  test('thermostat override inside the window RO → explicit warning; clear → none', () => {
+    const inRo = computeLevel(
+      roScene({ svc_t: svc('svc_t', 'thermostat', 0.52, 1.5) }),
+      makeConfig({ showHvac: true }),
+    )
+    expect(inRo.warnings).toContain(
+      'Service point “thermostat” sits in a door/window rough opening — move it clear',
+    )
+    const clear = computeLevel(
+      roScene({ svc_t: svc('svc_t', 'thermostat', 0.9, 1.5) }),
+      makeConfig({ showHvac: true }),
+    )
+    expect(clear.warnings.some((w) => w.includes('Service point “thermostat”'))).toBe(false)
+  })
+
+  test('electric-meter override inside the window RO → explicit warning; clear → none', () => {
+    const inRo = computeLevel(
+      roScene({ svc_em: svc('svc_em', 'electric-meter', 0.52, 1.4) }),
+      makeConfig({ showElectrical: true }),
+    )
+    expect(inRo.warnings).toContain(
+      'Service point “electric-meter” sits in a door/window rough opening — move it clear',
+    )
+    const clear = computeLevel(
+      roScene({ svc_em: svc('svc_em', 'electric-meter', 0.9, 1.4) }),
+      makeConfig({ showElectrical: true }),
+    )
+    expect(clear.warnings.some((w) => w.includes('Service point “electric-meter”'))).toBe(false)
+  })
 })
 
 /**

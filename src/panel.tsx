@@ -352,6 +352,9 @@ function SelectedWallCard({
       <div className="text-[11px] text-sidebar-foreground/60 leading-relaxed">
         <span className="block">{info.assembly}</span>
         {info.insulation && <span className="block">{info.insulation}</span>}
+        {info.duplicateNote && (
+          <span className="block text-amber-500/80">{info.duplicateNote}</span>
+        )}
         {info.curved && (
           <span className="block text-amber-500/80">Curved — framing lands later</span>
         )}
