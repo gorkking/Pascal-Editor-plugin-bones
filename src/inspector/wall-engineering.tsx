@@ -1,10 +1,16 @@
 'use client'
 
 import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { computeLevel } from '../framing/compute'
-import { FramingNode, type WallConstruction } from '../framing/schema'
-import { selectedWallInfo, wallOverridePatch } from '../panel-selection'
+import { FramingNode, type WallConstruction, type WallOverride } from '../framing/schema'
+import {
+  CMU_SEAM_NOTE,
+  cmuHeightControl,
+  cmuHeightOverride,
+  selectedWallInfo,
+  wallOverridePatch,
+} from '../panel-selection'
 
 const FRAMING_KIND: string = 'bones:framing'
 
@@ -41,6 +47,127 @@ function SegmentedControl<T extends string>({
           </button>
         )
       })}
+    </div>
+  )
+}
+
+const GRIP_DOTS = ['g1', 'g2', 'g3', 'g4', 'g5', 'g6']
+
+/**
+ * Local mirror of the host editor's SliderControl (same classes, same
+ * drag-the-label + click-to-type interaction) — same barrel-avoidance reason
+ * as SegmentedControl above. Trimmed to what this card needs: 4 px-per-step
+ * scrubbing with an undo-safe commit (pause temporal, roll back to the drag
+ * origin, resume, re-apply the final value = ONE undo step), typed entry on
+ * the value; the host's wheel/arrow-key/modifier extras stay in the sidebar.
+ */
+function SliderControl({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  precision,
+  unit,
+}: {
+  label: string
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max: number
+  step: number
+  precision: number
+  unit: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState('')
+  const drag = useRef<{ anchorX: number; origin: number } | null>(null)
+  const valueRef = useRef(value)
+  valueRef.current = value
+  const clamp = (v: number) => Math.min(Math.max(v, min), max)
+  const submit = () => {
+    const parsed = Number.parseFloat(text)
+    if (!Number.isNaN(parsed)) onChange(clamp(parsed))
+    setEditing(false)
+  }
+  return (
+    <div className="group flex h-7 w-full select-none items-center rounded-lg px-2 transition-colors hover:bg-white/5">
+      <div
+        className="flex shrink-0 cursor-ew-resize items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground/80"
+        onPointerDown={(e) => {
+          if (editing) return
+          e.preventDefault()
+          e.currentTarget.setPointerCapture(e.pointerId)
+          drag.current = { anchorX: e.clientX, origin: valueRef.current }
+          useScene.temporal.getState().pause()
+        }}
+        onPointerMove={(e) => {
+          if (!drag.current) return
+          // 4 px per step, like the host control
+          const next = clamp(drag.current.origin + ((e.clientX - drag.current.anchorX) / 4) * step)
+          if (next !== valueRef.current) {
+            valueRef.current = next
+            onChange(next)
+          }
+        }}
+        onPointerUp={(e) => {
+          if (!drag.current) return
+          const { origin } = drag.current
+          const final = valueRef.current
+          drag.current = null
+          e.currentTarget.releasePointerCapture(e.pointerId)
+          if (origin !== final) {
+            onChange(origin) // roll back inside the pause, re-apply after —
+            useScene.temporal.getState().resume() // the drag lands as one undo step
+            onChange(final)
+          } else {
+            useScene.temporal.getState().resume()
+          }
+        }}
+      >
+        {/* Grip dots — 2×3 grid */}
+        <div className="grid grid-cols-2 gap-[2.5px] opacity-25 transition-opacity group-hover:opacity-50">
+          {GRIP_DOTS.map((k) => (
+            <div className="h-[2px] w-[2px] rounded-full bg-current" key={k} />
+          ))}
+        </div>
+        <span className="font-medium">{label}</span>
+      </div>
+      <div className="flex-1" />
+      <div className="flex items-center text-xs">
+        {editing ? (
+          <>
+            <input
+              autoFocus
+              className="w-14 bg-transparent p-0 text-right font-mono text-foreground outline-none selection:bg-primary/30"
+              onBlur={submit}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submit()
+                else if (e.key === 'Escape') setEditing(false)
+              }}
+              type="text"
+              value={text}
+            />
+            <span className="ml-[1px] text-muted-foreground">{unit}</span>
+          </>
+        ) : (
+          <button
+            className="flex cursor-text items-center text-foreground/60 transition-colors hover:text-foreground"
+            onClick={() => {
+              setText(value.toFixed(precision))
+              setEditing(true)
+            }}
+            type="button"
+          >
+            <span className="font-mono tabular-nums tracking-tight">
+              {value.toFixed(precision)}
+            </span>
+            <span className="ml-[1px] text-muted-foreground">{unit}</span>
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -114,6 +241,18 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
     )
   }
 
+  const writeOverride = (value: WallOverride) =>
+    useScene
+      .getState()
+      .updateNode(
+        framingNode.id as AnyNodeId,
+        wallOverridePatch(framingNode, info.wallId, value) as Partial<AnyNode> as never,
+      )
+  // CMU walls grow a height control: full height (100%) by default, drag
+  // down to block only the bottom courses (knee/stem wall) — framed above.
+  const cmuHeight =
+    info.construction === 'cmu' ? cmuHeightControl(info.wallHeightM, info.override) : null
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -125,14 +264,7 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
         </span>
       </div>
       <SegmentedControl
-        onChange={(v: WallConstruction) =>
-          useScene
-            .getState()
-            .updateNode(
-              framingNode.id as AnyNodeId,
-              wallOverridePatch(framingNode, info.wallId, v) as Partial<AnyNode> as never,
-            )
-        }
+        onChange={(v: WallConstruction) => writeOverride(v)}
         options={[
           { label: 'Framed', value: 'framed' },
           { label: 'CMU', value: 'cmu' },
@@ -140,6 +272,26 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
         ]}
         value={info.construction}
       />
+      {cmuHeight && (
+        <div className="flex flex-col gap-0.5">
+          <SliderControl
+            label="Block height"
+            max={cmuHeight.maxM}
+            min={cmuHeight.minM}
+            onChange={(v: number) => writeOverride(cmuHeightOverride(info.wallHeightM, v))}
+            precision={2}
+            step={cmuHeight.stepM}
+            unit="m"
+            value={cmuHeight.valueM}
+          />
+          <span className="px-2 text-[10px] text-muted-foreground tabular-nums">
+            {cmuHeight.readout}
+          </span>
+          {cmuHeight.partial && (
+            <span className="px-2 text-[10px] text-muted-foreground">{CMU_SEAM_NOTE}</span>
+          )}
+        </div>
+      )}
       <div className="text-[11px] text-muted-foreground leading-relaxed">
         <span className="block">{info.assembly}</span>
         {info.insulation && <span className="block">{info.insulation}</span>}

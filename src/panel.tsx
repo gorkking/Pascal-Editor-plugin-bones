@@ -6,8 +6,14 @@ import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
 import { computeLevel } from './framing/compute'
 import { extractLevels } from './core/wall-model'
-import { FramingNode, type WallConstruction } from './framing/schema'
-import { selectedWallInfo, wallOverridePatch } from './panel-selection'
+import { FramingNode, type WallConstruction, type WallOverride } from './framing/schema'
+import {
+  CMU_SEAM_NOTE,
+  cmuHeightControl,
+  cmuHeightOverride,
+  selectedWallInfo,
+  wallOverridePatch,
+} from './panel-selection'
 import { buildPlanSet, planSetHtml } from './plans/plan-set'
 import { characteristicsCsv, characteristicsRows } from './engines/characteristics'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
@@ -323,6 +329,16 @@ function SelectedWallCard({
   )
 
   if (!info) return null
+  const writeOverride = (value: WallOverride) =>
+    useScene
+      .getState()
+      .updateNode(
+        framingNode.id as AnyNodeId,
+        wallOverridePatch(framingNode, info.wallId, value) as Partial<AnyNode> as never,
+      )
+  // CMU walls grow a height control: full height (100%) by default, drag
+  // down to block only the bottom courses (knee/stem wall) — framed above.
+  const cmuHeight = info.construction === 'cmu' ? cmuHeightControl(info.wallHeightM, info.override) : null
   return (
     <div className="flex flex-col gap-2 rounded-md border border-sidebar-ring/60 bg-sidebar-accent/30 p-2.5">
       <div className="flex items-center justify-between gap-2">
@@ -334,14 +350,7 @@ function SelectedWallCard({
         </span>
       </div>
       <SegmentedControl
-        onChange={(v: WallConstruction) =>
-          useScene
-            .getState()
-            .updateNode(
-              framingNode.id as AnyNodeId,
-              wallOverridePatch(framingNode, info.wallId, v) as Partial<AnyNode> as never,
-            )
-        }
+        onChange={(v: WallConstruction) => writeOverride(v)}
         options={[
           { label: 'Framed', value: 'framed' },
           { label: 'CMU', value: 'cmu' },
@@ -349,6 +358,26 @@ function SelectedWallCard({
         ]}
         value={info.construction}
       />
+      {cmuHeight && (
+        <div className="flex flex-col gap-0.5">
+          <SliderControl
+            label="Block height"
+            max={cmuHeight.maxM}
+            min={cmuHeight.minM}
+            onChange={(v: number) => writeOverride(cmuHeightOverride(info.wallHeightM, v))}
+            precision={2}
+            step={cmuHeight.stepM}
+            unit="m"
+            value={cmuHeight.valueM}
+          />
+          <span className="px-2 text-[10px] text-sidebar-foreground/60 tabular-nums">
+            {cmuHeight.readout}
+          </span>
+          {cmuHeight.partial && (
+            <span className="px-2 text-[10px] text-sidebar-foreground/50">{CMU_SEAM_NOTE}</span>
+          )}
+        </div>
+      )}
       <div className="text-[11px] text-sidebar-foreground/60 leading-relaxed">
         <span className="block">{info.assembly}</span>
         {info.insulation && <span className="block">{info.insulation}</span>}
