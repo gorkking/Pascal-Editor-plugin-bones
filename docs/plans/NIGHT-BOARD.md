@@ -29,6 +29,18 @@
 6. HARD RULE: never mention PlanCrafters/Steven Tibbs anywhere public.
    Attribute inspiration to IRC/NEC building codes only.
 
+## Task #19 service nodes CORE — LANDED (2026-08-16)
+- bones:service kind (panel/water-heater/water-entry/sewer-exit/power-entry)
+  + renderer (equipment box + canvas sign plates, wallId+wallT+heightAff
+  lerp, position fallback) + 'Place service points' panel action
+  (idempotent, seeds at engine auto spots) + engine overrides (verbatim;
+  routing follows) — checklist row A4 + gates
+  (service-overrides.test.ts, place.test.ts, schema.test.ts). 533 tests.
+- NOT built (by design): drag interactions (host gizmo/inspector wallT
+  slider is the move path), movable outlets (separate task), street-point
+  unification (Q6 answer pending), power-entry routing (node places at the
+  panel wall weatherhead; no engine consumer yet).
+
 ## State right now (POST-SHIP, ~01:40)
 - PROD SHIPPED: plugin 9f5a43f via editor #660 + private-editor #355
   (main 3aac52d6). Plumbing loop CLOSED after 6 rounds / 14 defect classes

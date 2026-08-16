@@ -85,6 +85,23 @@ AND a gate — a checklist line without a test is a wish.
   starter house wore its roof at ground level).
   Gate: `src/framing/compute.multistorey.test.ts` (10 scenarios)
 
+- **A4 Service overrides are authoritative; routing follows.** A
+  `bones:service` node on the level IS the location of its system point
+  (panel / water heater / water entry / sewer exit): the engines consume it
+  VERBATIM — wallId+wallT+heightAff resolved by wall lerp, or a plain
+  position snapped to the nearest wall point — instead of auto-placing.
+  Moving the panel re-anchors every homerun (E2 continuity still holds);
+  moving the meter/WH re-routes supplies (still continuous, P5); moving the
+  sewer exit re-slopes the drains (still strictly monotonic downhill,
+  P3005.3). Auto-placement applies ONLY when no node exists; the panel's
+  "Place service points" action is idempotent per level and seeds the nodes
+  at the engines' current auto spots so creation alone never moves anything.
+  Origin: service-nodes plan 2026-08-16 ("drag the panel like a door — the
+  wires follow").
+  Gates: `src/engines/service-overrides.test.ts` (override → re-route,
+  continuity + downhill re-proofs) + `src/service/place.test.ts`
+  (idempotent placement at engine auto spots)
+
 ## Process
 
 - New invariant ⇒ new row + new gate in the same commit.
