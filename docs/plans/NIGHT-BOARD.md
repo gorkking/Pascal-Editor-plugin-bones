@@ -178,6 +178,7 @@ then implement. Loop after each; ship in 1-2 prod batches today.
 1. Implement in small green increments (bunx tsc --noEmit + bun test after
    each; commit + push per green stage; NEVER pipe test output through
    tail/grep in a && chain — it masks the exit code).
+   NEVER `git add -A` in the shared tree — stage explicit paths only.
 2. Every change goes through the ADVERSARIAL LOOP before prod:
    - code skeptic agent: tries to REFUTE with scratch bun tests (repo root,
      imports source, deletes after). FAIL = concrete failing scenario.
