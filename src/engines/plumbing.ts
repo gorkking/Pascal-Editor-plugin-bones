@@ -372,8 +372,11 @@ function pipeWallLeg(
   const clamp = (u: number) => Math.max(legLo, Math.min(legHi, u))
   let cursor = u0
   for (const s of crossed) {
-    const near = clamp(dir > 0 ? s.lo : s.hi)
-    const far = clamp(dir > 0 ? s.hi : s.lo)
+    // Risers stand 4.5cm past the RO edge — electrical's risers occupy the
+    // edge itself (re-verify: colinear pipe/wire verticals, 0.000 apart).
+    const EDGE_OFF = 0.045
+    const near = clamp(dir > 0 ? s.lo - EDGE_OFF : s.hi + EDGE_OFF)
+    const far = clamp(dir > 0 ? s.hi + EDGE_OFF : s.lo - EDGE_OFF)
     const blockedAt = (yy: number) =>
       openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
     let detourY: number | null = null
@@ -845,9 +848,16 @@ function placedPlumbing(
         pointInPolygon(facePoint(wall, 1, wall.length / 2), g.polygon) ||
         pointInPolygon(facePoint(wall, -1, wall.length / 2), g.polygon),
     )
-  const garageWall = straight
+  const garageCandidates = straight
     .filter((w) => boundsGarage(w) !== undefined)
-    .sort((p, q) => q.length - p.length)[0]
+    .sort((p, q) => q.length - p.length)
+  // Tank (0.6) + panel enclosure (0.4) + NEC 110.26 working space (0.76)
+  // need ~1.0m of separation; a short garage wall can't host both trades
+  // (re-verify: the 1.2m offset clamped back onto the panel below 3.2m).
+  const garageWall = garageCandidates.find(
+    (w) => Math.abs(panelMountU(w) - Math.max(0.4, panelMountU(w) - 1.2)) >= 1.0 ||
+           panelMountU(w) + 1.2 <= w.length - 0.4,
+  )
   const tank = garageWall !== undefined
   const whWall = garageWall ?? meterWall
   const whURaw = (() => {

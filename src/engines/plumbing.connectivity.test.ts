@@ -633,3 +633,54 @@ describe('P5 gate — DFU main sizing + RO riser + through-wall clearance (verif
     expect(clearanceFlags).toEqual([])
   })
 })
+
+describe('P5 gate — re-verify round 2 (riser colinearity, short garage wall)', () => {
+  test('D2b: pipe and wire detour RISERS never share a plan point at a door', () => {
+    const { walls, rooms } = housePlan()
+    const placed = [pf('wc', 'toilet', [6.5, 0.6]), pf('ks', 'kitchen-sink', [1.5, 7.6])]
+    const { members } = layoutPlumbing(walls, rooms, undefined, placed)
+    const { layoutElectrical, routeWiring } = require('./electrical') as typeof import('./electrical')
+    const wires = routeWiring(layoutElectrical(walls, rooms), walls)
+    const vertical = (m: Member) => m.dims[1] > m.dims[0]
+    const pipeRisers = members.filter((m) => m.role === 'pipe-run' && vertical(m) && (m.sourceId.startsWith('cold-') || m.sourceId.startsWith('hot-')))
+    const wireRisers = wires.filter((m) => m.role === 'wire-run' && vertical(m))
+    for (const p of pipeRisers) {
+      for (const w of wireRisers) {
+        const planDist = Math.hypot(p.position[0] - w.position[0], p.position[2] - w.position[2])
+        const yOverlap =
+          Math.min(p.position[1] + p.dims[1] / 2, w.position[1] + w.dims[1] / 2) -
+          Math.max(p.position[1] - p.dims[1] / 2, w.position[1] - w.dims[1] / 2)
+        if (yOverlap > 0.1) expect(planDist).toBeGreaterThan(0.02)
+      }
+    }
+  })
+
+  test('D1b: a 1.5m garage wall falls back to tankless — never a tank on the panel', () => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [10, 0] }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+      makeWall({ id: 'w_g', start: [0, 5], end: [1.5, 5], exterior: false }),
+    ]
+    const rooms = [
+      room('r_garage', 'garage', [[0, 5], [1.5, 5], [1.5, 8], [0, 8]], ['w_g']),
+      room('r_bath', 'bathroom', [[5, 0], [10, 0], [10, 4], [5, 4]]),
+    ]
+    const placed = [pf('wc', 'toilet', [6.5, 0.6])]
+    const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed)
+    const wh = members.find((m) => m.role === 'water-heater')
+    const whFix = fixtures.find((f) => f.kind === 'water-heater')
+    expect(whFix?.label ?? '').toContain('Tankless')
+    // and never overlapping the panel enclosure box
+    const { layoutElectrical } = require('./electrical') as typeof import('./electrical')
+    const panel = layoutElectrical(walls, rooms).find((f) => f.kind === 'panel')
+    if (wh && panel) {
+      const overlap =
+        Math.abs(panel.position[0] - wh.position[0]) < wh.dims[0] / 2 + 0.2 &&
+        Math.abs(panel.position[2] - wh.position[2]) < wh.dims[2] / 2 + 0.2 &&
+        Math.abs(panel.position[1] - wh.position[1]) < wh.dims[1] / 2 + 0.38
+      expect(overlap).toBe(false)
+    }
+  })
+})
