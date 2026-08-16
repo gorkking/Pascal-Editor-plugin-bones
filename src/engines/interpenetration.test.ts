@@ -565,4 +565,22 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations([...tee.members, ...cmuWalls([through], spec400)])).toEqual([])
     expect(tee.warnings).toContain(`${MIXED_CORNER_FLAG} (wall wall_stem, start)`)
   })
+
+  test('mixed wall corners: acute 45° against thin framed neighbors (skeptic 2026-08-16)', () => {
+    // The k·neighborThickness/2 retreat is exact only when the retreating
+    // member is no wider than the neighbor's thickness. CMU blocks are
+    // 7-5/8" (0.19368 m) deep — wider than a 2x4/2x6 framed neighbor — so
+    // an acute 45° corner undershot ~4–6 cm and the block noses clipped the
+    // neighbor's studs (1 violation vs 0.114, 3 vs 0.0889).
+    for (const t of [0.114, 0.0889]) {
+      const mixed = wall({ id: 'wall_mx', start: [0, 0], end: [6, 0], thickness: 0.2032 })
+      const framed = wall({ id: 'wall_fr', start: [6, 0], end: [6 - 2.828, 2.828], thickness: t })
+      const mx = mixedCmuWall(mixed, spec400, 1.22, [framed])
+      expect({ t, v: violations([...mx.members, ...frameWalls([framed], spec400)]) }).toEqual({
+        t,
+        v: [],
+      })
+      expect(mx.warnings).toContain(`${MIXED_CORNER_FLAG} (wall wall_mx, end)`)
+    }
+  })
 })
