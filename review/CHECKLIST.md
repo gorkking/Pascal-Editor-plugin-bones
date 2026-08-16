@@ -73,6 +73,32 @@ AND a gate — a checklist line without a test is a wish.
   Gates: `src/engines/mixed-wall.test.ts` + mixed scenarios in
   `interpenetration.test.ts` + slider write shape / snap round-trip /
   resolver read-back in `src/panel-selection.test.ts`
+- **S6 Per-wall engineering overrides plumb through EVERY consumer; defaults
+  stay byte-equal.** The WallOverride object's engineering fields change the
+  derived members end-to-end — `studSize` re-sizes that wall's framing dims,
+  `spacingIn` its stud count, `insulation` ≠ 'none' emits pink batt members
+  in the stud bays (labeled 'batt R-13 (zone 2A)' style: type + override R
+  or the climate zone's code minimum) that lay out against the framing's
+  OWN frameHints (trimmed runs, corner backing, opening keep-outs,
+  backing-ladder bays, LOD-400 fire-row splits — SAT-clean with NO
+  insulation allow-list pair), `cladding` swaps that wall's finish family
+  (stucco doubles the WRB per R703.7.3); the takeoff books batts by
+  area per type+R and claddings per family. A config with no overrides, an
+  empty map, or an object carrying only its construction (or explicit
+  insulation 'none') computes members BYTE-EQUAL to today's. The write side
+  stores the MINIMAL form: field writes merge into the object
+  (engineeringOverride), construction flips preserve engineering fields and
+  drop cmuHeightM off-CMU (constructionOverride), the CMU height slider
+  keeps sibling fields (cmuHeightWrite), and a fields-less object collapses
+  to the plain legacy string. Both Engineering surfaces resolve through ONE
+  `selectedWallInfo` (per-wall recipe + 'per state code' defaults flags +
+  code-min hint + dimensions readout + R302.6 garage-separation note).
+  Gates: `src/framing/compute.test.ts` (plumb-through + byte-equal
+  regression) + `src/engines/wall-framing.test.ts` (per-wall spec) +
+  `src/engines/wall-layers.test.ts` (cladding/batt members) +
+  `src/engines/interpenetration.test.ts` (batt SAT scenarios) +
+  `src/engines/takeoff.test.ts` (batt/cladding rows) +
+  `src/panel-selection.test.ts` (resolver + write helpers)
 
 ## M — Mechanical (HVAC)
 

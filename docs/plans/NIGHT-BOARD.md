@@ -81,6 +81,11 @@ fiber-cement/wood...) }.
   runs to the centerline through the through wall's plates/backing at tees
   (exposed by the batt SAT composition, 2026-08-16 engineering-panel work;
   gate scoped to batts meanwhile — interpenetration.test.ts tee scenario).
+- Brick veneer renders NO cladding member — pre-existing: brickVeneer's
+  layers carry roles airGap/veneer which ROLE_OF (wall-layers) skips, so
+  brick-default states (TX/AL/…) and the new per-wall 'Brick veneer' select
+  emit sheathing+WRB only. Mapping veneer→cladding would change those
+  states' default output (byte-equal), so it needs its own round.
 
 # Bones day board — 2026-08-16 (morning directives; night board below)
 

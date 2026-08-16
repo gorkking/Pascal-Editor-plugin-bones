@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { WallSlice } from '../core/types'
 import { extractServiceOverrides } from '../core/wall-model'
+import { computeTakeoff } from '../engines/takeoff'
 import { FramingNode } from './schema'
 import { computeLevel, resolveWallConstruction, wallConstruction } from './compute'
 
@@ -611,5 +612,105 @@ describe('computeLevel — thermostat / heat-pump / electric-meter nodes', () =>
     expect(result.warnings).toContain('duplicate service point (thermostat) — extra node ignored')
     const tstat = result.fixtures.find((f) => f.kind === 'thermostat')
     expect(tstat?.position[2]).toBeCloseTo(0.9 * 6, 6) // svc_a's wallT on the 6 m wall
+  })
+})
+
+/**
+ * GATES (full wall engineering panel — computeLevel plumb-through + the
+ * defaults byte-equal regression): every override field changes the DERIVED
+ * members end-to-end (stud dims, stud count, batt presence + R label,
+ * cladding material), the takeoff sees the deltas, and an override-less
+ * config — or an object carrying only its construction — computes members
+ * byte-equal to today's.
+ */
+describe('computeLevel — per-wall engineering plumb-through', () => {
+  const engConfig = (fields: Record<string, unknown>) =>
+    makeConfig({ wallOverrides: { wall_ext: { construction: 'framed', ...fields } } })
+  const wallMembers = (config: ReturnType<typeof makeConfig>) =>
+    computeLevel(makeScene(), config).members.filter((m) => m.sourceId === 'wall_ext')
+
+  test('studSize: dims + takeoff size rows change', () => {
+    const base = wallMembers(makeConfig())
+    const thin = wallMembers(engConfig({ studSize: '2x4' }))
+    const stud = (ms: typeof base) => ms.find((m) => m.role === 'stud')
+    expect(stud(base)?.size).toBe('2x6') // 0.15m ≥ threshold default
+    expect(stud(thin)?.size).toBe('2x4')
+    expect(stud(thin)?.dims[2]).toBeCloseTo(3.5 * 0.0254, 6)
+  })
+
+  test('spacingIn: stud count drops at 24" o.c. on that wall only', () => {
+    const studs = (config: ReturnType<typeof makeConfig>, id: string) =>
+      computeLevel(makeScene(), config).members.filter(
+        (m) => m.role === 'stud' && m.sourceId === id,
+      ).length
+    const base = makeConfig()
+    const wide = engConfig({ spacingIn: 24 })
+    expect(studs(wide, 'wall_ext')).toBeLessThan(studs(base, 'wall_ext'))
+    expect(studs(wide, 'wall_int')).toBe(studs(base, 'wall_int'))
+  })
+
+  test('insulation: batts appear with the R label; takeoff books them', () => {
+    expect(wallMembers(makeConfig()).some((m) => m.role === 'insulation')).toBe(false)
+    const config = engConfig({ insulation: 'batt', insulationR: 15 })
+    const result = computeLevel(makeScene(), config)
+    const batts = result.members.filter((m) => m.role === 'insulation')
+    expect(batts.length).toBeGreaterThan(0)
+    for (const b of batts) {
+      expect(b.sourceId).toBe('wall_ext')
+      expect(b.label).toContain('batt R-15')
+    }
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(rows.some((r) => r.item === 'Insulation — batt R-15')).toBe(true)
+  })
+
+  test('cladding: the exterior finish member changes family (and only there)', () => {
+    // exteriorSide needs an inside signal — floor the scene so the exterior
+    // stack (sheathing/WRB/cladding) actually emits.
+    const flooredScene = () => ({
+      ...makeScene(),
+      slab_1: {
+        id: 'slab_1',
+        type: 'slab',
+        parentId: 'level_1',
+        polygon: [
+          [0, 0],
+          [6, 0],
+          [6, 4],
+          [0, 4],
+        ],
+        holes: [],
+      },
+    })
+    const cladLabels = (config: ReturnType<typeof makeConfig>) =>
+      computeLevel(flooredScene(), config)
+        .members.filter((m) => m.role === 'cladding' && m.sourceId === 'wall_ext')
+        .map((m) => m.label?.toLowerCase() ?? '')
+    const base = cladLabels(makeConfig()) // INTL → vinyl fallback
+    expect(base.length).toBeGreaterThan(0)
+    for (const label of base) expect(label).toContain('vinyl')
+    const stucco = cladLabels(engConfig({ cladding: 'stucco' }))
+    expect(stucco.length).toBeGreaterThan(0)
+    for (const label of stucco) expect(label).toContain('cement plaster')
+  })
+
+  test('DEFAULTS BYTE-EQUAL: no override ≡ empty overrides ≡ construction-only object', () => {
+    const scene = makeScene()
+    const base = computeLevel(scene, makeConfig())
+    const viaEmpty = computeLevel(scene, makeConfig({ wallOverrides: {} }))
+    const viaString = computeLevel(scene, makeConfig({ wallOverrides: { wall_ext: 'framed' } }))
+    const viaObject = computeLevel(
+      scene,
+      makeConfig({ wallOverrides: { wall_ext: { construction: 'framed' } } }),
+    )
+    expect(viaEmpty.members).toEqual(base.members)
+    expect(viaString.members).toEqual(base.members)
+    expect(viaObject.members).toEqual(base.members)
+    expect(viaObject.warnings).toEqual(base.warnings)
+    // and explicit 'none' insulation stays byte-equal too (no batt geometry)
+    const viaNone = computeLevel(
+      scene,
+      makeConfig({ wallOverrides: { wall_ext: { construction: 'framed', insulation: 'none' } } }),
+    )
+    expect(viaNone.members).toEqual(base.members)
   })
 })
