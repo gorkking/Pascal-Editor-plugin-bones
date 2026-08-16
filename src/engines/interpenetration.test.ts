@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Euler, Matrix4, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
-import { COURSE_HEIGHT, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
+import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
@@ -529,5 +529,40 @@ describe('interpenetration gate — structural members never share volume', () =
           .members,
       ),
     ).toEqual([])
+  })
+
+  test('mixed wall corners: butt joints against every neighbor kind (S1 fix, board 2026-08-16)', () => {
+    // The S1 defect: a mixed wall joined NEITHER corner-fabrication group,
+    // so its courses/bond beam/PT sill/plates ran to the centerline at a
+    // shared corner (16 violations vs a full-CMU neighbor, 23 vs framed).
+    // Both zones now BUTT at the neighbor's near face, with the per-corner
+    // MIXED_CORNER_FLAG advisory.
+    const mixedA = wall({ id: 'wall_a', start: [0, 0], end: [6, 0], thickness: 0.2032 })
+
+    // mixed + full-CMU corner (FL default neighbor)
+    const fullCmu = wall({ id: 'wall_b', start: [6, 0], end: [6, 4], thickness: 0.2032 })
+    const vsCmu = mixedCmuWall(mixedA, spec400, 1.22, [fullCmu])
+    expect(violations([...vsCmu.members, ...cmuWalls([fullCmu], spec400)])).toEqual([])
+    expect(vsCmu.warnings).toContain(`${MIXED_CORNER_FLAG} (wall wall_a, end)`)
+
+    // mixed + framed corner
+    const framed = wall({ id: 'wall_f', start: [6, 0], end: [6, 4] })
+    const vsFramed = mixedCmuWall(mixedA, spec400, 1.22, [framed])
+    expect(violations([...vsFramed.members, ...frameWalls([framed], spec400)])).toEqual([])
+    expect(vsFramed.warnings).toContain(`${MIXED_CORNER_FLAG} (wall wall_a, end)`)
+
+    // mixed + mixed corner: both butt — a verifiable joint, never shared volume
+    const mixedB = wall({ id: 'wall_c', start: [6, 0], end: [6, 4], thickness: 0.2032 })
+    const sideA = mixedCmuWall(mixedA, spec400, 1.22, [mixedB])
+    const sideB = mixedCmuWall(mixedB, spec400, 1.22, [mixedA])
+    expect(violations([...sideA.members, ...sideB.members])).toEqual([])
+    expect(sideB.warnings).toContain(`${MIXED_CORNER_FLAG} (wall wall_c, start)`)
+
+    // T junction: mixed stem lands mid-run on a full-CMU through wall
+    const through = wall({ id: 'wall_t', start: [0, 0], end: [8, 0], thickness: 0.2032 })
+    const stem = wall({ id: 'wall_stem', start: [4, 0], end: [4, 3], thickness: 0.2032 })
+    const tee = mixedCmuWall(stem, spec400, 1.22, [through])
+    expect(violations([...tee.members, ...cmuWalls([through], spec400)])).toEqual([])
+    expect(tee.warnings).toContain(`${MIXED_CORNER_FLAG} (wall wall_stem, start)`)
   })
 })

@@ -54,10 +54,14 @@ AND a gate — a checklist line without a test is a wish.
   7" embed), shortened framed zone with its own bottom/top plates above —
   zones never share volume (S1 matrix covers the seam), openings zone per
   the seam, a CROSSING opening always flags ('opening crosses the CMU/framing
-  seam — verify detail') and frames as if fully in the taller zone. A height
-  absent or at/above every fitting course = byte-equal to today's full-height
-  CMU. Takeoff: blocks for the zone only, PT booked on its own `<size> PT`
-  row, seam bolts under Wall framing. The WRITE side holds the same line:
+  seam — verify detail') and frames as if fully in the taller zone. At a
+  shared corner or tee the mixed wall BUTTS, never through-runs: both zones
+  inset to the neighbor's near face (butt joints at corners, advisory
+  emitted — 'mixed wall butts at corners — verify tie detail' per junction),
+  so it never shares volume with a framed, full-CMU or mixed neighbor.
+  A height absent or at/above every fitting course = byte-equal to today's
+  full-height CMU. Takeoff: blocks for the zone only, PT booked on its own
+  `<size> PT` row, seam bolts under Wall framing. The WRITE side holds the same line:
   the height slider on both Engineering surfaces (`cmuHeightOverride`)
   stores the plain legacy 'cmu' string at full height and the object form
   with a course-snapped height otherwise — never an unsnapped number.
