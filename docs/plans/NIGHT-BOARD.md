@@ -35,6 +35,11 @@ CMU/framed walls (corner chain closed through width-aware acute retreats).
 engineering panel (pilot running — studs/insulation/cladding per wall).
 
 ## ACTIVE: full wall engineering panel (user ask, evening 2)
+IMPLEMENTATION LANDED (2b83713→7ea771b, 721→760 tests green, all six
+stages committed+pushed per board rules; checklist row S6 added). NOT
+yet through the adversarial loop / visual round / prod chain. Queued
+findings: tee-stem face layers + brickVeneer no-cladding-member rows in
+the next-session queue below. Spec (as built):
 The Engineering section shows the wall's complete engineering identity,
 editable per wall. Extend WallOverride object (schema union already
 supports objects): { construction, cmuHeightM?, studSize? ('2x4'|'2x6'),
