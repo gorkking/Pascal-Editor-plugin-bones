@@ -566,3 +566,35 @@ describe('multi-storey — mixed roof levels (re-verify regression)', () => {
     expect(roof.filter((m) => m.position[0] <= 40).length).toBeGreaterThan(0)
   })
 })
+
+describe('hvac attic detection — gable-walled roof level (re-verify round)', () => {
+  test('a roof level carrying only gable walls keeps ATTIC routing, warning-free', () => {
+    const nodes = twoStoreyScene()
+    // strip floor one so lvl0 is the top lived storey; roof level gets gables
+    delete nodes.w1a
+    delete nodes.w1b
+    delete nodes.w1c
+    delete nodes.w1d
+    delete nodes.lvl1
+    ;(nodes.bldg as Record<string, unknown>).children = ['lvl0', 'lvlroof']
+    nodes.slab0 = {
+      id: 'slab0', type: 'slab', parentId: 'lvl0',
+      polygon: [[0, 0], [8, 0], [8, 5], [0, 5]], holes: [], elevation: 0.05, thickness: 0.1,
+    }
+    nodes.zone0 = { id: 'zone0', type: 'zone', parentId: 'lvl0', name: 'Living', polygon: [[0, 0], [8, 0], [8, 5], [0, 5]] }
+    ;(nodes.lvl0 as Record<string, unknown>).children = ['w0a', 'w0b', 'w0c', 'w0d', 'slab0', 'zone0']
+    nodes.gableA = wall('gableA', 'lvlroof', [0, 2.5], [1.5, 2.5])
+    nodes.gableB = wall('gableB', 'lvlroof', [6.5, 2.5], [8, 2.5])
+    const node = bones('bonesframing_hvac', 'lvl0')
+    ;(node as unknown as Record<string, unknown>).showHvac = true
+    nodes.bonesframing_hvac = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    expect(result.warnings.some((w) => w.includes('soffit'))).toBe(false)
+    const ducts = result.members.filter((m) => m.role === 'duct-run')
+    if (ducts.length > 0) {
+      // attic routing: trunk above the wall tops, not capped at ceiling−0.35
+      const maxTop = Math.max(...ducts.map((m) => m.position[1] + m.dims[1] / 2))
+      expect(maxTop).toBeGreaterThan(2.5)
+    }
+  })
+})

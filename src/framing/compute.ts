@@ -550,18 +550,22 @@ function computeLevelUncached(
   if (config.showHvac) {
     // Thermostat / heat-pump service nodes are authoritative here too —
     // the tstat re-mounts and the outdoor unit + lineset re-anchor.
-    // A WALLED level above means this is an interior storey: no attic —
+    // A LIVED-IN level above means this is an interior storey: no attic —
     // layoutHvac caps the trunk as a dropped-soffit run and warns
-    // (checklist M1; a bare roof level above still counts as attic space).
+    // (checklist M1). A roof/attic level above — even one carrying GABLE
+    // walls — IS the attic (re-verify round: gable end walls flipped the
+    // gabled starter house to soffit routing with a spurious warning), so
+    // only levels with rooms or slabs count as storeys.
     const hasLevelAbove =
       levelIndex >= 0 &&
-      levels
-        .slice(levelIndex + 1)
-        .some((l) =>
-          Object.values(nodes).some(
-            (n) => n.type === 'wall' && n.parentId === l.id && n.visible !== false,
-          ),
+      levels.slice(levelIndex + 1).some((l) => {
+        const lived =
+          extractSlabs(nodes, l.id).length > 0 || extractRooms(nodes, l.id).length > 0
+        if (!lived) return false
+        return Object.values(nodes).some(
+          (n) => n.type === 'wall' && n.parentId === l.id && n.visible !== false,
         )
+      })
     const hvac = layoutHvac(activeWalls, activeRooms, spec, services, { hasLevelAbove })
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
