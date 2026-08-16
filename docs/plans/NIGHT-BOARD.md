@@ -14,6 +14,16 @@ B. GABLE EXTERIOR (prod bug): roof-level gable walls frame as INTERIOR —
    still nothing, walls on a level with zero rooms+slabs = exterior. Gates:
    gable wall on slab-less level above a slabbed level → exterior true →
    layers emitted; interior partition below stays interior.
+C-USER REPORT (prod, 2026-08-16): hovering a window outlines it; hovering
+   the electric/water boxes does NOTHING. Selection works (QA verified),
+   hover outline does not. Scout said 'should already work' — it does not
+   in reality. Suspect: selection-manager builds its hover subscription
+   list from getSelectableKinds() at MOUNT, before async plugin kinds
+   register (built-ins hardcoded → windows outline). C implementation MUST
+   (1) verify the subscription timing hypothesis in the running editor,
+   (2) fix — likely a small HOST PR (re-subscribe on registry change or
+   lazy kind lookup at event time), (3) visual gate: hover over panel/WH
+   → cyan outline appears, same as a window.
 C-SCOUT DIGEST (implementation map, full detail in session transcript):
    - Hover/select/outline: ALREADY WORKING for bones:service (selectable
      capability + useNodeEvents spread + useRegistry — host outline pass
