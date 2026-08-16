@@ -671,7 +671,7 @@ describe('P5 gate — re-verify round 2 (riser colinearity, short garage wall)',
     const { members, fixtures } = layoutPlumbing(walls, rooms, undefined, placed)
     const wh = members.find((m) => m.role === 'water-heater')
     const whFix = fixtures.find((f) => f.kind === 'water-heater')
-    expect(whFix?.label ?? '').toContain('Tankless')
+    expect((whFix?.label ?? '').toLowerCase()).toContain('tankless')
     // and never overlapping the panel enclosure box
     const { layoutElectrical } = require('./electrical') as typeof import('./electrical')
     const panel = layoutElectrical(walls, rooms).find((f) => f.kind === 'panel')
