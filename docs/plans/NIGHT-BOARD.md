@@ -81,6 +81,29 @@ then implement. Loop after each; ship in 1-2 prod batches today.
 
 # Bones night board — 2026-08-16 (living file: update on every land/verdict)
 
+## Consolidated 8-defect fix batch — LANDED (2026-08-16, af6df36→0d4a51c)
+- All 8 skeptic/visual-confirmed defects fixed + gated, 666 tests:
+  (1) E1 service cable — meter→panel feed rides the WALL GRAPH at a service
+  plane (shared emitWallLegWith/emitWallPathWith detours); laterals/riser/
+  bridges RO-sampled + ⚠-flagged; (2) bath exhaust y keys off the LOWEST
+  wall along the path (exit wall's own plate band); (3) registers at the
+  shoelace AREA centroid nudged inside the room + off wall bands (L-room);
+  (4) interior storeys (walled level above) cap the trunk at ceiling−0.35
+  as a soffit run + warning, top storeys keep attic; (5) register grille at
+  ceiling−0.04 / boot to −0.05 (visible from inside); (6) RO-warning parity
+  for thermostat + electric-meter overrides; (7) selectedWallInfo runs
+  compute's dedupe (exported dedupeColinearWalls) — duplicates resolve to
+  the KEPT twin, overrides target its id, card prints a duplicateNote;
+  (8) checklist row M1 + A4 refreshed to 8 service types; plan-set EM tag +
+  legend, SE-cable legend row, characteristics notes WRAP (fixCheck2 items
+  1-3 folded in).
+- fixCheck2 leftovers QUEUED (not mechanical): slab-less gabled advisories
+  (WH auto-spot 0.6m outside the south wall, no water-meter fixture, MEP
+  legend merges coincident supply/DWV rows); carried minors: plan-sheet
+  upper-right bias, elevation depth cue, per-opening header tags.
+- NOT prod-shipped (per brief: no prod pins, no editor) — adversarial loop
+  before any pin bump.
+
 ## Item C LANDED (2026-08-16 ~09:55) — hover fix (host PR) + door-style drag
 - PART 1 (hover bug): hypothesis CONFIRMED by source read — prod
   (apps/community) discovers plugins via DYNAMIC imports, so kinds register
