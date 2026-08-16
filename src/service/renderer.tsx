@@ -2,7 +2,7 @@
 
 import { useLiveNodeOverrides, useLiveTransforms, useRegistry, useScene } from '@pascal-app/core'
 import { useNodeEvents } from '@pascal-app/viewer'
-import { useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { CanvasTexture, DoubleSide, type Group } from 'three'
 import { resolveServicePlacement, SERVICE_BODY } from './placement'
 import type { ServiceNode } from './schema'
@@ -82,10 +82,15 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
     () => makeSignTexture(body.sign, node.serviceType === 'panel'),
     [body.sign, node.serviceType],
   )
-  // Dispose the previous texture when the sign changes / node unmounts.
-  const lastTexture = useRef<CanvasTexture | null>(null)
-  if (lastTexture.current && lastTexture.current !== texture) lastTexture.current.dispose()
-  lastTexture.current = texture
+  // Dispose the texture when the sign changes AND on unmount — as an effect
+  // cleanup, never in the render body (React may re-render without
+  // committing, and a render-body dispose leaks the final texture on
+  // unmount).
+  useEffect(() => {
+    return () => {
+      texture?.dispose()
+    }
+  }, [texture])
 
   if (node.visible === false) return null
 
@@ -112,14 +117,18 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
       : placement.position
 
   // Sign plates sit proud of both wall faces (interior side unknown here);
-  // floor types wear one flag above the body.
+  // floor types wear one flag above the body. The exterior-facing plate
+  // (-Z) turns 180° around Y so its text reads correctly — a DoubleSide
+  // back face renders MIRRORED.
   const signZ = placement.wallThickness / 2 + body.dims[2] / 2 + SIGN_GAP
-  const signOffsets: [number, number, number][] = placement.wallMounted
-    ? [
-        [0, body.dims[1] / 2 + SIGN_H / 2 + 0.02, signZ],
-        [0, body.dims[1] / 2 + SIGN_H / 2 + 0.02, -signZ],
-      ]
-    : [[0, body.dims[1] / 2 + SIGN_H / 2 + 0.06, 0]]
+  const signY = body.dims[1] / 2 + SIGN_H / 2
+  const signPlates: { offset: [number, number, number]; rotY: number }[] =
+    placement.wallMounted
+      ? [
+          { offset: [0, signY + 0.02, signZ], rotY: 0 },
+          { offset: [0, signY + 0.02, -signZ], rotY: Math.PI },
+        ]
+      : [{ offset: [0, signY + 0.06, 0], rotY: 0 }]
   return (
     <group
       position={[position[0], 0, position[2]]}
@@ -132,8 +141,8 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
         <meshStandardMaterial color={body.color} roughness={0.7} />
       </mesh>
       {texture &&
-        signOffsets.map(([sx, sy, sz], i) => (
-          <mesh key={String(i)} position={[sx, position[1] + sy, sz]}>
+        signPlates.map(({ offset: [sx, sy, sz], rotY }, i) => (
+          <mesh key={String(i)} position={[sx, position[1] + sy, sz]} rotation={[0, rotY, 0]}>
             <planeGeometry args={[SIGN_W, SIGN_H]} />
             <meshBasicMaterial map={texture} side={DoubleSide} toneMapped={false} />
           </mesh>
