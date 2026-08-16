@@ -48,6 +48,19 @@ AND a gate — a checklist line without a test is a wish.
 - **P4 Engine warnings print verbatim in the schedules flag block** — a
   silent drop of a warning is a lie on paper.
 
+## P — Plumbing
+
+- **P5 Supply + DWV reach every placed fixture; drains only fall.** Every
+  stub-out is cold-reachable from the service meter and hot fixtures
+  hot-reachable from the water heater as continuous pipe (union-find over
+  endpoints); every trap drains to the sewer exit along a strictly
+  monotonic downhill path (P3005.3); no pipe crosses a rough opening
+  (supply/vents detour like cable — E1 applied to plumbing); trap arms
+  past Table P3105.1 and island fixtures carry flags, never silent runs.
+  Origin: plumbing rebuild 2026-08-16 (placed fixtures showed almost no
+  plumbing).
+  Gate: `src/engines/plumbing.connectivity.test.ts`
+
 ## App
 
 - **A1 X-ray off = the editor's own look.** No plugin layers rendered solid
