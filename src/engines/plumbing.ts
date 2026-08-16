@@ -37,7 +37,13 @@
 
 import mepRules from '../../data/mep-rules.json'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
-import type { Fixture, Member, RoomSlice, WallSlice } from '../core/types'
+import type {
+  Fixture,
+  Member,
+  RoomSlice,
+  ServiceOverrides,
+  WallSlice,
+} from '../core/types'
 import { feet, inches, toFeet } from '../core/units'
 import type { PlacedFixtureSlice } from '../core/wall-model'
 import {
@@ -45,6 +51,8 @@ import {
   clearOfOpenings,
   nearestWallPoint,
   openingSpans,
+  overridePlanPoint,
+  overrideWallPoint,
   panelMountU,
   pointInPolygon,
   wallPath,
@@ -144,6 +152,130 @@ function nearestExteriorPoint(walls: WallSlice[], p: Pt): Pt | null {
     }
   }
   return best
+}
+
+/** Face point offset off a wall — room containment probes (WH side pick). */
+function facePoint(wall: WallSlice, side: 1 | -1, u: number): Pt {
+  return [
+    wall.start[0] + wall.dir[0] * u + -wall.dir[1] * side * (wall.thickness / 2 + 0.08),
+    wall.start[1] + wall.dir[1] * u + wall.dir[0] * side * (wall.thickness / 2 + 0.08),
+  ]
+}
+
+/** The garage bounding a wall — boundary list or face-midpoint containment. */
+function garageBoundingWall(wall: WallSlice, rooms: RoomSlice[]): RoomSlice | undefined {
+  const garages = rooms.filter((r) => r.category === 'garage')
+  return garages.find(
+    (g) =>
+      g.boundaryWallIds.includes(wall.id) ||
+      pointInPolygon(facePoint(wall, 1, wall.length / 2), g.polygon) ||
+      pointInPolygon(facePoint(wall, -1, wall.length / 2), g.polygon),
+  )
+}
+
+/**
+ * AUTO spot for the water-service meter: the longest exterior wall (else the
+ * longest wall), clear of ROs. Exported so the Bones panel action can seed a
+ * `bones:service` water-entry node exactly where the engine auto-places.
+ */
+export function placeMeterSpot(
+  walls: WallSlice[],
+): { wall: WallSlice; u: number; heightAff: number } | null {
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  if (straight.length === 0) return null
+  const exterior = straight.filter((w) => w.exterior)
+  const meterWall = [...(exterior.length > 0 ? exterior : straight)].sort(
+    (p, q) => q.length - p.length,
+  )[0] as WallSlice
+  const meterU = clearOfOpenings(meterWall, panelMountU(meterWall), 0, ANCHOR_CLEAR_TOP)
+  return { wall: meterWall, u: meterU, heightAff: 0.3 }
+}
+
+/**
+ * AUTO spot for the water heater: a garage wall with room beside the panel
+ * (tank, M1307.3) — else tankless on the meter wall. `heightAff` is the
+ * equipment CENTER height. Exported for the Bones panel action.
+ */
+export function placeWhSpot(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+): { wall: WallSlice; u: number; tank: boolean; heightAff: number } | null {
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  const meter = placeMeterSpot(walls)
+  if (!meter) return null
+  const garageCandidates = straight
+    .filter((w) => garageBoundingWall(w, rooms) !== undefined)
+    .sort((p, q) => q.length - p.length)
+  // Tank (0.6) + panel enclosure (0.4) + NEC 110.26 working space (0.76)
+  // need ~1.0m of separation; a short garage wall can't host both trades
+  // (re-verify: the 1.2m offset clamped back onto the panel below 3.2m).
+  const garageWall = garageCandidates.find(
+    (w) => Math.abs(panelMountU(w) - Math.max(0.4, panelMountU(w) - 1.2)) >= 0.999 ||
+           panelMountU(w) + 1.2 <= w.length - 0.4,
+  )
+  const tank = garageWall !== undefined
+  const whWall = garageWall ?? meter.wall
+  const whURaw = (() => {
+    if (whWall === meter.wall) return Math.min(whWall.length - 0.4, meter.u + 1.2)
+    // The electrical panel claims panelMountU on this SAME wall (both
+    // trades elect the longest garage wall) — keep the tank a panel-width
+    // + NEC 110.26 working space away (verify round D1: the 50-gal tank
+    // ENGULFED the panel).
+    const panelU = panelMountU(whWall)
+    const off = 1.2
+    return panelU + off <= whWall.length - 0.4 ? panelU + off : Math.max(0.4, panelU - off)
+  })()
+  const whU = clearOfOpenings(whWall, whURaw, 0, 2.1)
+  const height = tank ? 1.5 : 0.6
+  const bottom = tank ? inches(18) : 1.2 // M1307.3 garage ignition height
+  return { wall: whWall, u: whU, tank, heightAff: bottom + height / 2 }
+}
+
+/**
+ * Sewer exit from a stack position: nearest exterior point, carried 0.6m
+ * past the wall (away from the wet core) when the stack already sits on it.
+ * Shared by the placed-fixture and room-fallback paths (identical code).
+ */
+function sewerExitFrom(walls: WallSlice[], stackAt: Pt, core: Pt): Pt {
+  let exit: Pt = nearestExteriorPoint(walls, stackAt) ?? [stackAt[0] + 1, stackAt[1]]
+  if (manhattanDist(stackAt, exit) < 0.3) {
+    const ox = exit[0] - core[0]
+    const oz = exit[1] - core[1]
+    const n = Math.max(1e-6, Math.hypot(ox, oz))
+    exit = [exit[0] + (ox / n) * 0.6, exit[1] + (oz / n) * 0.6]
+  }
+  return exit
+}
+
+/**
+ * AUTO plan point of the sewer exit — mirrors the engine's stack choice
+ * (DFU-weighted centroid of placed fixtures when present, else the wet-room
+ * fallback's stack wall). Exported for the Bones panel action.
+ */
+export function placeSewerExit(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  placed: PlacedFixtureSlice[] = [],
+): Pt | null {
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  if (straight.length === 0) return null
+  if (placed.length > 0) {
+    const totalDfu = placed.reduce((s, f) => s + f.dfu, 0)
+    const wx = placed.reduce((s, f) => s + f.plan[0] * f.dfu, 0) / Math.max(1, totalDfu)
+    const wz = placed.reduce((s, f) => s + f.plan[1] * f.dfu, 0) / Math.max(1, totalDfu)
+    const stackAnchor = nearestWallPoint(walls, [wx, wz], Number.POSITIVE_INFINITY)
+    if (stackAnchor) return sewerExitFrom(walls, wallPlan(stackAnchor) as Pt, [wx, wz])
+  }
+  const wetRooms = rooms.filter(
+    (r) => r.category === 'kitchen' || r.category === 'bathroom' || r.category === 'laundry',
+  )
+  if (wetRooms.length === 0) return null
+  const core = polygonCentroid(wetRooms.flatMap((r) => [polygonCentroid(r.polygon)]))
+  const stackRoom = wetRooms.find((r) => r.category === 'bathroom') ?? (wetRooms[0] as RoomSlice)
+  const stackWall = wetWallFor(stackRoom, walls, core)
+  if (!stackWall) return null
+  const stackAt = nearestOnWall(stackWall, polygonCentroid(stackRoom.polygon)).point
+  return sewerExitFrom(walls, stackAt, core)
 }
 
 /** The wet wall for a room: a boundary wall (else the nearest wall) whose
@@ -570,6 +702,7 @@ function placedPlumbing(
   rooms: RoomSlice[],
   spec: FramingSpec,
   placed: PlacedFixtureSlice[],
+  overrides?: ServiceOverrides,
 ): { members: Member[]; fixtures: Fixture[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -808,15 +941,11 @@ function placedPlumbing(
   }
 
   // ---- building drain: stack base → sewer-exit cleanout at the nearest
-  // exterior point, at 1/4"/ft (preferred practice even for 3") ----
+  // exterior point (or the sewer-exit service node, verbatim — the drains
+  // re-slope toward wherever it stands), at 1/4"/ft ----
   const core: Pt = [wx, wz]
-  let exit: Pt = nearestExteriorPoint(walls, stackAt) ?? [stackAt[0] + 1, stackAt[1]]
-  if (manhattanDist(stackAt, exit) < 0.3) {
-    const ox = exit[0] - core[0]
-    const oz = exit[1] - core[1]
-    const n = Math.max(1e-6, Math.hypot(ox, oz))
-    exit = [exit[0] + (ox / n) * 0.6, exit[1] + (oz / n) * 0.6]
-  }
+  const exit: Pt =
+    overridePlanPoint(walls, overrides?.sewerExit) ?? sewerExitFrom(walls, stackAt, core)
   const drainTable = rules.plumbing?.dwv?.maxDfuBuildingDrainBySizeAtQuarterInSlope ?? {}
   const cap3 = drainTable['3'] ?? 42
   const cap4 = drainTable['4'] ?? 216
@@ -880,15 +1009,16 @@ function placedPlumbing(
   }
 
   // ---- main water service: meter on the longest exterior wall, clear of
-  // ROs (P2903.7: ¾" minimum service) ----
-  const exterior = straight.filter((w) => w.exterior)
-  const meterWall = [...(exterior.length > 0 ? exterior : straight)].sort(
-    (p, q) => q.length - p.length,
-  )[0] as WallSlice
-  const meterU = clearOfOpenings(meterWall, panelMountU(meterWall), 0, ANCHOR_CLEAR_TOP)
+  // ROs (P2903.7: ¾" minimum service) — or the water-entry service node ----
+  const meterForced = overrideWallPoint(walls, overrides?.waterEntry)
+  const meterSpot = meterForced
+    ? { wall: meterForced.wall, u: meterForced.u, heightAff: overrides?.waterEntry?.heightAff ?? 0.3 }
+    : (placeMeterSpot(straight) as { wall: WallSlice; u: number; heightAff: number })
+  const meterWall = meterSpot.wall
+  const meterU = meterSpot.u
   const meterAnchor: WallPoint = { wall: meterWall, u: meterU }
   const meterPlan = wallPlan(meterAnchor) as Pt
-  const METER_Y = 0.3
+  const METER_Y = meterSpot.heightAff
   fixtures.push({
     system: 'plumbing',
     kind: 'water-meter',
@@ -899,48 +1029,26 @@ function placedPlumbing(
   })
 
   // ---- water heater: garage wall like the electrical panel (tank, M1307.3
-  // 18" ignition height) — else tankless on an exterior wall at 1.2 m AFF ----
-  const facePoint = (wall: WallSlice, side: 1 | -1, u: number): Pt => [
-    wall.start[0] + wall.dir[0] * u + -wall.dir[1] * side * (wall.thickness / 2 + 0.08),
-    wall.start[1] + wall.dir[1] * u + wall.dir[0] * side * (wall.thickness / 2 + 0.08),
-  ]
-  const garages = rooms.filter((r) => r.category === 'garage')
-  const boundsGarage = (wall: WallSlice): RoomSlice | undefined =>
-    garages.find(
-      (g) =>
-        g.boundaryWallIds.includes(wall.id) ||
-        pointInPolygon(facePoint(wall, 1, wall.length / 2), g.polygon) ||
-        pointInPolygon(facePoint(wall, -1, wall.length / 2), g.polygon),
-    )
-  const garageCandidates = straight
-    .filter((w) => boundsGarage(w) !== undefined)
-    .sort((p, q) => q.length - p.length)
-  // Tank (0.6) + panel enclosure (0.4) + NEC 110.26 working space (0.76)
-  // need ~1.0m of separation; a short garage wall can't host both trades
-  // (re-verify: the 1.2m offset clamped back onto the panel below 3.2m).
-  const garageWall = garageCandidates.find(
-    (w) => Math.abs(panelMountU(w) - Math.max(0.4, panelMountU(w) - 1.2)) >= 0.999 ||
-           panelMountU(w) + 1.2 <= w.length - 0.4,
-  )
-  const tank = garageWall !== undefined
-  const whWall = garageWall ?? meterWall
-  const whURaw = (() => {
-    if (whWall === meterWall) return Math.min(whWall.length - 0.4, meterU + 1.2)
-    // The electrical panel claims panelMountU on this SAME wall (both
-    // trades elect the longest garage wall) — keep the tank a panel-width
-    // + NEC 110.26 working space away (verify round D1: the 50-gal tank
-    // ENGULFED the panel).
-    const panelU = panelMountU(whWall)
-    const off = 1.2
-    return panelU + off <= whWall.length - 0.4 ? panelU + off : Math.max(0.4, panelU - off)
-  })()
-  const whU = clearOfOpenings(whWall, whURaw, 0, 2.1)
+  // 18" ignition height) — else tankless on an exterior wall at 1.2 m AFF —
+  // or the water-heater service node, verbatim ----
+  const whForced = overrideWallPoint(walls, overrides?.waterHeater)
+  const whSpot = whForced
+    ? {
+        wall: whForced.wall,
+        u: whForced.u,
+        tank: garageBoundingWall(whForced.wall, rooms) !== undefined,
+      }
+    : placeWhSpot(walls, rooms)
+  if (!whSpot) return { members, fixtures }
+  const whWall = whSpot.wall
+  const whU = whSpot.u
+  const tank = whSpot.tank
   const whAnchor: WallPoint = { wall: whWall, u: whU }
   const whWallPlan = wallPlan(whAnchor) as Pt
   let side: 1 | -1 = 1
-  if (garageWall) {
-    const g = boundsGarage(garageWall)
-    if (g && pointInPolygon(facePoint(garageWall, -1, whU), g.polygon)) side = -1
+  const whGarage = tank ? garageBoundingWall(whWall, rooms) : undefined
+  if (whGarage) {
+    if (pointInPolygon(facePoint(whWall, -1, whU), whGarage.polygon)) side = -1
   } else if (rooms.some((r) => pointInPolygon(facePoint(whWall, -1, whU), r.polygon))) {
     side = -1
   }
@@ -950,7 +1058,7 @@ function placedPlumbing(
   const whPlan: Pt = [whWallPlan[0] + nx * whOff, whWallPlan[1] + nz * whOff]
   const whDims: readonly [number, number, number] = tank ? [0.6, 1.5, 0.6] : [0.45, 0.6, 0.25]
   const whBottom = tank ? inches(18) : 1.2 // M1307.3 garage ignition height
-  const whCenterY = whBottom + whDims[1] / 2
+  const whCenterY = overrides?.waterHeater?.heightAff ?? whBottom + whDims[1] / 2
   members.push({
     system: 'plumbing',
     role: 'water-heater',
@@ -1076,14 +1184,15 @@ export function layoutPlumbing(
   rooms: RoomSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
   placed: PlacedFixtureSlice[] = [],
+  overrides?: ServiceOverrides,
 ): { members: Member[]; fixtures: Fixture[] } {
   if (placed.length > 0) {
-    const result = placedPlumbing(walls, rooms, spec, placed)
+    const result = placedPlumbing(walls, rooms, spec, placed, overrides)
     // Placed fixtures but no usable walls → let the fallback try (it
     // returns empty on wall-less scenes too, but never crashes).
     if (result.members.length > 0 || result.fixtures.length > 0) return result
   }
-  return roomPlumbing(walls, rooms, spec)
+  return roomPlumbing(walls, rooms, spec, overrides)
 }
 
 type Stub = {
@@ -1100,6 +1209,7 @@ function roomPlumbing(
   walls: WallSlice[],
   rooms: RoomSlice[],
   spec: FramingSpec,
+  overrides?: ServiceOverrides,
 ): { members: Member[]; fixtures: Fixture[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -1259,17 +1369,11 @@ function roomPlumbing(
     }
   }
 
-  // ---- 3" building drain: stack base → sewer exit at an exterior wall ----
+  // ---- 3" building drain: stack base → sewer exit at an exterior wall
+  // (or the sewer-exit service node, verbatim) ----
   const totalDfu = wetRooms.reduce((sum, r) => sum + (DFU_BY_CATEGORY[r.category] ?? 2), 0)
-  let exit: Pt = nearestExteriorPoint(walls, stackAt) ?? [stackAt[0] + 1, stackAt[1]]
-  // A stack sitting ON the exterior wall still needs a real lateral — carry
-  // the exit 0.6m past the wall (away from the wet core) toward the sewer.
-  if (manhattanDist(stackAt, exit) < 0.3) {
-    const ox = exit[0] - core[0]
-    const oz = exit[1] - core[1]
-    const n = Math.max(1e-6, Math.hypot(ox, oz))
-    exit = [exit[0] + (ox / n) * 0.6, exit[1] + (oz / n) * 0.6]
-  }
+  const exit: Pt =
+    overridePlanPoint(walls, overrides?.sewerExit) ?? sewerExitFrom(walls, stackAt, core)
   const undersized = totalDfu > MAIN_CAPACITY_DFU
   manhattan(
     members,
@@ -1300,21 +1404,23 @@ function roomPlumbing(
   // ---- supplies: cold service → WH; hot/cold branches to every stub ----
   const whRoom =
     rooms.find((r) => r.category === 'laundry') ?? rooms.find((r) => r.category === 'garage')
-  const whAt: Pt = whRoom
-    ? polygonCentroid(whRoom.polygon)
-    : [stackAt[0] + 0.6, stackAt[1] + 0.6]
+  const whAt: Pt =
+    overridePlanPoint(walls, overrides?.waterHeater) ??
+    (whRoom ? polygonCentroid(whRoom.polygon) : [stackAt[0] + 0.6, stackAt[1] + 0.6])
   fixtures.push({
     system: 'plumbing',
     kind: 'water-heater',
-    position: [whAt[0], 0.6, whAt[1]],
+    position: [whAt[0], overrides?.waterHeater?.heightAff ?? 0.6, whAt[1]],
     rotationY: 0,
     sourceId: whRoom?.id ?? stackRoom.id,
     label: 'Water heater',
   })
 
   if (fab) {
-    // Cold water service from the nearest exterior wall to the WH.
-    const service = nearestExteriorPoint(walls, whAt)
+    // Cold water service from the water-entry node (else the nearest
+    // exterior wall) to the WH.
+    const service =
+      overridePlanPoint(walls, overrides?.waterEntry) ?? nearestExteriorPoint(walls, whAt)
     if (service) {
       manhattan(
         members,

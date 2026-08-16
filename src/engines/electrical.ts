@@ -15,7 +15,14 @@
  */
 
 import rules from '../../data/electrical-rules.json'
-import type { Fixture, Member, RoomSlice, WallSlice } from '../core/types'
+import type {
+  Fixture,
+  Member,
+  RoomSlice,
+  ServiceOverrides,
+  ServicePointOverride,
+  WallSlice,
+} from '../core/types'
 import { feet, inches } from '../core/units'
 
 // ---- rule constants (data/electrical-rules.json) --------------------------
@@ -235,9 +242,14 @@ export function receptaclePositions(segment: Segment): number[] {
  *  - a switch at each door's latch side (210.70(A)(1) + universal practice)
  *  - a ceiling light per room (210.70(A)(1))
  *  - smoke alarms per IRC R314 (each bedroom + hallway outside sleeping areas)
- *  - one service panel
+ *  - one service panel (a `bones:service` panel override, when present, is
+ *    the authoritative spot — homeruns re-anchor there; checklist A4)
  */
-export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixture[] {
+export function layoutElectrical(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  overrides?: ServiceOverrides,
+): Fixture[] {
   const fixtures: Fixture[] = []
   const wetRooms = rooms.filter((r) => GFCI_CATEGORIES.has(r.category))
 
@@ -387,7 +399,7 @@ export function layoutElectrical(walls: WallSlice[], rooms: RoomSlice[]): Fixtur
   }
 
   // ---- service panel ----
-  const panel = placePanel(walls, rooms)
+  const panel = placePanel(walls, rooms, overrides?.panel)
   if (panel) fixtures.push(panel)
 
   // ---- circuiting (NEC 210.11/210.12/220.12) + 3-way switching ----
@@ -439,18 +451,29 @@ export function panelMountU(wall: WallSlice): number {
   return bestLo + bestLen / 2
 }
 
-function placePanel(walls: WallSlice[], rooms: RoomSlice[]): Fixture | null {
+/** The garage bounding a wall — boundary list or face-midpoint containment. */
+function garageBounding(wall: WallSlice, rooms: RoomSlice[]): RoomSlice | undefined {
+  const garages = rooms.filter((r) => r.category === 'garage')
+  return garages.find(
+    (g) =>
+      g.boundaryWallIds.includes(wall.id) ||
+      pointInPolygon(faceOf(wall, 1).plan(wall.length / 2), g.polygon) ||
+      pointInPolygon(faceOf(wall, -1).plan(wall.length / 2), g.polygon),
+  )
+}
+
+/**
+ * AUTO spot for the service panel — the longest garage wall, else the
+ * longest exterior wall, else the longest wall, mounted at `panelMountU`.
+ * Exported so the Bones panel's "Place service points" action can seed a
+ * `bones:service` node exactly where the engine would auto-place.
+ */
+export function placePanelSpot(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+): { wall: WallSlice; u: number; heightAff: number } | null {
   const straight = walls.filter((w) => !w.curved && w.length > 0)
   if (straight.length === 0) return null
-
-  const garages = rooms.filter((r) => r.category === 'garage')
-  const boundsGarage = (wall: WallSlice): RoomSlice | undefined =>
-    garages.find(
-      (g) =>
-        g.boundaryWallIds.includes(wall.id) ||
-        pointInPolygon(faceOf(wall, 1).plan(wall.length / 2), g.polygon) ||
-        pointInPolygon(faceOf(wall, -1).plan(wall.length / 2), g.polygon),
-    )
 
   const longest = (candidates: WallSlice[]): WallSlice | undefined =>
     candidates.reduce<WallSlice | undefined>(
@@ -458,13 +481,77 @@ function placePanel(walls: WallSlice[], rooms: RoomSlice[]): Fixture | null {
       undefined,
     )
 
-  const garageWall = longest(straight.filter((w) => boundsGarage(w) !== undefined))
+  const garageWall = longest(straight.filter((w) => garageBounding(w, rooms) !== undefined))
   const wall = garageWall ?? longest(straight.filter((w) => w.exterior)) ?? longest(straight)
   if (!wall) return null
+  // Round-12 B1: a door spanning the wall midpoint used to swallow the
+  // panel — every homerun then started from inside the RO and never
+  // reached its anchor. Mount in the widest door-free segment instead.
+  return { wall, u: panelMountU(wall), heightAff: PANEL_AFF }
+}
+
+/**
+ * Resolve a `bones:service` override to the engine's WallPoint form:
+ * `wallId`+`wallT` verbatim (0..1 → u along the wall), else the nearest wall
+ * point to a gizmo-written `position`. Null = no override → auto-place.
+ */
+export function overrideWallPoint(
+  walls: WallSlice[],
+  o: ServicePointOverride | undefined,
+): WallPoint | null {
+  if (!o) return null
+  if (o.wallId) {
+    const wall = walls.find((w) => w.id === o.wallId && !w.curved && w.length >= 0.1)
+    if (wall) {
+      const t = Math.max(0, Math.min(1, o.wallT ?? 0.5))
+      return { wall, u: t * wall.length }
+    }
+  }
+  if (o.position) {
+    return nearestWallPoint(walls, [o.position[0], o.position[2]], Number.POSITIVE_INFINITY)
+  }
+  return null
+}
+
+/**
+ * Resolve a `bones:service` override to a PLAN point: the wall lerp when
+ * anchored, else the node's own position. Null = no override.
+ */
+export function overridePlanPoint(
+  walls: WallSlice[],
+  o: ServicePointOverride | undefined,
+): readonly [number, number] | null {
+  if (!o) return null
+  if (o.wallId) {
+    const wall = walls.find((w) => w.id === o.wallId)
+    if (wall) {
+      const t = Math.max(0, Math.min(1, o.wallT ?? 0.5))
+      return [
+        wall.start[0] + wall.dir[0] * wall.length * t,
+        wall.start[1] + wall.dir[1] * wall.length * t,
+      ]
+    }
+  }
+  if (o.position) return [o.position[0], o.position[2]]
+  return null
+}
+
+function placePanel(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  override?: ServicePointOverride,
+): Fixture | null {
+  // A service node is the authoritative spot; auto-placement only when absent.
+  const forced = overrideWallPoint(walls, override)
+  const spot = forced
+    ? { wall: forced.wall, u: forced.u, heightAff: override?.heightAff ?? PANEL_AFF }
+    : placePanelSpot(walls, rooms)
+  if (!spot) return null
+  const { wall, u: mountU } = spot
 
   // Face into the garage when we have one, else the resolved interior face.
   let face = interiorFaces(wall, rooms)[0] ?? faceOf(wall, 1)
-  const garage = boundsGarage(wall)
+  const garage = garageBounding(wall, rooms)
   if (garage) {
     for (const side of [1, -1] as const) {
       const f = faceOf(wall, side)
@@ -472,15 +559,11 @@ function placePanel(walls: WallSlice[], rooms: RoomSlice[]): Fixture | null {
     }
   }
 
-  // Round-12 B1: a door spanning the wall midpoint used to swallow the
-  // panel — every homerun then started from inside the RO and never
-  // reached its anchor. Mount in the widest door-free segment instead.
-  const mountU = panelMountU(wall)
   const [x, z] = face.plan(mountU)
   return {
     system: 'electrical',
     kind: 'panel',
-    position: [x, PANEL_AFF, z],
+    position: [x, spot.heightAff, z],
     rotationY: face.rotationY,
     sourceId: wall.id,
     label: `Service panel (${rules.circuits.minServiceAmps}A min per NEC 230.79(C))`,

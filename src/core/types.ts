@@ -169,6 +169,30 @@ export type Fixture = {
   meta?: Record<string, string | number | boolean>
 }
 
+/**
+ * Authoritative location of one service point (from a `bones:service` node).
+ * When present, engines use it VERBATIM instead of auto-placement — routing
+ * follows (checklist A4). Wall-anchored via `wallId`+`wallT`, or a plain
+ * level-local `position` (gizmo-moved / floor-placed nodes).
+ */
+export type ServicePointOverride = {
+  wallId?: string
+  /** 0..1 along the wall from `start`. */
+  wallT?: number
+  /** Mount height (device center, m AFF). */
+  heightAff?: number
+  position?: readonly [number, number, number]
+}
+
+/** Per-level service overrides keyed by what each engine consumes. */
+export type ServiceOverrides = {
+  panel?: ServicePointOverride
+  waterHeater?: ServicePointOverride
+  waterEntry?: ServicePointOverride
+  sewerExit?: ServicePointOverride
+  powerEntry?: ServicePointOverride
+}
+
 /** A door/window opening extracted from a wall's children, wall-local. */
 export type OpeningSlice = {
   id: string
