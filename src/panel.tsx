@@ -631,6 +631,8 @@ function ExportPlansButton({
           // engine warnings print verbatim in the schedules flag block
           // (blueprint C5 / checklist P4) — paper never hides a caveat
           warnings: result.warnings,
+          // whole-building metrics block on the schedules sheet
+          characteristics: result.characteristics ?? undefined,
           studSpacingIn: framingNode.studSpacingIn,
           // storey elevations so cross-level (tagged) members draw at the
           // right height on elevations/section/cover

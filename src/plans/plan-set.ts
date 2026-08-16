@@ -11,6 +11,7 @@
  */
 
 import type { Fixture, Member } from '../core/types'
+import type { BuildingCharacteristics } from '../engines/characteristics'
 import { computeTakeoff } from '../engines/takeoff'
 import { PLUMBING_COLORS, circuitColor, circuitZoneHint, plumbingPipeColor } from './circuit-colors'
 
@@ -31,6 +32,9 @@ export type PlanSetOptions = {
   /** Storey elevations by level id — members tagged levelId (cross-level
    * roofs) are level-local; elevations/sections/cover lift them by this. */
   levelBaseY?: Record<string, number>
+  /** Whole-building metrics — printed as a compact block on the schedules
+   * sheet (above the flags on the last page). */
+  characteristics?: BuildingCharacteristics
 }
 
 // Sheet canvas (landscape letter at 96dpi: 11in × 8.5in).
@@ -849,7 +853,15 @@ function schedulesSheets(
   // row capacity so a full column never runs under the red list
   // (quality round-3: row 41 and the flags overprinted at y≈673).
   const flagRows = Math.min(flags.length, 6) + (flags.length > 6 ? 1 : 0)
-  const lastPageCap = 2 * Math.max(4, maxLines - (flagRows > 0 ? flagRows + 1 : 0))
+  // Building characteristics print just above the flags on the same page:
+  // title + 4 metric lines — reserved out of the last page's capacity too.
+  const charLines = opts.characteristics ? 5 : 0
+  const lastPageCap =
+    2 *
+    Math.max(
+      4,
+      maxLines - (flagRows > 0 ? flagRows + 1 : 0) - (charLines > 0 ? charLines + 1 : 0),
+    )
   const pages = (() => {
     if (rows.length <= lastPageCap) return 1
     let p = 2
@@ -899,10 +911,33 @@ function schedulesSheets(
       }
       flagText = parts.join('')
     }
+    // BUILDING CHARACTERISTICS block — last page, stacked above the flags
+    // (whole-building metrics for HVAC dimensioning; assumptions inline).
+    let charText = ''
+    if (page === pages - 1 && opts.characteristics) {
+      const c = opts.characteristics
+      const lines = [
+        `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
+        `Windows ${c.windowCount} (${c.windowAreaM2.toFixed(1)} m²) · Doors ${c.doorCount} · Climate zone ${c.insulation.climateZone} · Wall cavity R-${c.insulation.wallR}`,
+        `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
+        clip(`${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`, 130),
+      ]
+      // bottom-anchor above the flag block (or where flags would start)
+      const shownFlags = Math.min(flags.length, 6)
+      const flagsTopY = H - TITLE_H - 40 - Math.max(0, shownFlags - 1) * 13
+      const bottomY = flags.length > 0 ? flagsTopY - 18 : H - TITLE_H - 40
+      charText = [
+        `<text x="${MARGIN}" y="${bottomY - lines.length * 13}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">BUILDING CHARACTERISTICS</text>`,
+        ...lines.map(
+          (l, i) =>
+            `<text x="${MARGIN}" y="${bottomY - (lines.length - 1 - i) * 13}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(l)}</text>`,
+        ),
+      ].join('')
+    }
     const title = pages > 1 ? `Schedules + takeoff (${page + 1}/${pages})` : 'Schedules + takeoff'
     sheets.push({
       title,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${flagText}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${charText}${flagText}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
     })
   }
   return sheets

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Fixture, Member } from '../core/types'
+import type { BuildingCharacteristics } from '../engines/characteristics'
 import { buildPlanSet, planSetHtml } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
@@ -201,6 +202,89 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     expect(svg).toContain('supply / DWV pipe')
     expect(svg).not.toContain('supply — cold water')
     expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)') // plumbing present → note prints
+  })
+})
+
+describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
+  const characteristics: BuildingCharacteristics = {
+    floorAreaM2: 40,
+    volumeM3: 108,
+    envelopeAreaM2: 61.4,
+    windowCount: 1,
+    windowAreaM2: 1.8,
+    doorCount: 1,
+    insulation: { climateZone: '2A', wallR: 13, citation: '2021 IECC Table R402.1.3' },
+    uaWPerK: 30.1,
+    designHeatLossW: 662,
+    coolingTonsEstimate: 0.9,
+    notes: ['Design heat loss at ΔT = 22 K (winter design assumption)'],
+  }
+
+  test('prints the compact metrics block when characteristics are passed', () => {
+    const sched = buildPlanSet([member({})], [], { characteristics }).find((s) =>
+      s.title.startsWith('Schedules'),
+    )
+    const svg = sched?.svg ?? ''
+    expect(svg).toContain('BUILDING CHARACTERISTICS')
+    expect(svg).toContain('Floor area 40.0 m²')
+    expect(svg).toContain('Volume 108.0 m³')
+    expect(svg).toContain('Envelope 61.4 m²')
+    expect(svg).toContain('Climate zone 2A')
+    expect(svg).toContain('Wall cavity R-13')
+    expect(svg).toContain('Envelope UA 30.1 W/K')
+    expect(svg).toContain('Design heat loss 662 W')
+    expect(svg).toContain('RULE OF THUMB')
+    expect(svg).toContain('2021 IECC Table R402.1.3')
+  })
+
+  test('no characteristics option → no block', () => {
+    const sched = buildPlanSet([member({})], [], {}).find((s) => s.title.startsWith('Schedules'))
+    expect(sched?.svg).not.toContain('BUILDING CHARACTERISTICS')
+  })
+
+  test('coexists with flags: block stacks ABOVE the red flag list', () => {
+    const flagged = member({ flag: 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span' })
+    const sched = buildPlanSet([flagged], [], { characteristics }).find((s) =>
+      s.title.startsWith('Schedules'),
+    )
+    const svg = sched?.svg ?? ''
+    expect(svg).toContain('BUILDING CHARACTERISTICS')
+    expect(svg).toContain('ENGINEERED BEAM REQUIRED')
+    // the block's lowest line sits above the topmost flag line
+    const yOf = (needle: string): number => {
+      const at = svg.indexOf(needle)
+      const m = /y="([\d.]+)"/.exec(svg.slice(svg.lastIndexOf('<text', at), at))
+      return m ? Number(m[1]) : Number.NaN
+    }
+    expect(yOf('2021 IECC Table R402.1.3')).toBeLessThan(yOf('ENGINEERED BEAM REQUIRED'))
+  })
+
+  test('multi-page takeoff: block prints on the LAST schedules page only', () => {
+    // enough distinct (system × size × stock length) rows to overflow one
+    // schedules page — rows aggregate on that triple
+    const many: Member[] = []
+    const systems = ['floor-framing', 'wall-framing', 'roof-framing'] as const
+    for (let i = 0; i < 400; i++) {
+      const len = 0.5 + (i % 80) * 0.09
+      many.push(
+        member({
+          system: systems[i % 3],
+          role: i % 2 === 0 ? 'joist' : 'stud',
+          size: (['2x4', '2x6', '2x8', '2x10', '2x12', '4x4', '4x6', '4x8'] as const)[i % 8],
+          length: len,
+          dims: [len, 0.235, 0.038],
+          position: [i * 0.1, 0, 1],
+        }),
+      )
+    }
+    const sheets = buildPlanSet(many, [], { characteristics }).filter((s) =>
+      s.title.startsWith('Schedules'),
+    )
+    expect(sheets.length).toBeGreaterThan(1)
+    for (const [i, s] of sheets.entries()) {
+      if (i === sheets.length - 1) expect(s.svg).toContain('BUILDING CHARACTERISTICS')
+      else expect(s.svg).not.toContain('BUILDING CHARACTERISTICS')
+    }
   })
 })
 
