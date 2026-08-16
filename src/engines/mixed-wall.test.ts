@@ -246,6 +246,55 @@ describe('mixedCmuWall — openings zoned per the seam', () => {
   })
 })
 
+describe('mixedCmuWall — sill at the seam (RO-aware plate flag + bolt layout)', () => {
+  test('crossing door: sill carries the seam flag, bolts skip the RO, segments keep R403.1.6', () => {
+    const wall = makeWall({ openings: [door(3)] })
+    const { members } = mixedCmuWall(wall, spec, 3 * H)
+    // (a) the continuous plate passes through the door RO — seam flag on it
+    const sill = byRole(members, 'mudsill')[0] as Member
+    expect(sill.flag).toBe(SEAM_CROSSING_FLAG)
+    // (b) no bolt lands inside the rough opening
+    const roLo = 3 - (0.9 + PAD) / 2
+    const roHi = 3 + (0.9 + PAD) / 2
+    const us = byRole(members, 'anchor-bolt')
+      .map((b) => b.position[0] ?? 0)
+      .sort((a, b) => a - b)
+    for (const u of us) expect(u <= roLo + 1e-6 || u >= roHi - 1e-6).toBe(true)
+    // each remaining plate segment keeps its OWN R403.1.6 layout: ≥2 bolts,
+    // first/last within 12" of the segment ends, gaps ≤ the 6' spacing
+    const left = us.filter((u) => u < roLo)
+    const right = us.filter((u) => u > roHi)
+    expect(left.length).toBeGreaterThanOrEqual(2)
+    expect(right.length).toBeGreaterThanOrEqual(2)
+    expect(left[0] as number).toBeLessThanOrEqual(inches(12) + 1e-6)
+    expect(roLo - (left[left.length - 1] as number)).toBeLessThanOrEqual(inches(12) + 1e-6)
+    expect((right[0] as number) - roHi).toBeLessThanOrEqual(inches(12) + 1e-6)
+    expect(wall.length - (right[right.length - 1] as number)).toBeLessThanOrEqual(
+      inches(12) + 1e-6,
+    )
+    for (const seg of [left, right]) {
+      for (let i = 0; i + 1 < seg.length; i++) {
+        expect((seg[i + 1] as number) - (seg[i] as number)).toBeLessThanOrEqual(
+          spec.anchorBoltSpacing + 1e-6,
+        )
+      }
+    }
+  })
+
+  test('no RO in the sill band: plate unflagged, bolt layout unchanged', () => {
+    const wall = makeWall({ openings: [window_(3, 1.2, 1.0, 0.9)] }) // fully above the seam
+    const { members } = mixedCmuWall(wall, spec, 3 * H)
+    const sill = byRole(members, 'mudsill')[0] as Member
+    expect(sill.flag).toBeUndefined()
+    const expected = anchorBoltPositions(
+      wall.length,
+      spec.anchorBoltSpacing,
+      spec.anchorBoltEndDistance,
+    )
+    expect(byRole(members, 'anchor-bolt')).toHaveLength(expected.length)
+  })
+})
+
 describe('mixedCmuWall — full-height regression (unchanged vs today)', () => {
   test('a height at/above every course that fits = exactly today\'s cmuWall', () => {
     const wall = makeWall({ openings: [window_(2)] })
@@ -386,6 +435,9 @@ describe('mixed wall — takeoff deltas', () => {
     const crossing = mixedCmuWall(makeWall({ openings: [door(3)] }), spec, 3 * H).members
     const rows = computeTakeoff(crossing, [])
     const flag = rows.find((r) => r.section === 'Flags' && r.detail === SEAM_CROSSING_FLAG)
-    expect(flag?.quantity).toBe(1)
+    // BOTH seam elements carry the flag: the bond beam (crossing zoning) and
+    // the PT sill whose band the door RO passes through (stage 3 — the
+    // continuous plate is the part a real detail cuts at the door).
+    expect(flag?.quantity).toBe(2)
   })
 })

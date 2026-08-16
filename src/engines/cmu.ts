@@ -42,6 +42,7 @@ import type { FramingSpec } from '../core/spec'
 import type { Member, OpeningSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
+import { openingSpans } from './electrical'
 import { anchorBoltPositions } from './foundation'
 import { detectCorners, detectTees, frameWall, studSizeFor } from './wall-framing'
 
@@ -698,6 +699,14 @@ export function mixedCmuWall(
   }
 
   // ---- PT sill plate on the bond beam (mudsill, R403.1.6 anchorage) ----
+  // ROs whose vertical extent crosses the sill band [seam, seam + sillT]
+  // over the plate's horizontal run: the continuous plate passes THROUGH the
+  // opening there (the v1 continuity assumption above), so the seam element
+  // carries the canonical 'verify detail' flag — a real detail cuts the
+  // plate at the door.
+  const sillRoSpans = openingSpans(wall, seam, seam + sillT).filter(
+    (s) => s.hi > startInset + EPS && s.lo < len - endInset - EPS,
+  )
   members.push({
     system: 'wall-framing',
     role: 'mudsill',
@@ -709,6 +718,7 @@ export function mixedCmuWall(
     material: 'pt-lumber',
     sourceId: wall.id,
     label: 'PT sill plate on bond beam — anchor-bolted (R403.1.6)',
+    flag: sillRoSpans.length > 0 ? SEAM_CROSSING_FLAG : undefined,
   })
 
   // ---- anchor bolts through the sill into the grouted bond beam ----
@@ -716,19 +726,33 @@ export function mixedCmuWall(
   // (tighter via jurisdiction), first/last within 12" of the plate ends,
   // never fewer than two. 7" embedment stays inside the 8" beam course; the
   // shank tops out flush with the sill top (nut + washer land on the plate).
+  // Bolts never land inside an opening RO — a J-bolt in a doorway anchors
+  // nothing (the RO spans above already flagged the plate). The run splits
+  // at the RO spans and every remaining plate segment keeps its OWN
+  // R403.1.6 layout: ≤6' o.c., first/last within 12" of the segment ends,
+  // never fewer than two per section.
   const boltHeight = SEAM_BOLT_EMBEDMENT + sillT
-  for (const u of anchorBoltPositions(runLen, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
-    members.push({
-      system: 'wall-framing',
-      role: 'anchor-bolt',
-      dims: [SEAM_BOLT_SIDE, boltHeight, SEAM_BOLT_SIDE],
-      length: boltHeight,
-      position: place(startInset + u, seam - SEAM_BOLT_EMBEDMENT + boltHeight / 2),
-      rotation: [0, yaw, 0],
-      material: 'steel',
-      sourceId: wall.id,
-      label: '5/8" anchor bolt — sill to bond beam (R403.1.6)',
-    })
+  const boltSegments: { a: number; b: number }[] = []
+  let boltCursor = startInset
+  for (const s of sillRoSpans) {
+    if (s.lo > boltCursor + EPS) boltSegments.push({ a: boltCursor, b: Math.min(s.lo, len - endInset) })
+    boltCursor = Math.max(boltCursor, s.hi)
+  }
+  if (len - endInset > boltCursor + EPS) boltSegments.push({ a: boltCursor, b: len - endInset })
+  for (const seg of boltSegments) {
+    for (const u of anchorBoltPositions(seg.b - seg.a, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
+      members.push({
+        system: 'wall-framing',
+        role: 'anchor-bolt',
+        dims: [SEAM_BOLT_SIDE, boltHeight, SEAM_BOLT_SIDE],
+        length: boltHeight,
+        position: place(seg.a + u, seam - SEAM_BOLT_EMBEDMENT + boltHeight / 2),
+        rotation: [0, yaw, 0],
+        material: 'steel',
+        sourceId: wall.id,
+        label: '5/8" anchor bolt — sill to bond beam (R403.1.6)',
+      })
+    }
   }
 
   // ---- framed zone: shortened wall with its own bottom/top plates ----
