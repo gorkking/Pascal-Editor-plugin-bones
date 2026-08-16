@@ -61,16 +61,40 @@ export type ComputeResult = {
   characteristics: BuildingCharacteristics | null
 }
 
-/** Construction system for one wall: override → jurisdiction default → framed. */
+/**
+ * Fully-resolved construction for one wall. `cmuHeightM` is only carried for
+ * a 'cmu' wall whose override requested a partial height (mixed CMU/framed —
+ * the engines snap it to whole courses); undefined = full-height, as today.
+ */
+export type ResolvedWallConstruction = {
+  construction: WallConstruction
+  cmuHeightM?: number
+}
+
+/** Construction resolution for one wall: override → jurisdiction default → framed. */
+export function resolveWallConstruction(
+  wall: WallSlice,
+  config: Pick<FramingNode, 'wallOverrides'>,
+  exteriorDefault: 'framed' | 'cmu',
+): ResolvedWallConstruction {
+  const override = config.wallOverrides?.[wall.id]
+  if (typeof override === 'string') return { construction: override }
+  if (override) {
+    return override.cmuHeightM === undefined
+      ? { construction: override.construction }
+      : { construction: override.construction, cmuHeightM: override.cmuHeightM }
+  }
+  if (wall.exterior && exteriorDefault === 'cmu') return { construction: 'cmu' }
+  return { construction: 'framed' }
+}
+
+/** Construction system only (back-compat for the panel/inspector cards). */
 export function wallConstruction(
   wall: WallSlice,
   config: Pick<FramingNode, 'wallOverrides'>,
   exteriorDefault: 'framed' | 'cmu',
 ): WallConstruction {
-  const override = config.wallOverrides?.[wall.id]
-  if (override) return override
-  if (wall.exterior && exteriorDefault === 'cmu') return 'cmu'
-  return 'framed'
+  return resolveWallConstruction(wall, config, exteriorDefault).construction
 }
 
 // Per-config memo: the panel and the 3D renderer both derive from the same

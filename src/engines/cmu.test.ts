@@ -15,6 +15,7 @@ import {
   cmuWall,
   cmuWalls,
   courseIntervals,
+  snapCmuHeight,
   verticalBarPositions,
 } from './cmu'
 
@@ -533,5 +534,33 @@ describe('cmuWalls — corner interlock (courses alternate through the corner)',
     // beam course index 10 is even → A claims (extends to −0.1), B yields
     expect((beamA.position[0] ?? 0) - beamA.dims[0] / 2).toBeCloseTo(-0.1, 4)
     expect((beamB.position[2] ?? 0) - beamB.dims[0] / 2).toBeCloseTo(0.1, 4)
+  })
+})
+
+/**
+ * GATE (mixed wall construction — course snap): snapCmuHeight is the ONE
+ * course-math truth the engines and the UI height slider share. Whole 8"
+ * courses only, clamped to [1 course, every course that fits].
+ */
+describe('snapCmuHeight', () => {
+  test('snaps to the nearest whole course', () => {
+    expect(snapCmuHeight(1.22, 2.44)).toBeCloseTo(6 * H, 9) // 50% of 2.44m → 6 courses
+    expect(snapCmuHeight(1.0, 2.44)).toBeCloseTo(5 * H, 9)
+    expect(snapCmuHeight(0.5, 2.44)).toBeCloseTo(2 * H, 9)
+  })
+
+  test('clamps low to one course and high to the courses that fit', () => {
+    expect(snapCmuHeight(0.01, 2.44)).toBeCloseTo(H, 9)
+    expect(snapCmuHeight(99, 2.44)).toBeCloseTo(12 * H, 9)
+    expect(snapCmuHeight(2.44, 2.44)).toBeCloseTo(12 * H, 9) // 100% = full height
+  })
+
+  test('exact-fit wall heights do not float-round a course away', () => {
+    expect(snapCmuHeight(12 * H, 12 * H)).toBeCloseTo(12 * H, 12)
+    expect(snapCmuHeight(6 * H, 12 * H)).toBeCloseTo(6 * H, 12)
+  })
+
+  test('walls shorter than one course snap to 0 (nothing to lay)', () => {
+    expect(snapCmuHeight(0.1, 0.15)).toBe(0)
   })
 })

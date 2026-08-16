@@ -15,7 +15,7 @@ import {
   probeSlabsFor,
   wallConstruction,
 } from './framing/compute'
-import type { FramingNode, WallConstruction } from './framing/schema'
+import type { FramingNode, WallConstruction, WallOverride } from './framing/schema'
 import { profileFor } from './jurisdiction/profiles'
 
 const METERS_PER_INCH = 0.0254
@@ -33,8 +33,9 @@ export type SelectedWallInfo = {
   curved: boolean
   /** Resolved construction: override → jurisdiction default → framed. */
   construction: WallConstruction
-  /** The explicit per-wall override, if one is stored on the framing node. */
-  override: WallConstruction | undefined
+  /** The explicit per-wall override, if one is stored on the framing node —
+   * a plain construction string or the mixed-wall object form. */
+  override: WallOverride | undefined
   /** What the wall is built from — '2x6 studs @ 16" o.c.', the CMU module,
    * or the skip notice. Always printable. */
   assembly: string
@@ -135,7 +136,7 @@ export function selectedWallInfo(
 export function wallOverridePatch(
   framingNode: Pick<FramingNode, 'wallOverrides'>,
   wallId: string,
-  construction: WallConstruction,
-): { wallOverrides: Record<string, WallConstruction> } {
+  construction: WallOverride,
+): { wallOverrides: Record<string, WallOverride> } {
   return { wallOverrides: { ...framingNode.wallOverrides, [wallId]: construction } }
 }

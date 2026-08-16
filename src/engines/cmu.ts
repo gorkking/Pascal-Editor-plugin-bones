@@ -103,6 +103,25 @@ function frameOf(wall: WallSlice): WallFrame {
 // Coursing math (exported for direct unit testing, like studPositions)
 // ---------------------------------------------------------------------------
 
+/** Whole 8" courses that fit under a height (EPS guards exact-fit floats). */
+export function courseCount(height: number): number {
+  return Math.floor(height / COURSE_HEIGHT + EPS)
+}
+
+/**
+ * Snap a requested CMU-zone height to whole courses (ASTM C90 module,
+ * IRC R606 coursing): nearest course multiple, clamped to [1 course, all
+ * the courses that fit under the wall]. The UI height slider and the mixed
+ * wall engine share this one truth. Returns 0 when the wall is shorter
+ * than a single course (nothing to lay).
+ */
+export function snapCmuHeight(requestedM: number, wallHeight: number): number {
+  const total = courseCount(wallHeight)
+  if (total < 1 || !Number.isFinite(requestedM)) return 0
+  const courses = Math.min(total, Math.max(1, Math.round(requestedM / COURSE_HEIGHT)))
+  return courses * COURSE_HEIGHT
+}
+
 /** A block's raw extent [a, b] along the wall, BEFORE the mortar shrink. */
 export type BlockInterval = { a: number; b: number }
 
@@ -236,7 +255,7 @@ export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}
 
   // Whole courses that fit under the wall height (EPS guards an exact-fit
   // height like 8'-0" from float-rounding down to 11 courses).
-  const totalCourses = Math.floor(wall.height / COURSE_HEIGHT + EPS)
+  const totalCourses = courseCount(wall.height)
   if (totalCourses < 1) return [] // shorter than one course — nothing to lay
   const bodyCourses = totalCourses - 1 // top course is the bond beam
   const bondBeamBottom = bodyCourses * COURSE_HEIGHT

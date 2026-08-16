@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import type { WallSlice } from '../core/types'
 import { extractServiceOverrides } from '../core/wall-model'
 import { FramingNode } from './schema'
-import { computeLevel, wallConstruction } from './compute'
+import { computeLevel, resolveWallConstruction, wallConstruction } from './compute'
 
 /** A minimal one-level scene: two exterior walls, one interior, one curved. */
 function makeScene(): Record<string, Record<string, unknown>> {
@@ -324,6 +324,85 @@ describe('wallConstruction', () => {
     expect(wallConstruction(wall(true), { wallOverrides: {} }, 'cmu')).toBe('cmu')
     expect(wallConstruction(wall(false), { wallOverrides: {} }, 'cmu')).toBe('framed')
     expect(wallConstruction(wall(true), { wallOverrides: {} }, 'framed')).toBe('framed')
+  })
+
+  test('object override resolves like its construction string', () => {
+    expect(
+      wallConstruction(wall(true), { wallOverrides: { w: { construction: 'cmu' } } }, 'framed'),
+    ).toBe('cmu')
+  })
+})
+
+/**
+ * GATE (mixed wall construction — schema + resolution): the override union
+ * accepts the legacy strings AND { construction: 'cmu', cmuHeightM } (back-
+ * compat: absent height = full-height CMU, exactly like the string).
+ */
+describe('resolveWallConstruction — mixed CMU/framed overrides', () => {
+  const wall = (exterior: boolean): WallSlice => ({
+    id: 'w',
+    start: [0, 0],
+    end: [4, 0],
+    length: 4,
+    dir: [1, 0],
+    thickness: 0.15,
+    height: 2.5,
+    exterior,
+    openings: [],
+    curved: false,
+  })
+
+  test('string overrides resolve with no cmuHeightM (full height, as today)', () => {
+    expect(resolveWallConstruction(wall(true), { wallOverrides: { w: 'cmu' } }, 'framed')).toEqual({
+      construction: 'cmu',
+    })
+    expect(resolveWallConstruction(wall(true), { wallOverrides: {} }, 'cmu')).toEqual({
+      construction: 'cmu',
+    })
+    expect(resolveWallConstruction(wall(false), { wallOverrides: {} }, 'cmu')).toEqual({
+      construction: 'framed',
+    })
+  })
+
+  test('object override without a height = full-height CMU as today', () => {
+    expect(
+      resolveWallConstruction(
+        wall(true),
+        { wallOverrides: { w: { construction: 'cmu' } } },
+        'framed',
+      ),
+    ).toEqual({ construction: 'cmu' })
+  })
+
+  test('object override carries the requested height through verbatim', () => {
+    expect(
+      resolveWallConstruction(
+        wall(true),
+        { wallOverrides: { w: { construction: 'cmu', cmuHeightM: 1.2 } } },
+        'framed',
+      ),
+    ).toEqual({ construction: 'cmu', cmuHeightM: 1.2 })
+  })
+
+  test('schema: FramingNode parses both override forms and rejects junk', () => {
+    const parsed = FramingNode.parse({
+      jurisdiction: 'FL',
+      wallOverrides: {
+        a: 'framed',
+        b: 'cmu',
+        c: { construction: 'cmu', cmuHeightM: 1.016 },
+        d: { construction: 'cmu' },
+      },
+    })
+    expect(parsed.wallOverrides.a).toBe('framed')
+    expect(parsed.wallOverrides.c).toEqual({ construction: 'cmu', cmuHeightM: 1.016 })
+    expect(parsed.wallOverrides.d).toEqual({ construction: 'cmu' })
+    expect(() =>
+      FramingNode.parse({ wallOverrides: { x: { construction: 'framed', cmuHeightM: 1 } } }),
+    ).toThrow()
+    expect(() =>
+      FramingNode.parse({ wallOverrides: { x: { construction: 'cmu', cmuHeightM: -1 } } }),
+    ).toThrow()
   })
 })
 

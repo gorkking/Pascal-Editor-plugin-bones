@@ -11,6 +11,27 @@ import { z } from 'zod'
 export const WallConstruction = z.enum(['framed', 'cmu', 'skip'])
 export type WallConstruction = z.infer<typeof WallConstruction>
 
+/**
+ * Object form of a per-wall override — mixed CMU/framed construction: block
+ * coursing up to `cmuHeightM` (snapped to whole 8" courses by the engines,
+ * IRC R606 module), a bond beam + PT sill seam, stud framing above. Absent
+ * height (or one at/above the wall height) = full-height CMU, exactly like
+ * the plain 'cmu' string.
+ */
+export const CmuWallOverride = z.object({
+  construction: z.literal('cmu'),
+  /** Requested CMU-zone height in meters — course-snapped by the engines. */
+  cmuHeightM: z.number().positive().optional(),
+})
+export type CmuWallOverride = z.infer<typeof CmuWallOverride>
+
+/**
+ * One wall's construction override: the legacy strings persist untouched
+ * (back-compat), the object form adds the mixed CMU/framed split.
+ */
+export const WallOverride = z.union([WallConstruction, CmuWallOverride])
+export type WallOverride = z.infer<typeof WallOverride>
+
 /** BIM-ish level of detail: 200 generic members · 300 code-sized (jurisdiction) ·
  * 400 fabrication (connections, routing, cut/fastener data). */
 export const BonesDetail = z.enum(['200', '300', '400'])
@@ -39,14 +60,14 @@ export const FramingNode = BaseNode.extend({
   /** X-ray vision: draw the skeleton through walls/finishes (depth-test off). */
   seeThrough: z.boolean().default(true),
   /** Per-wall construction overrides, keyed by wall id. */
-  wallOverrides: z.record(z.string(), WallConstruction).default({}),
+  wallOverrides: z.record(z.string(), WallOverride).default({}),
 }).describe(
   `Bones framing config (engineering X-ray) — one per level.
   - jurisdiction: US state code ('CA'), 'INTL', or 'AUTO' (guessed from the browser locale/timezone)
   - detail: '200' generic members, '300' jurisdiction/code-sized, '400' fabrication (connections, routing, fastener data)
   - studSpacingIn: stud spacing on-center in inches (16 or 24)
   - show*: per-system visibility (walls, floor, roof, foundation, electrical, plumbing, hvac)
-  - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'skip'
+  - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'skip', or { construction: 'cmu', cmuHeightM } for a mixed wall (CMU up to a course-snapped height, framed above)
   All framing members are derived live from the level's walls/openings/slabs/roofs; deleting this node removes the X-ray without touching the model.`,
 )
 
