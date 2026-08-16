@@ -78,7 +78,21 @@
   unification (Q6 answer pending), power-entry routing (node places at the
   panel wall weatherhead; no engine consumer yet).
 
-## State right now (POST-SHIP 2, ~03:30)
+## State right now (~04:30 — round-3 batch HELD for fixes)
+- Blueprint examiner round 3: REVISE — all round-2 items closed, but FAIL
+  N3 (section poché recolors whole members; cutX on a wall axis = black
+  sheet) + flags (roof-coverage bbox proxy misses the demo wing, electrical
+  label stacking, char zeros on slab-less, caps, pagination).
+- Connector skeptic: FAIL — connectors cross ROs unflagged (P5d) + takeoff
+  books them as phantom copper lf + elbows (hot/cold share sourceId).
+- FIX AGENT RUNNING (8 items, exact remedies in its brief) → on green:
+  re-verify (examiner N3/C1/P4 re-check + connector skeptic re-run via
+  workflow resume wf_cb4ae7d1-089 or fresh focused agents) → THEN ship
+  the round-3 batch (1bb6982+fixes) through the prod chain.
+- DO NOT ship 1bb6982 as-is. Prod remains at e8d15ea (main 13296c84) — the
+  two shipped batches are unaffected (all their loops closed PASS).
+
+## Older (POST-SHIP 2, ~03:30)
 - SERVICE POINTS SHIPPED: plugin e8d15ea via editor#661 + private-editor#356
   (main 13296c84). Two verify rounds, 8 defects fixed+gated, visual PASS,
   closing skeptic PASS. 559 tests. Localhost = prod sha.
