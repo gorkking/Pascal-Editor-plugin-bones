@@ -1,5 +1,29 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## Night-3 verify round CLOSED (e1a5cb4, 779 tests) — pin bump + visual re-run next
+Verify workflow (wf_17ed08df-799 resumed) returned REVISE×2 on 593e70c.
+All four skeptic findings + the visual QA's new defect fixed and gated:
+- F1 batt/gypsum interpenetration on 0.15m zone-3+ walls → depth caps at
+  thickness−1" + 'compressed' member FLAG (d386404, S7).
+- F2 INTL R-13 vs R-30 parity → battZoneInfo assumes zone 4 like the
+  characteristics engine (d386404, S7).
+- F3 brick/EIFS memberless → already fixed c2491e7+18997e5 (S9).
+- F4 2x6-on-thin-wall one-click reachability → compute warning + amber
+  studsNote both surfaces, geometry stays honest (e1a5cb4, S7). GLOBAL
+  stackOrigin-vs-framing-depth redesign QUEUED (pre-existing: 140 SAT
+  pairs on DEFAULT 0.15m/2x6 exteriors at baseline — decide: derate
+  studSizeFor to drawn thickness, or stacks hug stud faces and walls
+  fatten; byte-equality breaks either way, needs its own loop).
+- Visual NEW defect: dedupe dropped duplicate twins' openings (studs
+  through doorways, D2/D3 exhibits) → openings merge onto the kept
+  centerline (S8). Board-note: cripple bays (under-sill/above-header)
+  carry no batts in v1 — real walls insulate them; queued.
+Visual (c) stucco→vinyl 0-pixel FAIL was at the OLD sha: X-ray colors
+fixed (c2491e7), solid-mode slots.exterior paint shipped (7161ba7 +
+0.9.2 types). MUST re-verify (c) at the new pin before prod; visual
+also warned the dollhouse face-cull may hide exterior stacks from
+outside views — check both faces in the re-run.
+
 ## ACTIVE NOW (night 3): cladding visibility + wall-panel verify → prod
 User report: vinyl vs stucco shows no texture difference, "even when the
 wall is up". Two halves:

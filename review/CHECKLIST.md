@@ -99,6 +99,34 @@ AND a gate — a checklist line without a test is a wish.
   `src/engines/interpenetration.test.ts` (batt SAT scenarios) +
   `src/engines/takeoff.test.ts` (batt/cladding rows) +
   `src/panel-selection.test.ts` (resolver + write helpers)
+- **S7 Batts live INSIDE the layer cavity; misfit overrides warn.** Batt
+  depth caps at min(stud depth, wall thickness − 1") — the cavity the layer
+  stacks leave — with a member flag ('compressed … R derated', flag not
+  label so takeoff rows keep their names) when the squeeze exceeds 1/4".
+  Zone-less jurisdictions label batts with the SAME assumed-zone-4 R the
+  panel hint prints (one fallback, both sides). An EXPLICIT studSize
+  override deeper than thickness − 1" keeps its true (clashing) geometry
+  but raises a compute warning + amber studsNote on both surfaces;
+  defaults never warn (default-spec misfit on thick walls = the queued
+  stackOrigin redesign). Gates: 0.15m zone-5 SAT case in
+  `interpenetration.test.ts`, INTL parity in `wall-layers.test.ts`,
+  misfit note/warning in `panel-selection.test.ts`.
+- **S8 Colinear dedupe preserves the duplicates' OPENINGS.** When a twin
+  is dropped, its openings project onto the kept centerline and merge
+  (same-center+width dedupes, off-run projections skip) — studs/layers/
+  batts/devices must never run through a doorway that only the dropped
+  twin carried; the card's opening count includes merged ones. Kept-only
+  walls stay reference-equal. Gates: `src/framing/compute.test.ts`
+  (dedupe describe block).
+- **S9 The Engineering cladding choice reads in BOTH render modes.** Every
+  CLADDING_OPTIONS family emits ≥ 1 member (ROLE_OF covers veneer/lamina/
+  foam/drainage) with a per-family X-ray color (label-matched, pairwise
+  distinct, locked to the data file's material strings), and the panel
+  writes the host wall's `slots.exterior` MaterialRef (library texture or
+  minted flat scene material, kept id + colinear twins via paintIds) so
+  solid mode changes too. Gates: `wall-layers.test.ts` (family members),
+  `src/framing/cladding-colors.test.ts` (distinct colors),
+  `src/framing/cladding-paint.test.ts` (paint plans).
 
 ## M — Mechanical (HVAC)
 
