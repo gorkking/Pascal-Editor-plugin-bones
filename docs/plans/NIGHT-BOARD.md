@@ -167,6 +167,10 @@ E. ELECTRIC METER (user, same morning): standard chain = street input →
 - PER-UTILITY ARRIVAL MODE: electricity + internet can arrive OVERHEAD
   (weatherhead/drop from a pole) or UNDERGROUND (lateral) — each utility
   independently editable; drains always toward the street (no choice).
+- STREET FLAGS (user idea 2026-08-17): the street access points render as
+  small FLAGS at the lot edge (matching the host's lot-corner flag look) —
+  a cluster of 3-4 (power/water/sewer, later internet), each draggable,
+  each the origin of its service run to the matching box. Ties into Q6.
 - SHARED STREET CORRIDOR: all services arrive near one street-side zone as
   parallel-but-individually-editable runs (ties into Q6 street point).
 
