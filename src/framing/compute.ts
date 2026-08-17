@@ -437,7 +437,10 @@ function computeLevelUncached(
         // on thick walls is the queued stackOrigin redesign, not this.
         if (resolved.studSize) {
           const depth = LUMBER_CROSS_SECTIONS[resolved.studSize][1]
-          if (depth > wall.thickness - inches(1)) {
+          // 2mm tolerance (the SAT skin): the textbook 0.114m partition is
+          // 0.3mm shy of a true 4.5" assembly and must NOT warn on 2x4
+          // (verify round: false positive on the standard wall).
+          if (depth > wall.thickness - inches(1) + 0.002) {
             warnings.push(
               `Wall ${wall.id}: ${resolved.studSize} studs (${depth.toFixed(2)}m) exceed the ` +
                 `${wall.thickness.toFixed(2)}m drawn wall — finishes will clash; deepen the wall ` +

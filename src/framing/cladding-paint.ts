@@ -103,43 +103,68 @@ export function claddingPaintPlan(
 }
 
 /**
- * Apply the plan to every host wall node in the colinear group (paintIds
- * from selectedWallInfo — the kept wall plus its dedupe twins, so a merged
- * run repaints without a seam). Interior slots are never touched.
+ * Apply the OVERRIDE write and the solid-mode repaint as ONE store commit:
+ * the framing-node patch, every wall's new slots (paintIds from
+ * selectedWallInfo — the kept wall plus its dedupe twins, so a merged run
+ * repaints without a seam) and any minted material land in a single
+ * setState, so a single Cmd+Z reverts the whole cladding pick together
+ * (verify round: two entries let one undo desync the skin from the
+ * Engineering select). Interior slots are never touched.
  */
-export function paintWallExterior(paintIds: readonly string[], cladding: WallCladding): void {
+export function paintWallExterior(
+  paintIds: readonly string[],
+  cladding: WallCladding,
+  framingWrite?: { nodeId: string; patch: Record<string, unknown> },
+): void {
   const state = useScene.getState()
+
+  // Plan everything against the CURRENT state first (find-or-mint must see
+  // a material minted for wall A when planning wall B in the same pick).
+  const plans = new Map<string, CladdingPaintPlan>()
+  const mints: SceneMaterial[] = []
+  const staged: MaterialsLike = { ...(state.materials as MaterialsLike) }
   for (const wallId of paintIds) {
     const node = state.nodes[wallId as AnyNodeId] as
       | (AnyNode & { slots?: Record<string, string> })
       | undefined
     if (!node) continue
-    const plan = claddingPaintPlan(
-      cladding,
-      node.slots,
-      useScene.getState().materials as MaterialsLike,
-    )
+    const plan = claddingPaintPlan(cladding, node.slots, staged)
     if (!plan) continue
+    plans.set(wallId, plan)
     if (plan.mint) {
-      // Material + slot ref land in ONE set — one history entry, one undo
-      // removes both (same contract as the host's commitSlotPaint).
-      const mint = plan.mint
-      useScene.setState((s) => {
-        if (s.readOnly) return s
-        const live = s.nodes[wallId as AnyNodeId] as
-          | (AnyNode & { slots?: Record<string, string> })
-          | undefined
-        if (!live) return s
-        return {
-          materials: { ...s.materials, [mint.id]: mint },
-          nodes: { ...s.nodes, [wallId]: { ...live, slots: plan.slots } as AnyNode },
-        }
-      })
-      useScene.getState().markDirty(wallId as AnyNodeId)
-      continue
+      mints.push(plan.mint)
+      staged[plan.mint.id] = plan.mint
     }
-    useScene
-      .getState()
-      .updateNode(wallId as AnyNodeId, { slots: plan.slots } as Partial<AnyNode> as never)
   }
+  if (plans.size === 0 && !framingWrite) return
+
+  useScene.setState((s) => {
+    if (s.readOnly) return s
+    const nodes = { ...s.nodes }
+    let materials = s.materials
+    for (const mint of mints) {
+      materials = materials === s.materials ? { ...s.materials } : materials
+      ;(materials as Record<string, SceneMaterial>)[mint.id] = mint
+    }
+    for (const [wallId, plan] of plans) {
+      const live = nodes[wallId as AnyNodeId] as
+        | (AnyNode & { slots?: Record<string, string> })
+        | undefined
+      if (!live) continue
+      nodes[wallId as AnyNodeId] = { ...live, slots: plan.slots } as AnyNode
+    }
+    if (framingWrite) {
+      const live = nodes[framingWrite.nodeId as AnyNodeId]
+      if (live) {
+        nodes[framingWrite.nodeId as AnyNodeId] = {
+          ...live,
+          ...framingWrite.patch,
+        } as AnyNode
+      }
+    }
+    return { nodes, materials }
+  })
+  const after = useScene.getState()
+  for (const wallId of plans.keys()) after.markDirty(wallId as AnyNodeId)
+  if (framingWrite) after.markDirty(framingWrite.nodeId as AnyNodeId)
 }

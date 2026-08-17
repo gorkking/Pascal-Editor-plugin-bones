@@ -455,6 +455,23 @@ describe('selectedWallInfo — engineering rows', () => {
     expect(plain.warnings.some((w) => w.includes('studs') && w.includes('exceed'))).toBe(false)
   })
 
+  test('explicit 2x4 on the textbook 0.114m partition never warns (verify: false positive)', () => {
+    // 4.5" = 1/2" gyp + 3.5" stud + 1/2" gyp — the standard interior
+    // assembly. The drawn 0.114m is 0.3mm shy of true 4.5"; the misfit
+    // check carries a 2mm tolerance so this exact-fit case stays silent.
+    // (The fixture partition is 0.10m — a real misfit — so bump it to the
+    // textbook thickness for this case.)
+    const nodes = makeScene()
+    ;(nodes.wall_int as Record<string, unknown>).thickness = 0.114
+    const config = makeConfig({
+      wallOverrides: { wall_int: { construction: 'framed', studSize: '2x4' } },
+    })
+    const result = computeLevel(nodes, config)
+    const info = selectedWallInfo(nodes, select('wall_int'), config, result)
+    expect(info?.engineering?.studsNote).toBeNull()
+    expect(result.warnings.some((w) => w.includes('studs') && w.includes('exceed'))).toBe(false)
+  })
+
   test('CMU / skip walls carry no engineering rows (v1 note constant exists)', () => {
     const nodes = makeScene()
     const config = makeConfig({ wallOverrides: { wall_ext: 'cmu', wall_int: 'skip' } })

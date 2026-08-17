@@ -446,10 +446,18 @@ function SelectedWallCard({
                 className="w-full rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-sidebar-foreground text-xs outline-none"
                 onChange={(e) => {
                   const next = e.target.value as WallCladding
-                  writeField({ cladding: next })
                   // Bones members only exist in X-ray — repaint the
                   // host-drawn skin so the finish reads in solid mode too.
-                  paintWallExterior(info.paintIds, next)
+                  // ONE commit with the override write: a single undo
+                  // reverts the pick and the repaint together.
+                  paintWallExterior(info.paintIds, next, {
+                    nodeId: framingNode.id,
+                    patch: wallOverridePatch(
+                      framingNode,
+                      info.wallId,
+                      engineeringOverride(info.override, info.construction, { cladding: next }),
+                    ) as Record<string, unknown>,
+                  })
                 }}
                 value={eng.cladding}
               >

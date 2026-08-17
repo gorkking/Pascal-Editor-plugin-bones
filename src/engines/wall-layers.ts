@@ -250,7 +250,13 @@ export function layoutWallLayers(
       for (const layer of layers) {
         const t = inches(layer.thicknessIn)
         const role = ROLE_OF[layer.role]
-        if (!role) continue
+        if (!role) {
+          // Space-occupying but non-rendered (the brick veneer's 1" air
+          // gap): skipping WITHOUT advancing collapsed the airspace and
+          // parked the wythe flush against the WRB (verify round S9).
+          offset += t
+          continue
+        }
         const center = offset + t / 2
         for (const band of bands) {
           const len = band.u1 - band.u0 - (band.u0 < 0.02 ? inset.start : 0) - (band.u1 > wall.length - 0.02 ? inset.end : 0)

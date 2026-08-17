@@ -59,3 +59,18 @@ describe('claddingPaintPlan', () => {
     }
   })
 })
+
+describe('multi-wall pick mints ONE material (staged find-or-mint)', () => {
+  test('planning twin walls in one pick reuses the first mint for the second', () => {
+    // paintWallExterior plans every paintId against a STAGED materials map
+    // so wall B reuses the material minted for wall A in the same commit —
+    // mirror that staging here.
+    const staged: Record<string, { id: string; name: string; material: unknown }> = {}
+    const a = claddingPaintPlan('vinyl', undefined, staged)
+    if (a?.mint) staged[a.mint.id] = a.mint
+    const b = claddingPaintPlan('vinyl', undefined, staged)
+    expect(a?.mint).toBeDefined()
+    expect(b?.mint).toBeUndefined()
+    expect(b?.slots.exterior).toBe(a?.slots.exterior)
+  })
+})

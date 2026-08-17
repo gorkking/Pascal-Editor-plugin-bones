@@ -349,3 +349,22 @@ describe('INTL fallback parity (verify S6: hint said R-30, members said R-13)', 
     }
   })
 })
+
+describe('brick veneer air gap occupies space (verify S9: collapsed airspace)', () => {
+  test('the wythe sits a full 1" gap beyond the WRB face', () => {
+    const overrides = new Map<string, WallLayerOverride>([
+      ['wall_L', { cladding: 'brickVeneer' }],
+    ])
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'NY', [], overrides)
+    const wrb = layers.find((m) => m.role === 'wrb')
+    const veneer = layers.find((m) => m.role === 'cladding')
+    expect(wrb).toBeDefined()
+    expect(veneer).toBeDefined()
+    // distance between member centers along the wall normal = half the WRB +
+    // the FULL 1" airspace + half the wythe
+    const gap =
+      Math.abs((veneer?.position[2] as number) - (wrb?.position[2] as number)) -
+      ((wrb?.dims[2] as number) + (veneer?.dims[2] as number)) / 2
+    expect(gap).toBeCloseTo(0.0254, 3)
+  })
+})

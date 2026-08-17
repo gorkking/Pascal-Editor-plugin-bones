@@ -208,7 +208,7 @@ export function selectedWallInfo(
           claddingDefault: resolved.cladding === undefined,
           studsNote:
             resolved.studSize !== undefined &&
-            LUMBER_CROSS_SECTIONS[resolved.studSize][1] > wall.thickness - METERS_PER_INCH
+            LUMBER_CROSS_SECTIONS[resolved.studSize][1] > wall.thickness - METERS_PER_INCH + 0.002
               ? `${resolved.studSize} studs exceed this ${wall.thickness.toFixed(2)}m wall — ` +
                 `finishes will clash; deepen the wall or drop to 2x4`
               : null,
