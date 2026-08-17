@@ -1,5 +1,25 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## ACTIVE NOW (night 3): cladding visibility + wall-panel verify → prod
+User report: vinyl vs stucco shows no texture difference, "even when the
+wall is up". Two halves:
+- X-RAY half FIXED (c2491e7, 766 tests): ROLE_OF in wall-layers.ts was
+  missing veneer/lamina/foam/drainage → Brick veneer + EIFS emitted ZERO
+  members (TX brick default was bare); colorOf now gives each cladding
+  family a distinct color via label matching (brick red #9e4a3a, stucco
+  sand #d6cdb8, vinyl #b9c6d1, fiber-cement #a9b3a4, wood #a67848, EIFS
+  #e3dccb). Gate: every family emits ≥1 cladding member.
+- SOLID-MODE half: host draws the wall skin; scout agent (Explore) is
+  mapping host wall material/texture APIs — options: wall-node field,
+  material override API, or plugin-drawn exterior skin overlay.
+State: verify workflow wch91e22w (resumed wf_17ed08df-799, panel skeptic
++ visual) STILL RUNNING — pin bump to c2491e7 deferred until it finishes
+(don't restart dev server under its Playwright). Then: bump pin, visual
+check cladding colors on localhost, ship whole wall-engineering batch to
+prod (user authorized: "on to production after working all night").
+Scratch files scratch.review*.test.ts belong to the running skeptic —
+do not touch/commit.
+
 ## Day batch SHIPPED: plugin eace4e8 via editor#665+#666 + private-editor#358
 (prod main 9131aedc, E2E green post-merge). 585→668 tests. Five verify
 rounds; ~18 confirmed defects fixed+gated today. All four morning items +
