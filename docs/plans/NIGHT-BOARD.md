@@ -1,5 +1,15 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-3 SHIPPED (~02:10): prod main 9e3716e0
+Plugin f308cf36 via editor #670 (main 4cbf30bc) → private-editor #360.
+Narrow verify: skeptic PASS + visual PASS (undo single-commit proven
+against the real zundo store; air gap 25.0mm live in the instance
+matrices; 782 tests, tsc clean, byte-equal across 51 jurisdictions —
+only the 7 brick-default states moved veneer members 1" outward).
+Post-ship on master (NOT shipped, next batch): ef95831 — advisories
+commit (readOnly bail, warning text, S7 row text, TX brick SAT
+scenario; 783 tests). Localhost pinned f308cf36 = prod build.
+
 ## Night-3 ROUND 2 (f308cf36, 782 tests) — narrow verify in flight, then SHIP
 Round-1 verify at dc1daf3a: skeptic REVISE (2 new findings), visual
 REVISE (1 finding + caveat). All three fixed + gated in f308cf36:
