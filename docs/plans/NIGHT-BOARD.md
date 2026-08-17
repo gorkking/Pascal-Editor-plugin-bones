@@ -1,5 +1,42 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## Night-3 ROUND 2 (f308cf36, 782 tests) — narrow verify in flight, then SHIP
+Round-1 verify at dc1daf3a: skeptic REVISE (2 new findings), visual
+REVISE (1 finding + caveat). All three fixed + gated in f308cf36:
+- S9 air gap: emitStack now ADVANCES offset for unmapped layers — brick
+  wythe was flush against the WRB (1" airspace collapsed; wythe center
+  0.1197m instead of 0.1451m on 0.15m TX walls). Gate: wythe−WRB clear
+  gap = 1".
+- S7 false positive: misfit warning told 2x4-on-0.114m users to "drop
+  to 2x4" (0.3mm rounding) — now has the 2mm SAT-skin grace. Gate:
+  textbook partition never warns; 0.10m still does.
+- Undo desync: cladding pick was TWO history entries (override +
+  repaint) — one Cmd+Z reverted only the skin. paintWallExterior now
+  lands framing patch + all twin slots + mints in ONE setState;
+  find-or-mint staged across paintIds (twins share one minted
+  material). Gate: staged-mint reuse.
+Round-1 PASSES to keep: doors framed through merged openings (E1
+downstream non-vacuous), batt sweep clean at 5 thicknesses × 3 states,
+INTL/AUTO parity closed, byte-equal breadth (TX +12 veneer-only),
+solid-mode repaint 68-70% pixel change per family, misfit note both
+surfaces addressed to the kept twin id.
+BOARD NOTES from visual round 1:
+- X-ray cladding only reads at GRAZING angles: the dollhouse face-cull
+  hides camera-facing exterior stacks, and from inside the sheathing
+  occludes them. Straight-on outside views show nothing. Idea for a
+  future loop: exempt the outermost cladding layer from the cull, or
+  add a 'finishes' view toggle. Solid mode is the primary answer today.
+- Batt 'compressed' flag aggregates in Takeoff → Flags (by design), NOT
+  the warnings list. Advisory only.
+- find-or-mint uses JSON.stringify equality — host-authored materials
+  with different key order mint a cosmetic duplicate. Advisory.
+SHIP CHAIN: editor PR #670 open (bumped to f308cf36, CI re-running) →
+merge after narrow verify PASS → private-editor PR (community pin +
+editor submodule gitlink) → E2E → merge = prod. Localhost pinned
+f308cf36, server healthy. Watch for turbo/tsgo ORPHAN WATCHERS when
+restarting the dev server (EMFILE pile-up — pkill turbo+tsgo+next
+first, they survive `pkill next`).
+
 ## Night-3 verify round CLOSED (e1a5cb4, 779 tests) — pin bump + visual re-run next
 Verify workflow (wf_17ed08df-799 resumed) returned REVISE×2 on 593e70c.
 All four skeptic findings + the visual QA's new defect fixed and gated:
