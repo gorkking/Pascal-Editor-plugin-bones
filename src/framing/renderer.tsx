@@ -27,7 +27,7 @@ import type { FramingNode } from './schema'
  */
 
 /** Color buckets — material first, with structural roles popped for reading. */
-function colorOf(member: Member): string {
+export function colorOf(member: Member): string {
   // Wires color by CIRCUIT (sourceId carries the circuit id) so a run reads
   // as its zone in the building exactly like on the exported plan.
   if (member.system === 'electrical' && member.role === 'wire-run') {
