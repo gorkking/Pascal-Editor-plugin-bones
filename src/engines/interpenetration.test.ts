@@ -372,6 +372,35 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(combined).filter((v) => v.includes('insulation'))).toEqual([])
   })
 
+  test('TX brick-default rectangle: veneer + air gap SAT-clean at corners (S9)', () => {
+    // The brick wythe sits a full 1" airspace beyond the WRB (round-2 air
+    // gap fix) — this pins the moved wythes clashing with nothing,
+    // including wythe-vs-wythe at the four corners (skeptic advisory: the
+    // matrix had no brick-state scenario).
+    const rectangle = [
+      wall({ id: 'w_s', start: [0, 0], end: [6, 0] }),
+      wall({ id: 'w_e', start: [6, 0], end: [6, 4] }),
+      wall({ id: 'w_n', start: [6, 4], end: [0, 4] }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const combined = [
+      ...frameWalls(rectangle, spec400),
+      ...layoutWallLayers(rectangle, rooms, spec400, 'TX'),
+    ]
+    expect(combined.some((m) => m.role === 'cladding' && m.label?.includes('wythe'))).toBe(true)
+    expect(violations(combined)).toEqual([])
+  })
+
   test('batts + tee partition backing: ladder bay skipped, SAT-clean (engineering panel)', () => {
     const composed = [
       wall({ id: 'w_through', start: [0, 0], end: [6, 0] }),

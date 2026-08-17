@@ -117,6 +117,10 @@ export function paintWallExterior(
   framingWrite?: { nodeId: string; patch: Record<string, unknown> },
 ): void {
   const state = useScene.getState()
+  // Bail BEFORE the setState: guarding only inside the reducer still
+  // pushes an identical-snapshot undo entry in read-only mode (verify
+  // round advisory — host actions guard before set).
+  if ((state as { readOnly?: boolean }).readOnly) return
 
   // Plan everything against the CURRENT state first (find-or-mint must see
   // a material minted for wall A when planning wall B in the same pick).

@@ -444,7 +444,7 @@ function computeLevelUncached(
             warnings.push(
               `Wall ${wall.id}: ${resolved.studSize} studs (${depth.toFixed(2)}m) exceed the ` +
                 `${wall.thickness.toFixed(2)}m drawn wall — finishes will clash; deepen the wall ` +
-                `to ≥ ${(depth + inches(1)).toFixed(2)}m or drop to 2x4`,
+                `to ${(depth + inches(1) - 0.002).toFixed(2)}m or drop to 2x4`,
             )
           }
         }

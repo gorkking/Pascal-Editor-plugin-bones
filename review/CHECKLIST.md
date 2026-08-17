@@ -105,8 +105,10 @@ AND a gate — a checklist line without a test is a wish.
   label so takeoff rows keep their names) when the squeeze exceeds 1/4".
   Zone-less jurisdictions label batts with the SAME assumed-zone-4 R the
   panel hint prints (one fallback, both sides). An EXPLICIT studSize
-  override deeper than thickness − 1" keeps its true (clashing) geometry
-  but raises a compute warning + amber studsNote on both surfaces;
+  override deeper than thickness − 1" + 2mm (the SAT-skin rounding grace —
+  the textbook 2x4-in-0.114m partition never warns) keeps its true
+  (clashing) geometry but raises a compute warning + amber studsNote on
+  both surfaces;
   defaults never warn (default-spec misfit on thick walls = the queued
   stackOrigin redesign). Gates: 0.15m zone-5 SAT case in
   `interpenetration.test.ts`, INTL parity in `wall-layers.test.ts`,
