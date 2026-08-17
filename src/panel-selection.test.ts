@@ -436,6 +436,23 @@ describe('selectedWallInfo — engineering rows', () => {
     expect(eng?.claddingDefault).toBe(false)
     // the printed recipe is the per-wall one the engines frame with
     expect(info?.assembly).toBe('2x4 studs @ 24" o.c.')
+    // 2x4 (0.089m) fits the 0.15m wall — no misfit note
+    expect(eng?.studsNote).toBeNull()
+  })
+
+  test('explicit 2x6 on a thin wall raises the misfit note + compute warning (verify F4)', () => {
+    const nodes = makeScene()
+    // wall_int is the 0.10m partition — 2x6 (0.14m) cannot fit it
+    const config = makeConfig({
+      wallOverrides: { wall_int: { construction: 'framed', studSize: '2x6' } },
+    })
+    const result = computeLevel(nodes, config)
+    const info = selectedWallInfo(nodes, select('wall_int'), config, result)
+    expect(info?.engineering?.studsNote).toContain('2x6 studs exceed')
+    expect(result.warnings.some((w) => w.includes('2x6 studs') && w.includes('exceed'))).toBe(true)
+    // defaults never warn — the default-spec misfit is the queued redesign
+    const plain = computeLevel(nodes, makeConfig({ jurisdiction: 'TX' }))
+    expect(plain.warnings.some((w) => w.includes('studs') && w.includes('exceed'))).toBe(false)
   })
 
   test('CMU / skip walls carry no engineering rows (v1 note constant exists)', () => {

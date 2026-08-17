@@ -423,6 +423,9 @@ function SelectedWallCard({
           {eng.studsDefault && (
             <span className="text-[10px] text-sidebar-foreground/40">per state code</span>
           )}
+          {eng.studsNote && (
+            <span className="text-[10px] text-amber-500/80">{eng.studsNote}</span>
+          )}
           <span className="mt-1 text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
             Insulation
           </span>

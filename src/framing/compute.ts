@@ -42,6 +42,7 @@ import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
 import { frameWalls } from '../engines/wall-framing'
+import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
 import type { TakeoffAreas } from '../engines/takeoff'
@@ -430,6 +431,20 @@ function computeLevelUncached(
       else {
         framed.push(wall)
         engineering.set(wall.id, resolved)
+        // An EXPLICIT stud override deeper than the drawn wall can hold is
+        // a real design clash — show it (the X-ray keeps the true 2x6
+        // geometry) and say so, like RO warnings. The default-spec misfit
+        // on thick walls is the queued stackOrigin redesign, not this.
+        if (resolved.studSize) {
+          const depth = LUMBER_CROSS_SECTIONS[resolved.studSize][1]
+          if (depth > wall.thickness - inches(1)) {
+            warnings.push(
+              `Wall ${wall.id}: ${resolved.studSize} studs (${depth.toFixed(2)}m) exceed the ` +
+                `${wall.thickness.toFixed(2)}m drawn wall — finishes will clash; deepen the wall ` +
+                `to ≥ ${(depth + inches(1)).toFixed(2)}m or drop to 2x4`,
+            )
+          }
+        }
       }
     }
     members.push(...frameWalls(framed, spec, engineering))

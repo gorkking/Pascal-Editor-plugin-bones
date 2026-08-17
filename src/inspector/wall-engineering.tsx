@@ -339,6 +339,9 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
           {eng.studsDefault && (
             <span className="text-[10px] text-muted-foreground/70">per state code</span>
           )}
+          {eng.studsNote && (
+            <span className="text-[10px] text-amber-500/80">{eng.studsNote}</span>
+          )}
           <span className="mt-1 text-[10px] text-muted-foreground/80 uppercase tracking-wider">
             Insulation
           </span>

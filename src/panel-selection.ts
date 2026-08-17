@@ -11,6 +11,7 @@ import assemblies from '../data/wall-assemblies.json'
 import { extractRooms, extractWalls } from './core/wall-model'
 import { COURSE_HEIGHT, courseCount, snapCmuHeight } from './engines/cmu'
 import { studSizeFor } from './engines/wall-framing'
+import { LUMBER_CROSS_SECTIONS } from './lumber'
 import {
   type ComputeResult,
   dedupeColinearWalls,
@@ -83,6 +84,10 @@ export type WallEngineeringInfo = {
   codeMinHint: string
   cladding: WallCladding
   claddingDefault: boolean
+  /** Amber note when an EXPLICIT stud override is deeper than the drawn
+   * wall can hold (2x6 in a 0.10m partition) — mirrors the compute warning;
+   * the X-ray keeps the true clashing geometry. Null when it fits. */
+  studsNote: string | null
 }
 
 export type SelectedWallInfo = {
@@ -201,6 +206,12 @@ export function selectedWallInfo(
             ((CLADDING_DATA.defaultCladdingByState[result.jurisdiction] ??
               'vinyl') as WallCladding),
           claddingDefault: resolved.cladding === undefined,
+          studsNote:
+            resolved.studSize !== undefined &&
+            LUMBER_CROSS_SECTIONS[resolved.studSize][1] > wall.thickness - METERS_PER_INCH
+              ? `${resolved.studSize} studs exceed this ${wall.thickness.toFixed(2)}m wall — ` +
+                `finishes will clash; deepen the wall or drop to 2x4`
+              : null,
         }
       : null
 
