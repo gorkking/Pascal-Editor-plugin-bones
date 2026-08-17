@@ -110,6 +110,10 @@ export type SelectedWallInfo = {
    * twin — a duplicate's own engineering would be a lie (it is never framed)
    * and an override on its id would be inert. */
   duplicateNote: string | null
+  /** Host wall-node ids the solid-mode cladding paint must cover: the kept
+   * wall PLUS its colinear duplicates — painting only the kept id would
+   * leave a seam where an overlapping twin still shows the old skin. */
+  paintIds: string[]
   /** Editable engineering rows — framed walls only, null for CMU/skip. */
   engineering: WallEngineeringInfo | null
   /** 'length · gross/net area · openings' readout, identical on both surfaces. */
@@ -230,6 +234,11 @@ export function selectedWallInfo(
       ? `Duplicate overlapping wall — showing the framed twin (${label}); edits apply to it`
       : null
 
+  const paintIds = [
+    wall.id,
+    ...[...duplicateOf.entries()].filter(([, kept]) => kept === wall.id).map(([dup]) => dup),
+  ]
+
   return {
     wallId: wall.id,
     label,
@@ -241,6 +250,7 @@ export function selectedWallInfo(
     assembly,
     insulation,
     duplicateNote,
+    paintIds,
     engineering,
     dimensions,
     garageNote,

@@ -2,6 +2,7 @@
 
 import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
 import { useMemo, useRef, useState } from 'react'
+import { paintWallExterior } from '../framing/cladding-paint'
 import { computeLevel } from '../framing/compute'
 import {
   FramingNode,
@@ -356,7 +357,13 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
               </span>
               <select
                 className="w-full rounded-lg border border-border/50 bg-[#2C2C2E] px-2 py-1.5 text-foreground text-xs outline-none"
-                onChange={(e) => writeField({ cladding: e.target.value as WallCladding })}
+                onChange={(e) => {
+                  const next = e.target.value as WallCladding
+                  writeField({ cladding: next })
+                  // Bones members only exist in X-ray — repaint the
+                  // host-drawn skin so the finish reads in solid mode too.
+                  paintWallExterior(info.paintIds, next)
+                }}
                 value={eng.cladding}
               >
                 {CLADDING_OPTIONS.map((o) => (

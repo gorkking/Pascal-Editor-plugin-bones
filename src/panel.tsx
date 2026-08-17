@@ -4,6 +4,7 @@ import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
 import { SegmentedControl, SliderControl, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
+import { paintWallExterior } from './framing/cladding-paint'
 import { computeLevel } from './framing/compute'
 import { extractLevels } from './core/wall-model'
 import {
@@ -440,7 +441,13 @@ function SelectedWallCard({
               </span>
               <select
                 className="w-full rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-sidebar-foreground text-xs outline-none"
-                onChange={(e) => writeField({ cladding: e.target.value as WallCladding })}
+                onChange={(e) => {
+                  const next = e.target.value as WallCladding
+                  writeField({ cladding: next })
+                  // Bones members only exist in X-ray — repaint the
+                  // host-drawn skin so the finish reads in solid mode too.
+                  paintWallExterior(info.paintIds, next)
+                }}
                 value={eng.cladding}
               >
                 {CLADDING_OPTIONS.map((o) => (
