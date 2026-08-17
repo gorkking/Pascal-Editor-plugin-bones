@@ -180,6 +180,14 @@ const ROLE_OF: Record<string, MemberRole> = {
   sheathing: 'sheathing',
   wrb: 'wrb',
   cladding: 'cladding',
+  // Brick veneer + EIFS families (verify round: their layer roles were
+  // unmapped, so selecting them emitted NO members — TX's brick default
+  // rendered bare). Air gaps stay unmapped (air is not a member); the
+  // EIFS drainage plane behaves as a WRB.
+  veneer: 'cladding',
+  lamina: 'cladding',
+  foam: 'cladding',
+  drainage: 'wrb',
 }
 
 export function layoutWallLayers(

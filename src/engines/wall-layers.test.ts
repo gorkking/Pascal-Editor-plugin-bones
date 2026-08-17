@@ -318,3 +318,13 @@ describe('layoutWallLayers — insulation batts', () => {
     expect(layers.some((m) => m.role === 'insulation')).toBe(true)
   })
 })
+
+describe('cladding families all emit members (verify round: brick/EIFS were bare)', () => {
+  for (const fam of ['brickVeneer', 'eifs', 'stucco', 'vinyl', 'wood', 'fiberCement']) {
+    test(`${fam} emits at least one cladding member`, () => {
+      const overrides = new Map<string, WallLayerOverride>([['wall_L', { cladding: fam }]])
+      const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'NY', [], overrides)
+      expect(layers.some((m) => m.role === 'cladding')).toBe(true)
+    })
+  }
+})

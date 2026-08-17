@@ -47,8 +47,18 @@ function colorOf(member: Member): string {
       return '#c8a262'
     case 'wrb':
       return '#4f7d8c'
-    case 'cladding':
+    case 'cladding': {
+      // Distinct per-family colors so the Engineering panel's finish choice
+      // reads in the X-ray (user report: stucco vs vinyl looked identical).
+      const l = (member.label ?? '').toLowerCase()
+      if (l.includes('brick')) return '#9e4a3a'
+      if (l.includes('stucco') || l.includes('plaster')) return '#d6cdb8'
+      if (l.includes('vinyl')) return '#b9c6d1'
+      if (l.includes('fiber cement')) return '#a9b3a4'
+      if (l.includes('wood')) return '#a67848'
+      if (l.includes('eps') || l.includes('base coat') || l.includes('finish')) return '#e3dccb'
       return '#aebfc7'
+    }
     case 'insulation':
       return '#e8b4c8' // pink batts (board spec, full wall engineering panel)
     default:
