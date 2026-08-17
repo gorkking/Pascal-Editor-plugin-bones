@@ -3,7 +3,7 @@ import type { WallSlice } from '../core/types'
 import { extractServiceOverrides } from '../core/wall-model'
 import { computeTakeoff } from '../engines/takeoff'
 import { FramingNode } from './schema'
-import { computeLevel, resolveWallConstruction, wallConstruction } from './compute'
+import { computeLevel, dedupeColinearWalls, resolveWallConstruction, wallConstruction } from './compute'
 
 /** A minimal one-level scene: two exterior walls, one interior, one curved. */
 function makeScene(): Record<string, Record<string, unknown>> {
@@ -712,5 +712,73 @@ describe('computeLevel — per-wall engineering plumb-through', () => {
       makeConfig({ wallOverrides: { wall_ext: { construction: 'framed', insulation: 'none' } } }),
     )
     expect(viaNone.members).toEqual(base.members)
+  })
+})
+
+
+describe('dedupeColinearWalls — duplicate openings merge into the kept twin (verify doors exhibit)', () => {
+  const slice = (over: Partial<WallSlice>): WallSlice => ({
+    id: 'w',
+    start: [0, 0],
+    end: [6, 0],
+    dir: [1, 0],
+    length: 6,
+    thickness: 0.114,
+    height: 2.44,
+    exterior: false,
+    openings: [],
+    curved: false,
+    ...over,
+  })
+  const door = (u: number) => ({
+    id: `door_${u}`,
+    kind: 'door' as const,
+    u,
+    width: 0.81,
+    height: 2.03,
+    sillHeight: 0,
+    roughWidth: 0.86,
+    roughHeight: 2.08,
+  })
+
+  test('a doored duplicate projects its door onto the kept wall', () => {
+    // Two rooms each drew their own boundary: the hall's 6m wall (kept,
+    // longer, no door) and the bedroom's 4m twin carrying the door. Before
+    // the merge, framing ran studs straight through the doorway.
+    const keptWall = slice({ id: 'w_hall' })
+    const dupWall = slice({ id: 'w_bed', start: [1, 0], end: [5, 0], length: 4, openings: [door(2)] })
+    const { walls, duplicateOf } = dedupeColinearWalls([keptWall, dupWall])
+    expect(duplicateOf.get('w_bed')).toBe('w_hall')
+    const kept = walls.find((w) => w.id === 'w_hall')
+    expect(kept?.openings).toHaveLength(1)
+    // door at u=2 on the twin, twin starts at x=1 → u=3 on the kept wall
+    expect(kept?.openings[0]?.u).toBeCloseTo(3, 5)
+    expect(kept?.openings[0]?.kind).toBe('door')
+  })
+
+  test('the SAME door drawn on both twins merges once; off-run openings drop', () => {
+    const keptWall = slice({ id: 'w_a', openings: [door(3)] })
+    const dupWall = slice({
+      id: 'w_b',
+      start: [1, 0],
+      end: [5, 0],
+      length: 4,
+      // u=2 on the twin = u=3 on kept (the same door), plus one projecting
+      // past the kept end (u=7) that must be skipped, not clamped into it.
+      openings: [door(2), { ...door(3.9), u: 6.5 }],
+    })
+    const { walls } = dedupeColinearWalls([keptWall, dupWall])
+    const kept = walls.find((w) => w.id === 'w_a')
+    expect(kept?.openings).toHaveLength(1)
+    expect(kept?.openings[0]?.u).toBeCloseTo(3, 5)
+  })
+
+  test('walls without duplicates come through untouched (reference-equal)', () => {
+    const a = slice({ id: 'w_a' })
+    const b = slice({ id: 'w_b', start: [0, 4], end: [6, 4] })
+    const { walls, duplicateOf } = dedupeColinearWalls([a, b])
+    expect(duplicateOf.size).toBe(0)
+    expect(walls).toContain(a)
+    expect(walls).toContain(b)
   })
 })

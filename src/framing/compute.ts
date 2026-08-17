@@ -269,7 +269,7 @@ export function dedupeColinearWalls(rawWalls: WallSlice[]): {
   const walls: WallSlice[] = []
   const duplicateOf = new Map<string, string>()
   for (const w of [...rawWalls].sort((a, b) => b.length - a.length)) {
-    const dup = walls.find((kept) => {
+    const dupIdx = walls.findIndex((kept) => {
       if (Math.abs(kept.thickness - w.thickness) > 0.03) return false
       const cross = Math.abs(kept.dir[0] * w.dir[1] - kept.dir[1] * w.dir[0])
       if (cross > 0.05) return false
@@ -283,8 +283,37 @@ export function dedupeColinearWalls(rawWalls: WallSlice[]): {
       }
       return on(w.start) && on(w.end)
     })
-    if (dup) duplicateOf.set(w.id, dup.id)
-    else walls.push(w)
+    if (dupIdx < 0) {
+      walls.push(w)
+      continue
+    }
+    const kept = walls[dupIdx] as WallSlice
+    duplicateOf.set(w.id, kept.id)
+    // The twins usually come from two rooms each drawing their own boundary
+    // — and only ONE of them carries the door. Dropping the duplicate used
+    // to drop its openings with it, framing studs straight through real
+    // doorways (verify round, doors exhibit). Project the duplicate's
+    // openings onto the kept centerline and merge the ones the kept wall
+    // doesn't already have.
+    const merged = [...kept.openings]
+    let added = false
+    for (const o of w.openings) {
+      const px = w.start[0] + w.dir[0] * o.u
+      const pz = w.start[1] + w.dir[1] * o.u
+      const u =
+        (px - kept.start[0]) * kept.dir[0] + (pz - kept.start[1]) * kept.dir[1]
+      if (u < -0.05 || u > kept.length + 0.05) continue
+      const twin = merged.some(
+        (k) => Math.abs(k.u - u) < 0.15 && Math.abs(k.roughWidth - o.roughWidth) < 0.15,
+      )
+      if (twin) continue
+      merged.push({ ...o, u: Math.min(Math.max(u, 0), kept.length) })
+      added = true
+    }
+    if (added) {
+      merged.sort((a, b) => a.u - b.u)
+      walls[dupIdx] = { ...kept, openings: merged }
+    }
   }
   return { walls, duplicateOf }
 }
