@@ -340,6 +340,38 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(combined)).toEqual([])
   })
 
+  test('0.15m zone-5 wall: batts compress into the layer cavity, never share volume (verify S1)', () => {
+    // The blocker case the 0.114m gates missed: NY (zone 5) books a nominal
+    // 5.5" batt, but a 0.15m wall's layer stacks start at (0.15-1")/2 from
+    // center — the batt must compress to that cavity, not poke 7.55mm into
+    // the gypsum. Framing×layer pairs at 0.15m are the QUEUED pre-existing
+    // stackOrigin flaw, so this gate owns the INSULATION pairs only.
+    const w015 = wall({ id: 'w_thick', start: [0, 0], end: [6, 0], thickness: 0.15 })
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+        boundaryWallIds: ['w_thick'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const overrides = new Map([['w_thick', { insulation: 'batt' as const }]])
+    const combined = [
+      ...frameWall(w015, spec400),
+      ...layoutWallLayers([w015], rooms, spec400, 'NY', [], overrides),
+    ]
+    const batts = combined.filter((m) => m.role === 'insulation')
+    expect(batts.length).toBeGreaterThan(0)
+    // Nominal 5.5" (0.1397m) does not fit — depth capped at thickness - 1".
+    for (const b of batts) {
+      expect(b.dims[2]).toBeLessThanOrEqual(0.15 - 0.0254 + 1e-9)
+      expect(b.flag).toContain('compressed')
+    }
+    expect(violations(combined).filter((v) => v.includes('insulation'))).toEqual([])
+  })
+
   test('batts + tee partition backing: ladder bay skipped, SAT-clean (engineering panel)', () => {
     const composed = [
       wall({ id: 'w_through', start: [0, 0], end: [6, 0] }),

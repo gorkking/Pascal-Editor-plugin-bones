@@ -243,8 +243,10 @@ describe('layoutWallLayers — insulation batts', () => {
     const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'NY', [], battMap())
     const batts = layers.filter((m) => m.role === 'insulation')
     expect(batts.length).toBeGreaterThan(5) // one per clear bay on a 6m wall
-    // NY primary zone 5A → prescriptive R-30 (2021 IECC)
+    // NY primary zone 5A → prescriptive R-30 (2021 IECC); the 5.5" zone
+    // batt in a 2x4 bay is a real 2" squeeze — flagged, label stays clean.
     for (const b of batts) expect(b.label).toBe('batt R-30 (zone 5A)')
+    for (const b of batts) expect(b.flag).toContain('compressed')
     // depth caps at the stud bay (0.114m wall → 2x4 bay, 3.5")
     for (const b of batts) expect(b.dims[2]).toBeLessThanOrEqual(3.5 * 0.0254 + 1e-9)
     // system/sourceId ride like every other wall member
@@ -327,4 +329,23 @@ describe('cladding families all emit members (verify round: brick/EIFS were bare
       expect(layers.some((m) => m.role === 'cladding')).toBe(true)
     })
   }
+})
+
+describe('INTL fallback parity (verify S6: hint said R-30, members said R-13)', () => {
+  test('zone-less jurisdictions label batts with the SAME assumed-zone-4 R as the panel hint', () => {
+    const DATA = require('../../data/wall-assemblies.json')
+    const zone4R = Number.parseInt(
+      (DATA.exterior.insulationByClimateZone['4'].value as string).replace(/^R/i, ''),
+      10,
+    )
+    const overrides = new Map<string, WallLayerOverride>([
+      ['wall_L', { insulation: 'batt' }],
+    ])
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'INTL', [], overrides)
+    const batts = layers.filter((m) => m.role === 'insulation')
+    expect(batts.length).toBeGreaterThan(0)
+    for (const b of batts) {
+      expect(b.label).toContain(`R-${zone4R}`)
+    }
+  })
 })

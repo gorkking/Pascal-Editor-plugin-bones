@@ -334,7 +334,11 @@ function battZoneInfo(state: string): BattZone {
   const raw = DATA.exterior.stateClimateZone?.[state]
   const m = raw ? /^(\d)([ABC])?/.exec(raw.trim()) : null
   const key = m ? (m[1] === '4' && m[2] === 'C' ? '4M' : (m[1] as string)) : null
-  const entry = key ? DATA.exterior.insulationByClimateZone?.[key] : undefined
+  // Zone-less codes (INTL) assume zone 4 — the SAME assumption the
+  // characteristics engine (and so the panel's 'code min' hint) makes; a
+  // private R-13 fallback here left members labeled R-13 under a hint
+  // reading R-30 (verify round S6 parity finding).
+  const entry = DATA.exterior.insulationByClimateZone?.[key ?? '4']
   const minR = entry?.value ? Number.parseInt(entry.value.replace(/^R/i, ''), 10) || 13 : 13
   return {
     zoneLabel: m ? `${m[1]}${m[2] ?? ''}` : null,
@@ -415,8 +419,21 @@ function insulationBatts(
 
   const type = override.insulation ?? 'batt'
   const r = override.insulationR ?? zone.minR
+  // The batt can only fill the cavity the LAYER stacks leave: they start at
+  // stackOrigin = min(studDepth, thickness-1")/2 from center, so a nominal
+  // 5.5" zone-5 batt in a 0.15m wall must compress or it shares volume with
+  // the gypsum (verify round S1 finding: 7.55mm overlap, 30 SAT pairs).
+  const cavity = Math.min(w, wall.thickness - inches(1))
+  const depth = Math.min(inches(zone.thicknessIn), cavity)
+  // Flag the compression only when it's real (> 1/4"): a 2x4 bay shaves a
+  // 3.5" batt by ~0.3mm on 0.114m walls, which no installer would call
+  // compressed. Flag, not label: takeoff rows key off the label, and flags
+  // aggregate to one warning row with a count.
+  const compressed = depth < inches(zone.thicknessIn) - inches(0.25)
+  const flag = compressed
+    ? `${zone.thicknessIn}" batt compressed into a shallower cavity — R derated below R-${r}`
+    : undefined
   const label = `${type} R-${r}${zone.zoneLabel ? ` (zone ${zone.zoneLabel})` : ''}`
-  const depth = Math.min(inches(zone.thicknessIn), w)
   const yaw = Math.atan2(-wall.dir[1], wall.dir[0])
 
   for (let i = 0; i + 1 < studUs.length; i++) {
@@ -457,6 +474,7 @@ function insulationBatts(
           material: 'lumber',
           sourceId: wall.id,
           label,
+          flag,
         })
       }
     }
