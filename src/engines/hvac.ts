@@ -1050,14 +1050,18 @@ export function layoutHvac(
           const faceOff = row.wall.thickness / 2 + 0.02
           const face: Pt = [pen[0] + slot.out[0] * faceOff, pen[1] + slot.out[1] * faceOff]
           const discY = unitTopY + DISCONNECT_ABOVE_UNIT
+          // Dedicated 2-pole branch circuit (NEC 440): ≤3-ton units run
+          // 30A/10 AWG, larger 40A/8 AWG — routeWiring homeruns the panel
+          // to this box like any device (compute wires it post-HVAC).
+          const acGauge = plan.unitTons <= 3 ? 10 : 8
           fixtures.push({
             system: 'hvac',
             kind: 'disconnect',
             position: [face[0], discY, face[1]],
             rotationY: Math.atan2(slot.out[0], slot.out[1]),
             sourceId: row.wall.id,
-            label: 'AC disconnect — NEC 440.14, within sight (dedicated circuit — routed separately)',
-            meta: { unit: n },
+            label: `AC disconnect — NEC 440.14, within sight (AC-${n}, ${acGauge === 10 ? '30A' : '40A'} 2-pole)`,
+            meta: { unit: n, circuit: `AC-${n}`, gaugeAwg: acGauge },
           })
           const whipY = unitTopY - 0.1
           const whipLabel = 'Condenser whip — liquid-tight conduit (NEC 440.14)'

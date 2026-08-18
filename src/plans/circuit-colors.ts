@@ -38,6 +38,7 @@ const FAMILY: Record<string, { hint: string; hue: number }> = {
   GA: { hint: 'garage', hue: 82 },
   LTG: { hint: 'lighting', hue: 44 },
   GEN: { hint: 'general receptacles', hue: 285 },
+  AC: { hint: 'AC condenser (dedicated 2-pole)', hue: 130 },
 }
 
 export function circuitZoneHint(circuit: string): string {

@@ -364,3 +364,37 @@ describe('night-4 batch fixes (F2 twin overrides, F3 batt notching)', () => {
     expect(Math.abs(fx.position[0] - derivedX)).toBeLessThan(0.5)
   })
 })
+
+describe('AC dedicated circuits (night-4: the "connection to power" half)', () => {
+  const cfgWith = (showHvac: boolean) =>
+    FramingNode.parse({
+      id: 'bonesframing_baseline',
+      parentId: 'level_1',
+      jurisdiction: 'NY',
+      detail: '400',
+      studSpacingIn: 16,
+      showWalls: true,
+      showElectrical: true,
+      showHvac,
+    })
+
+  test('panel → disconnect homerun exists, is continuous, and never doubles the service entrance', () => {
+    const scene = baselineScene()
+    const result = computeLevel(scene, cfgWith(true))
+    const disc = result.fixtures.find((f) => f.kind === 'disconnect') as Fixture
+    expect(disc).toBeDefined()
+    expect(disc.meta?.circuit).toBe('AC-1')
+    const acWires = result.members.filter((m) => m.sourceId === 'AC-1')
+    expect(acWires.length).toBeGreaterThan(0)
+    // heavy gauge on the label (30A/10 AWG for the small baseline unit)
+    expect(acWires.some((m) => m.label?.includes('10/2'))).toBe(true)
+    // continuity: the disconnect is panel-reachable as continuous cable
+    const panel = result.fixtures.find((f) => f.kind === 'panel') as Fixture
+    expect(unreachableDevices(result.members, [panel, disc])).toEqual([])
+    // the AC subset wiring must NOT re-emit the service entrance
+    const laterals = result.members.filter((m) => m.label?.includes('street lateral')).length
+    const noHvac = computeLevel(baselineScene(), cfgWith(false))
+    const baseLaterals = noHvac.members.filter((m) => m.label?.includes('street lateral')).length
+    expect(laterals).toBe(baseLaterals)
+  })
+})

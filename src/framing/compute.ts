@@ -791,6 +791,19 @@ function computeLevelUncached(
       )
       if (warn) warnings.push(warn)
     }
+    // AC "connection to power" (user ask): each condenser disconnect carries
+    // a dedicated circuit (AC-n) — homerun it from the panel like any device.
+    // The subset has NO meter fixture, so routeServiceCable inside bails and
+    // the service entrance is never doubled.
+    if (spec.detail === '400' && config.showElectrical) {
+      const panelFx = fixtures.find((f) => f.kind === 'panel')
+      const disconnects = hvac.fixtures.filter(
+        (f) => f.kind === 'disconnect' && typeof f.meta?.circuit === 'string',
+      )
+      if (panelFx && disconnects.length > 0) {
+        members.push(...routeWiring([panelFx, ...disconnects], activeWalls))
+      }
+    }
   }
 
   // ---- gross sheet-goods areas for the takeoff ----

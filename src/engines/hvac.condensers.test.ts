@@ -395,7 +395,7 @@ describe('line-set — Manhattan wall penetration to the air handler; disconnect
         disc.position[2] - unit.position[2],
       )
       expect(dist).toBeLessThanOrEqual(1.0)
-      expect(disc.label).toContain('dedicated circuit — routed separately')
+      expect(disc.label).toContain('2-pole') // AC-n circuit label (wired by compute)
     }
     // + a whip per unit (liquid-tight conduit, never NM-B)
     const whips = new Set(
