@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import {
+  placeCondenserSeedSpot,
   MAX_TONS_PER_CONDENSER,
   condenserPlan,
   condenserSqftPerTon,
@@ -504,5 +505,19 @@ describe('night-4 batch F1: slid pad stays wall-aligned and clear', () => {
         wall0.thickness / 2 + 0.13 - 1e-6,
       )
     }
+  })
+})
+
+describe('A4 seed parity: the heat-pump node seeds at the SLID anchor', () => {
+  test('an RO fronting the raw spot moves the seed to the engine unit-#1 anchor', () => {
+    const { walls, rooms } = shell(12, 8, [opening('door_front', 3, 0.95)])
+    const seed = placeCondenserSeedSpot(walls, rooms)
+    expect(seed).not.toBeNull()
+    const { members } = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'NY' })
+    const cab = cabinetsOf(members)[0]
+    expect(cab).toBeDefined()
+    // seed == unit-#1 cabinet plan position (the sign stands ON the unit)
+    expect(seed?.[0]).toBeCloseTo(cab?.position[0] as number, 6)
+    expect(seed?.[1]).toBeCloseTo(cab?.position[2] as number, 6)
   })
 })

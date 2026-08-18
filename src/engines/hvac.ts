@@ -541,6 +541,20 @@ type CondenserSlot = {
  * direction runs off the wall the row grows the other way; a row that
  * exhausts both directions keeps its pitch past the end and warns.
  */
+/**
+ * Where the heat-pump SERVICE NODE should seed: the engine's unit-#1 anchor
+ * AFTER the condenser row's RO slide — seeding at the raw spot let the sign
+ * sit fronting a window the engine had already slid away from (A4 seed
+ * parity, night-4 narrow round). equipAt only matters for the degenerate
+ * on-wall-anchor fallback, so the anchor itself is a safe stand-in.
+ */
+export function placeCondenserSeedSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
+  const anchor = placeHeatPumpSpot(walls, rooms)
+  if (!anchor) return null
+  const row = condenserRow(walls, anchor, false, 1, anchor)
+  return row.slots[0]?.at ?? anchor
+}
+
 function condenserRow(
   walls: WallSlice[],
   anchor: Pt,

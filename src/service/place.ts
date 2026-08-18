@@ -5,7 +5,7 @@ import {
 } from '../core/wall-model'
 import { probeSlabsFor } from '../framing/compute'
 import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
-import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
+import { placeCondenserSeedSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeSewerExit, placeWhSpot } from '../engines/plumbing'
 import { SERVICE_TYPES, ServiceNode, type ServiceType } from './schema'
 
@@ -98,7 +98,7 @@ export function buildServicePointNodes(
   // handler — `position` is the anchor (like the sewer exit), so the node
   // stands free and the lineset re-anchors wherever it's dragged.
   if (!existing.has('heat-pump')) {
-    const pad = placeHeatPumpSpot(walls, rooms)
+    const pad = placeCondenserSeedSpot(walls, rooms)
     if (pad) {
       out.push(ServiceNode.parse({ serviceType: 'heat-pump', position: [pad[0], 0, pad[1]] }))
     }
