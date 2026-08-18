@@ -381,6 +381,11 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // the resulting nodes change plans zero ops). Bails in read-only hosts
   // (community viewer) — no scene writes on view, like cladding-paint.
   useEffect(() => {
+    // EXPERIMENTAL flag (default off): the live drag-commit/undo path has
+    // open host-integration defects (night-4 visual round) — no device
+    // nodes are seeded in prod until it's closed, so nothing 400s the
+    // autosave and nothing corrupts on undo.
+    if (node.movableOutlets !== true) return
     if (node.visible === false || node.showElectrical === false) return
     const levelId = node.parentId
     if (!levelId) return

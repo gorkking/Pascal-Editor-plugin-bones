@@ -1,5 +1,32 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 BATCH ROUND CLOSED (~00:50) — outlets go EXPERIMENTAL, rest ships
+Skeptic (batch): 3 findings (oblique condenser pad through the wall on
+RO slides; twin-committed device overrides silently re-targeting; device
+blocking embedded in batts) — ALL FIXED + GATED (ca09e73b). Merge
+integrity independently verified: zero unenumerated drift vs prod
+across 6 states + island scenes. Visual (batch): condensers PASS live
+(zone divisor active, pads/line-set/disconnect/takeoff all right),
+regressions PASS (exploded 3-strata, blueprints, batts, cladding
+both-modes with clean single undo, service drag) — but the LIVE outlets
+integration has 4 defects:
+- D1 BLOCKER FIXED: colon deviceIds tripped the host API's URL-scheme
+  sanitizer → every save 400'd + scene WIPED. Ids are dash-joined now.
+- D2 QUEUED: a live drag commit mutates more than the node (+2
+  fixtures/−37 members; panel drag drops devices 77→74). Engine parity
+  proven — the defect is in the host commit/reconcile path.
+- D3 QUEUED: single Cmd+Z after a drag does NOT revert the box and
+  VANISHES the wall's wiring + panel (third state). History-paused
+  reconcile writes × host undo interplay.
+- D4 QUEUED: drag place-click never commits on some walls (host
+  placement-validity interaction).
+DECISION: bones:device seeding now gated behind FramingNode.
+movableOutlets (EXPERIMENTAL, default OFF — schema + defaults +
+renderer guard). Outlets ship dormant; the drag experience needs a
+host-side debugging session (D2/D3/D4) before the flag defaults on.
+All engine-side machinery (deviceIds, overrides, snapping, spacing
+advisory, gates) ships active and byte-equal-guarded.
+
 ## NIGHT-4 VERIFY ROUND 1 CLOSED (~05:20) — visual PASS, skeptic 5 fixes in
 F1 island crossings now clear EVERY scene wall (+ mixed-height E4 gate
 with room-ceiling clause); F2 S1 row rescoped (same-wall class dead;

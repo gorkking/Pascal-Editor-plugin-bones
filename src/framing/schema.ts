@@ -95,6 +95,11 @@ export const FramingNode = BaseNode.extend({
   showElectrical: z.boolean().default(false),
   showPlumbing: z.boolean().default(false),
   showHvac: z.boolean().default(false),
+  /** Movable outlets (Q7) — EXPERIMENTAL, default OFF: the bones:device
+   * reconciler seeds draggable nodes for every derived receptacle/switch.
+   * Ships dormant until the live drag-commit/undo host-integration defects
+   * are closed (night-4 batch visual round D2/D3/D4). */
+  movableOutlets: z.boolean().default(false),
   /** Fade the architectural shell: 0 = skeleton only (future host affordance). */
   xray: z.number().min(0).max(1).default(1),
   /** X-ray vision: draw the skeleton through walls/finishes (depth-test off). */

@@ -58,6 +58,7 @@ export const framingDefinition: FramingDefinition = {
     showElectrical: false,
     showPlumbing: false,
     showHvac: false,
+    movableOutlets: false,
     xray: 1,
     seeThrough: true,
     wallOverrides: {},

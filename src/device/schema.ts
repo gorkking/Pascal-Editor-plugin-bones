@@ -31,8 +31,8 @@ export type DeviceKind = z.infer<typeof DeviceKind>
 export const DeviceNode = BaseNode.extend({
   id: objectId('bonesdevice'),
   type: nodeType('bones:device'),
-  /** The engine's deterministic device id (`recep:<wall>:<n>:<face>`,
-   * `switch:<wall>:<opening>:<face>`) — the reconciliation key. */
+  /** The engine's deterministic device id (`recep-<wall>-<n>-<face>`,
+   * `switch-<wall>-<opening>-<face>`) — the reconciliation key. */
   deviceId: z.string(),
   deviceKind: DeviceKind,
   /** Wall the device mounts on (host wall node id). */

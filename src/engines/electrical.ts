@@ -289,7 +289,7 @@ export function layoutElectrical(
             position: [x, RECEPTACLE_AFF, z],
             rotationY: face.rotationY,
             sourceId: wall.id,
-            meta: { deviceId: `recep:${wall.id}:${ordinal}:${face.side === 1 ? 'p' : 'm'}` },
+            meta: { deviceId: `recep-${wall.id}-${ordinal}-${face.side === 1 ? 'p' : 'm'}` },
           })
         }
         ordinal += 1
@@ -324,7 +324,7 @@ export function layoutElectrical(
           label: 'Switch (48" AFF, latch side)',
           // Keyed by the OPENING (not an ordinal): a door switch belongs to
           // its door — adding a second door never renumbers this one.
-          meta: { deviceId: `switch:${wall.id}:${opening.id}:${face.side === 1 ? 'p' : 'm'}` },
+          meta: { deviceId: `switch-${wall.id}-${opening.id}-${face.side === 1 ? 'p' : 'm'}` },
         })
       }
     }
@@ -411,7 +411,7 @@ export function layoutElectrical(
         sourceId: room.id,
         label: 'Switch — hallway lighting (210.70(A)(2))',
         // One control per door-less hallway — the ROOM is the stable key.
-        meta: { deviceId: `switch:${best.wall.id}:hall:${room.id}` },
+        meta: { deviceId: `switch-${best.wall.id}-hall-${room.id}` },
       })
     }
   }

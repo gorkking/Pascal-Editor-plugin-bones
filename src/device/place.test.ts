@@ -85,7 +85,7 @@ describe('deriveWallDevices', () => {
     }
     const fixtures = layoutElectrical([wall], [hallway])
     const hallSwitch = fixtures.find(
-      (f) => f.kind === 'switch' && String(f.meta?.deviceId).includes(':hall:'),
+      (f) => f.kind === 'switch' && String(f.meta?.deviceId).includes('-hall-'),
     ) as Fixture
     expect(hallSwitch).toBeDefined()
     const devices = deriveWallDevices([hallSwitch], [wall])
