@@ -1060,8 +1060,36 @@ export function layoutHvac(
         // integration is a parallel electrical track).
         if (row.wall) {
           const faceOff = row.wall.thickness / 2 + 0.02
-          const face: Pt = [pen[0] + slot.out[0] * faceOff, pen[1] + slot.out[1] * faceOff]
           const discY = unitTopY + DISCONNECT_ABOVE_UNIT
+          // The disconnect is DERIVED (only the unit anchor is verbatim):
+          // a unit dragged in front of a window must not mount its box on
+          // the glass — slide the box along the wall to the nearest clear
+          // spot within sight (±1.2m), else keep + ⚠ (dawn visual round:
+          // box mid-RO with the AC stub crossing, silently).
+          let discU = slot.u
+          const discSpans = openingSpans(row.wall, discY - 0.15, discY + 0.15)
+          const inSpan = (u: number): boolean =>
+            discSpans.some((sp) => u > sp.lo - 0.08 && u < sp.hi + 0.08)
+          if (inSpan(discU)) {
+            let best: number | null = null
+            for (const sp of discSpans) {
+              for (const cand of [sp.lo - 0.1, sp.hi + 0.1]) {
+                if (cand < 0.1 || cand > row.wall.length - 0.1) continue
+                if (inSpan(cand)) continue
+                if (Math.abs(cand - slot.u) > 1.2) continue
+                if (best === null || Math.abs(cand - slot.u) < Math.abs(best - slot.u)) best = cand
+              }
+            }
+            if (best !== null) discU = best
+            else warnings.push(
+              `AC disconnect #${n} sits in a door/window rough opening — move the unit clear (NEC 440.14)`,
+            )
+          }
+          const discFoot = wallPointAt(row.wall, discU)
+          const face: Pt = [
+            discFoot[0] + slot.out[0] * faceOff,
+            discFoot[1] + slot.out[1] * faceOff,
+          ]
           // Dedicated 2-pole branch circuit (NEC 440): ≤3-ton units run
           // 30A/10 AWG, larger 40A/8 AWG — routeWiring homeruns the panel
           // to this box like any device (compute wires it post-HVAC).

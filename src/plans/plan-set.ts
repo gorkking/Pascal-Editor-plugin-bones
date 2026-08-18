@@ -631,9 +631,13 @@ function planSheet(
     const circuits = new Map<string, Fixture | undefined>()
     for (const m of mine) {
       if (m.role === 'wire-run' && !circuits.has(m.sourceId)) {
+        // Sample from ALL fixtures, not the sheet's system filter: the AC
+        // disconnect is system 'hvac' but carries the circuit's breaker +
+        // gauge — devs-only sampling printed 'AC-1 — —A/—AWG', the exact
+        // dash pattern round-3 called a defect (dawn round, exhibit 4).
         circuits.set(
           m.sourceId,
-          devs.find((f) => f.meta?.circuit === m.sourceId),
+          fixtures.find((f) => f.meta?.circuit === m.sourceId),
         )
       }
     }

@@ -9,6 +9,7 @@ import {
   layoutHvac,
   placeHeatPumpSpot,
 } from './hvac'
+import { circuitSchedule } from './electrical'
 import { computeTakeoff } from './takeoff'
 
 /**
@@ -519,5 +520,46 @@ describe('A4 seed parity: the heat-pump node seeds at the SLID anchor', () => {
     // seed == unit-#1 cabinet plan position (the sign stands ON the unit)
     expect(seed?.[0]).toBeCloseTo(cab?.position[0] as number, 6)
     expect(seed?.[1]).toBeCloseTo(cab?.position[2] as number, 6)
+  })
+})
+
+describe('dawn round 2: disconnect never mounts in an RO; schedule/legend honest', () => {
+  test('a unit anchored in front of a window slides its DISCONNECT clear (box off the glass)', () => {
+    // The unit anchor is verbatim (A4) but the disconnect is derived — a
+    // heat pump dragged before a window must not mount the box on glass.
+    const { walls, rooms } = shell(12, 8, [])
+    // window on the north wall at the exact spot the unit will anchor
+    const north = walls[1]!
+    north.openings.push({
+      id: 'win_hp',
+      kind: 'window',
+      u: 6,
+      width: 1.4,
+      height: 1.3,
+      sillHeight: 0.9,
+      roughWidth: 1.45,
+      roughHeight: 1.35,
+    })
+    const { members, fixtures, warnings } = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { position: [6, 0, 8.6] },
+    }, { stateCode: 'NY' })
+    void members
+    void warnings
+    const disc = fixtures.find((f) => f.kind === 'disconnect') as Fixture
+    expect(disc).toBeDefined()
+    // the box's along-wall spot clears the RO span [6−0.725, 6+0.725]
+    const u = disc.position[0]
+    expect(u < 6 - 0.725 - 0.05 || u > 6 + 0.725 + 0.05).toBe(true)
+  })
+
+  test('circuit schedule prints the real breaker (30A/10AWG, never the 15A default)', () => {
+    const { walls, rooms } = shell(12, 8, [])
+    const { fixtures } = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'NY' })
+    const disc = fixtures.find((f) => f.kind === 'disconnect') as Fixture
+    expect(disc.meta?.breakerA).toBe(30)
+    expect(Number(disc.meta?.va)).toBeGreaterThan(0)
+    const rows = circuitSchedule([disc])
+    expect(rows[0]?.breakerA).toBe(30)
+    expect(rows[0]?.gaugeAwg).toBe(10)
   })
 })
