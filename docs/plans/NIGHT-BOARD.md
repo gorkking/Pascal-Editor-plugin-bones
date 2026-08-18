@@ -1,5 +1,33 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 SHIPPED (~02:30): prod main 3da33331
+Plugin 8f40d06b via editor #676 (main 0c694be8) → private-editor #366
+(E2E green). Two full adversarial rounds + one narrow; final visual
+PASS at the pinned sha. 793→859 tests this night. SHIPPED: cavity-fit
+framing (S1 same-wall class dead across 51 jurisdictions, verified by
+expected-diff manifest), AC condensers (live climate divisors,
+wall-aligned pads, line-sets, disconnects), E4 closed (island ceiling
+crossings clear every wall incl. mixed heights; buried island feeders),
+selected-wall cull exemption (dedupe-twin aware), movable-outlet ENGINE
+(dash ids, code-aware overrides, batt notching, truthful fallbacks) —
+seeding gated behind movableOutlets=false.
+NEXT-SESSION QUEUE (movable outlets live UX — flip the flag AFTER):
+- D2: live drag commit mutates counts beyond the node (+2 fixtures/−37
+  members; narrow round attributed the PANEL-drag −3 devices to
+  engine-side re-derivation when the panel moves — receptacle layout
+  follows the panel wall; the outlet-drag delta still needs a repro).
+- D3: single Cmd+Z after a drag doesn't revert the box and vanishes
+  wiring+panel (history-paused reconcile × host undo interplay).
+- D4: place-click never commits on some walls (host placement
+  validity). All evidence in /tmp/qa-ship4/ result JSONs (may be gone —
+  re-repro via the batch-round brief).
+- Heat-pump seed-parity: buildServicePointNodes seeds the node at raw
+  placeHeatPumpSpot which can FRONT an RO; the engine slides unit #1 —
+  seed at the slid anchor (A4 parity, narrow-round finding).
+- Advisory: unit #1 cabinet corner 0.201m off the wall at oblique
+  facing (M2 measures axis center 0.35); corner-clamped verbatim
+  anchors give non-90° pad yaw (no SAT hit found — paper hole).
+
 ## NIGHT-4 BATCH ROUND CLOSED (~00:50) — outlets go EXPERIMENTAL, rest ships
 Skeptic (batch): 3 findings (oblique condenser pad through the wall on
 RO slides; twin-committed device overrides silently re-targeting; device
