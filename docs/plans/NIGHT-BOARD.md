@@ -1,5 +1,25 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## DAWN BATCH SHIPPED (~06:00): prod main f86a5bd3
+Plugin 041041da via editor #677 (main 49a81377) → private-editor #367
+(E2E green). 859→865 tests. Three dawn verify rounds total; final:
+skeptic items all PASS after two fix passes, visual PASS with the
+box-beside-window exhibit. SHIPPED: AC dedicated circuits (AC-n,
+30A/40A honest on schedule + legend, brute-forced color family >64 RGB
+from every real id), heat-pump seed parity (equip-room-centroid
+out-normal + corner-flip guard), disconnect RO slide (≤1.5m within
+sight, unclearable warns), M2 row truth + slid-distance gate.
+NIGHT-4 TOTALS: two prod ships (3da33331 + f86a5bd3), 793→865 tests,
+~13 verified defects fixed+gated across 5 verify rounds, 2 pilots
+merged, design panel run, E4 closed, S1 unconditional (same-wall).
+QUEUE unchanged: outlets live UX D2/D3/D4 (flag off), tee-stem trio,
+foreign-group cull, Q10 CMU repaint, gas/internet future work.
+HOST BUG (visual dawn round, ticket-worthy): read-only sessions can
+fire ONE autosave PUT with an EMPTY graph, wiping the scene at v2 —
+edit-bearing sessions save fine. Matches the 2026-08-16 scene-wipe
+class; evidence /tmp/qa-dawn2 result JSONs (scenes a4993ec9f1ab,
+1befee38f973).
+
 ## DAWN MINI-BATCH IN VERIFY (~03:40): 598bea8, 861 tests
 Post-ship on master: A4 seed parity (7dc92f3 — heat-pump node seeds at
 the SLID condenser anchor, gate seed==cabinet) + AC DEDICATED CIRCUITS
