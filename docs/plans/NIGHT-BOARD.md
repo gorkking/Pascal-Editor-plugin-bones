@@ -1,5 +1,15 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## DAWN MINI-BATCH IN VERIFY (~03:40): 598bea8, 861 tests
+Post-ship on master: A4 seed parity (7dc92f3 — heat-pump node seeds at
+the SLID condenser anchor, gate seed==cabinet) + AC DEDICATED CIRCUITS
+(598bea8 — disconnects carry AC-n + gauge, compute homeruns
+panel→disconnect via a meter-less routeWiring subset so the service
+entrance never doubles; FAMILY 'AC' hue 130; gates: continuity,
+10/2 label, single street lateral). This completes the user's AC ask
+('but also connection to power'). Verify wi4gmovvy RUNNING at 598bea8;
+localhost pinned there. Ship as dawn mini-batch on PASS.
+
 ## NIGHT-4 SHIPPED (~02:30): prod main 3da33331
 Plugin 8f40d06b via editor #676 (main 0c694be8) → private-editor #366
 (E2E green). Two full adversarial rounds + one narrow; final visual
