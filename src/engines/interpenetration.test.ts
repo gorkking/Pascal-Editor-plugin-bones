@@ -3,6 +3,7 @@ import { Euler, Matrix4, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
 import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
+import { applyDeviceOverrides, layoutElectrical } from './electrical'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
@@ -280,6 +281,31 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(frameWall(wall({ openings: [door(2), window_(4.2)] }), spec400))).toEqual([])
     expect(violations(frameWall(wall({ thickness: 0.15, openings: [window_(3)] }), spec400))).toEqual([])
     expect(violations(frameWall(wall({ end: [1.2, 0] }), spec400))).toEqual([])
+  })
+
+  test('device blocking (movable outlets): the off-stud block composes SAT-clean with the wall framing', () => {
+    // A sparse rhythm (grid studs thinned out) forces the off-stud path:
+    // the moved box keeps its spot and books a 'device blocking' member
+    // between the bay's remaining studs — that block must share volume
+    // with NOTHING (face contact with the studs is the design intent).
+    const w = wall({ id: 'w_dev' })
+    const framing = frameWall(w, spec400)
+    const sparse = framing.filter((m) => {
+      if (m.role !== 'stud') return true
+      const u = (m.position[0] - w.start[0]) * w.dir[0] + (m.position[2] - w.start[1]) * w.dir[1]
+      return u < 0.5 || u > 2.4 // open a ~1.9 m bay mid-wall
+    })
+    const fixtures = layoutElectrical([w], [])
+    const id = String(fixtures.find((f) => f.kind === 'receptacle')?.meta?.deviceId)
+    const applied = applyDeviceOverrides(
+      fixtures,
+      [w],
+      [],
+      sparse,
+      new Map([[id, { wallId: w.id, wallT: 1.5 / w.length, heightAff: 0.45 }]]),
+    )
+    expect(applied.members.map((m) => m.label)).toEqual(['device blocking — box off-stud'])
+    expect(violations([...sparse, ...applied.members])).toEqual([])
   })
 
   test('wall framing + assembly layers: default rectangle (round-14)', () => {

@@ -31,11 +31,14 @@ import {
 } from '../engines/characteristics'
 import { layoutWallLayers } from '../engines/wall-layers'
 import {
+  applyDeviceOverrides,
   layoutElectrical,
   openingSpans,
   overrideWallPoint,
   routeWiring,
 } from '../engines/electrical'
+import { deriveWallDevices, type DerivedDevice } from '../device/derive'
+import { extractDeviceOverrides } from '../device/overrides'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
@@ -63,6 +66,10 @@ export type ComputeResult = {
   /** Colinear-dedupe map (duplicate id → kept id) — consumers that key off
    * member sourceIds (cull exemption) resolve host selections through it. */
   duplicateOf: Record<string, string>
+  /** Wall-mounted electrical devices (deterministic deviceIds, final mount
+   * anchors) — what the `bones:device` reconciler mirrors into nodes.
+   * Empty when electrical is off. */
+  devices: DerivedDevice[]
 }
 
 /**
@@ -338,6 +345,7 @@ function computeLevelUncached(
       areas: {},
       characteristics: null,
       duplicateOf: {},
+      devices: [],
     }
   }
 
@@ -618,9 +626,33 @@ function computeLevelUncached(
     warnings.push(`duplicate service point (${dup}) — extra node ignored`)
   }
 
+  let devices: DerivedDevice[] = []
   if (config.showElectrical) {
-    const electrical = layoutElectrical(activeWalls, activeRooms, services)
+    const derived = layoutElectrical(activeWalls, activeRooms, services)
+    // Movable outlets (Q7): moved `bones:device` nodes override the derived
+    // receptacle/switch spots — code-aware (RO snap-out, stud rule +
+    // blocking, height clamps, spacing advisory). Unmoved nodes are ignored
+    // by construction (device/overrides.ts), so a scene of untouched nodes
+    // computes byte-equal to a node-less one. The blocking members join the
+    // wall framing; the wiring below consumes the POST-override positions.
+    const deviceExtraction = extractDeviceOverrides(nodes, levelId)
+    for (const dup of deviceExtraction.duplicates) {
+      warnings.push(`duplicate device node (${dup}) — extra node ignored`)
+    }
+    const applied = applyDeviceOverrides(
+      derived,
+      activeWalls,
+      activeRooms,
+      members,
+      deviceExtraction.overrides,
+    )
+    const electrical = applied.fixtures
+    members.push(...applied.members)
+    warnings.push(...applied.warnings)
     fixtures.push(...electrical)
+    // The device manifest the bones:device reconciler mirrors into nodes —
+    // built from the same walls + final fixtures the engines used.
+    devices = deriveWallDevices(electrical, activeWalls)
     // Panel override forced into a door/window RO → explicit warning
     // (NEC 110.26 working space — placePanel skips panelMountU's scan).
     const panelFx = electrical.find((f) => f.kind === 'panel')
@@ -761,5 +793,6 @@ function computeLevelUncached(
     areas,
     characteristics,
     duplicateOf: Object.fromEntries(duplicateOf),
+    devices,
   }
 }

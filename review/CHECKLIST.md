@@ -32,6 +32,37 @@ AND a gate — a checklist line without a test is a wish.
   legal. Origin: QA E1 round 2026-08-15; closed night-4 (mixed heights
   round 2). Gate: `src/engines/electrical.e4.test.ts` (airRuns invariant
   on connected + island + MIXED-HEIGHT scenes, connectivity preserved).
+  cable paths even when they avoid ROs. Origin: QA E1 round 2026-08-15;
+  closed night-4. Gate: `src/engines/electrical.e4.test.ts` (airRuns
+  invariant on connected + island scenes, connectivity preserved).
+- **E5 Moved devices stay code-legal; untouched scenes stay byte-equal.**
+  Every wall device fixture (receptacle / GFCI / switch) carries a
+  DETERMINISTIC `meta.deviceId` (per-wall ordinal / opening key / hallway
+  room key): an unchanged scene reproduces identical ids and editing one
+  wall never shuffles another wall's. Each derived device is mirrored by a
+  `bones:device` node (reconciler: create at the derived anchor with
+  seed == anchor, re-seat UNMOVED nodes when the derivation drifts, NEVER
+  touch a moved node's anchor, drop orphans/duplicates) so any outlet is
+  hoverable/draggable. A node whose anchor differs from its seed is an
+  engine override that WINS over the derived spot but lands buildable:
+  never inside a door/window RO (snapped clear + warning), box edge
+  against a stud face — off-stud books a 'device blocking' member across
+  the bay (SAT-clean vs the studs) — and heights clamp to the legal bands
+  (receptacle 0.15–1.7 m, switch 0.9–2.0 m per NEC 404.8(A)). Wiring
+  consumes the POST-override positions (a wire endpoint lands ON the moved
+  box, E2 continuity preserved). NEC 210.52 spacing re-checks ONLY walls a
+  moved receptacle left/joined — the derived layout is spacing-correct by
+  construction, so untouched scenes never warn. CRITICAL regression: zero
+  device nodes/overrides computes members STRICTLY byte-equal to master
+  (pinned master-baseline.json) and fixtures identical except the added
+  `meta.deviceId`; seeded-but-unmoved nodes stay byte-equal end-to-end.
+  Origin: user ask Q7 ("outlets should move like doors — against a stud or
+  an extra piece of wood, per code"), built night-4.
+  Gates: `src/engines/electrical.devices.test.ts` (ids + snapping matrix) +
+  `src/framing/compute.devices.test.ts` (byte-equality pin, wiring
+  re-route, warning parity) + `src/device/schema.test.ts` +
+  `src/device/place.test.ts` (reconciler) + the device-blocking SAT
+  scenario in `src/engines/interpenetration.test.ts`.
 
 ## S — Structure
 

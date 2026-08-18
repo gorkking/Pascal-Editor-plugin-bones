@@ -202,6 +202,29 @@ export type ServicePointOverride = {
   position?: readonly [number, number, number]
 }
 
+/**
+ * Authoritative location of one wall-mounted electrical DEVICE (receptacle /
+ * switch), keyed by the engine's deterministic `deviceId` — from a
+ * `bones:device` node the user MOVED (unmoved nodes track the derivation and
+ * are never overrides; see device/overrides.ts). Same precedence as
+ * `ServicePointOverride`: a non-default `position` outranks `wallId`+`wallT`
+ * (mapped to the nearest wall point). Unlike service points, a device
+ * override is NOT honored verbatim — the engine applies code-aware snapping
+ * (RO snap-out, stud rule, height clamps; electrical.ts
+ * `applyDeviceOverrides`) so the mount stays physical.
+ */
+export type DeviceOverride = {
+  wallId?: string
+  /** 0..1 along the wall from `start`. */
+  wallT?: number
+  /** Mount height (device center, m AFF). */
+  heightAff?: number
+  position?: readonly [number, number, number]
+}
+
+/** Per-level device overrides, keyed by deterministic deviceId. */
+export type DeviceOverrides = ReadonlyMap<string, DeviceOverride>
+
 /** Per-level service overrides keyed by what each engine consumes. */
 export type ServiceOverrides = {
   panel?: ServicePointOverride

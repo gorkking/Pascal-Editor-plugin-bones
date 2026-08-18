@@ -16,6 +16,7 @@
 
 import rules from '../../data/electrical-rules.json'
 import type {
+  DeviceOverrides,
   Fixture,
   Member,
   RoomSlice,
@@ -268,6 +269,12 @@ export function layoutElectrical(
     // kitchen/living/bed/etc. — over-placing is the safe drafting default.
     // LOD 400: wall spaces should WRAP inside corners (two 5 ft walls meeting
     // in a corner are one 10 ft space); walking per-wall over-counts slightly.
+    // Every wall-mounted device carries a DETERMINISTIC `meta.deviceId`
+    // (movable outlets, Q7): the ordinal walks this wall's u-positions in
+    // derivation order, so an unchanged scene reproduces identical ids and
+    // editing ANOTHER wall never shuffles this wall's. The id keys the
+    // `bones:device` override nodes (device/schema.ts).
+    let ordinal = 0
     for (const segment of usableSegments(wall)) {
       for (const u of receptaclePositions(segment)) {
         for (const face of faces) {
@@ -282,8 +289,10 @@ export function layoutElectrical(
             position: [x, RECEPTACLE_AFF, z],
             rotationY: face.rotationY,
             sourceId: wall.id,
+            meta: { deviceId: `recep:${wall.id}:${ordinal}:${face.side === 1 ? 'p' : 'm'}` },
           })
         }
+        ordinal += 1
       }
     }
 
@@ -313,6 +322,9 @@ export function layoutElectrical(
           rotationY: face.rotationY,
           sourceId: opening.id,
           label: 'Switch (48" AFF, latch side)',
+          // Keyed by the OPENING (not an ordinal): a door switch belongs to
+          // its door — adding a second door never renumbers this one.
+          meta: { deviceId: `switch:${wall.id}:${opening.id}:${face.side === 1 ? 'p' : 'm'}` },
         })
       }
     }
@@ -374,7 +386,7 @@ export function layoutElectrical(
     )
     if (hasSwitch) continue
     const [hx, hz] = polygonCentroid(room.polygon)
-    let best: { face: WallFace; u: number; d: number } | null = null
+    let best: { wall: WallSlice; face: WallFace; u: number; d: number } | null = null
     for (const wall of walls) {
       if (wall.curved) continue
       for (const face of interiorFaces(wall, rooms)) {
@@ -386,7 +398,7 @@ export function layoutElectrical(
         const [px, pz] = face.plan(u)
         if (!pointInPolygon([px, pz], room.polygon)) continue
         const d = Math.hypot(px - hx, pz - hz)
-        if (!best || d < best.d) best = { face, u, d }
+        if (!best || d < best.d) best = { wall, face, u, d }
       }
     }
     if (best) {
@@ -398,6 +410,8 @@ export function layoutElectrical(
         rotationY: best.face.rotationY,
         sourceId: room.id,
         label: 'Switch — hallway lighting (210.70(A)(2))',
+        // One control per door-less hallway — the ROOM is the stable key.
+        meta: { deviceId: `switch:${best.wall.id}:hall:${room.id}` },
       })
     }
   }
@@ -666,6 +680,393 @@ function placeElectricMeter(
     sourceId: spot.wall.id,
     label: 'Electric meter — service entrance (NEC 230.66)',
   }
+}
+
+// ---------------------------------------------------------------------------
+// Movable devices (Q7): `bones:device` overrides with code-aware snapping
+// ---------------------------------------------------------------------------
+
+/** Single-gang device box ≈ 3" wide × 4.5" tall — the footprint the RO and
+ * stud snapping work with (matches the renderer's fixtureBox dims). */
+export const DEVICE_BOX_W = inches(3)
+const DEVICE_BOX_HALF_H = inches(2.25)
+/** Legal mounting bands (device CENTER, m AFF). Receptacles: 15" convention /
+ * ADA reach floor up to 1.7 m; switches: 0.9 m up to NEC 404.8(A)'s 6'7"
+ * grip-center maximum (2.0 m). A dragged height clamps into its band. */
+export const RECEPTACLE_HEIGHT_BAND: readonly [number, number] = [0.15, 1.7]
+export const SWITCH_HEIGHT_BAND: readonly [number, number] = [0.9, 2.0]
+
+/** Wall-framing verticals a device box can mount beside. */
+const MOUNTABLE_VERTICALS: ReadonlySet<Member['role']> = new Set([
+  'stud',
+  'king-stud',
+  'trimmer',
+  'cripple',
+])
+/** Horizontal in-wall rows that already give a mid-bay box wood to mount to —
+ * an off-stud box over one of these books NO extra device blocking. */
+const MOUNT_ROWS: ReadonlySet<Member['role']> = new Set(['blocking', 'backing', 'fire-blocking'])
+
+/**
+ * The wall a device fixture mounts on: receptacles carry their wall id in
+ * `sourceId`; door switches carry the OPENING id (resolve the wall holding
+ * it); hallway switches carry the ROOM id (nearest wall axis). Exported for
+ * the `bones:device` reconciler (device/derive.ts) — node seeding and the
+ * engine must agree on every device's wall.
+ */
+export function deviceWallOf(fixture: Fixture, walls: WallSlice[]): WallSlice | null {
+  const own = walls.find((w) => w.id === fixture.sourceId)
+  if (own) return own
+  const byOpening = walls.find((w) => w.openings.some((o) => o.id === fixture.sourceId))
+  if (byOpening) return byOpening
+  let best: WallSlice | null = null
+  let bestDist = Number.POSITIVE_INFINITY
+  for (const wall of walls) {
+    if (wall.curved || wall.length < 0.1) continue
+    const u = wallU(wall, fixture.position)
+    const q = wallPlan({ wall, u })
+    const d = Math.hypot(q[0] - fixture.position[0], q[1] - fixture.position[2])
+    if (d < bestDist) {
+      bestDist = d
+      best = wall
+    }
+  }
+  return best
+}
+
+/** Clamped along-wall coordinate of a level-space position. */
+function wallU(wall: WallSlice, p: readonly [number, number, number]): number {
+  const raw = (p[0] - wall.start[0]) * wall.dir[0] + (p[2] - wall.start[1]) * wall.dir[1]
+  return Math.max(0, Math.min(wall.length, raw))
+}
+
+/** Signed cross-wall offset of a position (+ = the wall's +normal face). */
+function wallSideOffset(wall: WallSlice, p: readonly [number, number, number]): number {
+  return -(p[0] - wall.start[0]) * wall.dir[1] + (p[2] - wall.start[1]) * wall.dir[0]
+}
+
+/** Snap `u` so the whole BOX (± width/2, + 1" trim breath) clears every rough
+ * opening crossing [y0, y1] — like `clearOfOpenings`, but edge-aware: a box
+ * whose CENTER sits just outside the RO still overlaps it. Iterates because
+ * the snapped spot can graze a neighboring span. */
+function snapBoxClearOfRo(wall: WallSlice, u: number, y0: number, y1: number): number {
+  const margin = DEVICE_BOX_W / 2 + inches(1)
+  let out = u
+  for (let pass = 0; pass < 4; pass++) {
+    const spans = openingSpans(wall, y0, y1)
+    const hit = spans.find((s) => out > s.lo - margin && out < s.hi + margin)
+    if (!hit) return out
+    const lo = Math.max(margin, hit.lo - margin)
+    const hi = Math.min(wall.length - margin, hit.hi + margin)
+    out = out - hit.lo < hit.hi - out ? lo : hi
+  }
+  return out
+}
+
+type WallVertical = {
+  u: number
+  halfT: number
+  w: number
+  size?: Member['size']
+  y0: number
+  y1: number
+}
+type WallRow = { u0: number; u1: number; y0: number; y1: number }
+
+/** Index the wall-framing members a box interacts with, per wall id. */
+function indexWallFraming(
+  members: Member[],
+  walls: WallSlice[],
+): { verticals: Map<string, WallVertical[]>; rows: Map<string, WallRow[]> } {
+  const byId = new Map(walls.map((w) => [w.id, w]))
+  const verticals = new Map<string, WallVertical[]>()
+  const rows = new Map<string, WallRow[]>()
+  for (const m of members) {
+    if (m.system !== 'wall-framing') continue
+    const wall = byId.get(m.sourceId)
+    if (!wall) continue
+    const u = wallU(wall, m.position)
+    if (MOUNTABLE_VERTICALS.has(m.role)) {
+      const list = verticals.get(wall.id) ?? []
+      list.push({
+        u,
+        halfT: m.dims[0] / 2,
+        w: m.dims[2],
+        size: m.size,
+        y0: m.position[1] - m.dims[1] / 2,
+        y1: m.position[1] + m.dims[1] / 2,
+      })
+      verticals.set(wall.id, list)
+    } else if (MOUNT_ROWS.has(m.role)) {
+      const list = rows.get(wall.id) ?? []
+      list.push({
+        u0: u - m.dims[0] / 2,
+        u1: u + m.dims[0] / 2,
+        y0: m.position[1] - m.dims[1] / 2,
+        y1: m.position[1] + m.dims[1] / 2,
+      })
+      rows.set(wall.id, list)
+    }
+  }
+  for (const list of verticals.values()) list.sort((a, b) => a.u - b.u)
+  return { verticals, rows }
+}
+
+/** The wall's o.c. rhythm read back from its actual verticals (median clear
+ * gap — trimmer packs and doubled studs filtered). 16" when unreadable. */
+function bayRhythm(verts: WallVertical[]): number {
+  const gaps: number[] = []
+  for (let i = 0; i + 1 < verts.length; i++) {
+    const a = verts[i] as WallVertical
+    const b = verts[i + 1] as WallVertical
+    const gap = b.u - a.u
+    if (gap > 0.09) gaps.push(gap)
+  }
+  if (gaps.length === 0) return inches(16)
+  gaps.sort((a, b) => a - b)
+  return gaps[Math.floor(gaps.length / 2)] ?? inches(16)
+}
+
+export type AppliedDeviceOverrides = {
+  fixtures: Fixture[]
+  /** Extra wall-framing members the moves needed (device blocking). */
+  members: Member[]
+  warnings: string[]
+}
+
+/**
+ * Apply `bones:device` overrides to the derived device fixtures — the
+ * movable-outlets contract (Q7): the override WINS over the derived spot
+ * (position-wins precedence like `overrideWallPoint`), but never lands
+ * somewhere unbuildable. In order:
+ *  (a) RO rule: the box never sits inside a door/window rough opening —
+ *      snapped out with a warning (serviceOverrideRoWarning parity);
+ *  (b) STUD rule: boxes mount BESIDE a stud — wallT snaps so the box edge
+ *      lands against the nearest vertical's face (studs/kings/trimmers/
+ *      cripples covering the box's height band); when the nearest usable
+ *      face is farther than half a bay, the position is KEPT and a
+ *      horizontal 2x 'device blocking' member spans the bay at box height
+ *      (skipped when an existing blocking/backing/fire row already crosses
+ *      there — the box mounts to that instead);
+ *  (c) HEIGHT clamp: receptacles [0.15, 1.7] m, switches [0.9, 2.0] m
+ *      (NEC 404.8(A)) — clamped with a note.
+ * After the moves, NEC 210.52(A) receptacle spacing is re-checked on every
+ * wall a moved receptacle left or joined — the derived layout is
+ * spacing-correct by construction, so untouched walls never warn.
+ * With no overrides the input `fixtures` array is returned UNCHANGED
+ * (reference-equal — the byte-equality guarantee).
+ */
+export function applyDeviceOverrides(
+  fixtures: Fixture[],
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  framingMembers: Member[],
+  overrides: DeviceOverrides | undefined,
+): AppliedDeviceOverrides {
+  if (!overrides || overrides.size === 0) return { fixtures, members: [], warnings: [] }
+
+  const out = [...fixtures]
+  const members: Member[] = []
+  const warnings: string[] = []
+  const { verticals, rows } = indexWallFraming(framingMembers, walls)
+  const spacingWalls = new Set<string>()
+
+  // Deterministic application order (Map insertion order is the caller's):
+  // sort by deviceId so duplicate work (shared blocking rows) is stable.
+  const entries = [...overrides.entries()].sort(([a], [b]) => a.localeCompare(b))
+  for (const [deviceId, override] of entries) {
+    const idx = out.findIndex((f) => f.meta?.deviceId === deviceId)
+    if (idx < 0) continue // orphan override — the id no longer derives
+    const fixture = out[idx] as Fixture
+    const isSwitch = fixture.kind === 'switch'
+    const derivedWall = deviceWallOf(fixture, walls)
+
+    // ---- resolve the target wall + raw u (position-wins precedence) ----
+    let wall: WallSlice | null = null
+    let u = 0
+    const moved = movedOverridePosition(override)
+    if (moved) {
+      const wp = nearestWallPoint(walls, [moved[0], moved[2]])
+      if (wp) {
+        wall = wp.wall
+        u = wp.u
+      }
+    } else {
+      wall = overrideWall(walls, override) ?? derivedWall
+      if (wall) {
+        const t =
+          typeof override.wallT === 'number' && Number.isFinite(override.wallT)
+            ? Math.max(0, Math.min(1, override.wallT))
+            : wallU(wall, fixture.position) / Math.max(wall.length, 1e-9)
+        u = t * wall.length
+      }
+    }
+    if (!wall) continue // nothing usable to mount on — keep the derived spot
+
+    // ---- (c) height clamp — applied first so the RO band is the real one ----
+    const band = isSwitch ? SWITCH_HEIGHT_BAND : RECEPTACLE_HEIGHT_BAND
+    const rawH =
+      typeof override.heightAff === 'number' && Number.isFinite(override.heightAff)
+        ? override.heightAff
+        : fixture.position[1]
+    const h = Math.max(band[0], Math.min(band[1], rawH))
+    if (Math.abs(h - rawH) > 1e-9) {
+      warnings.push(
+        `device “${deviceId}”: mount height clamped to ${h.toFixed(2)} m — ` +
+          (isSwitch
+            ? `switches live in [${band[0]}, ${band[1]}] m (NEC 404.8(A) 6'7" max)`
+            : `receptacles live in [${band[0]}, ${band[1]}] m`),
+      )
+    }
+    const y0 = h - DEVICE_BOX_HALF_H
+    const y1 = h + DEVICE_BOX_HALF_H
+
+    // ---- (a) never inside a rough opening — snap out + warn ----
+    const roSnapped = snapBoxClearOfRo(wall, u, y0, y1)
+    if (Math.abs(roSnapped - u) > 1e-9) {
+      warnings.push(
+        `device “${deviceId}” sits in a door/window rough opening — snapped clear`,
+      )
+      u = roSnapped
+    }
+
+    // ---- (b) stud rule: the box edge mounts against a stud face ----
+    const spans = openingSpans(wall, y0, y1)
+    const boxHalf = DEVICE_BOX_W / 2
+    const verts = (verticals.get(wall.id) ?? []).filter(
+      (v) => v.y0 <= y0 + 0.02 && v.y1 >= y1 - 0.02,
+    )
+    if (verts.length > 0) {
+      let bestC: number | null = null
+      for (const v of verts) {
+        for (const side of [-1, 1] as const) {
+          const c = v.u + side * (v.halfT + boxHalf)
+          if (c < boxHalf + 0.01 || c > wall.length - boxHalf - 0.01) continue
+          // the box must clear every RO span and every other vertical
+          if (spans.some((s) => c + boxHalf > s.lo && c - boxHalf < s.hi)) continue
+          if (
+            verts.some(
+              (o) => c + boxHalf > o.u - o.halfT + 1e-6 && c - boxHalf < o.u + o.halfT - 1e-6,
+            )
+          ) {
+            continue
+          }
+          if (bestC === null || Math.abs(c - u) < Math.abs(bestC - u)) bestC = c
+        }
+      }
+      // Half a bay of the wall's o.c. rhythm — capped at a 24" bay so a
+      // degenerate sparse rhythm still books blocking instead of teleporting
+      // the box across a meters-wide gap.
+      const halfBay = Math.min(bayRhythm(verts), inches(24)) / 2 + 1e-6
+      if (bestC !== null && Math.abs(bestC - u) <= halfBay) {
+        u = bestC
+      } else {
+        // Off-stud: keep the user's spot and make the mount PHYSICAL — a
+        // flat 2x block between the bay's studs at box height (unless an
+        // existing row already crosses the box there).
+        const left = [...verts].reverse().find((v) => v.u < u)
+        const right = verts.find((v) => v.u > u)
+        const rowList = rows.get(wall.id) ?? []
+        const covered = rowList.some(
+          (r) => u > r.u0 - 1e-6 && u < r.u1 + 1e-6 && r.y0 < y1 && r.y1 > y0,
+        )
+        if (left && right && !covered) {
+          const blockLen = right.u - right.halfT - (left.u + left.halfT)
+          if (blockLen >= inches(3)) {
+            const mid = (left.u + left.halfT + (right.u - right.halfT)) / 2
+            const p = wallPlan({ wall, u: mid })
+            const t = left.halfT * 2
+            const block: Member = {
+              system: 'wall-framing',
+              role: 'blocking',
+              size: left.size,
+              dims: [blockLen, t, left.w],
+              length: blockLen,
+              position: [p[0], h, p[1]],
+              rotation: [0, Math.atan2(-wall.dir[1], wall.dir[0]), 0],
+              material: 'lumber',
+              sourceId: wall.id,
+              label: 'device blocking — box off-stud',
+            }
+            members.push(block)
+            // later devices in the same bay mount to THIS block
+            rowList.push({ u0: left.u + left.halfT, u1: right.u - right.halfT, y0: h - t / 2, y1: h + t / 2 })
+            rows.set(wall.id, rowList)
+          }
+        }
+      }
+    }
+
+    // ---- re-mount the fixture on its (possibly new) wall face ----
+    let side: 1 | -1
+    if (derivedWall && wall.id === derivedWall.id) {
+      side = wallSideOffset(wall, fixture.position) >= 0 ? 1 : -1
+    } else {
+      side = (interiorFaces(wall, rooms)[0] ?? faceOf(wall, 1)).side
+    }
+    const face = faceOf(wall, side)
+    const [x, z] = face.plan(u)
+    // Receptacles key their wall in sourceId — a cross-wall move re-keys it
+    // so the device manifest (deviceWallOf) mounts the node where the box
+    // stands. Switches keep their OPENING/room key: a moved switch still
+    // controls the same light.
+    const sourceId = !isSwitch && derivedWall && wall.id !== derivedWall.id ? wall.id : fixture.sourceId
+    out[idx] = { ...fixture, position: [x, h, z], rotationY: face.rotationY, sourceId }
+
+    if (!isSwitch) {
+      if (derivedWall) spacingWalls.add(derivedWall.id)
+      spacingWalls.add(wall.id)
+    }
+  }
+
+  // ---- NEC 210.52(A) spacing advisory on the walls the moves touched ----
+  for (const wallId of [...spacingWalls].sort()) {
+    const wall = walls.find((w) => w.id === wallId)
+    if (!wall || wall.curved || wall.length < 0.1) continue
+    let violated = false
+    for (const side of [1, -1] as const) {
+      // receptacle u-positions on this wall FACE (moved arrivals included)
+      const us = out
+        .filter((f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci')
+        .filter((f) => {
+          const off = wallSideOffset(wall, f.position)
+          if (Math.sign(off) !== side) return false
+          if (Math.abs(off) > wall.thickness / 2 + FACE_OFFSET + 0.05) return false
+          const raw =
+            (f.position[0] - wall.start[0]) * wall.dir[0] +
+            (f.position[2] - wall.start[1]) * wall.dir[1]
+          return raw > -0.05 && raw < wall.length + 0.05
+        })
+        .map((f) => wallU(wall, f.position))
+        .sort((a, b) => a - b)
+      // Only faces that had receptacles derive receptacles — an exterior
+      // wall's outside face never counts.
+      if (us.length === 0 && wall.exterior) continue
+      for (const seg of usableSegments(wall)) {
+        const inSeg = us.filter((v) => v >= seg.a - 1e-6 && v <= seg.b + 1e-6)
+        let maxDist: number
+        if (inSeg.length === 0) {
+          maxDist = seg.b - seg.a // a usable space with NO receptacle left
+        } else {
+          maxDist = Math.max(
+            (inSeg[0] as number) - seg.a,
+            seg.b - (inSeg[inSeg.length - 1] as number),
+          )
+          for (let i = 0; i + 1 < inSeg.length; i++) {
+            maxDist = Math.max(maxDist, ((inSeg[i + 1] as number) - (inSeg[i] as number)) / 2)
+          }
+        }
+        if (maxDist > MAX_FROM_BREAK + 1e-9) violated = true
+      }
+    }
+    if (violated) {
+      warnings.push(
+        `wall ${wall.id}: receptacle spacing exceeds NEC 210.52 (moved outlet leaves a >12ft gap)`,
+      )
+    }
+  }
+
+  return { fixtures: out, members, warnings }
 }
 
 // ---------------------------------------------------------------------------
