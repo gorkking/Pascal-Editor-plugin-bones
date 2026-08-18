@@ -147,8 +147,23 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
       [],
       true,
     )
-    const faceMesh = layered.children[0] as unknown as { userData: { face?: readonly [number, number] } }
+    const faceMesh = layered.children[0] as unknown as { userData: { face?: readonly [number, number]; sourceId?: string } }
     expect(faceMesh.userData.face).toEqual([0, 1])
+    // …and their SOURCE WALL id (night-4: the selected wall is exempt from
+    // the cut, so face buckets split per wall and tag their mesh).
+    expect(faceMesh.userData.sourceId).toBeDefined()
+    const twoWalls = buildGroup(
+      [
+        { ...synthesizeMembers(1)[0]!, role: 'drywall' as const, face: [0, 1] as const, sourceId: 'wall_a' },
+        { ...synthesizeMembers(1)[0]!, role: 'drywall' as const, face: [0, 1] as const, sourceId: 'wall_b' },
+      ],
+      [],
+      true,
+    )
+    // same color + same face normal but different walls → separate buckets
+    expect(twoWalls.children).toHaveLength(2)
+    const ids = twoWalls.children.map((c) => (c.userData as { sourceId?: string }).sourceId).sort()
+    expect(ids).toEqual(['wall_a', 'wall_b'])
     for (const m of meshes) {
       expect(m.isInstancedMesh).toBe(true) // members only — no sentinels
       expect(m.material.depthTest).toBe(true) // natural near-hides-far

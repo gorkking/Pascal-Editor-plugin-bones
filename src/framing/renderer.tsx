@@ -117,6 +117,8 @@ function fixtureBox(fixture: Fixture): { dims: [number, number, number]; color: 
 
 type Bucket = {
   color: string
+  /** Source wall id for face-carrying buckets — the cull exemption key. */
+  sourceId?: string
   entries: {
     dims: readonly [number, number, number]
     position: readonly [number, number, number]
@@ -174,10 +176,11 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     rotation: readonly [number, number, number],
     face?: readonly [number, number],
     ghostless?: boolean,
+    sourceId?: string,
   ) => {
     let bucket = buckets.get(key)
     if (!bucket) {
-      bucket = { color, entries: [], face, ghostless }
+      bucket = { color, entries: [], face, ghostless, sourceId }
       buckets.set(key, bucket)
     }
     bucket.entries.push({ dims, position, rotation })
@@ -194,10 +197,12 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
       continue
     }
     if (member.face) {
-      // Assembly layers: bucket PER FACE NORMAL (quantized) so the
-      // dollhouse cut can hide camera-facing stacks as whole meshes.
-      const key = `${color}|${member.face[0].toFixed(2)},${member.face[1].toFixed(2)}`
-      push(key, color, member.dims, member.position, member.rotation, member.face, true)
+      // Assembly layers: bucket PER FACE NORMAL (quantized) AND per source
+      // wall, so the dollhouse cut can hide camera-facing stacks as whole
+      // meshes while the SELECTED wall's stacks stay visible (night-4:
+      // picking a cladding was invisible from every straight-on view).
+      const key = `${color}|${member.face[0].toFixed(2)},${member.face[1].toFixed(2)}|${member.sourceId}`
+      push(key, color, member.dims, member.position, member.rotation, member.face, true, member.sourceId)
       continue
     }
     // Ghost copies only make sense where no dollhouse opening can reveal
@@ -267,6 +272,7 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
       bucket.entries.length,
     )
     if (bucket.face) solid.userData.face = bucket.face
+    if (bucket.sourceId) solid.userData.sourceId = bucket.sourceId
     const meshes = [solid]
     if (seeThrough && !bucket.ghostless) {
       const ghostMaterial = new MeshStandardMaterial({
@@ -346,7 +352,9 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // Cached useViewer store handle (resolved by the dynamic import below) —
   // useFrame can't await, so attachForeign reads levelMode through this ref;
   // null until the import lands = treat as stacked.
-  const viewerStore = useRef<{ getState: () => { levelMode?: string } } | null>(null)
+  const viewerStore = useRef<{
+    getState: () => { levelMode?: string; selection?: { selectedIds?: readonly string[] } }
+  } | null>(null)
   useRegistry(node.id, node.type, ref)
 
   // Any scene edit re-derives the skeleton — that's the contract (never stale).
@@ -443,9 +451,18 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     attachForeign()
     if (node.seeThrough === false) return
     const dir = camera.getWorldDirection(viewDir.current)
+    // The SELECTED wall is exempt from the cut: the user is inspecting it
+    // (Engineering card flow), so its full stack — cladding included —
+    // must read from any angle. Everything else keeps the dollhouse cut.
+    const selected = viewerStore.current?.getState().selection?.selectedIds
     for (const child of group.children) {
       const face = (child.userData as { face?: readonly [number, number] }).face
       if (!face) continue
+      const sourceId = (child.userData as { sourceId?: string }).sourceId
+      if (sourceId && selected && selected.includes(sourceId)) {
+        child.visible = true
+        continue
+      }
       // face normal · view direction > 0 → face points away → keep it
       child.visible = face[0] * dir.x + face[1] * dir.z > 0.02
     }
