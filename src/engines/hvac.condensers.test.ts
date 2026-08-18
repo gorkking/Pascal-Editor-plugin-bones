@@ -482,3 +482,27 @@ describe('takeoff — condenser rows mirror the rendered members/fixtures (S4)',
     expect(find('Mechanical equipment')?.quantity).toBe(1)
   })
 })
+
+describe('night-4 batch F1: slid pad stays wall-aligned and clear', () => {
+  test('an RO fronting the anchor slides the unit — the PAD may not reach the wall assembly', () => {
+    // Pre-fix: unit #1's pad inherited the cabinet's oblique equip-bearing
+    // rotation after the slide; a 45° square pad reaches
+    // (|sin|+|cos|)·half toward the wall and punched through the cladding.
+    // door at u=3 fronts the anchor projected from the laundry equip room.
+    const { walls, rooms } = shell(12, 8, [opening('door_front', 3, 0.95)])
+    const { members } = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'NY' })
+    const pads = padsOf(members)
+    expect(pads.length).toBeGreaterThan(0)
+    for (const pad of pads) {
+      // wall-aligned: yaw is a clean multiple of 90° (the south wall runs +X)
+      const yaw = ((pad.rotation[1] % (Math.PI / 2)) + Math.PI / 2) % (Math.PI / 2)
+      expect(Math.min(yaw, Math.PI / 2 - yaw)).toBeLessThan(1e-6)
+      // and the pad's near edge clears the wall assembly (0.13m cladding allow)
+      const half = pad.dims[0] / 2
+      const wall0 = walls[0]!
+      expect(Math.abs(pad.position[2]) - half).toBeGreaterThanOrEqual(
+        wall0.thickness / 2 + 0.13 - 1e-6,
+      )
+    }
+  })
+})

@@ -862,6 +862,12 @@ export function applyDeviceOverrides(
   rooms: RoomSlice[],
   framingMembers: Member[],
   overrides: DeviceOverrides | undefined,
+  /** Colinear-dedupe context: an override committed against a DROPPED twin
+   * (the drag's nearestUsableWall ties break by iteration order) resolves
+   * to the kept wall with its wallT re-projected onto the kept centerline
+   * (verify night-4 batch F2 — the silent fallback re-targeted the
+   * derived wall with the twin's t). */
+  dedupe?: { rawWalls: WallSlice[]; duplicateOf: Record<string, string> },
 ): AppliedDeviceOverrides {
   if (!overrides || overrides.size === 0) return { fixtures, members: [], warnings: [] }
 
@@ -892,13 +898,42 @@ export function applyDeviceOverrides(
         u = wp.u
       }
     } else {
-      wall = overrideWall(walls, override) ?? derivedWall
+      wall = overrideWall(walls, override) ?? null
+      let projectedU: number | null = null
+      if (!wall && override.wallId) {
+        const keptId = dedupe?.duplicateOf[override.wallId]
+        const kept = keptId ? walls.find((w) => w.id === keptId) : undefined
+        const twin = dedupe?.rawWalls.find((w) => w.id === override.wallId)
+        if (kept && twin && typeof override.wallT === 'number' && Number.isFinite(override.wallT)) {
+          // project the twin-relative t through world space onto the kept run
+          const t = Math.max(0, Math.min(1, override.wallT))
+          const px = twin.start[0] + twin.dir[0] * t * twin.length
+          const pz = twin.start[1] + twin.dir[1] * t * twin.length
+          wall = kept
+          projectedU = Math.max(
+            0,
+            Math.min(
+              kept.length,
+              (px - kept.start[0]) * kept.dir[0] + (pz - kept.start[1]) * kept.dir[1],
+            ),
+          )
+        } else {
+          warnings.push(
+            `device “${deviceId}”: override wall ${override.wallId} is not framed — using the derived spot`,
+          )
+        }
+      }
+      if (!wall) wall = derivedWall
       if (wall) {
-        const t =
-          typeof override.wallT === 'number' && Number.isFinite(override.wallT)
-            ? Math.max(0, Math.min(1, override.wallT))
-            : wallU(wall, fixture.position) / Math.max(wall.length, 1e-9)
-        u = t * wall.length
+        if (projectedU !== null) {
+          u = projectedU
+        } else {
+          const t =
+            typeof override.wallT === 'number' && Number.isFinite(override.wallT)
+              ? Math.max(0, Math.min(1, override.wallT))
+              : wallU(wall, fixture.position) / Math.max(wall.length, 1e-9)
+          u = t * wall.length
+        }
       }
     }
     if (!wall) continue // nothing usable to mount on — keep the derived spot

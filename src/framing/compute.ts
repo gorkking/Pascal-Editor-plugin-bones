@@ -167,6 +167,50 @@ function serviceOverrideRoWarning(
 }
 
 /**
+ * A device-blocking row (off-stud box mount) lands INSIDE a stud bay that a
+ * per-wall insulation override may have filled with a batt — the installer
+ * notches the batt around the block, so the member model SPLITS it: the
+ * overlapped batt becomes a below-piece and an above-piece (the block spans
+ * the whole bay, S1/S6 — verify night-4 batch F3). Mutates `members`.
+ */
+function splitBattsAroundBlocking(members: Member[], blocking: Member[]): void {
+  for (const block of blocking) {
+    if (block.label !== 'device blocking — box off-stud') continue
+    const byLo = block.position[1] - block.dims[1] / 2
+    const byHi = block.position[1] + block.dims[1] / 2
+    for (let i = members.length - 1; i >= 0; i--) {
+      const m = members[i] as Member
+      if (m.role !== 'insulation' || m.sourceId !== block.sourceId) continue
+      // both boxes are centered on the wall line — colinear overlap test
+      const du = Math.hypot(
+        m.position[0] - block.position[0],
+        m.position[2] - block.position[2],
+      )
+      if (du > (m.dims[0] + block.dims[0]) / 2 - 0.005) continue
+      const yLo = m.position[1] - m.dims[1] / 2
+      const yHi = m.position[1] + m.dims[1] / 2
+      if (byLo >= yHi - 0.001 || byHi <= yLo + 0.001) continue
+      const pieces: Member[] = []
+      if (byLo - yLo > 0.02) {
+        pieces.push({
+          ...m,
+          dims: [m.dims[0], byLo - yLo, m.dims[2]],
+          position: [m.position[0], (yLo + byLo) / 2, m.position[2]],
+        })
+      }
+      if (yHi - byHi > 0.02) {
+        pieces.push({
+          ...m,
+          dims: [m.dims[0], yHi - byHi, m.dims[2]],
+          position: [m.position[0], (byHi + yHi) / 2, m.position[2]],
+        })
+      }
+      members.splice(i, 1, ...pieces)
+    }
+  }
+}
+
+/**
  * serviceType → override slot for the service types added AFTER the core five
  * (thermostat / heat-pump / electric-meter). The extraction extension lives
  * HERE rather than in wall-model.ts — same lowest-id-wins, visible-only and
@@ -645,8 +689,10 @@ function computeLevelUncached(
       activeRooms,
       members,
       deviceExtraction.overrides,
+      { rawWalls, duplicateOf: Object.fromEntries(duplicateOf) },
     )
     const electrical = applied.fixtures
+    splitBattsAroundBlocking(members, applied.members)
     members.push(...applied.members)
     warnings.push(...applied.warnings)
     fixtures.push(...electrical)

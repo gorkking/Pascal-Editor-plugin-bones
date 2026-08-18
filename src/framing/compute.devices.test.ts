@@ -210,3 +210,103 @@ describe('computeLevel — device nodes end to end', () => {
     expect(result.fixtures.every((f) => f.meta?.deviceId === undefined)).toBe(true)
   })
 })
+
+describe('night-4 batch fixes (F2 twin overrides, F3 batt notching)', () => {
+  test('F2: an override committed against a DROPPED colinear twin lands on the kept run', () => {
+    const scene = baselineScene()
+    // draw an overlapping shorter twin of the 12m south wall carrying no
+    // devices of its own — dedupe drops it, drags may still commit its id
+    scene.wall_twin = {
+      id: 'wall_twin',
+      type: 'wall',
+      parentId: 'level_1',
+      start: [2, 0],
+      end: [10, 0],
+      thickness: 0.15,
+      height: 2.5,
+      children: [],
+    }
+    const base = computeLevel(scene, baselineConfig('INTL'))
+    expect(base.duplicateOf.wall_twin).toBe('w_s')
+    const target = base.devices.find(
+      (d) => d.wallId === 'w_s' && d.deviceKind !== 'switch',
+    ) as NonNullable<(typeof base.devices)[number]>
+    // override committed against the twin: wallT 0.75 on the 8m twin
+    // = world x = 2 + 6 = 8 → wallT 8/12 on the kept 12m wall
+    scene.bonesdevice_twin = {
+      id: 'bonesdevice_twin',
+      type: 'bones:device',
+      parentId: 'level_1',
+      visible: true,
+      deviceId: target.deviceId,
+      deviceKind: target.deviceKind,
+      wallId: 'wall_twin',
+      wallT: 0.75,
+      heightAff: 0.38,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    }
+    const result = computeLevel({ ...scene }, baselineConfig('INTL'))
+    const fx = result.fixtures.find((f) => f.meta?.deviceId === target.deviceId) as Fixture
+    // lands near world x=8 on the kept south wall (stud-snap may nudge)
+    expect(Math.abs(fx.position[0] - 8)).toBeLessThan(0.5)
+    expect(Math.abs(fx.position[2])).toBeLessThan(0.2)
+    // no silent-fallback spacing false alarm on an untouched-wall basis
+    expect(result.warnings.some((w) => w.includes('not framed'))).toBe(false)
+  })
+
+  test('F3: device blocking notches the batt — no insulation×blocking overlap', () => {
+    const scene = baselineScene()
+    const cfg = FramingNode.parse({
+      id: 'bonesframing_baseline',
+      parentId: 'level_1',
+      jurisdiction: 'NY',
+      detail: '400',
+      studSpacingIn: 16,
+      showWalls: true,
+      showElectrical: true,
+      wallOverrides: { w_s: { construction: 'framed', insulation: 'batt' } },
+    })
+    const base = computeLevel(scene, cfg)
+    const target = base.devices.find(
+      (d) => d.wallId === 'w_s' && d.deviceKind !== 'switch',
+    ) as NonNullable<(typeof base.devices)[number]>
+    scene.bonesdevice_mid = {
+      id: 'bonesdevice_mid',
+      type: 'bones:device',
+      parentId: 'level_1',
+      visible: true,
+      deviceId: target.deviceId,
+      deviceKind: target.deviceKind,
+      wallId: 'w_s',
+      wallT: 0.58,
+      heightAff: 1.5,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    }
+    const result = computeLevel({ ...scene }, cfg)
+    const blocks = result.members.filter(
+      (m) => m.label === 'device blocking — box off-stud',
+    )
+    const batts = result.members.filter(
+      (m) => m.role === 'insulation' && m.sourceId === 'w_s',
+    )
+    expect(batts.length).toBeGreaterThan(0)
+    // the notch: no batt's vertical extent may overlap a block's at the
+    // same along-wall spot
+    for (const block of blocks) {
+      const byLo = block.position[1] - block.dims[1] / 2
+      const byHi = block.position[1] + block.dims[1] / 2
+      for (const b of batts) {
+        const du = Math.hypot(
+          b.position[0] - block.position[0],
+          b.position[2] - block.position[2],
+        )
+        if (du > (b.dims[0] + block.dims[0]) / 2 - 0.005) continue
+        const yLo = b.position[1] - b.dims[1] / 2
+        const yHi = b.position[1] + b.dims[1] / 2
+        expect(byLo >= yHi - 0.003 || byHi <= yLo + 0.003).toBe(true)
+      }
+    }
+  })
+})

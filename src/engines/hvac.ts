@@ -938,13 +938,19 @@ export function layoutHvac(
             padCenter = [at[0] + slot.out[0] * push, at[1] + slot.out[1] * push]
           }
         }
+        // The PAD is always poured parallel to the row wall — only the
+        // CABINET keeps unit #1's legacy facing. An oblique square pad
+        // reaches (|sin|+|cos|)·half toward the wall and punched through
+        // the assembly after an RO slide (verify night-4 batch F1); the
+        // wall-aligned pad is exactly what the clearance math assumes.
+        const padRotY = row.wall ? Math.atan2(slot.out[0], slot.out[1]) : rotY
         members.push({
           system: 'hvac',
           role: 'equipment',
           dims: [COND_PAD_SIDE, COND_PAD_T, COND_PAD_SIDE],
           length: COND_PAD_SIDE,
           position: [padCenter[0], COND_PAD_T / 2, padCenter[1]],
-          rotation: [0, rotY, 0],
+          rotation: [0, padRotY, 0],
           material: 'concrete',
           sourceId: equipRoom.id,
           label: 'Condenser pad 4" — concrete (per mfr clearance + IRC M1403)',
