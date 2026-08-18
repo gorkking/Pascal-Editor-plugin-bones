@@ -1,6 +1,7 @@
 import type { AnyNodeDefinition, Plugin } from '@pascal-app/core'
 import { BONES_ICON } from './art'
 import { lumberDefinition } from './definition'
+import { deviceDefinition } from './device/definition'
 import { framingDefinition } from './framing/definition'
 import { serviceDefinition } from './service/definition'
 
@@ -66,6 +67,7 @@ export const bonesPlugin: Plugin & { inspectorExtensions: InspectorExtensionLike
     framingDefinition as unknown as AnyNodeDefinition,
     lumberDefinition as unknown as AnyNodeDefinition,
     serviceDefinition as unknown as AnyNodeDefinition,
+    deviceDefinition as unknown as AnyNodeDefinition,
   ],
   inspectorExtensions: bonesInspectorExtensions,
 }
@@ -91,3 +93,5 @@ export { LumberNode } from './schema'
 export { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, lumberBoxDims } from './lumber'
 export { serviceDefinition } from './service/definition'
 export { SERVICE_TYPES, ServiceNode } from './service/schema'
+export { deviceDefinition } from './device/definition'
+export { DEVICE_KINDS, DeviceNode } from './device/schema'

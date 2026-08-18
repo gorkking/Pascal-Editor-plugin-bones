@@ -14,6 +14,7 @@ describe('Bones plugin manifest', () => {
       'bones:framing',
       'bones:lumber',
       'bones:service',
+      'bones:device',
     ])
   })
 

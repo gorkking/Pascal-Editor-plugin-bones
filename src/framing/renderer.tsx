@@ -1,6 +1,12 @@
 'use client'
 
-import { sceneRegistry, useRegistry, useScene } from '@pascal-app/core'
+import {
+  pauseSceneHistory,
+  resumeSceneHistory,
+  sceneRegistry,
+  useRegistry,
+  useScene,
+} from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
@@ -15,6 +21,7 @@ import {
 } from 'three'
 import type { Fixture, Member } from '../core/types'
 import { inches } from '../core/units'
+import { reconcileDeviceNodes } from '../device/place'
 import { circuitColor, plumbingPipeColor } from '../plans/circuit-colors'
 import { computeLevel } from './compute'
 import type { FramingNode } from './schema'
@@ -355,6 +362,46 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     () => computeLevel(nodes as Record<string, Record<string, unknown>>, node),
     [nodes, node],
   )
+
+  // Movable outlets (Q7): mirror every derived wall device into a
+  // `bones:device` node so ANY receptacle/switch is hoverable and draggable —
+  // create missing nodes at the derived spots, re-seat unmoved ones when the
+  // derivation drifts, drop orphans; nodes the user moved are never touched
+  // (device/place.ts). Derived maintenance, not a user edit: history pauses
+  // around the batch so reconcile writes never pollute undo, and the whole
+  // plan lands in ONE applyNodeChanges. Converges in one pass (the re-run on
+  // the resulting nodes change plans zero ops). Bails in read-only hosts
+  // (community viewer) — no scene writes on view, like cladding-paint.
+  useEffect(() => {
+    if (node.visible === false || node.showElectrical === false) return
+    const levelId = node.parentId
+    if (!levelId) return
+    const state = useScene.getState() as unknown as {
+      readOnly?: boolean
+      applyNodeChanges: (changes: {
+        create?: { node: unknown; parentId?: unknown }[]
+        update?: { id: unknown; data: Record<string, unknown> }[]
+        delete?: unknown[]
+      }) => void
+    }
+    if (state.readOnly) return
+    const plan = reconcileDeviceNodes(
+      nodes as Record<string, Record<string, unknown>>,
+      levelId,
+      result.devices,
+    )
+    if (plan.create.length + plan.update.length + plan.remove.length === 0) return
+    pauseSceneHistory(useScene)
+    try {
+      state.applyNodeChanges({
+        create: plan.create.map((n) => ({ node: n as unknown, parentId: levelId })),
+        update: plan.update.map((u) => ({ id: u.id, data: u.data })),
+        delete: plan.remove,
+      })
+    } finally {
+      resumeSceneHistory(useScene)
+    }
+  }, [nodes, node, result])
 
   const built = useMemo(
     () => buildGroups(result.members, result.fixtures, node.seeThrough !== false),
