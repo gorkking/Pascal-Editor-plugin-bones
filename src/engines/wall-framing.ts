@@ -59,6 +59,20 @@ export function studSizeFor(wall: WallSlice, spec: FramingSpec): LumberSize {
 }
 
 /**
+ * Across-wall geometry depth that FITS the drawn wall: caps at the finish
+ * cavity (thickness − 1") when the nominal depth overshoots by more than
+ * the 2mm SAT-skin grace (the textbook 0.114m/2x4 partition stays
+ * byte-equal). The stud-family analog of the S7 batt cap — members keep
+ * their nominal size/label/takeoff identity; only the drawn geometry
+ * compresses, landing the stud face exactly on the layer engine's
+ * stackOrigin (night-4 Cavity-Fit design: 140 default-scene S1 pairs → 0).
+ */
+export function fitAcross(nominalDepth: number, wall: WallSlice): number {
+  const cavity = wall.thickness - inches(1)
+  return nominalDepth - cavity > 0.002 ? cavity : nominalDepth
+}
+
+/**
  * Per-wall engineering override the framing consumes — a projection of the
  * resolved WallOverride object (framing/compute.ts): stud size pins BOTH
  * spec sizes so the thickness heuristic can't argue, spacing replaces the
@@ -136,6 +150,14 @@ export function frameWall(
   const { yaw, place } = frameOf(wall)
   const studSize = studSizeFor(wall, spec)
   const [t, w] = LUMBER_CROSS_SECTIONS[studSize] // t = 1.5", w = 3.5"/5.5"
+  // Cavity-fit: geometry compresses to what the drawn wall holds (labels,
+  // takeoff and cut lengths stay nominal). One exact flag string per
+  // (size, thickness) class so Takeoff → Flags aggregates with a count.
+  const wFit = fitAcross(w, wall)
+  const compressionFlag =
+    wFit < w
+      ? `${studSize} framing compressed to ${formatIn(wFit)} — ${wall.thickness.toFixed(3)}m drawn wall holds ${formatIn(wFit)} + finishes; deepen to ${(w + inches(1)).toFixed(3)}m for full-depth ${studSize}`
+      : undefined
   const len = wall.length
   const H = wall.height
 
@@ -158,7 +180,9 @@ export function frameWall(
       material: 'lumber',
       sourceId: wall.id,
       label,
-      flag,
+      // Member-specific flags (engineered header, RO clamp) win; every
+      // other member on a compressed wall carries the aggregate flag.
+      flag: flag ?? compressionFlag,
     })
   }
 
@@ -173,7 +197,7 @@ export function frameWall(
     sticks > 1
       ? ` — spliced from ${sticks}× 20ft stock (${sticks - 1} splice${sticks > 2 ? 's' : ''}, min 24" lap)`
       : ''
-  const plateDims: [number, number, number] = [runLen, t, w]
+  const plateDims: [number, number, number] = [runLen, t, wFit]
   const runMid = (u0 + u1) / 2
   emit('bottom-plate', studSize, plateDims, runMid, t / 2, runLen, `Bottom plate${spliceNote}`)
   emit('top-plate', studSize, plateDims, runMid, H - t / 2, runLen, `Top plate${spliceNote}`)
@@ -188,7 +212,7 @@ export function frameWall(
     emit(
       'cap-plate',
       studSize,
-      [capLen, t, w],
+      [capLen, t, wFit],
       capMid,
       H - t - t / 2,
       capLen,
@@ -201,7 +225,7 @@ export function frameWall(
   const studHeight = studTop - studBottom
   if (studHeight <= t) return members // degenerate pony wall — plates only
 
-  const studDims: [number, number, number] = [t, studHeight, w]
+  const studDims: [number, number, number] = [t, studHeight, wFit]
   const halfT = t / 2
 
   // ---- opening frames (kings / trimmers / header / sill / cripples) ----
@@ -239,7 +263,7 @@ export function frameWall(
     emit(
       'header',
       headerSize,
-      [headerLength, headerDepth, Math.min(ht, wall.thickness)],
+      [headerLength, headerDepth, fitAcross(Math.min(ht, wall.thickness), wall)],
       u,
       headerY,
       headerLength,
@@ -251,7 +275,7 @@ export function frameWall(
 
     // Trimmers (jack studs): floor plate → header bottom, tight to the RO.
     const trimmerHeight = roTop - studBottom
-    const trimmerDims: [number, number, number] = [t, trimmerHeight, w]
+    const trimmerDims: [number, number, number] = [t, trimmerHeight, wFit]
     for (const side of [-1, 1] as const) {
       for (let k = 0; k < trimmersPerSide; k++) {
         emit(
@@ -281,7 +305,7 @@ export function frameWall(
     // Cripples above the header, continuing the common-stud rhythm.
     const crippleTopHeight = studTop - (roTop + headerDepth)
     if (crippleTopHeight > t) {
-      const crippleDims: [number, number, number] = [t, crippleTopHeight, w]
+      const crippleDims: [number, number, number] = [t, crippleTopHeight, wFit]
       for (const cu of studPositions(len, spec.studSpacing, halfT)) {
         if (Math.abs(cu - u) < ro / 2 - halfT) {
           emit(
@@ -299,10 +323,10 @@ export function frameWall(
     // Windows: rough sill + cripples below it.
     if (opening.kind === 'window' && roBottom > studBottom + t) {
       const sillY = roBottom - t / 2
-      emit('sill', studSize, [ro, t, w], u, sillY, ro, 'Rough sill')
+      emit('sill', studSize, [ro, t, wFit], u, sillY, ro, 'Rough sill')
       const crippleBottomHeight = roBottom - t - studBottom
       if (crippleBottomHeight > t) {
-        const crippleDims: [number, number, number] = [t, crippleBottomHeight, w]
+        const crippleDims: [number, number, number] = [t, crippleBottomHeight, wFit]
         const cus = new Set<number>()
         for (const cu of studPositions(runLen, spec.studSpacing, halfT)) {
           if (Math.abs(cu + u0 - u) < ro / 2 - halfT) cus.add(cu + u0)
@@ -357,7 +381,7 @@ export function frameWall(
       emit(
         'backing',
         studSize,
-        [blockLen, t, w],
+        [blockLen, t, wFit],
         bu,
         y,
         blockLen,
@@ -382,7 +406,7 @@ export function frameWall(
         emit(
           'fire-blocking',
           studSize,
-          [blockLen, t, w],
+          [blockLen, t, wFit],
           mid,
           rowY,
           blockLen,

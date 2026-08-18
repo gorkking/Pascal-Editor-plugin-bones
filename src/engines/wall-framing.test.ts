@@ -373,7 +373,11 @@ describe('frameWalls — per-wall studSize/spacingIn overrides', () => {
     expect(studA.size).toBe('2x4')
     expect(studA.dims[2]).toBeCloseTo(inches(3.5), 6)
     expect(studB.size).toBe('2x6')
-    expect(studB.dims[2]).toBeCloseTo(inches(5.5), 6)
+    // Cavity-fit (night-4): the default 2x6 on a 0.15m wall draws
+    // compressed to thickness − 1" (nominal size/label kept, flag carried).
+    expect(studB.dims[2]).toBeCloseTo(0.15 - inches(1), 6)
+    expect(studB.flag).toContain('compressed')
+    expect(studA.flag).toBeUndefined() // 2x4 fits a 0.15m wall outright
     // plates follow the stud size too
     const plateA = members.find(
       (m) => m.role === 'bottom-plate' && m.sourceId === 'wall_a',
@@ -420,5 +424,47 @@ describe('frameWalls — per-wall studSize/spacingIn overrides', () => {
     // butting wall keeps its default 2x6 recipe
     const buttStud = members.find((m) => m.role === 'stud' && m.sourceId === 'w_butt') as Member
     expect(buttStud.size).toBe('2x6')
+  })
+})
+
+describe('cavity-fit framing (night-4): geometry compresses, identity stays nominal', () => {
+  test('flagged walls: every lumber member draws at thickness − 1"', () => {
+    const w015 = makeWall({ id: 'w_thick', thickness: 0.15 })
+    const members = frameWall(w015, DEFAULT_SPEC)
+    const cavity = 0.15 - inches(1)
+    for (const m of members) {
+      expect(m.dims[2]).toBeLessThanOrEqual(cavity + 1e-9)
+      if (m.role !== 'header') {
+        expect(m.dims[2]).toBeCloseTo(cavity, 9)
+        expect(m.flag).toContain('compressed')
+        expect(m.size).toBe('2x6') // identity stays nominal
+      }
+    }
+  })
+
+  test('header clamps on 2x4-class walls only', () => {
+    const thin = makeWall({ id: 'w_thin', thickness: 0.1, openings: [door(2)] })
+    const thinHeader = frameWall(thin, DEFAULT_SPEC).find((m) => m.role === 'header')
+    expect(thinHeader?.dims[2]).toBeCloseTo(0.1 - inches(1), 9)
+    const std = makeWall({ id: 'w_std', thickness: 0.15, openings: [door(2)] })
+    const stdHeader = frameWall(std, DEFAULT_SPEC).find((m) => m.role === 'header')
+    expect(stdHeader?.dims[2]).toBeCloseTo(inches(3.5), 9) // 3.5" fits a 0.15m wall
+  })
+
+  test('grace window: 0.164m keeps FULL 2x6 depth (≤2mm absorbed by the SAT skin)', () => {
+    for (const th of [0.164, 0.165]) {
+      const w = makeWall({ id: `w_${th}`, thickness: th })
+      const stud = frameWall(w, DEFAULT_SPEC).find((m) => m.role === 'stud')
+      expect(stud?.dims[2]).toBeCloseTo(inches(5.5), 9)
+      expect(stud?.flag).toBeUndefined()
+    }
+  })
+
+  test('textbook 0.114m partition stays byte-nominal (no flag, full 2x4)', () => {
+    const w = makeWall({ id: 'w_std114', thickness: 0.114 })
+    for (const m of frameWall(w, DEFAULT_SPEC)) {
+      expect(m.dims[2]).toBeCloseTo(inches(3.5), 9)
+      expect(m.flag).toBeUndefined()
+    }
   })
 })

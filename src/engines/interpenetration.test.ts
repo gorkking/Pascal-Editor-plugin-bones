@@ -372,6 +372,50 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(combined).filter((v) => v.includes('insulation'))).toEqual([])
   })
 
+  test('cavity-fit sweep: framing+layers+batts SAT-clean at EVERY thickness (night-4 S1)', () => {
+    // The redesign's crown gate: the 140-pair default-scene interpenetration
+    // class is dead at every drawn thickness, with and without explicit
+    // stud overrides, batts on, opening frames included. Compressed stud
+    // faces land exactly on the layer stacks' origin — contact, not overlap.
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    for (const th of [0.09, 0.1, 0.114, 0.13, 0.15, 0.164, 0.165, 0.2]) {
+      for (const studSize of [undefined, '2x4' as const, '2x6' as const]) {
+        const rect = [
+          wall({ id: 'w_s', start: [0, 0], end: [6, 0], thickness: th, openings: [door(2), window_(4.2)] }),
+          wall({ id: 'w_e', start: [6, 0], end: [6, 4], thickness: th }),
+          wall({ id: 'w_n', start: [6, 4], end: [0, 4], thickness: th, openings: [window_(3)] }),
+          wall({ id: 'w_w', start: [0, 4], end: [0, 0], thickness: th }),
+        ]
+        const framingOv = new Map(
+          rect.map((w) => [w.id, studSize ? { studSize } : {}]),
+        )
+        const layerOv = new Map(
+          rect.map((w) => [w.id, { ...(studSize ? { studSize } : {}), insulation: 'batt' as const }]),
+        )
+        const combined = [
+          ...frameWalls(rect, spec400, framingOv),
+          ...layoutWallLayers(rect, rooms, spec400, 'NY', [], layerOv),
+        ]
+        const label = `th=${th} stud=${studSize ?? 'default'}`
+        expect(violations(combined), label).toEqual([])
+        // batt depth never exceeds the framing geometry depth (parity)
+        const studGeom = combined.find((m) => m.role === 'stud')?.dims[2] as number
+        for (const b of combined.filter((m) => m.role === 'insulation')) {
+          expect(b.dims[2], label).toBeLessThanOrEqual(studGeom + 1e-9)
+        }
+      }
+    }
+  })
+
   test('TX brick-default rectangle: veneer + air gap SAT-clean at corners (S9)', () => {
     // The brick wythe sits a full 1" airspace beyond the WRB (round-2 air
     // gap fix) — this pins the moved wythes clashing with nothing,

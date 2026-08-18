@@ -441,3 +441,26 @@ describe('mixed wall — takeoff deltas', () => {
     expect(flag?.quantity).toBe(2)
   })
 })
+
+describe('cavity-fit (night-4): mixed wall framed zone + PT sill compress to the drawn wall', () => {
+  test('0.15m mixed wall: sill + framed-zone members at thickness − 1"', () => {
+    const wall = makeWall({ thickness: 0.15 })
+    const { members } = mixedCmuWall(wall, DEFAULT_SPEC, 1.2)
+    const cavity = 0.15 - 0.0254
+    const sill = members.find((m) => m.role === 'mudsill')
+    expect(sill?.dims[2]).toBeCloseTo(cavity, 9)
+    const studs = members.filter((m) => m.role === 'stud')
+    expect(studs.length).toBeGreaterThan(0)
+    for (const s of studs) expect(s.dims[2]).toBeCloseTo(cavity, 9)
+  })
+
+  test('block-depth mixed wall (0.2032m) keeps FULL nominal framing', () => {
+    const wall = makeWall({ thickness: 0.2032 })
+    const { members } = mixedCmuWall(wall, DEFAULT_SPEC, 1.2)
+    const sill = members.find((m) => m.role === 'mudsill')
+    const stud = members.find((m) => m.role === 'stud')
+    expect(sill?.dims[2]).toBeCloseTo(0.1397, 3)
+    expect(stud?.dims[2]).toBeCloseTo(0.1397, 3)
+    expect(stud?.flag).toBeUndefined()
+  })
+})

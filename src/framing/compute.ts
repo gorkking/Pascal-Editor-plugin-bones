@@ -14,7 +14,7 @@ import type {
   SlabSlice,
   WallSlice,
 } from '../core/types'
-import { inches } from '../core/units'
+import { formatIn, inches } from '../core/units'
 import {
   extractLevels,
   extractPlacedFixtures,
@@ -431,10 +431,10 @@ function computeLevelUncached(
       else {
         framed.push(wall)
         engineering.set(wall.id, resolved)
-        // An EXPLICIT stud override deeper than the drawn wall can hold is
-        // a real design clash — show it (the X-ray keeps the true 2x6
-        // geometry) and say so, like RO warnings. The default-spec misfit
-        // on thick walls is the queued stackOrigin redesign, not this.
+        // An EXPLICIT stud override deeper than the drawn wall can hold
+        // still warns — the geometry now draws CAVITY-FIT (compressed to
+        // thickness − 1", the batt rule extended to lumber; night-4), so
+        // the message names the compression instead of a clash.
         if (resolved.studSize) {
           const depth = LUMBER_CROSS_SECTIONS[resolved.studSize][1]
           // 2mm tolerance (the SAT skin): the textbook 0.114m partition is
@@ -443,8 +443,9 @@ function computeLevelUncached(
           if (depth > wall.thickness - inches(1) + 0.002) {
             warnings.push(
               `Wall ${wall.id}: ${resolved.studSize} studs (${depth.toFixed(2)}m) exceed the ` +
-                `${wall.thickness.toFixed(2)}m drawn wall — finishes will clash; deepen the wall ` +
-                `to ${(depth + inches(1) - 0.002).toFixed(2)}m or drop to 2x4`,
+                `${wall.thickness.toFixed(2)}m drawn wall — framing is drawn compressed to ` +
+                `${formatIn(wall.thickness - inches(1))}; deepen the wall to ` +
+                `${(depth + inches(1) - 0.002).toFixed(2)}m for true ${resolved.studSize} or drop to 2x4`,
             )
           }
         }

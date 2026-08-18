@@ -40,11 +40,11 @@
 
 import type { FramingSpec } from '../core/spec'
 import type { Member, OpeningSlice, WallSlice } from '../core/types'
-import { inches } from '../core/units'
+import { formatIn, inches } from '../core/units'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { openingSpans } from './electrical'
 import { anchorBoltPositions } from './foundation'
-import { detectCorners, detectTees, frameWall, studSizeFor } from './wall-framing'
+import { detectCorners, detectTees, fitAcross, frameWall, studSizeFor } from './wall-framing'
 
 const EPS = 1e-6
 
@@ -721,18 +721,26 @@ export function mixedCmuWall(
   const sillRoSpans = openingSpans(wall, seam, seam + sillT).filter(
     (s) => s.hi > startInset + EPS && s.lo < len - endInset - EPS,
   )
+  // Cavity-fit (night-4): the PT sill's across-wall geometry compresses to
+  // the drawn wall like every framed member (labels/takeoff stay nominal).
+  const sillWFit = fitAcross(sillW, wall)
   members.push({
     system: 'wall-framing',
     role: 'mudsill',
     size: studSize,
-    dims: [runLen, sillT, sillW],
+    dims: [runLen, sillT, sillWFit],
     length: runLen,
     position: place(startInset + runLen / 2, seam + sillT / 2),
     rotation: [0, yaw, 0],
     material: 'pt-lumber',
     sourceId: wall.id,
     label: 'PT sill plate on bond beam — anchor-bolted (R403.1.6)',
-    flag: sillRoSpans.length > 0 ? SEAM_CROSSING_FLAG : undefined,
+    flag:
+      sillRoSpans.length > 0
+        ? SEAM_CROSSING_FLAG
+        : sillWFit < sillW
+          ? `${studSize} framing compressed to ${formatIn(sillWFit)} — ${wall.thickness.toFixed(3)}m drawn wall holds ${formatIn(sillWFit)} + finishes; deepen to ${(sillW + inches(1)).toFixed(3)}m for full-depth ${studSize}`
+          : undefined,
   })
 
   // ---- anchor bolts through the sill into the grouted bond beam ----

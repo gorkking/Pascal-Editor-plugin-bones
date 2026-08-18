@@ -2,6 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import type { Fixture, FixtureKind, Member } from '../core/types'
 import { feet } from '../core/units'
 import type { LumberSize } from '../lumber'
+import { DEFAULT_SPEC } from '../core/spec'
+import type { WallSlice } from '../core/types'
+import { frameWall } from './wall-framing'
 import { computeTakeoff, takeoffCsv, takeoffMarkdown, type TakeoffRow } from './takeoff'
 
 // ---------------------------------------------------------------------------
@@ -929,5 +932,35 @@ describe('insulation batts + per-wall cladding rows', () => {
   test('no insulation members = no insulation rows (defaults untouched)', () => {
     const rows = computeTakeoff([mem()], [])
     expect(rows.some((r) => r.item.startsWith('Insulation'))).toBe(false)
+  })
+})
+
+describe('cavity-fit framing flags aggregate (night-4)', () => {
+  test('a compressed wall books ONE Flags row with a member count; lumber rows stay nominal', () => {
+    const wall: WallSlice = {
+      id: 'w_thick',
+      start: [0, 0],
+      end: [6, 0],
+      dir: [1, 0],
+      length: 6,
+      thickness: 0.15,
+      height: 2.44,
+      exterior: true,
+      openings: [],
+      curved: false,
+    }
+    const members = frameWall(wall, DEFAULT_SPEC)
+    const rows = computeTakeoff(members, [])
+    const flagRows = rows.filter(
+      (r) => r.section === 'Flags' && r.detail.includes('compressed'),
+    )
+    // one exact string per (size, thickness) class → exactly one row
+    expect(flagRows).toHaveLength(1)
+    expect(flagRows[0]?.quantity).toBe(members.filter((m) => m.flag?.includes('compressed')).length)
+    expect(flagRows[0]?.quantity as number).toBeGreaterThan(5)
+    // the LUMBER rows keep their nominal 2x6 identity (no 4.91" fiction)
+    const lumberRows = rows.filter((r) => r.item.startsWith('2x6'))
+    expect(lumberRows.length).toBeGreaterThan(0)
+    expect(rows.filter((r) => r.section !== 'Flags').some((r) => r.item.includes('4.9') || r.detail.includes('4.9'))).toBe(false)
   })
 })

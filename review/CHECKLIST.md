@@ -34,7 +34,12 @@ AND a gate — a checklist line without a test is a wish.
 
 - **S1 No member interpenetrates another** outside the allowed bearing
   pairs (15-axis OBB SAT, 2 mm skin; non-finite geometry = violation).
-  Gate: `src/engines/interpenetration.test.ts` scenario matrix
+  UNCONDITIONAL since night-4 (cavity-fit framing): the old carve-outs —
+  140 pairs on default 0.15m/2x6 exteriors, explicit-misfit overrides —
+  are retired; framing geometry compresses to the drawn cavity
+  (`fitAcross`) so contact replaces overlap at every thickness.
+  Gate: `src/engines/interpenetration.test.ts` scenario matrix + the
+  cavity-fit thickness sweep (8 thicknesses × 3 stud configs × batts)
 - **S2 Every roof family inscribes inside its footprint** (no eave-line
   overhang unless declared; rake ladders from actual member positions).
   Gate: roof-framing tests
@@ -110,11 +115,12 @@ AND a gate — a checklist line without a test is a wish.
   Zone-less jurisdictions label batts with the SAME assumed-zone-4 R the
   panel hint prints (one fallback, both sides). An EXPLICIT studSize
   override deeper than thickness − 1" + 2mm (the SAT-skin rounding grace —
-  the textbook 2x4-in-0.114m partition never warns) keeps its true
-  (clashing) geometry but raises a compute warning + amber studsNote on
-  both surfaces;
-  defaults never warn (default-spec misfit on thick walls = the queued
-  stackOrigin redesign). Gates: 0.15m zone-5 SAT case in
+  the textbook 2x4-in-0.114m partition never warns) draws CAVITY-FIT
+  (geometry compresses to thickness − 1", the batt rule extended to
+  lumber via `fitAcross`; labels/size/takeoff/cut lengths stay nominal;
+  members carry one aggregated 'compressed' flag per (size, thickness)
+  class) and raises a compute warning + amber studsNote on both surfaces;
+  defaults never WARN — they compress with the flag only. Gates: 0.15m zone-5 SAT case in
   `interpenetration.test.ts`, INTL parity in `wall-layers.test.ts`,
   misfit note/warning in `panel-selection.test.ts`.
 - **S8 Colinear dedupe preserves the duplicates' OPENINGS.** When a twin
