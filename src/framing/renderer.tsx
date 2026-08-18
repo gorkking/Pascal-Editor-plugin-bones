@@ -378,6 +378,7 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     if (!levelId) return
     const state = useScene.getState() as unknown as {
       readOnly?: boolean
+      nodes: Record<string, Record<string, unknown>>
       applyNodeChanges: (changes: {
         create?: { node: unknown; parentId?: unknown }[]
         update?: { id: unknown; data: Record<string, unknown> }[]
@@ -385,11 +386,11 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
       }) => void
     }
     if (state.readOnly) return
-    const plan = reconcileDeviceNodes(
-      nodes as Record<string, Record<string, unknown>>,
-      levelId,
-      result.devices,
-    )
+    // Plan against the FRESH store state, not this render's snapshot: with
+    // two X-rays on one level, the second effect would otherwise re-plan
+    // the first one's creates from a stale snapshot and mint duplicates
+    // (the dedupe would heal it, but with churn).
+    const plan = reconcileDeviceNodes(state.nodes, levelId, result.devices)
     if (plan.create.length + plan.update.length + plan.remove.length === 0) return
     pauseSceneHistory(useScene)
     try {
