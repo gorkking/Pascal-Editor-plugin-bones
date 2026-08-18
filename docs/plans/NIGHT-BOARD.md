@@ -1,5 +1,37 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 PLAN (2026-08-17 ~02:30 → morning) — user: "make a plan, pull all nighter"
+Priorities (user-visible + physical-impossibility first):
+1. E4 AIR JUMPERS (OPEN checklist row, prod-visible): connectivity
+   jumpers render as straight diagonals through room air. Fix: route
+   along wall/ceiling Manhattan paths (up the wall → along ceiling/top
+   plates → down). Inline fix + E4 gate → verify loop.
+2. MOVABLE OUTLETS (Q7, direct user ask): outlets/switches draggable
+   along their wall like doors/windows (hover outline + parentFrame
+   drag, same as service points); placement snaps to legal spots —
+   never inside an RO, against a stud bay (or books an extra blocking
+   member when mid-bay), height presets (receptacle 0.30m, switch
+   1.22m, counter 1.10m); wires re-route on release. NEC 210.52
+   spacing advisory stays engine-side (flag when a wall span exceeds
+   12ft between receptacles). Pilot agent in worktree; schema =
+   per-device override keyed to the engine's deterministic device ids
+   (like service overrides).
+3. STACKORIGIN REDESIGN (queued S1 blocker: 140 SAT pairs on DEFAULT
+   0.15m/2x6 exteriors — framing deeper than the finish cavity):
+   design judge-panel (3 independent approaches) → winner spec →
+   implement → byte-equality RESET (expected-diff manifest) +
+   thickness-swept SAT matrix. The big structural one.
+4. FILLER BATCH (after 3 lands — same files): cripple-bay batts
+   (under-sill/above-header bays), tee-stem trio (stem face layers
+   cross through-wall framing; reverse-direction tee insets; oblique
+   tee thickness/2), X-ray cladding cull exemption (outermost layer
+   visible from straight-on outside views), Q10 CMU solid-mode repaint
+   (concrete block texture if the catalog has one).
+Ship in ~2 batches (mid-night + dawn) through the full chain
+(editor PR → private-editor PR → E2E → prod), morning review updated
+after each. Loop rule unchanged: nothing ships without skeptic +
+visual PASS at the exact pinned sha.
+
 ## NIGHT-3 SHIPPED (~02:10): prod main 9e3716e0
 Plugin f308cf36 via editor #670 (main 4cbf30bc) → private-editor #360.
 Narrow verify: skeptic PASS + visual PASS (undo single-commit proven
