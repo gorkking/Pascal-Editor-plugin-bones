@@ -954,7 +954,10 @@ export function applyDeviceOverrides(
           if (bestC === null || Math.abs(c - u) < Math.abs(bestC - u)) bestC = c
         }
       }
-      const halfBay = bayRhythm(verts) / 2 + 1e-6
+      // Half a bay of the wall's o.c. rhythm — capped at a 24" bay so a
+      // degenerate sparse rhythm still books blocking instead of teleporting
+      // the box across a meters-wide gap.
+      const halfBay = Math.min(bayRhythm(verts), inches(24)) / 2 + 1e-6
       if (bestC !== null && Math.abs(bestC - u) <= halfBay) {
         u = bestC
       } else {
@@ -1003,7 +1006,12 @@ export function applyDeviceOverrides(
     }
     const face = faceOf(wall, side)
     const [x, z] = face.plan(u)
-    out[idx] = { ...fixture, position: [x, h, z], rotationY: face.rotationY }
+    // Receptacles key their wall in sourceId — a cross-wall move re-keys it
+    // so the device manifest (deviceWallOf) mounts the node where the box
+    // stands. Switches keep their OPENING/room key: a moved switch still
+    // controls the same light.
+    const sourceId = !isSwitch && derivedWall && wall.id !== derivedWall.id ? wall.id : fixture.sourceId
+    out[idx] = { ...fixture, position: [x, h, z], rotationY: face.rotationY, sourceId }
 
     if (!isSwitch) {
       if (derivedWall) spacingWalls.add(derivedWall.id)
