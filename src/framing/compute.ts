@@ -729,7 +729,7 @@ function computeLevelUncached(
           (n) => n.type === 'wall' && n.parentId === l.id && n.visible !== false,
         )
       })
-    const hvac = layoutHvac(activeWalls, activeRooms, spec, services, { hasLevelAbove })
+    const hvac = layoutHvac(activeWalls, activeRooms, spec, services, { hasLevelAbove, stateCode: code })
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
     warnings.push(...hvac.warnings)

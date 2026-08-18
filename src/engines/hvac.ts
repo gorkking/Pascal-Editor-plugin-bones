@@ -27,20 +27,36 @@
  *    exterior terminations BELOW the plate band (through a stud bay);
  *  - a thermostat mounts on an interior wall near the return (52" AFF);
  *  - LOD 400 — or a heat-pump service node at any LOD — adds the condensate
- *    drain to the exterior and the outdoor unit (pad + cabinet + refrigerant
- *    lineset through the wall to the air handler).
+ *    drain to the exterior and the OUTDOOR AC CONDENSER ROW (night-4 user
+ *    ask): N units sized from conditioned area at a climate-zone divisor
+ *    (zones 1-2 ≈ 1 ton/450 sqft, 3-4 ≈ 550, 5+ ≈ 650 — an ASSUMPTION,
+ *    Manual J/S govern), one condenser per ≤ 5 tons. Each unit gets a 4"
+ *    concrete pad + cabinet outside an exterior wall (≥ 0.3 m off the face,
+ *    ≥ 0.6 m between units, clear of door/window ROs — per mfr clearance +
+ *    IRC M1403), a refrigerant line-set (Ø22 suction + Ø10 liquid) through
+ *    a wall penetration at ~0.4 m Manhattan-routed to the air handler, and
+ *    a wall disconnect + whip (NEC 440.14; the dedicated branch circuit is
+ *    routed separately). The heat-pump service node still wins unit #1's
+ *    position verbatim (checklist A4) and the row re-anchors to it.
+ *    NOTE: the climate-zone divisor keys off `context.stateCode` — the
+ *    one-line compute.ts hookup (`stateCode: code`) is deferred while
+ *    src/framing/* is frozen for parallel tracks; absent it, the mid band
+ *    (550) applies.
  */
 
 import mepRules from '../../data/mep-rules.json'
+import wallAssemblies from '../../data/wall-assemblies.json'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Fixture, Member, RoomSlice, ServiceOverrides, WallSlice } from '../core/types'
 import { inches, toFeet } from '../core/units'
 import {
   clearOfOpenings,
+  openingSpans,
   overridePlanPoint,
   overrideWallPoint,
   pointInPolygon,
   polygonCentroid,
+  segmentCrossesRo,
 } from './electrical'
 
 type Pt = readonly [number, number]
@@ -50,7 +66,25 @@ const rules = mepRules as {
     sizingRuleOfThumb?: { coolingSqftPerTon?: number }
     ducted?: { branchRoundIn?: number }
     attic?: { trunkAboveWallTopM?: number; topPlateBandM?: number }
+    condenser?: {
+      sqftPerTonByZoneBand?: { hot?: number; mid?: number; cold?: number }
+      maxTonsPerUnit?: number
+      minTons?: number
+      padSideM?: number
+      padThicknessM?: number
+      unitDimsM?: number[]
+      unitClearM?: number
+      wallClearM?: number
+      linesetSuctionDiaM?: number
+      linesetLiquidDiaM?: number
+      linesetHeightM?: number
+      disconnectAboveUnitM?: number
+    }
   }
+}
+
+const ASSEMBLIES = wallAssemblies as {
+  exterior?: { stateClimateZone?: Record<string, string> }
 }
 
 const SQFT_PER_TON = rules.hvac?.sizingRuleOfThumb?.coolingSqftPerTon ?? 500
@@ -77,10 +111,44 @@ const BOOT_BELOW_CEILING = 0.05
 const TSTAT_AFF = inches(52)
 /** Heat-pump pad stands this far outside its exterior wall. */
 const PAD_OFFSET = 0.6
-/** Condenser pad slab: 1.0 × 0.7 m, 9 cm thick. */
-const PAD_DIMS = [1.0, 0.09, 0.7] as const
-/** Outdoor unit cabinet (typical 2–4 ton heat pump). */
-const HP_DIMS = [0.9, 0.8, 0.4] as const
+
+// ---- AC condenser row (data/mep-rules.json hvac.condenser) ------------------
+const COND = rules.hvac?.condenser
+/** Cooling divisor (sqft/ton) by IECC zone band — ASSUMPTION, Manual J/S govern. */
+const COND_SQFT_HOT = COND?.sqftPerTonByZoneBand?.hot ?? 450
+const COND_SQFT_MID = COND?.sqftPerTonByZoneBand?.mid ?? 550
+const COND_SQFT_COLD = COND?.sqftPerTonByZoneBand?.cold ?? 650
+/** Residential condensers top out ~5 tons — bigger loads take more units. */
+export const MAX_TONS_PER_CONDENSER = COND?.maxTonsPerUnit ?? 5
+const COND_MIN_TONS = COND?.minTons ?? 1.5
+/** 4" concrete equipment pad, ~0.95 × 0.95 m footprint (IRC M1403). */
+const COND_PAD_SIDE = COND?.padSideM ?? 0.95
+const COND_PAD_T = COND?.padThicknessM ?? 0.1016
+/** Condenser cabinet W × H × D on the pad. */
+const COND_DIMS: readonly [number, number, number] = [
+  COND?.unitDimsM?.[0] ?? 0.9,
+  COND?.unitDimsM?.[1] ?? 0.8,
+  COND?.unitDimsM?.[2] ?? 0.35,
+]
+/** Clear space BETWEEN units in the row — per mfr clearance + IRC M1403. */
+const COND_UNIT_CLEAR = COND?.unitClearM ?? 0.6
+/** Clear space between the wall FACE and the cabinet. */
+const COND_WALL_CLEAR = COND?.wallClearM ?? 0.3
+/** Refrigerant line-set: insulated suction + liquid pair, through-wall ~0.4 m. */
+const LINESET_SUCTION_DIA = COND?.linesetSuctionDiaM ?? 0.022
+const LINESET_LIQUID_DIA = COND?.linesetLiquidDiaM ?? 0.01
+const LINESET_Y = COND?.linesetHeightM ?? 0.4
+/** Disconnect box center above the unit top, on the wall face (NEC 440.14). */
+const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
+/**
+ * Worst-case exterior assembly beyond the wall FACE the pad must clear:
+ * brick veneer's 4.625" assembly offset (1" airspace + 3.625" wythe,
+ * R703.8 / Table R703.3(1)) + 7/16" sheathing ≈ 0.129 m. The hvac engine
+ * doesn't know this wall's cladding, so every pad keeps the worst-case
+ * stand-off — the CABINET stays at its anchor (byte-stable), only the pad
+ * slab slides outward under it when the anchor tucks it too close.
+ */
+const PAD_CLADDING_ALLOW = 0.13
 /** ACCA rule of thumb: airflow per ton of cooling. */
 export const CFM_PER_TON = 400
 /** Return grille sizing: ~200 in² per ton keeps face velocity near 2 cfm/in². */
@@ -181,6 +249,46 @@ export function returnGrilleIn2(tons: number): number {
   return RETURN_GRILLE_CATALOG_IN2[RETURN_GRILLE_CATALOG_IN2.length - 1] as number
 }
 
+/**
+ * Cooling divisor (sqft/ton) for a state, from its dominant IECC climate
+ * zone (data/wall-assemblies.json exterior.stateClimateZone — same read the
+ * wall-layers batt sizing does): zones 1-2 (FL/TX/AZ style heat) size at
+ * 1 ton/450 sqft, zones 3-4 at 550, zones 5+ at 650. Unknown / zone-less
+ * codes (INTL, AUTO unresolved) assume the mid band. ASSUMPTION only —
+ * ACCA Manual J/S govern (IRC M1401.3); the labels say so.
+ */
+export function condenserSqftPerTon(stateCode?: string): {
+  divisor: number
+  zone: string | null
+} {
+  const raw = stateCode ? ASSEMBLIES.exterior?.stateClimateZone?.[stateCode] : undefined
+  const m = raw ? /^(\d)([ABC])?/.exec(raw.trim()) : null
+  if (!m) return { divisor: COND_SQFT_MID, zone: null }
+  const z = Number(m[1])
+  const zone = `${m[1]}${m[2] ?? ''}`
+  if (z <= 2) return { divisor: COND_SQFT_HOT, zone }
+  if (z <= 4) return { divisor: COND_SQFT_MID, zone }
+  return { divisor: COND_SQFT_COLD, zone }
+}
+
+/**
+ * Outdoor-unit plan for a conditioned area: total tons at the climate-band
+ * divisor (rounded UP to the half ton, min 1.5), one condenser per ≤ 5 tons
+ * (unit count = ceil(total/5)), per-unit tonnage = total/count rounded to
+ * the NEAREST half ton. A tiny home floors at 1 unit / 1.5 tons.
+ */
+export function condenserPlan(
+  conditionedAreaM2: number,
+  stateCode?: string,
+): { totalTons: number; count: number; unitTons: number; divisor: number; zone: string | null } {
+  const { divisor, zone } = condenserSqftPerTon(stateCode)
+  const sqft = conditionedAreaM2 * 10.7639
+  const totalTons = Math.max(COND_MIN_TONS, Math.ceil((sqft / divisor) * 2) / 2)
+  const count = Math.max(1, Math.ceil(totalTons / MAX_TONS_PER_CONDENSER))
+  const unitTons = Math.max(COND_MIN_TONS, Math.round((totalTons / count) * 2) / 2)
+  return { totalTons, count, unitTons, divisor, zone }
+}
+
 /** A straight horizontal duct run between two plan points. */
 function duct(
   from: Pt,
@@ -210,7 +318,7 @@ function duct(
   }
 }
 
-/** Vertical duct (riser/boot) between two heights at one plan point. */
+/** Vertical duct/pipe/conduit (riser/boot/drop) between two heights at one plan point. */
 function ductDrop(
   at: Pt,
   y0: number,
@@ -219,6 +327,8 @@ function ductDrop(
   h: number,
   sourceId: string,
   label: string,
+  material: Member['material'] = 'duct',
+  role: Member['role'] = 'duct-run',
 ): Member | null {
   const lo = Math.min(y0, y1)
   const hi = Math.max(y0, y1)
@@ -226,12 +336,12 @@ function ductDrop(
   if (length < 0.05) return null
   return {
     system: 'hvac',
-    role: 'duct-run',
+    role,
     dims: [w, length, h],
     length,
     position: [at[0], (lo + hi) / 2, at[1]],
     rotation: [0, 0, 0],
-    material: 'duct',
+    material,
     sourceId,
     label,
   }
@@ -408,12 +518,134 @@ export function placeHeatPumpSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | 
   return [exit[0] + (ox / n) * PAD_OFFSET, exit[1] + (oz / n) * PAD_OFFSET]
 }
 
+/** Plan point on a wall centerline at distance `u` from its start. */
+function wallPointAt(wall: WallSlice, u: number): Pt {
+  return [wall.start[0] + wall.dir[0] * u, wall.start[1] + wall.dir[1] * u]
+}
+
+/** One placed outdoor unit: plan center, its wall anchor, outward normal. */
+type CondenserSlot = {
+  at: Pt
+  /** Along-wall anchor (pad center + line-set penetration + disconnect). */
+  u: number
+  /** Unit outward normal (away from the house). */
+  out: Pt
+}
+
+/**
+ * The condenser row: unit #1 sits AT the anchor (the heat-pump service node
+ * verbatim when present — checklist A4 — else the auto pad spot, slid along
+ * the wall only if it fronts a door/window RO), subsequent units step along
+ * the SAME exterior wall at pad + 0.6 m clear pitch, each ≥ 0.3 m off the
+ * wall face, never in front of a rough opening (slide past it). When one
+ * direction runs off the wall the row grows the other way; a row that
+ * exhausts both directions keeps its pitch past the end and warns.
+ */
+function condenserRow(
+  walls: WallSlice[],
+  anchor: Pt,
+  anchorVerbatim: boolean,
+  count: number,
+  equipAt: Pt,
+): { wall: WallSlice | null; slots: CondenserSlot[]; warnings: string[] } {
+  const warnings: string[] = []
+  const exit = nearestExteriorExit(walls, anchor)
+  if (!exit) {
+    // No exterior wall at all — stack the row along +X from the anchor.
+    const pitch = COND_PAD_SIDE + COND_UNIT_CLEAR
+    const slots: CondenserSlot[] = Array.from({ length: count }, (_, i) => ({
+      at: [anchor[0] + i * pitch, anchor[1]] as Pt,
+      u: 0,
+      out: [0, 1] as Pt,
+    }))
+    if (count > 0) warnings.push('no exterior wall — condenser row placed at the anchor, verify')
+    return { wall: null, slots, warnings }
+  }
+  const wall = exit.wall
+  const foot = exit.at
+  const u0 = Math.max(0, Math.min(wall.length, (anchor[0] - wall.start[0]) * wall.dir[0] + (anchor[1] - wall.start[1]) * wall.dir[1]))
+  // Outward normal: anchor relative to its wall foot; a degenerate on-wall
+  // anchor falls back to "away from the equipment room".
+  const ox = anchor[0] - foot[0]
+  const oz = anchor[1] - foot[1]
+  const off = Math.hypot(ox, oz)
+  let out: Pt
+  if (off > 1e-6) out = [ox / off, oz / off]
+  else {
+    const n: Pt = [-wall.dir[1], wall.dir[0]]
+    const sign = (foot[0] - equipAt[0]) * n[0] + (foot[1] - equipAt[1]) * n[1] >= 0 ? 1 : -1
+    out = [n[0] * sign, n[1] * sign]
+  }
+  // Row units keep the anchor's stand-off, floored at the mfr clearance:
+  // wall face + 0.3 m + half the cabinet depth.
+  const minOff = wall.thickness / 2 + COND_WALL_CLEAR + COND_DIMS[2] / 2
+  const rowOff = Math.max(off, minOff)
+  const halfW = COND_PAD_SIDE / 2
+  // Keep-outs: rough openings whose vertical span reaches the unit/disconnect
+  // zone [0, pad + cabinet + disconnect], padded by half a pad + slack.
+  const keepouts = openingSpans(wall, 0, COND_PAD_T + COND_DIMS[1] + DISCONNECT_ABOVE_UNIT).map(
+    (s) => ({ lo: s.lo - halfW - 0.05, hi: s.hi + halfW + 0.05 }),
+  )
+  const slide = (u: number, d: 1 | -1): number => {
+    let v = u
+    for (let guard = 0; guard < 24; guard++) {
+      const hit = keepouts.find((k) => v > k.lo && v < k.hi)
+      if (!hit) return v
+      v = d > 0 ? hit.hi : hit.lo
+    }
+    return v
+  }
+  const inRange = (u: number): boolean => u >= halfW && u <= wall.length - halfW
+  // Unit #1: verbatim override anchors exactly; the auto spot slides to the
+  // NEAREST clear along-wall position when it fronts an RO.
+  let u1 = u0
+  if (!anchorVerbatim) {
+    const fwd = slide(u0, 1)
+    const bwd = slide(u0, -1)
+    const cands = [fwd, bwd].filter((c) => inRange(c))
+    u1 = cands.length > 0
+      ? (cands.reduce((best, c) => (Math.abs(c - u0) < Math.abs(best - u0) ? c : best)) as number)
+      : fwd
+  }
+  const slots: CondenserSlot[] = []
+  const at1: Pt =
+    anchorVerbatim || u1 === u0 ? anchor : (() => {
+      const p = wallPointAt(wall, u1)
+      return [p[0] + out[0] * rowOff, p[1] + out[1] * rowOff] as Pt
+    })()
+  slots.push({ at: at1, u: u1, out })
+  // Subsequent units: step along the wall at pad + clear pitch, sliding past
+  // ROs; grow the other way when a direction runs out of wall.
+  const pitch = COND_PAD_SIDE + COND_UNIT_CLEAR
+  const d0: 1 | -1 = wall.length - u1 >= u1 ? 1 : -1
+  let fwdCursor = u1
+  let bwdCursor = u1
+  for (let k = 1; k < count; k++) {
+    let u = slide(fwdCursor + d0 * pitch, d0)
+    if (inRange(u)) fwdCursor = u
+    else {
+      const alt = slide(bwdCursor - d0 * pitch, (d0 === 1 ? -1 : 1) as 1 | -1)
+      if (inRange(alt)) {
+        u = alt
+        bwdCursor = alt
+      } else {
+        u = fwdCursor + d0 * pitch
+        fwdCursor = u
+        warnings.push('condenser row exceeds the exterior wall — verify placement')
+      }
+    }
+    const p = wallPointAt(wall, u)
+    slots.push({ at: [p[0] + out[0] * rowOff, p[1] + out[1] * rowOff] as Pt, u, out })
+  }
+  return { wall, slots, warnings }
+}
+
 export function layoutHvac(
   walls: WallSlice[],
   rooms: RoomSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
   overrides?: Pick<ServiceOverrides, 'thermostat' | 'heatPump'>,
-  context?: { hasLevelAbove?: boolean },
+  context?: { hasLevelAbove?: boolean; stateCode?: string },
 ): { members: Member[]; fixtures: Fixture[]; warnings: string[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -669,58 +901,156 @@ export function layoutHvac(
       const elbow: Pt = [exit[0], equipAt[1]]
       condensate(elbow, exit, condensate(equipAt, elbow, 0.25))
     }
-    // Outdoor unit: the heat-pump service node when present (verbatim plan
-    // point — moving it re-anchors pad, cabinet AND lineset), else the auto
-    // pad 0.6 m outside the exterior wall nearest the air handler.
-    const pad = hpPlan ?? placeHeatPumpSpot(walls, rooms)
-    if (pad) {
-      const outX = pad[0] - equipAt[0]
-      const outZ = pad[1] - equipAt[1]
-      const rotY = Math.atan2(outX, outZ) // cabinet back faces the house
-      members.push({
-        system: 'hvac',
-        role: 'equipment',
-        dims: PAD_DIMS,
-        length: PAD_DIMS[0],
-        position: [pad[0], PAD_DIMS[1] / 2, pad[1]],
-        rotation: [0, rotY, 0],
-        material: 'concrete',
-        sourceId: equipRoom.id,
-        label: 'Condenser pad — concrete, exterior',
-      })
-      members.push({
-        system: 'hvac',
-        role: 'equipment',
-        dims: HP_DIMS,
-        length: HP_DIMS[0],
-        position: [pad[0], PAD_DIMS[1] + HP_DIMS[1] / 2, pad[1]],
-        rotation: [0, rotY, 0],
-        material: 'steel',
-        sourceId: equipRoom.id,
-        label: `Heat pump / condenser — ${tons} ton outdoor unit`,
-      })
-      fixtures.push({
-        system: 'hvac',
-        kind: 'equipment',
-        position: [pad[0], PAD_DIMS[1] + HP_DIMS[1] / 2, pad[1]],
-        rotationY: rotY,
-        sourceId: equipRoom.id,
-        label: `Condenser — ${tons} ton, exterior pad`,
-        meta: { tons },
-      })
-      // Lineset stub through the wall back to the air handler.
-      manhattanDuct(
-        members,
-        equipAt,
-        pad,
-        0.4,
-        inches(0.875),
-        inches(0.875),
-        equipRoom.id,
-        'Refrigerant lineset ⅞" suction / ⅜" liquid (insulated)',
-        'copper',
-        'pipe-run',
-      )
+    // Outdoor CONDENSER ROW (night-4 user ask — generalizes the old single
+    // heat-pump block): the heat-pump service node still wins unit #1's
+    // position verbatim (moving it re-anchors pads, cabinets, line-sets AND
+    // the whole row), else unit #1 takes the auto pad spot; units 2..N step
+    // along the same exterior wall. Sizing is a labeled ASSUMPTION
+    // (1 ton per 450/550/650 sqft by climate-zone band — Manual J/S govern).
+    const anchor = hpPlan ?? placeHeatPumpSpot(walls, rooms)
+    if (anchor) {
+      const plan = condenserPlan(areaM2, context?.stateCode)
+      const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt)
+      warnings.push(...row.warnings)
+      const unitTopY = COND_PAD_T + COND_DIMS[1]
+      const sizingNote = `assumed 1 ton/${plan.divisor} sqft${plan.zone ? `, zone ${plan.zone}` : ''}`
+      for (let i = 0; i < row.slots.length; i++) {
+        const slot = row.slots[i] as CondenserSlot
+        const n = i + 1
+        const at = slot.at
+        // Cabinet back faces the house: unit #1 keeps the legacy facing (the
+        // anchor's bearing from the equipment room); row units face outward.
+        const rotY =
+          i === 0
+            ? Math.atan2(at[0] - equipAt[0], at[1] - equipAt[1])
+            : Math.atan2(slot.out[0], slot.out[1])
+        // The pad's inner edge must clear the wall's exterior assembly —
+        // brick veneer reaches ~0.13 m past the face (R703.8) and a 0.95 m
+        // square pad centered on the legacy 0.6 m anchor would run INTO it
+        // (S1). Slide the SLAB outward just enough; the cabinet stays put.
+        let padCenter: Pt = at
+        if (row.wall) {
+          const foot = wallPointAt(row.wall, slot.u)
+          const standOff = (at[0] - foot[0]) * slot.out[0] + (at[1] - foot[1]) * slot.out[1]
+          const needed = row.wall.thickness / 2 + PAD_CLADDING_ALLOW + COND_PAD_SIDE / 2
+          const push = Math.max(0, needed - standOff)
+          if (push > 0) {
+            padCenter = [at[0] + slot.out[0] * push, at[1] + slot.out[1] * push]
+          }
+        }
+        members.push({
+          system: 'hvac',
+          role: 'equipment',
+          dims: [COND_PAD_SIDE, COND_PAD_T, COND_PAD_SIDE],
+          length: COND_PAD_SIDE,
+          position: [padCenter[0], COND_PAD_T / 2, padCenter[1]],
+          rotation: [0, rotY, 0],
+          material: 'concrete',
+          sourceId: equipRoom.id,
+          label: 'Condenser pad 4" — concrete (per mfr clearance + IRC M1403)',
+        })
+        members.push({
+          system: 'hvac',
+          role: 'equipment',
+          dims: COND_DIMS,
+          length: COND_DIMS[0],
+          position: [at[0], COND_PAD_T + COND_DIMS[1] / 2, at[1]],
+          rotation: [0, rotY, 0],
+          material: 'steel',
+          sourceId: equipRoom.id,
+          label: `AC condenser #${n} — ${plan.unitTons} tons outdoor unit`,
+        })
+        fixtures.push({
+          system: 'hvac',
+          kind: 'equipment',
+          position: [at[0], COND_PAD_T + COND_DIMS[1] / 2, at[1]],
+          rotationY: rotY,
+          sourceId: equipRoom.id,
+          label: `AC Condenser #${n} — ${plan.unitTons} tons (${sizingNote})`,
+          meta: {
+            tons: plan.unitTons,
+            equipment: 'condenser',
+            unit: n,
+            units: plan.count,
+            totalTons: plan.totalTons,
+          },
+        })
+        // Refrigerant LINE-SET (Ø22 suction + Ø10 liquid, insulated): unit →
+        // through-wall penetration at the pad's cleared along-wall spot
+        // (~0.4 m up) → Manhattan along to the air handler. Every segment is
+        // plan-axis-aligned; when the default elbow crosses a door/window RO
+        // the alternate elbow is tried, and a path that cannot clear is
+        // ⚠-flagged, never silent (E1 applied to refrigerant pipe).
+        const pen = row.wall ? wallPointAt(row.wall, slot.u) : at
+        const e1: Pt = [equipAt[0], pen[1]]
+        const e2: Pt = [pen[0], equipAt[1]]
+        const legA: Pt[] = [at, [pen[0], at[1]], pen]
+        const crossesRo = (pts: Pt[]): boolean =>
+          pts.some(
+            (p, j) =>
+              j > 0 &&
+              segmentCrossesRo(
+                walls,
+                [(pts[j - 1] as Pt)[0], LINESET_Y, (pts[j - 1] as Pt)[1]],
+                [p[0], LINESET_Y, p[1]],
+              ),
+          )
+        const defPath = [...legA, e1, equipAt]
+        const altPath = [...legA, e2, equipAt]
+        const useAlt = crossesRo(defPath) && !crossesRo(altPath)
+        const path = useAlt ? altPath : defPath
+        const flagged = crossesRo(path)
+        const pipes = [
+          { dia: LINESET_SUCTION_DIA, y: LINESET_Y + 0.02, name: 'Ø22mm suction' },
+          { dia: LINESET_LIQUID_DIA, y: LINESET_Y - 0.02, name: 'Ø10mm liquid' },
+        ]
+        for (const pipe of pipes) {
+          for (let j = 1; j < path.length; j++) {
+            const seg = duct(
+              path[j - 1] as Pt,
+              path[j] as Pt,
+              pipe.y,
+              pipe.dia,
+              pipe.dia,
+              `lineset-${n}`,
+              `Refrigerant lineset — ${pipe.name} (insulated, M1411)`,
+              'copper',
+              'pipe-run',
+            )
+            if (!seg) continue
+            if (flagged) seg.flag = 'lineset crosses a door/window RO — verify routing'
+            members.push(seg)
+          }
+        }
+        // DISCONNECT on the wall face above the unit (NEC 440.14 — within
+        // sight) + a short liquid-tight whip down to the cabinet. The
+        // dedicated branch circuit is deliberately NOT routed here (panel
+        // integration is a parallel electrical track).
+        if (row.wall) {
+          const faceOff = row.wall.thickness / 2 + 0.02
+          const face: Pt = [pen[0] + slot.out[0] * faceOff, pen[1] + slot.out[1] * faceOff]
+          const discY = unitTopY + DISCONNECT_ABOVE_UNIT
+          fixtures.push({
+            system: 'hvac',
+            kind: 'disconnect',
+            position: [face[0], discY, face[1]],
+            rotationY: Math.atan2(slot.out[0], slot.out[1]),
+            sourceId: row.wall.id,
+            label: 'AC disconnect — NEC 440.14, within sight (dedicated circuit — routed separately)',
+            meta: { unit: n },
+          })
+          const whipY = unitTopY - 0.1
+          const whipLabel = 'Condenser whip — liquid-tight conduit (NEC 440.14)'
+          const drop = ductDrop(
+            face, whipY, discY, 0.016, 0.016, `ac-whip-${n}`, whipLabel, 'steel', 'wire-run',
+          )
+          if (drop) members.push(drop)
+          const run = duct(
+            face, at, whipY, 0.016, 0.016, `ac-whip-${n}`, whipLabel, 'steel', 'wire-run',
+          )
+          if (run) members.push(run)
+        }
+      }
     }
   }
 

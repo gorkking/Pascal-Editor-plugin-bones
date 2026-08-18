@@ -218,6 +218,7 @@ const FIXTURE_ROWS: Record<FixtureKind, { item: string; detail: string }> = {
   'exhaust-fan': { item: 'Exhaust fans', detail: 'bath/dryer ventilation (M1505)' },
   thermostat: { item: 'Thermostats', detail: 'zone control' },
   'electric-meter': { item: 'Electric meters', detail: 'service entrance (NEC 230.66)' },
+  disconnect: { item: 'AC disconnects', detail: 'NEC 440.14 — within sight of the unit' },
 }
 
 /** Stable panel ordering for fixture rows (matches FixtureKind declaration). */
@@ -239,6 +240,7 @@ const FIXTURE_ORDER: readonly FixtureKind[] = [
   'thermostat',
   'exhaust-fan',
   'electric-meter',
+  'disconnect',
 ]
 
 // ---------------------------------------------------------------------------
@@ -348,11 +350,19 @@ export function computeTakeoff(
   const concretePours = new Map<string, { section: string; detail: string; m3: number }>()
   let blockCount = 0
   let groutedCells = 0
+  // Condenser pads (hvac 'equipment' concrete) are counted EACH below — a 4"
+  // equipment pad is placed/precast, not a formed pour (S4: the row mirrors
+  // the rendered pad members, never a phantom 'lintels/beams' volume).
+  let condenserPads = 0
   for (const m of members) {
     if (m.material !== 'concrete') continue
     if (m.role === 'block') {
       blockCount += 1
       if (m.grouted) groutedCells += 1
+      continue
+    }
+    if (m.system === 'hvac' && m.role === 'equipment') {
+      condenserPads += 1
       continue
     }
     const section = SECTION_OF[m.system]
@@ -369,6 +379,9 @@ export function computeTakeoff(
     if (pour.m3 <= 0) continue
     // Ready-mix trucks batch to 0.1 yd³; never show a real pour as 0.0.
     push(pour.section, 'Concrete', pour.detail, Math.max(0.1, round1(pour.m3 * M3_TO_YD3)), 'yd³')
+  }
+  if (condenserPads > 0) {
+    push('HVAC', 'Condenser pads', '4" concrete equipment pad (IRC M1403)', condenserPads, 'pcs')
   }
   if (blockCount > 0) {
     push('Wall framing', 'CMU block', '8x8x16 running bond', blockCount, 'pcs')
@@ -507,14 +520,28 @@ export function computeTakeoff(
   // Service-entrance cable (street → meter → panel) is SE/USE conductor, not
   // NM-B — booked on its own line, never under a phantom NM gauge.
   let seCableLf = 0
+  // Refrigerant line-sets are BOUGHT as insulated suction+liquid pairs, not
+  // cut copper pipe — booked by pair-run lf on their own row, never under
+  // the plumbing-style copper lf or elbow fittings (soft copper bends).
+  let linesetLf = 0
+  const linesetRuns = new Set<string>()
+  // Condenser whips are liquid-tight conduit kits (NEC 440.14), one per
+  // unit — never NM-B lineal feet.
+  const acWhips = new Set<string>()
   for (const m of members) {
     if (m.role === 'wire-run' && m.sourceId === 'service-entrance') {
       seCableLf += toFeet(m.length)
+    } else if (m.role === 'wire-run' && m.sourceId.startsWith('ac-whip-')) {
+      acWhips.add(m.sourceId)
     } else if (m.role === 'wire-run') {
       const gauge = m.label?.match(/(\d+)\/2/)?.[1] ?? '14'
       wireTallies.set(gauge, (wireTallies.get(gauge) ?? 0) + toFeet(m.length))
     } else if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) {
       connectorHoses.add(m.sourceId)
+    } else if (m.role === 'pipe-run' && m.sourceId.startsWith('lineset-')) {
+      // The pair runs the same path — book the PAIR length once (suction leg).
+      if (m.label?.includes('suction')) linesetLf += toFeet(m.length)
+      linesetRuns.add(m.sourceId)
     } else if (m.role === 'pipe-run' || m.role === 'vent-stack') {
       const sizeIn = Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
       const materialName = m.material === 'copper' ? 'Copper' : m.material === 'pvc' ? 'PVC' : 'Pipe'
@@ -552,6 +579,18 @@ export function computeTakeoff(
       'pcs',
     )
   }
+  if (linesetLf > 0) {
+    push(
+      'HVAC',
+      'Refrigerant line-set',
+      `Ø22 suction + Ø10 liquid pair, insulated — ${linesetRuns.size} run${linesetRuns.size === 1 ? '' : 's'} (M1411)`,
+      round1(linesetLf),
+      'lf',
+    )
+  }
+  if (acWhips.size > 0) {
+    push('HVAC', 'Condenser whips', 'liquid-tight conduit kits (NEC 440.14)', acWhips.size, 'pcs')
+  }
   for (const tally of ductTallies.values()) {
     push(tally.section, tally.item, 'linear feet', round1(tally.lf), 'lf')
   }
@@ -570,6 +609,7 @@ export function computeTakeoff(
   const fittingChains = new Map<string, { section: string; item: string; legs: number }>()
   for (const m of members) {
     if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) continue // hoses bend freely — no elbows
+    if (m.role === 'pipe-run' && m.sourceId.startsWith('lineset-')) continue // soft copper — bent, not fitted
     if (m.role === 'pipe-run') {
       const sizeIn = Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
       const materialName = m.material === 'copper' ? 'Copper' : m.material === 'pvc' ? 'PVC' : 'Pipe'
@@ -661,11 +701,30 @@ export function computeTakeoff(
   }
 
   // ---- FIXTURES: devices each, one row per kind, in their system section ----
+  // AC condensers (equipment fixtures tagged meta.equipment='condenser') book
+  // on their OWN row with the sized tonnage — the generic 'Mechanical
+  // equipment' row keeps the air handler & co.
+  const condensers = fixtures.filter(
+    (f) => f.kind === 'equipment' && f.meta?.equipment === 'condenser',
+  )
   const kindCounts = new Map<FixtureKind, { count: number; section: string }>()
   for (const f of fixtures) {
+    if (f.kind === 'equipment' && f.meta?.equipment === 'condenser') continue
     const entry = kindCounts.get(f.kind) ?? { count: 0, section: SECTION_OF[f.system] }
     entry.count += 1
     kindCounts.set(f.kind, entry)
+  }
+  if (condensers.length > 0) {
+    const totalTons = round1(
+      condensers.reduce((sum, f) => sum + (Number(f.meta?.tons) || 0), 0),
+    )
+    push(
+      'HVAC',
+      'AC condensers',
+      `${totalTons} tons total — assumed sizing, Manual S governs (M1401.3)`,
+      condensers.length,
+      'pcs',
+    )
   }
   for (const kind of FIXTURE_ORDER) {
     const entry = kindCounts.get(kind)

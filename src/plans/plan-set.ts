@@ -116,6 +116,7 @@ const FIXTURE_TAG: Record<string, string> = {
   'electric-meter': 'EM',
   equipment: 'AH',
   cleanout: 'CO',
+  disconnect: 'DS',
 }
 
 const esc = (s: string): string =>
@@ -612,6 +613,7 @@ function planSheet(
       EM: 'electric meter',
       AH: 'air handler',
       CO: 'cleanout',
+      DS: 'AC disconnect',
     }
     const usedTags = [...new Set(devs.map((f) => FIXTURE_TAG[f.kind] ?? '·'))]
     let trow = legendLines.length

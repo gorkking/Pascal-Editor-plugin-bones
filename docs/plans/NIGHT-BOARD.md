@@ -43,6 +43,23 @@ each through its own verify round; ship batches as they close.
 PIN GOTCHA (repeat offender): NEVER hand-type a full sha — always
 `git rev-parse` it (tonight's near-miss: guessed suffix wrote a
 nonexistent pin; caught before install).
+## NIGHT-4 AC CONDENSERS — LANDED on feat/ac-condensers (pilot 2, worktree)
+Implementation of the addition below: hvac.ts single heat-pump block
+generalized to an N-unit condenser row (sizing 450/550/650 sqft/ton by
+IECC zone band from wall-assemblies stateClimateZone, count=ceil(tons/5),
+row along the exterior wall ≥0.6m apart / ≥0.3m off the face / RO-sliding,
+4" pads clearing worst-case cladding, Ø22+Ø10 Manhattan line-sets through
+a 0.4m wall penetration with E1-style RO reroute/flag, disconnect (new
+FixtureKind) + whip per unit, S4 takeoff rows, DS plan-set tag, checklist
+row M2 + 21 gates in hvac.condensers.test.ts). 805 tests green, tsc clean,
+ALL pre-existing tests unmodified (frozen src/framing/* untouched).
+DEFERRED (frozen files / parallel tracks):
+- ONE-LINE HOOKUP: compute.ts showHvac block must pass
+  `{ hasLevelAbove, stateCode: code }` to layoutHvac — until then prod
+  sizing uses the mid band (550). Apply post-merge.
+- serviceOverrideRoWarning parity for the heatPump override (compute.ts).
+- Disconnect branch circuit → panel (electrical.ts owner); host 'AC block'
+  catalog item as native visuals (plugin fixture boxes for now).
 
 ## NIGHT-4 ADDITION (user, ~03:30): AC condenser blocks (HVAC)
 User (verbatim essence): catalog has an "AC block" item that looks like

@@ -239,6 +239,26 @@
       "garageIgnitionElevationIn": 18,
       "atticAppliancePassagewayMaxFt": 20,
       "note": "IRC M1305.1 working space and access rules apply to furnaces/air handlers exactly as to water heaters."
+    },
+    "condenser": {
+      "sqftPerTonByZoneBand": { "hot": 450, "mid": 550, "cold": 650 },
+      "zoneBandNote": "ASSUMPTION (Manual J/S govern, M1401.3): rule-of-thumb cooling load divisor by IECC climate zone band — zones 1-2 (FL/TX/AZ style) ~1 ton/450 sqft, zones 3-4 ~1 ton/550 sqft, zones 5+ ~1 ton/650 sqft. Zone read from wall-assemblies.json exterior.stateClimateZone; unknown/INTL codes assume the mid band.",
+      "maxTonsPerUnit": 5,
+      "maxTonsPerUnitNote": "Residential split-system condensers top out around 5 tons — bigger loads take multiple outdoor units (unit count = ceil(totalTons/5)).",
+      "minTons": 1.5,
+      "padSideM": 0.95,
+      "padThicknessM": 0.1016,
+      "padNote": "4-in concrete equipment pad; unit anchored per IRC M1403 (heat pumps on a level base ~3 in above grade) + manufacturer clearance.",
+      "unitDimsM": [0.9, 0.8, 0.35],
+      "unitClearM": 0.6,
+      "wallClearM": 0.3,
+      "clearanceNote": "≥0.6 m clear between units, ≥0.3 m off the wall face — per mfr clearance + IRC M1403.",
+      "linesetSuctionDiaM": 0.022,
+      "linesetLiquidDiaM": 0.01,
+      "linesetHeightM": 0.4,
+      "linesetNote": "Refrigerant line-set per unit: Ø22 mm insulated suction + Ø10 mm liquid, through-wall penetration at ~0.4 m to the indoor air handler (M1411).",
+      "disconnectAboveUnitM": 0.3,
+      "disconnectNote": "NEC 440.14: disconnecting means within sight of the unit — wall-mounted beside each condenser; the dedicated branch circuit is routed separately."
     }
   },
   "placementHeuristics": {
