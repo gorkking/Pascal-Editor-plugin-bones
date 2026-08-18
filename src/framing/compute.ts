@@ -173,7 +173,7 @@ function serviceOverrideRoWarning(
  * overlapped batt becomes a below-piece and an above-piece (the block spans
  * the whole bay, S1/S6 — verify night-4 batch F3). Mutates `members`.
  */
-function splitBattsAroundBlocking(members: Member[], blocking: Member[]): void {
+export function splitBattsAroundBlocking(members: Member[], blocking: Member[]): void {
   for (const block of blocking) {
     if (block.label !== 'device blocking — box off-stud') continue
     const byLo = block.position[1] - block.dims[1] / 2

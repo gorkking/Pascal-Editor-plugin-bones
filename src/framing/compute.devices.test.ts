@@ -2,8 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import baseline from './master-baseline.json'
 import type { Fixture } from '../core/types'
 import { DEVICE_TOL, endpointsOf, unreachableDevices } from '../engines/electrical.test-helpers'
+import { DEFAULT_SPEC } from '../core/spec'
+import { applyDeviceOverrides, layoutElectrical } from '../engines/electrical'
+import { frameWall } from '../engines/wall-framing'
+import { layoutWallLayers } from '../engines/wall-layers'
 import { baselineConfig, baselineScene } from './baseline-scene'
-import { computeLevel } from './compute'
+import { computeLevel, splitBattsAroundBlocking } from './compute'
 import { FramingNode } from './schema'
 
 /**
@@ -255,45 +259,64 @@ describe('night-4 batch fixes (F2 twin overrides, F3 batt notching)', () => {
     expect(result.warnings.some((w) => w.includes('not framed'))).toBe(false)
   })
 
-  test('F3: device blocking notches the batt — no insulation×blocking overlap', () => {
-    const scene = baselineScene()
-    const cfg = FramingNode.parse({
-      id: 'bonesframing_baseline',
-      parentId: 'level_1',
-      jurisdiction: 'NY',
-      detail: '400',
-      studSpacingIn: 16,
-      showWalls: true,
-      showElectrical: true,
-      wallOverrides: { w_s: { construction: 'framed', insulation: 'batt' } },
-    })
-    const base = computeLevel(scene, cfg)
-    const target = base.devices.find(
-      (d) => d.wallId === 'w_s' && d.deviceKind !== 'switch',
-    ) as NonNullable<(typeof base.devices)[number]>
-    scene.bonesdevice_mid = {
-      id: 'bonesdevice_mid',
-      type: 'bones:device',
-      parentId: 'level_1',
-      visible: true,
-      deviceId: target.deviceId,
-      deviceKind: target.deviceKind,
-      wallId: 'w_s',
-      wallT: 0.58,
-      heightAff: 1.5,
-      position: [0, 0, 0],
-      rotation: [0, 0, 0],
+  test('F3: device blocking notches the batt — DIRECT drive (integration cannot book blocking)', () => {
+    // Narrow re-check: on code-framed walls the off-stud path never fires
+    // through computeLevel (a stud is always within half a bay), so the
+    // end-to-end gate was VACUOUS. Drive the pieces directly: sparse
+    // framing forces applyDeviceOverrides to book blocking (assert it!),
+    // compose the wall's batts, then splitBattsAroundBlocking must notch.
+    const wallSlice = {
+      id: 'w_dev',
+      start: [0, 0] as [number, number],
+      end: [6, 0] as [number, number],
+      dir: [1, 0] as [number, number],
+      length: 6,
+      thickness: 0.114,
+      height: 2.44,
+      exterior: true,
+      openings: [],
+      curved: false,
     }
-    const result = computeLevel({ ...scene }, cfg)
-    const blocks = result.members.filter(
-      (m) => m.label === 'device blocking — box off-stud',
+    const framing = frameWall(wallSlice, { ...DEFAULT_SPEC, detail: '400' as const })
+    const sparse = framing.filter((m) => {
+      if (m.role !== 'stud') return true
+      const u = m.position[0]
+      return u < 0.5 || u > 2.4 // open a ~1.9m bay mid-wall
+    })
+    const fixtures = layoutElectrical([wallSlice], [])
+    const id = String(fixtures.find((f) => f.kind === 'receptacle')?.meta?.deviceId)
+    const applied = applyDeviceOverrides(
+      fixtures,
+      [wallSlice],
+      [],
+      sparse,
+      new Map([[id, { wallId: 'w_dev', wallT: 1.5 / 6, heightAff: 1.2 }]]),
     )
-    const batts = result.members.filter(
-      (m) => m.role === 'insulation' && m.sourceId === 'w_s',
+    const blocks = applied.members.filter((m) => m.label === 'device blocking — box off-stud')
+    expect(blocks.length).toBe(1) // NON-VACUOUS: the block is really booked
+    const room = {
+      id: 'room_r',
+      name: 'room',
+      category: 'other' as const,
+      polygon: [[0, 0], [6, 0], [6, 4], [0, 4]] as [number, number][],
+      boundaryWallIds: ['w_dev'],
+      ceilingHeight: 2.7,
+    }
+    const layers = layoutWallLayers(
+      [wallSlice],
+      [room],
+      { ...DEFAULT_SPEC, detail: '400' as const },
+      'NY',
+      [],
+      new Map([['w_dev', { insulation: 'batt' as const }]]),
     )
-    expect(batts.length).toBeGreaterThan(0)
-    // the notch: no batt's vertical extent may overlap a block's at the
-    // same along-wall spot
+    const combined = [...layers]
+    const before = combined.filter((m) => m.role === 'insulation').length
+    expect(before).toBeGreaterThan(0)
+    splitBattsAroundBlocking(combined, applied.members)
+    const batts = combined.filter((m) => m.role === 'insulation')
+    // the split happened: one batt became two pieces (or clipped)
+    expect(batts.length).toBeGreaterThan(before - 1)
     for (const block of blocks) {
       const byLo = block.position[1] - block.dims[1] / 2
       const byHi = block.position[1] + block.dims[1] / 2
@@ -308,5 +331,36 @@ describe('night-4 batch fixes (F2 twin overrides, F3 batt notching)', () => {
         expect(byLo >= yHi - 0.003 || byHi <= yLo + 0.003).toBe(true)
       }
     }
+  })
+
+  test('F2 residual: an UNFRAMED override wall falls back to the DERIVED spot, truthfully', () => {
+    // Narrow re-check: the warn branch said 'using the derived spot' but
+    // then applied the foreign wallT to the derived wall (x = 0.9 × 12m —
+    // a spot the user never chose). The warning must be true.
+    const scene = baselineScene()
+    const cfg = baselineConfig('INTL')
+    const base = computeLevel(scene, cfg)
+    const target = base.devices.find(
+      (d) => d.wallId === 'w_s' && d.deviceKind !== 'switch',
+    ) as NonNullable<(typeof base.devices)[number]>
+    const derivedX = base.fixtures.find((f) => f.meta?.deviceId === target.deviceId)
+      ?.position[0] as number
+    scene.bonesdevice_ghost = {
+      id: 'bonesdevice_ghost',
+      type: 'bones:device',
+      parentId: 'level_1',
+      visible: true,
+      deviceId: target.deviceId,
+      deviceKind: target.deviceKind,
+      wallId: 'wall_that_never_existed',
+      wallT: 0.9,
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+    }
+    const result = computeLevel({ ...scene }, cfg)
+    expect(result.warnings.some((w) => w.includes('not framed'))).toBe(true)
+    const fx = result.fixtures.find((f) => f.meta?.deviceId === target.deviceId) as Fixture
+    // stays at (about) the derived spot — never 0.9 × 12m = 10.8
+    expect(Math.abs(fx.position[0] - derivedX)).toBeLessThan(0.5)
   })
 })

@@ -921,6 +921,12 @@ export function applyDeviceOverrides(
           warnings.push(
             `device “${deviceId}”: override wall ${override.wallId} is not framed — using the derived spot`,
           )
+          // The warning must be TRUE: a foreign wall's t means nothing on
+          // the derived wall — fall back to the derived position, never
+          // override.wallT (narrow re-check: the warn branch re-targeted
+          // to u = t×derivedLength, a spot the user never chose).
+          wall = derivedWall
+          if (wall) projectedU = wallU(wall, fixture.position)
         }
       }
       if (!wall) wall = derivedWall
