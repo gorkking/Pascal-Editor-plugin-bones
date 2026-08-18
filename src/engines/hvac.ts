@@ -140,6 +140,15 @@ const LINESET_LIQUID_DIA = COND?.linesetLiquidDiaM ?? 0.01
 const LINESET_Y = COND?.linesetHeightM ?? 0.4
 /** Disconnect box center above the unit top, on the wall face (NEC 440.14). */
 const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
+/**
+ * Worst-case exterior assembly beyond the wall FACE the pad must clear:
+ * brick veneer's 4.625" assembly offset (1" airspace + 3.625" wythe,
+ * R703.8 / Table R703.3(1)) + 7/16" sheathing ≈ 0.129 m. The hvac engine
+ * doesn't know this wall's cladding, so every pad keeps the worst-case
+ * stand-off — the CABINET stays at its anchor (byte-stable), only the pad
+ * slab slides outward under it when the anchor tucks it too close.
+ */
+const PAD_CLADDING_ALLOW = 0.13
 /** ACCA rule of thumb: airflow per ton of cooling. */
 export const CFM_PER_TON = 400
 /** Return grille sizing: ~200 in² per ton keeps face velocity near 2 cfm/in². */
@@ -915,12 +924,26 @@ export function layoutHvac(
           i === 0
             ? Math.atan2(at[0] - equipAt[0], at[1] - equipAt[1])
             : Math.atan2(slot.out[0], slot.out[1])
+        // The pad's inner edge must clear the wall's exterior assembly —
+        // brick veneer reaches ~0.13 m past the face (R703.8) and a 0.95 m
+        // square pad centered on the legacy 0.6 m anchor would run INTO it
+        // (S1). Slide the SLAB outward just enough; the cabinet stays put.
+        let padCenter: Pt = at
+        if (row.wall) {
+          const foot = wallPointAt(row.wall, slot.u)
+          const standOff = (at[0] - foot[0]) * slot.out[0] + (at[1] - foot[1]) * slot.out[1]
+          const needed = row.wall.thickness / 2 + PAD_CLADDING_ALLOW + COND_PAD_SIDE / 2
+          const push = Math.max(0, needed - standOff)
+          if (push > 0) {
+            padCenter = [at[0] + slot.out[0] * push, at[1] + slot.out[1] * push]
+          }
+        }
         members.push({
           system: 'hvac',
           role: 'equipment',
           dims: [COND_PAD_SIDE, COND_PAD_T, COND_PAD_SIDE],
           length: COND_PAD_SIDE,
-          position: [at[0], COND_PAD_T / 2, at[1]],
+          position: [padCenter[0], COND_PAD_T / 2, padCenter[1]],
           rotation: [0, rotY, 0],
           material: 'concrete',
           sourceId: equipRoom.id,

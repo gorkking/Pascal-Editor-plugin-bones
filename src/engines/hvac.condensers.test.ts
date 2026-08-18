@@ -218,6 +218,34 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
     }
   })
 
+  test('the pad slab clears the worst-case exterior assembly; the cabinet stays on it', () => {
+    // Brick veneer reaches ~0.13 m past the wall face (R703.8 4.625"
+    // assembly + sheathing): a 0.95 m pad centered on the legacy 0.6 m
+    // anchor would run into the wythe (S1). The slab slides outward; the
+    // CABINET keeps the anchor (legacy position) and still rests on the pad.
+    const { walls, rooms } = shell(26, 10)
+    const { members } = layoutHvac(walls, rooms, LOD400)
+    const pads = padsOf(members)
+    const cabs = cabinetsOf(members)
+    expect(pads.length).toBe(2)
+    for (let i = 0; i < pads.length; i++) {
+      const pad = pads[i] as Member
+      const cab = cabs[i] as Member
+      // south row: wall centerline z = 0, thickness 0.2 → face −0.1
+      const padInnerEdge = -(pad.position[2] + 0.95 / 2)
+      expect(padInnerEdge).toBeGreaterThanOrEqual(0.1 + 0.13 - 1e-9)
+      // cabinet footprint stays within the pad footprint
+      expect(Math.abs(cab.position[2] - pad.position[2])).toBeLessThanOrEqual(
+        0.95 / 2 - 0.35 / 2 + 1e-9,
+      )
+      expect(Math.abs(cab.position[0] - pad.position[0])).toBeLessThanOrEqual(
+        0.95 / 2 - 0.9 / 2 + 1e-9,
+      )
+      // cabinet anchor itself is unmoved (legacy 0.6 m stand-off)
+      expect(cab.position[2]).toBeCloseTo(-0.6, 6)
+    }
+  })
+
   test('a pad never fronts a door/window RO — the row slides along the wall to clear', () => {
     // Door RO right where the auto anchor would land (u≈1.5 on w_south).
     const { walls, rooms } = shell(26, 10, [opening('d1', 1.6, 0.9)])
