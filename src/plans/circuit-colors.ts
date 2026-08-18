@@ -38,7 +38,9 @@ const FAMILY: Record<string, { hint: string; hue: number }> = {
   GA: { hint: 'garage', hue: 82 },
   LTG: { hint: 'lighting', hue: 44 },
   GEN: { hint: 'general receptacles', hue: 285 },
-  AC: { hint: 'AC condenser (dedicated 2-pole)', hue: 130 },
+  // 160 sits in the 143-177 gap between LTG's walk band (44..142) and LA's
+  // (178..276) — hue 130 collided with LTG-7 at 128 (dawn review).
+  AC: { hint: 'AC condenser (dedicated 2-pole)', hue: 160 },
 }
 
 export function circuitZoneHint(circuit: string): string {

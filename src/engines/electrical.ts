@@ -1281,7 +1281,7 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
     row.gfci = row.gfci || f.meta?.gfci === true || f.kind === 'receptacle-gfci'
     rows.set(circuit, row)
   }
-  const order = ['SA', 'BA', 'LA', 'GA', 'GEN', 'LTG']
+  const order = ['SA', 'BA', 'LA', 'GA', 'GEN', 'LTG', 'AC']
   return [...rows.values()].sort((a, b) => {
     const pa = order.indexOf(a.circuit.split('-')[0] ?? '')
     const pb = order.indexOf(b.circuit.split('-')[0] ?? '')

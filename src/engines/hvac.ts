@@ -551,8 +551,20 @@ type CondenserSlot = {
 export function placeCondenserSeedSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
   const anchor = placeHeatPumpSpot(walls, rooms)
   if (!anchor) return null
-  const row = condenserRow(walls, anchor, false, 1, anchor)
-  return row.slots[0]?.at ?? anchor
+  // The REAL equipAt (dawn review 1d: passing `anchor` let the degenerate
+  // on-wall fallback pick the opposite out-normal and seed inside-out).
+  const equipAt = rooms.length > 0 ? centroid(equipmentRoomOf(rooms).polygon) : anchor
+  const row = condenserRow(walls, anchor, false, 1, equipAt)
+  const slid = row.slots[0]?.at
+  if (!slid) return anchor
+  // Corner-flip guard (dawn review 1e): if the slid spot's nearest exterior
+  // wall differs from the raw anchor's, seeding there would re-derive the
+  // whole row on the OTHER wall — keep the raw anchor in that case (the
+  // engine's own slide still applies at compute time).
+  const rawExit = nearestExteriorExit(walls, anchor)
+  const slidExit = nearestExteriorExit(walls, slid)
+  if (rawExit && slidExit && rawExit.wall.id !== slidExit.wall.id) return anchor
+  return slid
 }
 
 function condenserRow(
@@ -1054,14 +1066,23 @@ export function layoutHvac(
           // 30A/10 AWG, larger 40A/8 AWG — routeWiring homeruns the panel
           // to this box like any device (compute wires it post-HVAC).
           const acGauge = plan.unitTons <= 3 ? 10 : 8
+          const acBreaker = acGauge === 10 ? 30 : 40
           fixtures.push({
             system: 'hvac',
             kind: 'disconnect',
             position: [face[0], discY, face[1]],
             rotationY: Math.atan2(slot.out[0], slot.out[1]),
             sourceId: row.wall.id,
-            label: `AC disconnect — NEC 440.14, within sight (AC-${n}, ${acGauge === 10 ? '30A' : '40A'} 2-pole)`,
-            meta: { unit: n, circuit: `AC-${n}`, gaugeAwg: acGauge },
+            label: `AC disconnect — NEC 440.14, within sight (AC-${n}, ${acBreaker}A 2-pole)`,
+            meta: {
+              unit: n,
+              circuit: `AC-${n}`,
+              gaugeAwg: acGauge,
+              breakerA: acBreaker,
+              // ~MCA proxy for the schedule's VA column (assumption-labeled
+              // on the condenser fixture itself: 1 ton ≈ 1200 VA).
+              va: Math.round(plan.unitTons * 1200),
+            },
           })
           const whipY = unitTopY - 0.1
           const whipLabel = 'Condenser whip — liquid-tight conduit (NEC 440.14)'

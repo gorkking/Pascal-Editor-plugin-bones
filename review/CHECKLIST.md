@@ -215,7 +215,7 @@ AND a gate — a checklist line without a test is a wish.
   is ⚠-flagged, never silent (E1 applied to pipe). A disconnect mounts
   within sight (≤ 1 m) of each unit (NEC 440.14) with a whip; the dedicated
   branch circuit is NOT routed yet (deferred — electrical track owns
-  panel integration; the label says 'dedicated circuit — routed separately').
+  panel integration; the label says 'dedicated AC-n circuit, panel-homerun by compute').
   The heat-pump service node stays authoritative for unit #1 (A4 verbatim;
   the row re-anchors to it), and the takeoff books exactly the rendered row
   (S4): condensers/pads/disconnects/whips by count, line-set by pair-lf on

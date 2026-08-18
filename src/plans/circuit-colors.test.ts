@@ -24,9 +24,20 @@ describe('circuit colors (checklist E3)', () => {
       'LTG-1',
       'LTG-2',
       ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
+      ...Array.from({ length: 3 }, (_, i) => `AC-${i + 1}`),
     ]
     const colors = ids.map(circuitColor)
     expect(new Set(colors).size).toBe(ids.length)
+  })
+
+  test('AC family reads apart from the FULL lighting walk (dawn round: hue 130 vs LTG-7 128)', () => {
+    const ltg = Array.from({ length: 8 }, (_, i) => circuitColor(`LTG-${i + 1}`))
+    const ac = Array.from({ length: 3 }, (_, i) => circuitColor(`AC-${i + 1}`))
+    for (const a of ac) {
+      for (const l of ltg) {
+        expect(dist(a, l)).toBeGreaterThan(40)
+      }
+    }
   })
 
   test('GEN family reads apart on paper (blueprint round-1: four near-identical magentas)', () => {
