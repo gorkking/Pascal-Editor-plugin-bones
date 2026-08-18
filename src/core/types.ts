@@ -170,6 +170,8 @@ export type FixtureKind =
   | 'thermostat'
   | 'exhaust-fan'
   | 'electric-meter'
+  /** AC-condenser service disconnect (NEC 440.14 — within sight of the unit). */
+  | 'disconnect'
 
 export type Fixture = {
   system: BonesSystem
