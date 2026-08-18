@@ -1,5 +1,50 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 item 2 LANDED (pilot worktree → feat/movable-outlets): MOVABLE OUTLETS (Q7)
+Implementation + gates complete on branch feat/movable-outlets (base 724d9ad,
+823+ tests green, tsc clean). NOT yet through the adversarial loop / prod chain.
+- ENGINE: deterministic meta.deviceId on every receptacle/GFCI/switch fixture
+  (recep:<wall>:<ordinal>:<face p|m>, switch:<wall>:<openingId>:<face>,
+  switch:<wall>:hall:<roomId>); applyDeviceOverrides (electrical.ts) applies
+  moved-node overrides code-aware: RO snap-out + warning, box edge against a
+  stud face (verticals read back from the ACTUAL framed members — zero drift),
+  off-stud keeps the spot + books 'device blocking — box off-stud' across the
+  bay (skips when an existing backing/blocking row already crosses), height
+  clamps (recep 0.15-1.7m / switch 0.9-2.0m NEC 404.8(A)), NEC 210.52 spacing
+  advisory ONLY on walls a moved receptacle left/joined. routeWiring consumes
+  post-override fixtures → wires land at the moved box for free (E2 gated).
+- NODES: bones:device kind (schema mirrors bones:service + seed* fields).
+  MOVED-DETECTION = anchor ≠ seed (any write path counts: drag commit,
+  inspector slider, MCP); unmoved nodes track the derivation and extract NO
+  override → byte-equality by construction. FramingRenderer reconciles
+  nodes↔result.devices every compute (create/re-seat/remove) in ONE
+  history-paused applyNodeChanges batch; bails on readOnly hosts. Drag =
+  parentFrame door-style (device/frame.ts), commit wallId+wallT+position
+  reset. Renderer = invisible raycast proxy AT the engine's snapped box
+  (memoized computeLevel lookup — proxy and box can't diverge).
+- CHECKLIST row E5 added (+ gates listed there). master-baseline.json =
+  members/fixtures pin captured AT 724d9ad for the byte-equality gate;
+  regenerate ONLY from master (scripts/capture-master-baseline.ts).
+- V1 GAPS / notes for the skeptic:
+  (1) HEIGHT drag: the host MoveRegistryNodeTool is PLANAR (localY passes
+      through untouched) — drag moves wallT only; height rides the inspector
+      heightAff slider (any write ≠ seed = override, engine clamps). The Q7
+      'higher/lower' ask is served, but not by the 3D drag itself. A host
+      Shift-vertical-drag mode would need an editor PR.
+  (2) Reconcile writes run from the FramingRenderer effect (editor only,
+      history-paused, converges in one pass) — the brief's 'extend the
+      buildServicePointNodes caller' became renderer-driven so outlets are
+      draggable WITHOUT a panel action; watch undo UX in the visual round.
+  (3) Ordinal ids shuffle WITHIN a wall when that wall's own segments change
+      (new opening on the same wall) — moved overrides can then re-key to a
+      neighbor spot. Same-wall edits are rare mid-drag; board-noted.
+  (4) Cross-wall switch moves keep the OPENING key (still control the same
+      light); cross-wall receptacle moves re-key sourceId to the new wall.
+  (5) Circuit assignment stays with the DERIVED room (a receptacle dragged
+      across a room boundary keeps its circuit/GFCI kind, v1).
+  (6) Blocking members carry system 'wall-framing' → takeoff books them as
+      blocking lumber (by design, it's real wood).
+
 ## NIGHT-4 PLAN (2026-08-17 ~02:30 → morning) — user: "make a plan, pull all nighter"
 Priorities (user-visible + physical-impossibility first):
 1. E4 AIR JUMPERS (OPEN checklist row, prod-visible): connectivity
