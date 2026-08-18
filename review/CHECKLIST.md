@@ -154,6 +154,29 @@ AND a gate — a checklist line without a test is a wish.
   invisible grilles).
   Gates: `src/engines/hvac.plates.test.ts` +
   `src/framing/compute.multistorey.test.ts` (M1 soffit storey)
+- **M2 The AC condenser row is sized, placed and booked honestly.** Outdoor
+  units are a labeled ASSUMPTION (1 ton per 450/550/650 sqft by IECC zone
+  band 1-2/3-4/5+, cited in the fixture label — Manual J/S govern per
+  M1401.3), one condenser per ≤ 5 tons, tiny homes floor at 1 unit/1.5 tons.
+  Every pad + cabinet sits OUTSIDE an exterior wall, ≥ 0.6 m clear between
+  units, cabinet ≥ 0.3 m off the wall face (per mfr clearance + IRC M1403),
+  the pad slab's inner edge clears the worst-case exterior assembly
+  (face + 0.13 m — brick veneer, R703.8), and nothing fronts a door/window
+  RO (the row slides along the wall to clear). Each unit's refrigerant
+  line-set (Ø22 suction + Ø10 liquid) runs Manhattan-only (plan-axis-aligned
+  legs) through a ~0.4 m wall penetration to the air handler — a leg that
+  would cross an RO takes the alternate elbow, and a path that cannot clear
+  is ⚠-flagged, never silent (E1 applied to pipe). A disconnect mounts
+  within sight (≤ 1 m) of each unit (NEC 440.14) with a whip; the dedicated
+  branch circuit is NOT routed yet (deferred — electrical track owns
+  panel integration; the label says 'dedicated circuit — routed separately').
+  The heat-pump service node stays authoritative for unit #1 (A4 verbatim;
+  the row re-anchors to it), and the takeoff books exactly the rendered row
+  (S4): condensers/pads/disconnects/whips by count, line-set by pair-lf on
+  its own row — never phantom copper lf, elbow fittings or NM-B.
+  Origin: night-4 user ask 2026-08-17 ("AC block" catalog item — 1/2/3+
+  outdoor units by cooled volume + jurisdiction, piped and powered).
+  Gate: `src/engines/hvac.condensers.test.ts`
 
 ## P — Plans (the exported document)
 
