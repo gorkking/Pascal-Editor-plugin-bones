@@ -454,7 +454,11 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     // The SELECTED wall is exempt from the cut: the user is inspecting it
     // (Engineering card flow), so its full stack — cladding included —
     // must read from any angle. Everything else keeps the dollhouse cut.
-    const selected = viewerStore.current?.getState().selection?.selectedIds
+    // Selections resolve through the colinear-dedupe map: members carry
+    // the KEPT twin's sourceId, so selecting a dropped duplicate must
+    // exempt its twin (verify night-4 F5).
+    const selectedRaw = viewerStore.current?.getState().selection?.selectedIds
+    const selected = selectedRaw?.map((id) => result.duplicateOf[id] ?? id)
     for (const child of group.children) {
       const face = (child.userData as { face?: readonly [number, number] }).face
       if (!face) continue

@@ -1,5 +1,25 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 VERIFY ROUND 1 CLOSED (~05:20) — visual PASS, skeptic 5 fixes in
+F1 island crossings now clear EVERY scene wall (+ mixed-height E4 gate
+with room-ceiling clause); F2 S1 row rescoped (same-wall class dead;
+residual pre-existing classes enumerated: tee-stem layers×framing,
+anchor-bolt×bottom-plate slab-on-grade, partition tees into CMU, stem
+layer×layer — ALL QUEUED); F3 face-bucket perf gate (per-wall split
+bounded, member census preserved); F4 buried feeder no longer retraces
+the street riser (double-booked ~6ft SE cable); F5 cull exemption
+resolves selections through result.duplicateOf (dedupe twins exempt).
+QUEUE (new rows): foreign-group face buckets never culled/exempted
+(gable-wall layers permanently visible — pre-existing, F6); compression
+flag counts read as member counts (advisory); corner frame-to-frame gap
+12.7mm on compressed walls — California backing beyond nailing distance
+(advisory); MEP-vs-structure penetrations un-gated by design.
+Visual round PASSes to keep: live cladding recolor from straight-on
+views (80-90% pixel swings), 0.0mm stud/gyp contact close-ups, ONE
+aggregated compression Flags row (350 ea), batt cripple-bays now filled
+(D_53 — the v1 gap CLOSED by the frameHints-mirroring batts), service
+drag + blueprints regression-clean.
+
 ## NIGHT-4 STATE (~04:15) — three tracks in flight
 MASTER (mine): E4 closed (724d9ad) + selected-wall cull exemption
 (5cf1cf8) + CAVITY-FIT FRAMING landed (f522f61, 793 tests) — S1 is now

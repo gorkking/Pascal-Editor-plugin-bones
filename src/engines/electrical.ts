@@ -1164,7 +1164,11 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     // drop back down the target wall to drill height.
     const a = wallPlan(from)
     const b = wallPlan(to)
-    const yCross = Math.max(from.wall.height, to.wall.height) + 0.05
+    // Clear EVERY wall in the scene: the legs may pass over rooms taller
+    // than either endpoint wall (verify night-4 F1 — a 2.5m→2.5m island
+    // hop crossed a 4m great room at bed height of ITS ceiling).
+    let yCross = Math.max(from.wall.height, to.wall.height) + 0.05
+    for (const w of walls) yCross = Math.max(yCross, w.height + 0.05)
     const note = ' (ceiling crossing — no wall path)'
     const seg = (p: readonly [number, number, number], q: readonly [number, number, number]) => {
       if (Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.01) return
@@ -1449,7 +1453,9 @@ export function routeServiceCable(
     // panel-height air run (E4) — drop below grade at the meter, cross at
     // lateral depth, rise into the panel.
     const fnote = 'meter → panel feed (⚠ buried crossing — no wall path)'
-    heavy([mx, my, mz], [mx, SERVICE_LATERAL_Y, mz], fnote)
+    // No vertical drop here: the street riser member already runs
+    // [mx, SERVICE_LATERAL_Y] → [mx, my] — re-emitting it double-booked
+    // ~6ft of SE cable and z-fought the riser (verify night-4 F4).
     heavy([mx, SERVICE_LATERAL_Y, mz], [px, SERVICE_LATERAL_Y, mz], fnote)
     heavy([px, SERVICE_LATERAL_Y, mz], [px, SERVICE_LATERAL_Y, pz], fnote)
     heavy([px, SERVICE_LATERAL_Y, pz], [px, py, pz], fnote)

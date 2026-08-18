@@ -87,6 +87,39 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(doubled).toBe(saturated)
   })
 
+  test('face buckets scale per WALL, not per member (night-4 cull-exemption split)', () => {
+    // Assembly-layer buckets key on (color, face normal, sourceId) so the
+    // selected-wall exemption can toggle whole meshes: a 40-wall scene adds
+    // O(walls × layer colors) face meshes — bounded, and independent of how
+    // many layer MEMBERS each wall has (bands, opening splits).
+    const walls = 40
+    const perWall = 6 // gyp both faces + sheathing/wrb/cladding bands…
+    const members = [] as ReturnType<typeof synthesizeMembers>
+    for (let wi = 0; wi < walls; wi++) {
+      for (let mi = 0; mi < perWall; mi++) {
+        members.push({
+          ...synthesizeMembers(1)[0]!,
+          role: (['drywall', 'sheathing', 'wrb'] as const)[mi % 3] as 'drywall' | 'sheathing' | 'wrb',
+          face: mi % 2 === 0 ? ([0, 1] as const) : ([0, -1] as const),
+          sourceId: `wall_${wi}`,
+        })
+      }
+    }
+    const group = buildGroup(members, [], true)
+    // ≤ walls × (colors × faces present) — here 3 colors × 2 faces = 6/wall
+    expect(group.children.length).toBeLessThanOrEqual(walls * 6)
+    expect(group.children.length).toBeGreaterThanOrEqual(walls) // split per wall is real
+    for (const child of group.children) {
+      expect((child.userData as { sourceId?: string }).sourceId).toBeDefined()
+    }
+    // and the member count is preserved across the split
+    const instances = group.children.reduce(
+      (sum, c) => sum + (((c as { count?: number }).count) ?? 0),
+      0,
+    )
+    expect(instances).toBe(walls * perWall)
+  })
+
   test('X-ray = solid scene copy + ghost overlay copy — always depth-tested, no render hacks', () => {
     // Round-2 user reports: with depth tricks on the members themselves, a
     // footing painted over nearer studs, then far stud tops read through the

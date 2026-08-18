@@ -26,18 +26,27 @@ AND a gate — a checklist line without a test is a wish.
   crosses above both walls, drops back to drill height), or below grade
   (the meter→panel island fallback is buried conduit per NEC 300.5).
   Bed-height jumpers and cross-room diagonals are physically impossible
-  cable paths even when they avoid ROs. Origin: QA E1 round 2026-08-15;
-  closed night-4. Gate: `src/engines/electrical.e4.test.ts` (airRuns
-  invariant on connected + island scenes, connectivity preserved).
+  cable paths even when they avoid ROs. Island crossings clear EVERY
+  wall in the scene (a 2.5m→2.5m hop must not cross a 4m great room at
+  its own ceiling); per-room light legs at their room's ceiling are
+  legal. Origin: QA E1 round 2026-08-15; closed night-4 (mixed heights
+  round 2). Gate: `src/engines/electrical.e4.test.ts` (airRuns invariant
+  on connected + island + MIXED-HEIGHT scenes, connectivity preserved).
 
 ## S — Structure
 
 - **S1 No member interpenetrates another** outside the allowed bearing
   pairs (15-axis OBB SAT, 2 mm skin; non-finite geometry = violation).
-  UNCONDITIONAL since night-4 (cavity-fit framing): the old carve-outs —
-  140 pairs on default 0.15m/2x6 exteriors, explicit-misfit overrides —
-  are retired; framing geometry compresses to the drawn cavity
-  (`fitAcross`) so contact replaces overlap at every thickness.
+  The SAME-WALL framing-vs-finish-cavity class is DEAD since night-4
+  (cavity-fit framing): 140 pairs on default 0.15m/2x6 exteriors and the
+  explicit-misfit carve-out are retired — framing geometry compresses to
+  the drawn cavity (`fitAcross`) so contact replaces overlap at every
+  thickness. KNOWN residual pre-existing classes (byte-identical to the
+  pre-night-4 baseline, queued on the board): tee-stem face layers ×
+  through-wall framing; anchor-bolt × bottom-plate on slab-on-grade
+  (allow-list covers anchor-bolt|mudsill only); framed partition tees
+  into full-CMU through walls (frameWalls never sees CMU walls for
+  insets); stem layer×layer at tees.
   Gate: `src/engines/interpenetration.test.ts` scenario matrix + the
   cavity-fit thickness sweep (8 thicknesses × 3 stud configs × batts)
 - **S2 Every roof family inscribes inside its footprint** (no eave-line

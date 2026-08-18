@@ -60,6 +60,9 @@ export type ComputeResult = {
   /** Whole-building metrics (floor area, volume, envelope UA…) — null when
    * there is nothing to measure. Cited/assumption-labeled via `notes`. */
   characteristics: BuildingCharacteristics | null
+  /** Colinear-dedupe map (duplicate id → kept id) — consumers that key off
+   * member sourceIds (cull exemption) resolve host selections through it. */
+  duplicateOf: Record<string, string>
 }
 
 /**
@@ -334,6 +337,7 @@ function computeLevelUncached(
       spec: DEFAULT_SPEC,
       areas: {},
       characteristics: null,
+      duplicateOf: {},
     }
   }
 
@@ -748,5 +752,14 @@ function computeLevelUncached(
   // the panel drawer and the blueprints' schedules block.
   const characteristics = computeCharacteristics(activeWalls, activeRooms, slabs, spec, code)
 
-  return { members, fixtures, warnings, jurisdiction: code, spec, areas, characteristics }
+  return {
+    members,
+    fixtures,
+    warnings,
+    jurisdiction: code,
+    spec,
+    areas,
+    characteristics,
+    duplicateOf: Object.fromEntries(duplicateOf),
+  }
 }
