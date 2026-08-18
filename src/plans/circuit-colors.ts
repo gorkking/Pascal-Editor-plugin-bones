@@ -38,9 +38,12 @@ const FAMILY: Record<string, { hint: string; hue: number }> = {
   GA: { hint: 'garage', hue: 82 },
   LTG: { hint: 'lighting', hue: 44 },
   GEN: { hint: 'general receptacles', hue: 285 },
-  // 160 sits in the 143-177 gap between LTG's walk band (44..142) and LA's
-  // (178..276) — hue 130 collided with LTG-7 at 128 (dawn review).
-  AC: { hint: 'AC condenser (dedicated 2-pole)', hue: 160 },
+  // Hue 218 + a 22° walk + its OWN three lightness stops (below): the
+  // brute-forced config whose worst pair vs every REAL circuit id
+  // (SA-1..2, BA-1..2, LA-1, GA-1, LTG-1..8, GEN-1..8) clears 64 RGB —
+  // hue 130 collided with LTG-7 (dist 5) and hue 160's walk hit LA-1
+  // at 18.7 (two dawn rounds).
+  AC: { hint: 'AC condenser (dedicated 2-pole)', hue: 218 },
 }
 
 export function circuitZoneHint(circuit: string): string {
@@ -57,8 +60,16 @@ export function circuitColor(circuit: string): string {
   // 26° per index and cycle THREE lightness stops — the 14°/two-stop walk
   // left four near-identical magentas on paper (blueprint round-1 P4).
   const crowded = prefix === 'GEN'
-  const hue = (family.hue + (index - 1) * (crowded ? 26 : 14)) % 360
-  const light = crowded ? [40, 52, 63][(index - 1) % 3] as number : index % 2 === 1 ? 42 : 55
+  // AC walks 22° with its own deep/mid/light stops — see the FAMILY note.
+  const ac = prefix === 'AC'
+  const hue = (family.hue + (index - 1) * (crowded ? 26 : ac ? 22 : 14)) % 360
+  const light = ac
+    ? ([30, 48, 66][(index - 1) % 3] as number)
+    : crowded
+      ? ([40, 52, 63][(index - 1) % 3] as number)
+      : index % 2 === 1
+        ? 42
+        : 55
   const sat = 62
   // hsl → hex so both three.js and the SVG sheets get plain hex strings
   const h = hue / 360

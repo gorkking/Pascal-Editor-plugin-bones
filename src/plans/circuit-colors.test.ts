@@ -30,12 +30,24 @@ describe('circuit colors (checklist E3)', () => {
     expect(new Set(colors).size).toBe(ids.length)
   })
 
-  test('AC family reads apart from the FULL lighting walk (dawn round: hue 130 vs LTG-7 128)', () => {
-    const ltg = Array.from({ length: 8 }, (_, i) => circuitColor(`LTG-${i + 1}`))
+  test('AC family reads apart from EVERY real circuit id (two dawn rounds of near-collisions)', () => {
+    // hue 130 hit LTG-7 (dist 5); hue 160's walk hit LA-1 (18.7). The gate
+    // now covers the full set of ids the engine can actually emit.
+    const others = [
+      'SA-1', 'SA-2', 'BA-1', 'BA-2', 'LA-1', 'GA-1',
+      ...Array.from({ length: 8 }, (_, i) => `LTG-${i + 1}`),
+      ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
+    ].map(circuitColor)
     const ac = Array.from({ length: 3 }, (_, i) => circuitColor(`AC-${i + 1}`))
     for (const a of ac) {
-      for (const l of ltg) {
-        expect(dist(a, l)).toBeGreaterThan(40)
+      for (const o of others) {
+        expect(dist(a, o)).toBeGreaterThan(40)
+      }
+    }
+    // and within the family
+    for (let i = 0; i < ac.length; i++) {
+      for (let j = i + 1; j < ac.length; j++) {
+        expect(dist(ac[i] as string, ac[j] as string)).toBeGreaterThan(40)
       }
     }
   })

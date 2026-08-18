@@ -563,3 +563,33 @@ describe('dawn round 2: disconnect never mounts in an RO; schedule/legend honest
     expect(rows[0]?.gaugeAwg).toBe(10)
   })
 })
+
+describe('M2 distance truth: slid disconnects stay within the stated budget', () => {
+  test('an RO-slid disconnect lands ≤ 1.5 m from its unit', () => {
+    const { walls, rooms } = shell(12, 8, [])
+    const north = walls[1]!
+    north.openings.push({
+      id: 'win_hp2',
+      kind: 'window',
+      u: 6,
+      width: 1.4,
+      height: 1.3,
+      sillHeight: 0.9,
+      roughWidth: 1.45,
+      roughHeight: 1.35,
+    })
+    const { fixtures } = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { position: [6, 0, 8.6] },
+    }, { stateCode: 'NY' })
+    const disc = fixtures.find((f) => f.kind === 'disconnect') as Fixture
+    const unit = fixtures.find(
+      (f) => f.kind === 'equipment' && f.meta?.equipment === 'condenser',
+    ) as Fixture
+    const dist = Math.hypot(
+      disc.position[0] - unit.position[0],
+      disc.position[1] - unit.position[1],
+      disc.position[2] - unit.position[2],
+    )
+    expect(dist).toBeLessThanOrEqual(1.5)
+  })
+})

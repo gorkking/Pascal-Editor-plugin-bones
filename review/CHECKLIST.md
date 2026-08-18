@@ -213,7 +213,9 @@ AND a gate — a checklist line without a test is a wish.
   legs) through a ~0.4 m wall penetration to the air handler — a leg that
   would cross an RO takes the alternate elbow, and a path that cannot clear
   is ⚠-flagged, never silent (E1 applied to pipe). A disconnect mounts
-  within sight (≤ 1 m) of each unit (NEC 440.14) with a whip; the dedicated
+  within sight of each unit (NEC 440.14; ≤ 1 m at an unobstructed
+  anchor, ≤ 1.5 m when the box slides clear of a fronting RO — the slide
+  budget is ±1.2 m along-wall) with a whip; the dedicated
   branch circuit is NOT routed yet (deferred — electrical track owns
   panel integration; the label says 'dedicated AC-n circuit, panel-homerun by compute').
   The heat-pump service node stays authoritative for unit #1 (A4 verbatim;
