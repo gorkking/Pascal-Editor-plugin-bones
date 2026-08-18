@@ -1,5 +1,29 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 STATE (~04:15) — three tracks in flight
+MASTER (mine): E4 closed (724d9ad) + selected-wall cull exemption
+(5cf1cf8) + CAVITY-FIT FRAMING landed (f522f61, 793 tests) — S1 is now
+UNCONDITIONAL; design panel winner implemented per judge spec (fitAcross
+caps across-wall dims at thickness−1\" past 2mm grace; headers clamp;
+mixed sill too; one aggregated flag per class; labels/takeoff nominal;
+stackOrigin/batt-cavity untouched — keystone identity: compressed stud
+face == stackOrigin exactly). Verify workflow w2te30u72 RUNNING at
+f522f61 (skeptic: expected-diff manifest across 51 jurisdictions +
+consumer-gap hunt; visual: cull exemption + stud/gyp contact close-up +
+regression sweep). Localhost pinned f522f61.
+PILOT 1 (feat/movable-outlets worktree /tmp/pilot-outlets): Q7 movable
+outlets per brief — deterministic device ids, bones:device nodes,
+parentFrame drag, stud-snap/blocking, height clamps, NEC 210.52
+advisory, byte-equality gate. RUNNING.
+PILOT 2 (feat/ac-condensers worktree /tmp/pilot-ac): AC condenser
+blocks per spec below. RUNNING. electrical.ts circuit integration
+DEFERRED (outlets track owns that file).
+MERGE ORDER when pilots land: outlets first (bigger), then AC rebased;
+each through its own verify round; ship batches as they close.
+PIN GOTCHA (repeat offender): NEVER hand-type a full sha — always
+`git rev-parse` it (tonight's near-miss: guessed suffix wrote a
+nonexistent pin; caught before install).
+
 ## NIGHT-4 ADDITION (user, ~03:30): AC condenser blocks (HVAC)
 User (verbatim essence): catalog has an "AC block" item that looks like
 the outdoor heat pump. There should be 1/2/3+ depending on cooled
