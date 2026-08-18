@@ -1157,11 +1157,23 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   ): void => {
     const emit: SegmentEmitter = (a, b, note = '') => emitWire(circuit, gauge, a, b, note)
     if (emitWallPathWith(emit, graph, from, to, runY)) return
-    // Disconnected wall islands: Manhattan air legs, called out in the label.
+    // Disconnected wall islands: a bed-height run through open room air is
+    // a physically impossible cable path (checklist E4) — a real pull
+    // crosses through the CEILING/joist space: rise up the source wall
+    // through its plates, two Manhattan legs above both walls' top plates,
+    // drop back down the target wall to drill height.
     const a = wallPlan(from)
     const b = wallPlan(to)
-    emitWire(circuit, gauge, [a[0], runY, a[1]], [b[0], runY, a[1]], ' (air run — no wall path)')
-    emitWire(circuit, gauge, [b[0], runY, a[1]], [b[0], runY, b[1]], ' (air run — no wall path)')
+    const yCross = Math.max(from.wall.height, to.wall.height) + 0.05
+    const note = ' (ceiling crossing — no wall path)'
+    const seg = (p: readonly [number, number, number], q: readonly [number, number, number]) => {
+      if (Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.01) return
+      emitWire(circuit, gauge, p, q, note)
+    }
+    seg([a[0], runY, a[1]], [a[0], yCross, a[1]])
+    seg([a[0], yCross, a[1]], [b[0], yCross, a[1]])
+    seg([b[0], yCross, a[1]], [b[0], yCross, b[1]])
+    seg([b[0], yCross, b[1]], [b[0], runY, b[1]])
   }
 
   const panelPlan: Pt = [panel.position[0], panel.position[2]]
@@ -1235,10 +1247,14 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
         cursor = anchor
         cursorPlan = ap
       } else {
-        // No walls at all — degenerate scene: straight legs to the device.
-        emitWire(circuit, gauge, [cursorPlan[0], runY, cursorPlan[1]], [x, runY, cursorPlan[1]], ' (air run — no wall path)')
-        emitWire(circuit, gauge, [x, runY, cursorPlan[1]], [x, runY, z], ' (air run — no wall path)')
-        emitWire(circuit, gauge, [x, WIRE_RUN_Y, z], [x, y, z])
+        // No walls at all — degenerate scene: still no bed-height air runs
+        // (E4): cross at a nominal ceiling height, drop at the device.
+        const yC = 2.4
+        const note = ' (ceiling crossing — no walls)'
+        emitWire(circuit, gauge, [cursorPlan[0], runY, cursorPlan[1]], [cursorPlan[0], yC, cursorPlan[1]], note)
+        emitWire(circuit, gauge, [cursorPlan[0], yC, cursorPlan[1]], [x, yC, cursorPlan[1]], note)
+        emitWire(circuit, gauge, [x, yC, cursorPlan[1]], [x, yC, z], note)
+        emitWire(circuit, gauge, [x, yC, z], [x, y, z])
         cursorPlan = [x, z]
       }
     }
@@ -1428,10 +1444,15 @@ export function routeServiceCable(
     heavy([pa[0], SERVICE_FEED_Y, pa[1]], [pa[0], py, pa[1]], 'meter → panel feed')
     flagged([pa[0], py, pa[1]], [px, py, pz], 'meter → panel feed')
   } else {
-    // Disconnected islands / degenerate scenes: Manhattan air legs, flagged.
-    heavy([mx, my, mz], [mx, py, mz], 'meter → panel feed (⚠ air run — no wall path)')
-    heavy([mx, py, mz], [px, py, mz], 'meter → panel feed (⚠ air run — no wall path)')
-    heavy([px, py, mz], [px, py, pz], 'meter → panel feed (⚠ air run — no wall path)')
+    // Disconnected islands / degenerate scenes: a feeder between
+    // disconnected structures is BURIED conduit (NEC 300.5), not a
+    // panel-height air run (E4) — drop below grade at the meter, cross at
+    // lateral depth, rise into the panel.
+    const fnote = 'meter → panel feed (⚠ buried crossing — no wall path)'
+    heavy([mx, my, mz], [mx, SERVICE_LATERAL_Y, mz], fnote)
+    heavy([mx, SERVICE_LATERAL_Y, mz], [px, SERVICE_LATERAL_Y, mz], fnote)
+    heavy([px, SERVICE_LATERAL_Y, mz], [px, SERVICE_LATERAL_Y, pz], fnote)
+    heavy([px, SERVICE_LATERAL_Y, pz], [px, py, pz], fnote)
   }
   return members
 }

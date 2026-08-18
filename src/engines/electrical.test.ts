@@ -927,11 +927,14 @@ describe('routeWiring — LOD 400 wall-following homeruns + chains', () => {
     }
   })
 
-  test('disconnected islands fall back to labeled air runs instead of vanishing', () => {
+  test('disconnected islands fall back to labeled CEILING crossings instead of vanishing', () => {
+    // E4: the fallback is a rise-cross-drop through the joist space, never
+    // a bed-height air run — still labeled so the takeoff/warnings see it.
     const island = makeWall({ id: 'w_island', start: [20, 20], end: [24, 20] })
     const islandFixtures = layoutElectrical([...plan.walls, island], plan.rooms)
     const routed = routeWiring(islandFixtures, [...plan.walls, island])
-    expect(routed.some((w) => w.label?.includes('air run'))).toBe(true)
+    expect(routed.some((w) => w.label?.includes('ceiling crossing'))).toBe(true)
+    expect(routed.some((w) => w.label?.includes('air run'))).toBe(false)
   })
 
   test('no panel → no wiring', () => {

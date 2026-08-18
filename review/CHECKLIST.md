@@ -20,11 +20,15 @@ AND a gate — a checklist line without a test is a wish.
   Gate: `src/engines/electrical.connectivity.test.ts`
 - **E3 Circuit colors are unique and identical in 3D and on paper.**
   Gate: `src/plans/circuit-colors.test.ts` (uniqueness pins)
-- **E4 No air jumpers through open rooms.** (OPEN — QA E1 round, 2026-08-15)
-  Straight diagonal wires flying through room air (bed-height jumpers,
-  cross-living-room diagonals) are physically impossible cable paths even
-  when they avoid ROs. Likely E2 connectivity jumpers rendered literally —
-  route them along wall/ceiling Manhattan paths. Gate: TODO with the fix.
+- **E4 No air runs at living height.** Every horizontal wire segment lies
+  along a wall centerline band, at/above the ceiling plane (joist/attic
+  crossings — the disconnected-island fallback rises through the plates,
+  crosses above both walls, drops back to drill height), or below grade
+  (the meter→panel island fallback is buried conduit per NEC 300.5).
+  Bed-height jumpers and cross-room diagonals are physically impossible
+  cable paths even when they avoid ROs. Origin: QA E1 round 2026-08-15;
+  closed night-4. Gate: `src/engines/electrical.e4.test.ts` (airRuns
+  invariant on connected + island scenes, connectivity preserved).
 
 ## S — Structure
 
