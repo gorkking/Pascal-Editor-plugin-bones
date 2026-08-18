@@ -1,5 +1,26 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-4 ADDITION (user, ~03:30): AC condenser blocks (HVAC)
+User (verbatim essence): catalog has an "AC block" item that looks like
+the outdoor heat pump. There should be 1/2/3+ depending on cooled
+volume + jurisdiction/code. Hooked to the indoor exchanger (where AC
+ducts get their cold) — refrigerant piping AND a power connection.
+Generated as part of HVAC. Default position outside; per code maybe on
+a concrete footing; connected to the house.
+SPEC (pilot 2): sizing = conditioned floor area → tons (cite the
+rule-of-thumb ~1 ton / 500-600 sqft as an assumption note), one
+condenser per ≤ 5 tons → unit count; pads along an exterior wall near
+the existing heat-pump spot with clearances (unit ~0.9×0.9×0.8m on a
+4" concrete pad member, ≥0.3m off the wall, ≥0.6m between units, IRC
+M1403 / manufacturer clearance note); refrigerant LINE-SET per unit
+(insulated suction + liquid pipe pair) through the wall to the air
+handler the ducts source from; DISCONNECT box on the wall beside each
+unit (NEC 440.14) + whip — panel circuit integration deferred until
+the outlets branch merges (electrical.ts collision). Prefer the host
+catalog "AC block" item for visuals if placeable as a host item node
+(native drag); else plugin fixture + sign like service points. Takeoff
+rows: condensers, pads (concrete), line-set length, disconnects.
+
 ## NIGHT-4 PLAN (2026-08-17 ~02:30 → morning) — user: "make a plan, pull all nighter"
 Priorities (user-visible + physical-impossibility first):
 1. E4 AIR JUMPERS (OPEN checklist row, prod-visible): connectivity
