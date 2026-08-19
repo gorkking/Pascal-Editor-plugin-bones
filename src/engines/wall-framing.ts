@@ -510,6 +510,15 @@ export function detectTees(walls: WallSlice[]): Tee[] {
       const p = endPoint(partition, which)
       for (const through of walls) {
         if (through.id === partition.id) continue
+        // Parallelism filter (mirrors detectCorners' splice guard): a
+        // back-to-back PARALLEL wall offset by ~a thickness is a drawing
+        // artifact, not a tee — without this it registered with sinθ≈0,
+        // hit the 0.2 floor and silently ate 0.57m of run per end
+        // (night-5 skeptic d2, NEW regression class).
+        const cross = Math.abs(
+          partition.dir[0] * through.dir[1] - partition.dir[1] * through.dir[0],
+        )
+        if (cross < 0.3) continue
         const [ax, az] = through.start
         const proj =
           (p[0] - ax) * through.dir[0] + (p[1] - az) * through.dir[1]

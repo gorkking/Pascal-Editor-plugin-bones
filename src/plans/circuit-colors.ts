@@ -37,7 +37,7 @@ const FAMILY: Record<string, { hint: string; hue: number }> = {
   LA: { hint: 'laundry', hue: 178 },
   GA: { hint: 'garage', hue: 82 },
   LTG: { hint: 'lighting', hue: 44 },
-  GEN: { hint: 'general receptacles', hue: 285 },
+  GEN: { hint: 'general receptacles', hue: 256 },
   // Hue 218 + a 22° walk + its OWN three lightness stops (below): the
   // brute-forced config whose worst pair vs every REAL circuit id
   // (SA-1..2, BA-1..2, LA-1, GA-1, LTG-1..8, GEN-1..8) clears 64 RGB —
@@ -62,7 +62,13 @@ export function circuitColor(circuit: string): string {
   const crowded = prefix === 'GEN'
   // AC walks 22° with its own deep/mid/light stops — see the FAMILY note.
   const ac = prefix === 'AC'
-  const hue = (family.hue + (index - 1) * (crowded ? 26 : ac ? 22 : 14)) % 360
+  // GEN walks 16° from 256: the old 26° walk from 285 WRAPPED into the
+  // lighting band (GEN-8 at hue 107 vs LTG-6 at 114 — twin greens on
+  // paper, examiner round-4); 256+16° stays inside [256, 368→8] clear
+  // of every other family's walk. Family floor brute-forced to 22 RGB
+  // (the residual 22 is the pre-existing GA-1/LTG-3 pair — full-palette
+  // redesign queued).
+  const hue = (family.hue + (index - 1) * (crowded ? 16 : ac ? 22 : 14)) % 360
   const light = ac
     ? ([30, 48, 66][(index - 1) % 3] as number)
     : crowded

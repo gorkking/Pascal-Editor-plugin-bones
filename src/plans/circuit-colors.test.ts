@@ -61,6 +61,28 @@ describe('circuit colors (checklist E3)', () => {
     }
   })
 
+  test('FULL family floor: every real circuit pair clears 20 RGB (examiner round-4 twins)', () => {
+    // GEN's old 26° walk from 285 wrapped GEN-7/8 into the GA/LTG bands
+    // (worst pair 4.2). The floor is now 22 — pinned above 20 here; the
+    // residual 22 is the pre-existing GA-1/LTG-3 pair (palette redesign
+    // queued for a >40 family-wide floor).
+    const ids = [
+      'SA-1', 'SA-2', 'BA-1', 'BA-2', 'LA-1', 'GA-1',
+      ...Array.from({ length: 8 }, (_, i) => `LTG-${i + 1}`),
+      ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
+      ...Array.from({ length: 3 }, (_, i) => `AC-${i + 1}`),
+    ]
+    const colors = ids.map(circuitColor)
+    for (let i = 0; i < colors.length; i++) {
+      for (let j = i + 1; j < colors.length; j++) {
+        expect(
+          dist(colors[i] as string, colors[j] as string),
+          `${ids[i]} vs ${ids[j]}`,
+        ).toBeGreaterThan(20)
+      }
+    }
+  })
+
   test('unknown circuit falls back to legacy copper', () => {
     expect(circuitColor('WAT-1')).toBe('#b0723d')
   })

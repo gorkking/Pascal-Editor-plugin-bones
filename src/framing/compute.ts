@@ -44,7 +44,7 @@ import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
-import { frameWalls } from '../engines/wall-framing'
+import { frameHints, frameWalls, specForWall, studSizeFor } from '../engines/wall-framing'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
@@ -504,6 +504,45 @@ function computeLevelUncached(
                 `${(depth + inches(1) - 0.002).toFixed(2)}m for true ${resolved.studSize} or drop to 2x4`,
             )
           }
+        }
+      }
+    }
+    // Junction honesty (night-5 skeptic d1/e): the tee detector's
+    // parallelism guard (cross < 0.3) means a NEAR-PARALLEL contact gets
+    // no junction treatment AT ALL — warn instead of silently framing
+    // through it; and a stem SHORTER than its junction insets re-extends
+    // to the 4t minimum run — honest geometry, never silent.
+    for (const stem of framed) {
+      for (const which of ['start', 'end'] as const) {
+        const p = which === 'start' ? stem.start : stem.end
+        for (const other of framed) {
+          if (other.id === stem.id || other.curved) continue
+          const cross = Math.abs(stem.dir[0] * other.dir[1] - stem.dir[1] * other.dir[0])
+          if (cross >= 0.3) continue // real tees handle themselves
+          const proj =
+            (p[0] - other.start[0]) * other.dir[0] + (p[1] - other.start[1]) * other.dir[1]
+          if (proj < other.thickness || proj > other.length - other.thickness) continue
+          const fx = other.start[0] + other.dir[0] * proj
+          const fz = other.start[1] + other.dir[1] * proj
+          const dist = Math.hypot(p[0] - fx, p[1] - fz)
+          if (dist > (other.thickness + stem.thickness) / 2 + 0.001) continue
+          warnings.push(
+            `Wall ${stem.id}: near-parallel contact with ${other.id} (< ~17°) — not framed as a junction, verify the drawing`,
+          )
+        }
+      }
+    }
+    {
+      const hintMap = frameHints(framed, spec, engineering)
+      for (const w of framed) {
+        const h = hintMap.get(w.id)
+        if (!h) continue
+        const insetSum = (h.startInset ?? 0) + (h.endInset ?? 0)
+        const minRun = 4 * LUMBER_CROSS_SECTIONS[studSizeFor(w, specForWall(spec, engineering.get(w.id)))][0]
+        if (insetSum > 0 && w.length - insetSum < minRun) {
+          warnings.push(
+            `Wall ${w.id}: run shorter than its junction insets — framing re-extends to the ${(minRun * 100).toFixed(0)}cm minimum, verify`,
+          )
         }
       }
     }

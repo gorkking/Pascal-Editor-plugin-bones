@@ -825,3 +825,52 @@ describe('interpenetration gate — structural members never share volume', () =
     }
   })
 })
+
+describe('night-5 skeptic round: tee edge cases', () => {
+  test('d2: back-to-back PARALLEL walls are NOT tees — no run collapse', () => {
+    // Two rooms each drawing their shared boundary, offset a full
+    // thickness: pre-fix this registered as a tee with sinθ=0 → floored
+    // 0.2 → 0.57m inset PER END silently ate 1.14m of framing+finishes.
+    const a = wall({ id: 'w_a', start: [0, 0], end: [4, 0], exterior: false })
+    const b = wall({ id: 'w_b', start: [1.5, 0.113], end: [3.5, 0.113], exterior: false })
+    const members = frameWalls([a, b], spec400)
+    const bPlate = members.find((m) => m.role === 'bottom-plate' && m.sourceId === 'w_b')
+    expect(bPlate?.dims[0]).toBeCloseTo(2.0, 2) // full run, no tee inset
+  })
+
+  test('a: a FAT stem longer than the through wall still insets its layers at the tee', () => {
+    // Corner-candidate (endpoint within tol of the through end) that LOSES
+    // the tie-break used to shadow the tee probe → zero layer inset.
+    const through = wall({ id: 'w_th', start: [0, 0], end: [1, 0], thickness: 0.114 })
+    const stem = wall({ id: 'w_stem', start: [0.87, 0], end: [0.87, 3], thickness: 0.2, exterior: false })
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [1, 0], [1, 3], [0, 3]] as [number, number][],
+        boundaryWallIds: ['w_th'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const combined = [
+      ...frameWalls([through, stem], spec400),
+      ...layoutWallLayers([through, stem], rooms, spec400, 'NY'),
+    ]
+    // The FIXED class: the stem's DRYWALL through the through wall's
+    // framing. (The corner-lap cap × through-drywall pair on this hybrid
+    // corner/tee geometry is a separate pre-existing class — board-queued.)
+    const stemLayerPairs = violations(combined).filter(
+      (v) => v.startsWith('drywall') && v.includes('plate'),
+    )
+    expect(stemLayerPairs).toEqual([])
+  })
+
+  test('c: MIXED 45° stem into a framed through wall uses the width-aware retreat', () => {
+    const through = wall({ id: 'w_th', start: [0, 0], end: [8, 0] })
+    const stem = wall({ id: 'w_stem', start: [5.5, 1.5], end: [4, 0], thickness: 0.2, exterior: false })
+    const { members } = mixedCmuWall(stem, spec400, 0.6096, [through, stem])
+    const framing = frameWalls([through], spec400)
+    expect(violations([...members, ...framing])).toEqual([])
+  })
+})

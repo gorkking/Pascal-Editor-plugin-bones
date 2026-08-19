@@ -591,7 +591,17 @@ export function mixedWallInsets(
   }
   for (const tee of detectTees(group)) {
     if (tee.stem.id !== wall.id) continue
-    claim(tee.stemEnd, tee.through.thickness / 2)
+    // Width-aware oblique retreat — the same S5 formula the framed tee
+    // path adopted night-5 (plain t/2 left a 45° mixed stem's blocks and
+    // plates inside the through studs; skeptic probe F).
+    const cosT = Math.abs(
+      tee.stem.dir[0] * tee.through.dir[0] + tee.stem.dir[1] * tee.through.dir[1],
+    )
+    const sinT = Math.max(
+      0.2,
+      Math.abs(tee.stem.dir[0] * tee.through.dir[1] - tee.stem.dir[1] * tee.through.dir[0]),
+    )
+    claim(tee.stemEnd, (tee.through.thickness + wall.thickness * cosT) / (2 * sinT))
   }
   return { startInset, endInset, junctions }
 }

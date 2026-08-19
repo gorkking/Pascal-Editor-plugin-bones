@@ -457,7 +457,12 @@ function planSheet(
     const key = `${f.kind}|${f.position[0].toFixed(2)}|${f.position[2].toFixed(2)}`
     if (seenDev.has(key)) continue
     seenDev.add(key)
-    const tag = FIXTURE_TAG[f.kind] ?? '·'
+    // Condensers share kind 'equipment' with the air handler — key the
+    // refinement off meta (examiner round-4: two 'AH' bubbles outdoors).
+    const tag =
+      f.kind === 'equipment' && f.meta?.equipment === 'condenser'
+        ? 'CU'
+        : (FIXTURE_TAG[f.kind] ?? '·')
     let px = X(f.position[0])
     let py = Z(f.position[2])
     for (let attempt = 0; attempt < 8; attempt++) {
@@ -601,6 +606,7 @@ function planSheet(
       S: 'switch',
       L: 'light',
       SD: 'smoke alarm',
+      CU: 'AC condenser (outdoor unit)',
       P: 'panel',
       EF: 'exhaust fan',
       T: 'thermostat',
@@ -615,7 +621,15 @@ function planSheet(
       CO: 'cleanout',
       DS: 'AC disconnect',
     }
-    const usedTags = [...new Set(devs.map((f) => FIXTURE_TAG[f.kind] ?? '·'))]
+    const usedTags = [
+      ...new Set(
+        devs.map((f) =>
+          f.kind === 'equipment' && f.meta?.equipment === 'condenser'
+            ? 'CU'
+            : (FIXTURE_TAG[f.kind] ?? '·'),
+        ),
+      ),
+    ]
     let trow = legendLines.length
     for (const tag of usedTags) {
       const y = MARGIN + 14 + trow * 14
@@ -642,8 +656,17 @@ function planSheet(
       }
     }
     let row = legendLines.length
+    // EVERY circuit gets a legend row — the old 'row > 22' cap silently
+    // dropped LTG-6+/SA-1/2 and the SE cable on 23-circuit sets while
+    // their colored runs were drawn (examiner round-4 blocker). Rows past
+    // the column cap continue in a SECOND column.
+    const CIRCUIT_ROWS_PER_COL = 22
+    let circuitIdx = 0
     for (const [circuit, sample] of [...circuits.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-      const y = MARGIN + 14 + row * 14
+      const col = Math.floor(circuitIdx / CIRCUIT_ROWS_PER_COL)
+      const rowInCol = circuitIdx % CIRCUIT_ROWS_PER_COL
+      const colX = MARGIN + col * 230
+      const y = MARGIN + 14 + (col === 0 ? row + rowInCol : rowInCol) * 14
       const amps = sample?.meta?.breakerA ?? '—'
       const awg = sample?.meta?.gaugeAwg ?? '—'
       // The SE cable is not a branch circuit — it has no breaker/gauge meta,
@@ -654,11 +677,10 @@ function planSheet(
           ? 'SE cable 2 AWG Cu — street → meter → panel (NEC 230)'
           : `${circuit} — ${amps}A/${awg}AWG · ${circuitZoneHint(circuit)}`
       legendLines.push(
-        `<rect x="${MARGIN + 2}" y="${y - 8}" width="10" height="10" fill="${circuitColor(circuit)}" stroke="#444" stroke-width="0.5"/>` +
-          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(text)}</text>`,
+        `<rect x="${colX + 2}" y="${y - 8}" width="10" height="10" fill="${circuitColor(circuit)}" stroke="#444" stroke-width="0.5"/>` +
+          `<text x="${colX + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(text)}</text>`,
       )
-      row++
-      if (row > 22) break
+      circuitIdx++
     }
   }
   if (def.key === 'foundation') {

@@ -175,20 +175,22 @@ function runInsets(wall: WallSlice, walls: WallSlice[]): { start: number; end: n
         const through =
           other.length > wall.length || (other.length === wall.length && other.id < wall.id)
         if (through) insets[which] = Math.max(insets[which], other.thickness / 2)
-        continue
+        // NO `continue`: a fat stem near the through wall's end can be a
+        // corner-candidate that LOSES the tie-break AND a real tee — the
+        // shadowing left its layers with zero inset (night-5 skeptic a).
       }
       // TEE: this endpoint lands on `other`'s centerline interior — the
-      // stem always butts (mirrors detectTees' geometry + frameHints' inset).
+      // stem always butts (mirrors detectTees' geometry + frameHints'
+      // inset, including the parallelism splice guard).
+      const crossRaw = wall.dir[0] * other.dir[1] - wall.dir[1] * other.dir[0]
+      if (Math.abs(crossRaw) < 0.3) continue
       const proj = (p[0] - other.start[0]) * other.dir[0] + (p[1] - other.start[1]) * other.dir[1]
       if (proj < other.thickness || proj > other.length - other.thickness) continue
       const foot: Pt = [other.start[0] + other.dir[0] * proj, other.start[1] + other.dir[1] * proj]
       const dist = Math.hypot(p[0] - foot[0], p[1] - foot[1])
       if (dist > (other.thickness + wall.thickness) / 2 + 0.001) continue
       const cosTheta = Math.abs(wall.dir[0] * other.dir[0] + wall.dir[1] * other.dir[1])
-      const sinTheta = Math.max(
-        0.2,
-        Math.abs(wall.dir[0] * other.dir[1] - wall.dir[1] * other.dir[0]),
-      )
+      const sinTheta = Math.max(0.2, Math.abs(crossRaw))
       // Width-aware (S5 formula): the stem's finished footprint reaches
       // (w/2)·|cosθ| past its centerline at oblique angles.
       insets[which] = Math.max(
