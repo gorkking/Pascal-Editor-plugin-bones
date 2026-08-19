@@ -1,5 +1,44 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-5 SHIPPED (~04:45): prod main b6bf8acb — OUTLETS ARE LIVE
+Plugin 22d9e7ae via editor #684 (main 751e983a, carrying #682 wipe
+guard + #683 pointer-transparent hidden walls) → private-editor #371.
+Full-stack final verify: skeptic PASS (mechanical remerge = 3 board
+lines; flag semantics; onCommit removal traced into the host guard;
+byte story: compute ignores the flag entirely) + visual PASS (63
+device nodes seed, drag/undo/redo EXACT on outlet + panel + the old
+dead-click south wall, RO snap + stud close-up, reload persistence,
+9/9 autosaves 200 with 70 extra nodes — wipe guard held). 866→878
+tests. SHIPPED: movable outlets live (D2/D3 one root cause — the
+drag-frame onCommit cascade woke space-detection mid-commit → three
+undo entries; commits are ONE tracked write now; D4 = invisible
+hidden-wall raycast meshes, host #683), scene-wipe fix (#682:
+StrictMode/unmount flushed an empty autosave during the load window —
+autosave arms only after hydration, empty-over-populated PUTs 409),
+tee guards (parallel false-tee filter, width-aware retreats × 3
+consumers, junction warnings), examiner round-4 fixes (legend
+2-column, CU tag, GEN rewalk 256/16°).
+NIGHT-5 QUEUE (new):
+- X-RAY WALL CARD (ticket-worthy, intended #683 semantics): hidden
+  walls are pointer-transparent everywhere, so clicking a wall in
+  X-ray no longer opens the Engineering card — solid-mode-only in the
+  viewport now. Options: sidebar affordance, or host fallthrough
+  (wall as lowest-priority hit).
+- Host tickets from pilot A: space-detection double-subscription
+  (tracked+untracked twin writes), MoveRegistryNodeTool pauses
+  temporal directly, detection re-runs on undo restores, plan-frame
+  drag gesture needs floor-point cursor (candidate: raycast the
+  parent-wall plane), level-scoped creates trigger one-time
+  classification transition on API-built scenes.
+- apps/community needs wipe-guard layers (b)+(c) (its own onSave +
+  API lack them; #682's layer (a) protects once editor ships).
+- Skeptic advisories: junk movableOutlets in raw stored scenes reads
+  ON (zod guards parse paths only); flag-OFF doesn't remove seeded
+  nodes (by design). Corner-lap cap × through-drywall on fat-stem
+  hybrid corner/tee geometry (pre-existing class). Palette redesign
+  for a >40 full-family color floor. Fixture-fixture overlap warnings
+  (panel parked at the WH cabinet — A4 covers ROs only).
+
 ## NIGHT-5 STATE (~07:30) — three tracks live
 TRACK C (me): tee-stem TRIO CLOSED (df565b7 — layers get tee insets
 mirroring detectTees; BOTH engines use the width-aware oblique retreat
