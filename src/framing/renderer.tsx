@@ -408,9 +408,13 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     // Service anchor normalization runs regardless of the outlets flag —
     // service points ship enabled and their drags need the same one-entry
     // commit. Device reconciliation rides the movableOutlets flag (default
-    // ON since night-5; the per-node opt-out stays available).
+    // ON since night-5; the per-node opt-out stays available). ABSENT ≠ off:
+    // stored scenes predating the flag never re-parse through the schema on
+    // load, so the node object simply lacks the key — only an explicit
+    // `false` (inspector toggle / MCP) disables (night-5 final round: a
+    // `=== true` guard left a default-path scene with ZERO device nodes).
     const serviceUpdates = normalizeServiceAnchors(state.nodes, levelId)
-    const devicesOn = node.movableOutlets === true && node.showElectrical !== false
+    const devicesOn = node.movableOutlets !== false && node.showElectrical !== false
     const plan = devicesOn
       ? reconcileDeviceNodes(state.nodes, levelId, result.devices)
       : { create: [], update: [], remove: [] }
