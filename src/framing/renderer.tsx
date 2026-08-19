@@ -356,6 +356,11 @@ function disposeGroup(group: Group) {
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   const ref = useRef<Group>(null!)
   const viewDir = useRef(new Vector3())
+  // TEMPORARY (feat/outlets-live-ux): scratch write-trace hook for the
+  // D2/D3/D4 live sessions — stripped before ship (see src/debug-trace.ts).
+  useEffect(() => {
+    import('../debug-trace').then((m) => m.installBonesTrace())
+  }, [])
   // Cached useViewer store handle (resolved by the dynamic import below) —
   // useFrame can't await, so attachForeign reads levelMode through this ref;
   // null until the import lands = treat as stacked.
