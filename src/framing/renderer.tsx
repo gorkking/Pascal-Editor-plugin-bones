@@ -512,17 +512,24 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     // exempt its twin (verify night-4 F5).
     const selectedRaw = viewerStore.current?.getState().selection?.selectedIds
     const selected = selectedRaw?.map((id) => result.duplicateOf[id] ?? id)
-    for (const child of group.children) {
-      const face = (child.userData as { face?: readonly [number, number] }).face
-      if (!face) continue
-      const sourceId = (child.userData as { sourceId?: string }).sourceId
-      if (sourceId && selected && selected.includes(sourceId)) {
-        child.visible = true
-        continue
+    const cullChildren = (children: readonly { userData: unknown; visible: boolean }[]) => {
+      for (const child of children) {
+        const face = (child.userData as { face?: readonly [number, number] }).face
+        if (!face) continue
+        const sourceId = (child.userData as { sourceId?: string }).sourceId
+        if (sourceId && selected && selected.includes(sourceId)) {
+          child.visible = true
+          continue
+        }
+        // face normal · view direction > 0 → face points away → keep it
+        child.visible = face[0] * dir.x + face[1] * dir.z > 0.02
       }
-      // face normal · view direction > 0 → face points away → keep it
-      child.visible = face[0] * dir.x + face[1] * dir.z > 0.02
     }
+    cullChildren(group.children)
+    // Foreign groups (cross-level roofs, gable-wall layers) carry face
+    // buckets too — they were never culled NOR exemption-checked, leaving
+    // gable finishes permanently opaque from every angle (night-5 queue).
+    for (const [, g] of built.foreign) cullChildren(g.children)
   })
 
   if (!node.visible) return null
