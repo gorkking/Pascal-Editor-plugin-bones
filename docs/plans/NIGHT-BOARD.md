@@ -1,5 +1,17 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-5 STATE (~07:30) — three tracks live
+TRACK C (me): tee-stem TRIO CLOSED (df565b7 — layers get tee insets
+mirroring detectTees; BOTH engines use the width-aware oblique retreat
+(t + w·|cosθ|)/(2·sinθ) after a 45° repro beat plain (t/2)/sinθ; gate:
+composed SAT for fwd/rev/45°/27° tees) + FOREIGN CULL closed (4e2dd82
+— cullChildren walks built.foreign too; gable finishes cull + exempt
+like own-group). 866 tests. Verify whociofv8 RUNNING (narrow skeptic
+on the two fixes + FULL BLUEPRINT EXAMINER round — first paper review
+since condensers/AC circuits/cavity-fit landed).
+PILOT A (outlets live UX) + PILOT B (scene-wipe) RUNNING since ~06:45.
+Pilot A owns the dev server tonight (may bump pin + restart).
+
 ## NIGHT-5 PLAN (2026-08-18 ~06:30 → morning) — user: "go, be even more ambitious, all-nighter"
 Three tracks, two ships targeted (mid-night + dawn):
 TRACK A (pilot 1, host+plugin): MOVABLE OUTLETS LIVE UX — root-cause
