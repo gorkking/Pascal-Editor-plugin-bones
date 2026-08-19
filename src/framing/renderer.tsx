@@ -357,18 +357,6 @@ function disposeGroup(group: Group) {
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   const ref = useRef<Group>(null!)
   const viewDir = useRef(new Vector3())
-  // TEMPORARY (feat/outlets-live-ux): scratch write-trace hook for the
-  // D2/D3/D4 live sessions — stripped before ship (see src/debug-trace.ts).
-  useEffect(() => {
-    import('../debug-trace').then((m) => {
-      m.installBonesTrace()
-      import('@pascal-app/viewer').then(({ useViewer }) => {
-        ;(window as unknown as { __bones?: { setViewer: (s: unknown) => void } }).__bones?.setViewer(
-          useViewer,
-        )
-      })
-    })
-  }, [])
   // Cached useViewer store handle (resolved by the dynamic import below) —
   // useFrame can't await, so attachForeign reads levelMode through this ref;
   // null until the import lands = treat as stacked.
@@ -419,8 +407,8 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     //
     // Service anchor normalization runs regardless of the outlets flag —
     // service points ship enabled and their drags need the same one-entry
-    // commit. Device reconciliation stays behind the EXPERIMENTAL
-    // movableOutlets flag (default off) until the flag flips.
+    // commit. Device reconciliation rides the movableOutlets flag (default
+    // ON since night-5; the per-node opt-out stays available).
     const serviceUpdates = normalizeServiceAnchors(state.nodes, levelId)
     const devicesOn = node.movableOutlets === true && node.showElectrical !== false
     const plan = devicesOn

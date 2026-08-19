@@ -56,12 +56,30 @@ AND a gate — a checklist line without a test is a wish.
   device nodes/overrides computes members STRICTLY byte-equal to master
   (pinned master-baseline.json) and fixtures identical except the added
   `meta.deviceId`; seeded-but-unmoved nodes stay byte-equal end-to-end.
+  DRAG-COMMIT CONTRACT (night-5, D2/D3 closure): the parentFrame drag
+  frames — device AND service — carry NO `onCommit`; a host move-commit is
+  exactly ONE tracked write ({position: on-axis plan point}) and the
+  reconcile batch converts it to the wall anchor (wallId + wallT, position
+  → [0,0,0]) history-paused. The host `onCommit` branch is what patched the
+  parent WALL (`resolveSupportSlabPatch` no-op) and woke the space-detection
+  sync mid-commit — rewriting unclassified walls' frontSide/backSide (the
+  exact fields `extractWalls` derives exterior-ness from) + zone defaults,
+  partly TRACKED: one drag minted three undo entries and drifted the counts
+  (night-4 D2/D3 evidence: 1255·77 → 1218·79 → Cmd+Z → 1207·74). One drag =
+  one undo entry; Cmd+Z returns the box AND the wiring; Cmd+Shift+Z goes
+  forward; counts never drift. Sibling host defect (D4, editor branch
+  fix/outlets-hidden-wall-clicks): walls hidden by the wall-mode pass kept
+  full-height invisible raycast meshes that swallowed clicks aimed at
+  devices behind them — hidden walls are pointer-transparent now.
   Origin: user ask Q7 ("outlets should move like doors — against a stud or
-  an extra piece of wood, per code"), built night-4.
+  an extra piece of wood, per code"), built night-4; live drag closed
+  night-5 (movableOutlets defaults ON since).
   Gates: `src/engines/electrical.devices.test.ts` (ids + snapping matrix) +
   `src/framing/compute.devices.test.ts` (byte-equality pin, wiring
   re-route, warning parity) + `src/device/schema.test.ts` +
-  `src/device/place.test.ts` (reconciler) + the device-blocking SAT
+  `src/device/place.test.ts` (reconciler + position→anchor normalization
+  matrix) + `src/service/frame.test.ts` (onCommit-ABSENCE pin for both drag
+  frames + `normalizeServiceAnchors` matrix) + the device-blocking SAT
   scenario in `src/engines/interpenetration.test.ts`.
 
 ## S — Structure
