@@ -23,6 +23,7 @@ import type { Fixture, Member } from '../core/types'
 import { inches } from '../core/units'
 import { reconcileDeviceNodes } from '../device/place'
 import { circuitColor, plumbingPipeColor } from '../plans/circuit-colors'
+import { normalizeServiceAnchors } from '../service/normalize'
 import { computeLevel } from './compute'
 import type { FramingNode } from './schema'
 
@@ -378,20 +379,20 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
 
   // Movable outlets (Q7): mirror every derived wall device into a
   // `bones:device` node so ANY receptacle/switch is hoverable and draggable —
-  // create missing nodes at the derived spots, re-seat unmoved ones when the
-  // derivation drifts, drop orphans; nodes the user moved are never touched
-  // (device/place.ts). Derived maintenance, not a user edit: history pauses
-  // around the batch so reconcile writes never pollute undo, and the whole
-  // plan lands in ONE applyNodeChanges. Converges in one pass (the re-run on
-  // the resulting nodes change plans zero ops). Bails in read-only hosts
-  // (community viewer) — no scene writes on view, like cladding-paint.
+  // create missing nodes at the derived spots, normalize drag-committed
+  // positions into wall anchors, re-seat unmoved ones when the derivation
+  // drifts, drop orphans; nodes the user moved are never re-seated
+  // (device/place.ts). The same batch normalizes drag-committed
+  // `bones:service` positions (service/normalize.ts) — the parentFrame drags
+  // carry NO onCommit (night-5 D2/D3: the host onCommit branch's wall patch
+  // woke the space-detection sync mid-commit), so the anchor conversion for
+  // both kinds lives here. Derived maintenance, not a user edit: history
+  // pauses around the batch so reconcile writes never pollute undo, and the
+  // whole plan lands in ONE applyNodeChanges. Converges in one pass (the
+  // re-run on the resulting nodes change plans zero ops). Bails in read-only
+  // hosts (community viewer) — no scene writes on view, like cladding-paint.
   useEffect(() => {
-    // EXPERIMENTAL flag (default off): the live drag-commit/undo path has
-    // open host-integration defects (night-4 visual round) — no device
-    // nodes are seeded in prod until it's closed, so nothing 400s the
-    // autosave and nothing corrupts on undo.
-    if (node.movableOutlets !== true) return
-    if (node.visible === false || node.showElectrical === false) return
+    if (node.visible === false) return
     const levelId = node.parentId
     if (!levelId) return
     const state = useScene.getState() as unknown as {
@@ -408,13 +409,23 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     // two X-rays on one level, the second effect would otherwise re-plan
     // the first one's creates from a stale snapshot and mint duplicates
     // (the dedupe would heal it, but with churn).
-    const plan = reconcileDeviceNodes(state.nodes, levelId, result.devices)
-    if (plan.create.length + plan.update.length + plan.remove.length === 0) return
+    //
+    // Service anchor normalization runs regardless of the outlets flag —
+    // service points ship enabled and their drags need the same one-entry
+    // commit. Device reconciliation stays behind the EXPERIMENTAL
+    // movableOutlets flag (default off) until the flag flips.
+    const serviceUpdates = normalizeServiceAnchors(state.nodes, levelId)
+    const devicesOn = node.movableOutlets === true && node.showElectrical !== false
+    const plan = devicesOn
+      ? reconcileDeviceNodes(state.nodes, levelId, result.devices)
+      : { create: [], update: [], remove: [] }
+    const update = [...plan.update, ...serviceUpdates]
+    if (plan.create.length + update.length + plan.remove.length === 0) return
     pauseSceneHistory(useScene)
     try {
       state.applyNodeChanges({
         create: plan.create.map((n) => ({ node: n as unknown, parentId: levelId })),
-        update: plan.update.map((u) => ({ id: u.id, data: u.data })),
+        update: update.map((u) => ({ id: u.id, data: u.data })),
         delete: plan.remove,
       })
     } finally {

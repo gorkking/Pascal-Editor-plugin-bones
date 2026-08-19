@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { deviceParentFrame } from '../device/frame'
 import { resolveServiceParent, serviceParentFrame } from './frame'
+import { normalizeServiceAnchors } from './normalize'
 import { resolveServicePlacement } from './placement'
 
 /**
@@ -8,9 +10,11 @@ import { resolveServicePlacement } from './placement'
  *    t clamped 0..1);
  *  - resolveParent precedence (wallId anchor, moved-position nearest wall,
  *    floor types + unusable walls → null);
- *  - commit shape: ONE update writing wallId + wallT AND resetting position
- *    to [0,0,0] (re-arms the wall anchor — the fix for the old "wallT inert
- *    after a gizmo drag" quirk);
+ *  - commit shape: NO onCommit on either drag frame (the host onCommit
+ *    branch's wall patch woke the space-detection sync mid-commit — night-5
+ *    D2/D3); the reconcile batch normalizes the committed position into
+ *    wallId + wallT + position [0,0,0] instead, which keeps the old "wallT
+ *    inert after a gizmo drag" quirk retired;
  *  - the renderer's live-override merge resolves both a position override
  *    (the drag preview) and a wallT override to the right wall spot.
  */
@@ -123,34 +127,66 @@ describe('resolveServiceParent', () => {
   })
 })
 
-describe('onCommit — re-arms the wall anchor', () => {
-  test('single update writes wallId + wallT and zeroes position', () => {
-    const parent = wall('wall-a', [2, 1], [8, 1])
-    // The tool has just committed the on-axis point (6.5, 1) into position.
+describe('drag commit — NO onCommit; the reconcile batch normalizes instead', () => {
+  test('PIN: neither drag frame declares onCommit (host cascade guard)', () => {
+    // Night-5 D2/D3 root cause: the host MoveRegistryNodeTool runs the
+    // `parentFrame.onCommit` branch with history RESUMED and follows it with
+    // an `updateNode(parentWall, resolveSupportSlabPatch)` no-op patch. That
+    // patch flags the WALL as a commit candidate, waking the host's
+    // space-detection sync mid-commit — which rewrites unclassified walls'
+    // frontSide/backSide + zone defaults, PARTLY TRACKED. Measured on the
+    // night-4 QA scene: one outlet drag = THREE undo entries, counts drifting
+    // 1255·77 → 1218·79, single Cmd+Z landing a third state (1207·74) with
+    // wiring + panel gone. No onCommit ⇒ the whole branch is skipped ⇒ one
+    // drag = ONE tracked write; the anchor conversion happens in the
+    // history-paused reconcile batch (device/place.ts, service/normalize.ts).
+    expect(serviceParentFrame.onCommit).toBeUndefined()
+    expect(deviceParentFrame.onCommit).toBeUndefined()
+  })
+
+  test('normalizeServiceAnchors converts the committed position to the wall anchor', () => {
+    const all = nodes()
+    // The tool committed the on-axis point (6.5, 1) into position.
     const committed = panel({ position: [6.5, 0, 1] })
-    const updates: Array<{ id: string; patch: Record<string, unknown> }> = []
-    serviceParentFrame.onCommit(committed, parent, {
-      update: (id, patch) => updates.push({ id, patch }),
-    })
+    const updates = normalizeServiceAnchors(
+      { ...all, [String(committed.id)]: committed },
+      LEVEL,
+    )
     expect(updates).toHaveLength(1)
     expect(updates[0]?.id).toBe('bonesservice-panel')
-    expect(updates[0]?.patch.wallId).toBe('wall-a')
-    expect(updates[0]?.patch.wallT).toBeCloseTo(0.75) // (6.5-2)/6
-    expect(updates[0]?.patch.position).toEqual([0, 0, 0])
+    expect(updates[0]?.data.wallId).toBe('wall-a')
+    expect(updates[0]?.data.wallT).toBeCloseTo(0.75) // (6.5-2)/6
+    expect(updates[0]?.data.position).toEqual([0, 0, 0])
   })
 
   test('sliding onto a different wall adopts it as the new anchor', () => {
     const all = nodes()
     const moved = panel({ position: [0.2, 0, 4.2] })
-    const parent = resolveServiceParent(moved, all)
-    expect(parent).toBe(all['wall-b'])
-    const updates: Array<{ id: string; patch: Record<string, unknown> }> = []
-    serviceParentFrame.onCommit(moved, parent as never, {
-      update: (id, patch) => updates.push({ id, patch }),
-    })
-    expect(updates[0]?.patch.wallId).toBe('wall-b')
-    expect(updates[0]?.patch.wallT).toBeCloseTo(0.7) // 4.2 / 6 along wall B
-    expect(updates[0]?.patch.position).toEqual([0, 0, 0])
+    expect(resolveServiceParent(moved, all)).toBe(all['wall-b'])
+    const updates = normalizeServiceAnchors({ ...all, [String(moved.id)]: moved }, LEVEL)
+    expect(updates[0]?.data.wallId).toBe('wall-b')
+    expect(updates[0]?.data.wallT).toBeCloseTo(0.7) // 4.2 / 6 along wall B
+    expect(updates[0]?.data.position).toEqual([0, 0, 0])
+  })
+
+  test('floor types and unmoved / wall-less nodes never normalize', () => {
+    const all = nodes()
+    // Floor-placed: position IS the anchor.
+    const sewer = panel({ id: 'svc-sewer', serviceType: 'sewer-exit', position: [1, 0, 2] })
+    // Wall-mounted but never moved: default position.
+    const idle = panel({ id: 'svc-idle' })
+    // Wall-mounted, moved, but no usable wall on the level.
+    const island = panel({ id: 'svc-island', position: [3, 0, 3] })
+    expect(
+      normalizeServiceAnchors({ ...all, 'svc-sewer': sewer, 'svc-idle': idle }, LEVEL),
+    ).toEqual([])
+    expect(normalizeServiceAnchors({ 'svc-island': island }, LEVEL)).toEqual([])
+  })
+
+  test('normalization converges: the normalized node plans nothing', () => {
+    const all = nodes()
+    const after = panel({ wallT: 0.75, position: [0, 0, 0] })
+    expect(normalizeServiceAnchors({ ...all, [String(after.id)]: after }, LEVEL)).toEqual([])
   })
 })
 

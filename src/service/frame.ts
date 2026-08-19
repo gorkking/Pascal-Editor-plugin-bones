@@ -17,12 +17,21 @@ import {
  * ALONG ITS WALL like a door: the plan cursor projects onto the wall axis
  * (clamped 0..1), the live preview flows through `useLiveNodeOverrides`
  * (the renderer merges the override and re-resolves placement — the box and
- * both sign plates track the cursor on the wall), and the commit re-arms the
- * wall anchor: ONE update writing `wallId` + `wallT` and resetting
- * `position` to the [0,0,0] default. That reset is what retired the old
- * "wallT inert after a gizmo drag" quirk — position no longer lingers as a
- * stale outranking override, so the inspector's wallT slider keeps working
- * after any number of drags.
+ * both sign plates track the cursor on the wall), and the commit writes ONE
+ * tracked update: `position` = the on-axis plan point. The X-ray's reconcile
+ * effect then converts that point into the wall anchor (`wallId` + `wallT`,
+ * position reset to [0,0,0]) inside its history-paused batch
+ * (service/normalize.ts) — which keeps the "wallT inert after a gizmo drag"
+ * quirk retired without minting a second history entry.
+ *
+ * DELIBERATELY NO `onCommit` (night-5 D2/D3 root cause, see device/frame.ts
+ * for the full write trace): the host runs the `parentFrame.onCommit` branch
+ * with history RESUMED and follows it with an `updateNode(parentWall,
+ * resolveSupportSlabPatch)` no-op patch that flags the WALL as a commit
+ * candidate — waking the space-detection sync mid-commit, which rewrites
+ * unclassified walls' `frontSide`/`backSide` + zone defaults (partly TRACKED).
+ * That is what made a night-4 PANEL drag drop the device count 77 → 74 and an
+ * outlet drag mint three undo entries. No `onCommit` ⇒ that branch never runs.
  *
  * The pinned @pascal-app/core (0.9.1) predates `MovableParentFrame` /
  * `cursorAttached` in its published types, so the contract is mirrored here
@@ -37,11 +46,9 @@ import {
 type LooseNode = Record<string, unknown>
 type LooseNodes = Readonly<Record<string, LooseNode>>
 
-type FrameSceneApi = {
-  update: (id: string, patch: Record<string, unknown>) => void
-}
-
-/** Plugin-local mirror of the host's MovableParentFrame contract. */
+/** Plugin-local mirror of the host's MovableParentFrame contract. `onCommit`
+ * is part of the host contract but OPTIONAL — and intentionally absent here
+ * (see the module doc). */
 export type ServiceParentFrame = {
   resolveParent: (node: LooseNode, nodes: LooseNodes) => LooseNode | null
   parentRotationY: (parent: LooseNode, nodes?: LooseNodes) => number
@@ -57,7 +64,11 @@ export type ServiceParentFrame = {
     planZ: number,
     nodes?: LooseNodes,
   ) => [number, number, number]
-  onCommit: (node: LooseNode, parent: LooseNode, sceneApi: FrameSceneApi) => void
+  onCommit?: (
+    node: LooseNode,
+    parent: LooseNode,
+    sceneApi: { update: (id: string, patch: Record<string, unknown>) => void },
+  ) => void
 }
 
 const asService = (node: LooseNode): (ServicePlacementNode & { id?: unknown }) | null => {
@@ -121,25 +132,7 @@ export const serviceParentFrame: ServiceParentFrame = {
 
   planToLocal: (parent, planX, localY, planZ) => projectToAxis(parent, planX, localY, planZ),
 
-  /**
-   * Re-arm the wall anchor in ONE update: the tool has just committed the
-   * on-axis plan point into `position`; convert it to `wallT` on the parent
-   * wall, adopt the parent as `wallId` (a moved node may have slid on a
-   * different wall than its stored anchor), and reset `position` to the
-   * [0,0,0] default so the wallT anchor — not a stale position override —
-   * is authoritative for the renderer, the engines and the inspector slider.
-   */
-  onCommit: (node, parent, sceneApi) => {
-    const geom = wallGeom(parent)
-    const id = node.id
-    if (!geom || typeof id !== 'string') return
-    const position = Array.isArray(node.position) ? node.position : [0, 0, 0]
-    const px = typeof position[0] === 'number' && Number.isFinite(position[0]) ? position[0] : 0
-    const pz = typeof position[2] === 'number' && Number.isFinite(position[2]) ? position[2] : 0
-    sceneApi.update(id, {
-      wallId: parent.id,
-      wallT: projectWallT(geom, [px, pz]),
-      position: [0, 0, 0],
-    })
-  },
+  // NO onCommit — see the module doc. The X-ray reconcile effect normalizes
+  // the committed position into wallId/wallT (service/normalize.ts) inside
+  // its history-paused batch instead.
 }

@@ -211,3 +211,114 @@ describe('reconcileDeviceNodes', () => {
     expect(plan.create).toHaveLength(1) // level_1 still needs its own node
   })
 })
+
+describe('reconcileDeviceNodes — drag-commit position normalization', () => {
+  // Host wall node the projection resolves against (nearestUsableWall reads
+  // host wall nodes, not engine slices): along +X from (0,0) to (6,0).
+  const hostWall = {
+    id: 'w1',
+    type: 'wall',
+    parentId: 'level_1',
+    start: [0, 0],
+    end: [6, 0],
+    thickness: 0.114,
+  }
+  const derived = (deviceId: string, wallT: number, heightAff = 0.381) => ({
+    deviceId,
+    deviceKind: 'receptacle' as const,
+    wallId: 'w1',
+    wallT,
+    heightAff,
+  })
+  const node = (fields: Record<string, unknown> = {}): Record<string, unknown> => ({
+    id: 'a',
+    type: 'bones:device',
+    parentId: 'level_1',
+    deviceId: 'recep:w1:0:p',
+    deviceKind: 'receptacle',
+    wallId: 'w1',
+    wallT: 0.25,
+    heightAff: 0.381,
+    seedWallId: 'w1',
+    seedWallT: 0.25,
+    seedHeightAff: 0.381,
+    position: [0, 0, 0],
+    ...fields,
+  })
+
+  test('a committed position converts to the wall anchor (ONE paused write, same spot)', () => {
+    // The host move tool committed the on-axis plan point (4.5, 0) into
+    // position — the drag frame has no onCommit (device/frame.ts: the host
+    // onCommit branch's wall patch woke space detection mid-commit).
+    const plan = reconcileDeviceNodes(
+      { w1: hostWall, a: node({ position: [4.5, 0, 0] }) },
+      'level_1',
+      [derived('recep:w1:0:p', 0.25)],
+    )
+    expect(plan.create).toEqual([])
+    expect(plan.remove).toEqual([])
+    expect(plan.update).toHaveLength(1)
+    const data = plan.update[0]?.data as Record<string, unknown>
+    expect(plan.update[0]?.id).toBe('a')
+    expect(data.wallId).toBe('w1')
+    expect(data.wallT).toBeCloseTo(0.75) // 4.5 / 6 along the wall
+    expect(data.position).toEqual([0, 0, 0])
+    // heightAff and the seed anchor are NOT touched — planar drag keeps
+    // height, and the seed stays the moved-detection reference.
+    expect('heightAff' in data).toBe(false)
+    expect('seedWallT' in data).toBe(false)
+    expect('seedWallId' in data).toBe(false)
+  })
+
+  test('normalization converges: the normalized node plans zero ops', () => {
+    const plan = reconcileDeviceNodes(
+      { w1: hostWall, a: node({ wallT: 0.75, position: [0, 0, 0] }) },
+      'level_1',
+      [derived('recep:w1:0:p', 0.25)],
+    )
+    expect(plan.create).toEqual([])
+    expect(plan.update).toEqual([])
+    expect(plan.remove).toEqual([])
+  })
+
+  test('sliding onto a DIFFERENT wall adopts it as the anchor', () => {
+    const wallB = {
+      id: 'wB',
+      type: 'wall',
+      parentId: 'level_1',
+      start: [0, 0],
+      end: [0, 6],
+      thickness: 0.114,
+    }
+    const plan = reconcileDeviceNodes(
+      { w1: hostWall, wB: wallB, a: node({ position: [0, 0, 4.2] }) },
+      'level_1',
+      [derived('recep:w1:0:p', 0.25)],
+    )
+    const data = plan.update[0]?.data as Record<string, unknown>
+    expect(data.wallId).toBe('wB')
+    expect(data.wallT).toBeCloseTo(0.7) // 4.2 / 6 along wall B
+    expect(data.position).toEqual([0, 0, 0])
+  })
+
+  test('no usable wall: the position stays (engines position-wins path)', () => {
+    const plan = reconcileDeviceNodes(
+      { a: node({ position: [4.5, 0, 0] }) }, // no wall nodes at all
+      'level_1',
+      [derived('recep:w1:0:p', 0.25)],
+    )
+    expect(plan.update).toEqual([])
+  })
+
+  test('normalization composes with the deviceKind follow in one update', () => {
+    const plan = reconcileDeviceNodes(
+      { w1: hostWall, a: node({ position: [4.5, 0, 0] }) },
+      'level_1',
+      [{ ...derived('recep:w1:0:p', 0.25), deviceKind: 'receptacle-gfci' as const }],
+    )
+    expect(plan.update).toHaveLength(1)
+    const data = plan.update[0]?.data as Record<string, unknown>
+    expect(data.deviceKind).toBe('receptacle-gfci')
+    expect(data.wallT).toBeCloseTo(0.75)
+  })
+})
