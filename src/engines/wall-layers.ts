@@ -147,8 +147,13 @@ function bandsAround(wall: WallSlice, height: number): Band[] {
   return bands.filter((b) => b.u1 - b.u0 > 0.01 && b.y1 - b.y0 > 0.01)
 }
 
-/** Corner run insets, mirroring frameWalls: butting layers stop at the
- * through wall's face. Cheap re-derivation (endpoint coincidence). */
+/** Corner + TEE run insets, mirroring frameWalls: butting layers stop at
+ * the through wall's face. Corners re-derive from endpoint coincidence;
+ * tees (endpoint on another wall's centerline interior) inset the stem by
+ * the angle-aware (t/2)/sinθ — without it the stem's face layers ran to
+ * the through CENTERLINE, straight through its studs and plates (36-78
+ * SAT pairs per house, night-board queue; both stem directions covered
+ * since both endpoints are probed). */
 function runInsets(wall: WallSlice, walls: WallSlice[]): { start: number; end: number } {
   const insets = { start: 0, end: 0 }
   const ends: { which: 'start' | 'end'; p: Pt }[] = [
@@ -163,13 +168,33 @@ function runInsets(wall: WallSlice, walls: WallSlice[]): { start: number; end: n
         Math.hypot(p[0] - other.start[0], p[1] - other.start[1]),
         Math.hypot(p[0] - other.end[0], p[1] - other.end[1]),
       )
-      if (dEnds > tol) continue
-      // Round-14: '>' left EQUAL-length corners (every drawn rectangle!)
-      // with neither wall inset — 20 layer clashes on the default house.
-      // Tie breaks by id so exactly one wall runs through.
-      const through =
-        other.length > wall.length || (other.length === wall.length && other.id < wall.id)
-      if (through) insets[which] = Math.max(insets[which], other.thickness / 2)
+      if (dEnds <= tol) {
+        // Round-14: '>' left EQUAL-length corners (every drawn rectangle!)
+        // with neither wall inset — 20 layer clashes on the default house.
+        // Tie breaks by id so exactly one wall runs through.
+        const through =
+          other.length > wall.length || (other.length === wall.length && other.id < wall.id)
+        if (through) insets[which] = Math.max(insets[which], other.thickness / 2)
+        continue
+      }
+      // TEE: this endpoint lands on `other`'s centerline interior — the
+      // stem always butts (mirrors detectTees' geometry + frameHints' inset).
+      const proj = (p[0] - other.start[0]) * other.dir[0] + (p[1] - other.start[1]) * other.dir[1]
+      if (proj < other.thickness || proj > other.length - other.thickness) continue
+      const foot: Pt = [other.start[0] + other.dir[0] * proj, other.start[1] + other.dir[1] * proj]
+      const dist = Math.hypot(p[0] - foot[0], p[1] - foot[1])
+      if (dist > (other.thickness + wall.thickness) / 2 + 0.001) continue
+      const cosTheta = Math.abs(wall.dir[0] * other.dir[0] + wall.dir[1] * other.dir[1])
+      const sinTheta = Math.max(
+        0.2,
+        Math.abs(wall.dir[0] * other.dir[1] - wall.dir[1] * other.dir[0]),
+      )
+      // Width-aware (S5 formula): the stem's finished footprint reaches
+      // (w/2)·|cosθ| past its centerline at oblique angles.
+      insets[which] = Math.max(
+        insets[which],
+        (other.thickness + wall.thickness * cosTheta) / (2 * sinTheta),
+      )
     }
   }
   return insets

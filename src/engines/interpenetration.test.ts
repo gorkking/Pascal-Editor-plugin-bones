@@ -442,6 +442,44 @@ describe('interpenetration gate — structural members never share volume', () =
     }
   })
 
+  test('tee trio: perpendicular, REVERSE-direction and OBLIQUE stems compose SAT-clean with layers (night-5)', () => {
+    // The queued trio: stem face layers used to run to the through
+    // CENTERLINE (no tee inset in the layer engine), and oblique stems
+    // inset by plain t/2 in the framing. Full composed SAT, no filtering.
+    const rooms = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other' as const,
+        polygon: [[0, 0], [8, 0], [8, 6], [0, 6]] as [number, number][],
+        boundaryWallIds: ['w_th'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const cases: { name: string; stem: WallSlice }[] = [
+      // stem END lands on the through wall (forward)
+      { name: 'perpendicular-fwd', stem: wall({ id: 'w_stem', start: [4, 3], end: [4, 0], exterior: false }) },
+      // stem START lands on the through wall (reverse direction)
+      { name: 'perpendicular-rev', stem: wall({ id: 'w_stem', start: [4, 0], end: [4, 3], exterior: false }) },
+      // oblique 45° stem into the through wall
+      { name: 'oblique-45', stem: wall({ id: 'w_stem', start: [5.5, 1.5], end: [4, 0], exterior: false }) },
+      // shallow oblique ~27°
+      { name: 'oblique-27', stem: wall({ id: 'w_stem', start: [6, 1], end: [4, 0], exterior: false }) },
+    ]
+    for (const c of cases) {
+      const through = wall({ id: 'w_th', start: [0, 0], end: [8, 0] })
+      const set = [through, c.stem]
+      const combined = [
+        ...frameWalls(set, spec400),
+        ...layoutWallLayers(set, rooms, spec400, 'NY'),
+      ]
+      expect(violations(combined), c.name).toEqual([])
+      // non-vacuous: the stem really framed and layered
+      expect(combined.some((m) => m.sourceId === 'w_stem' && m.role === 'stud'), c.name).toBe(true)
+      expect(combined.some((m) => m.sourceId === 'w_stem' && m.role === 'drywall'), c.name).toBe(true)
+    }
+  })
+
   test('TX brick-default rectangle: veneer + air gap SAT-clean at corners (S9)', () => {
     // The brick wythe sits a full 1" airspace beyond the WRB (round-2 air
     // gap fix) — this pins the moved wythes clashing with nothing,

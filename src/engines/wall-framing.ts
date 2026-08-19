@@ -607,7 +607,22 @@ export function frameHints(
     h.backing = h.backing ?? []
     h.backing.push({ u: tee.u, heights: [0.6, 1.2, 1.8] })
     const stemHints = hintFor(tee.stem)
-    const inset = tee.through.thickness / 2
+    // WIDTH-AWARE oblique retreat (the S5 mixed-wall formula): the stem's
+    // own width w reaches (w/2)·|cosθ| past its centerline along the
+    // through wall, so clearing the through face takes
+    // (t + w·|cosθ|)/(2·sinθ) along the stem — plain t/2 left oblique
+    // stems interpenetrating (night-board queue; 45° repro showed plates
+    // and end studs still inside the through body at (t/2)/sinθ too).
+    // sinθ floors at 0.2 (≈11°): shallower tees are degenerate drawings.
+    const cosTheta = Math.abs(
+      tee.stem.dir[0] * tee.through.dir[0] + tee.stem.dir[1] * tee.through.dir[1],
+    )
+    const sinTheta = Math.max(
+      0.2,
+      Math.abs(tee.stem.dir[0] * tee.through.dir[1] - tee.stem.dir[1] * tee.through.dir[0]),
+    )
+    const inset =
+      (tee.through.thickness + tee.stem.thickness * cosTheta) / (2 * sinTheta)
     if (tee.stemEnd === 'start') stemHints.startInset = Math.max(stemHints.startInset ?? 0, inset)
     else stemHints.endInset = Math.max(stemHints.endInset ?? 0, inset)
   }
