@@ -1,5 +1,41 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-5 PLAN (2026-08-18 ~06:30 → morning) — user: "go, be even more ambitious, all-nighter"
+Three tracks, two ships targeted (mid-night + dawn):
+TRACK A (pilot 1, host+plugin): MOVABLE OUTLETS LIVE UX — root-cause
+and FIX D2/D3/D4 so movableOutlets can default ON:
+- D2 mutating drag commit: +2 fixtures/−37 members after ONE outlet
+  drag; panel-drag −3 devices partially explained (receptacle layout
+  follows the panel wall — engine-side, maybe correct); outlet-drag
+  delta unexplained. Suspects: device/frame.ts onCommit (writes
+  parent.id from nearestUsableWall over the RAW node map → reparenting
+  breaks level-scoped extraction?), reconcile effect interplay.
+- D3 broken undo: one Cmd+Z leaves the box, vanishes wall wiring +
+  panel, lands a third state. History-paused reconcile writes × host
+  zundo. Fix may need a host PR (undo-boundary API) or reconcile
+  restructure (no writes during/after user edits, only on load?).
+- D4 dead place-click on some walls (host placement-validity).
+Evidence: board night-4 entries + /tmp/qa-ship4/result*.json (may be
+gone — re-repro per the batch-round visual brief). DELIVERABLE: fixes
++ gates + flag defaults ON only if a full visual round passes drag,
+undo, redo, persistence on BOTH surfaces.
+TRACK B (pilot 2, host): SCENE-WIPE ROOT CAUSE — sessions that make
+NO edits fire ONE autosave PUT with an EMPTY graph, wiping the scene
+at v2 (dawn evidence: scenes a4993ec9f1ab/1befee38f973; recurring
+since 2026-08-16 'cold-load readiness timeout' hypothesis). Host repo:
+find the autosave trigger + why the graph serializes empty, fix (never
+PUT an empty graph over a non-empty server copy at minimum), test,
+host PR. This is prod DATA LOSS — highest severity open item.
+TRACK C (me, inline): STRUCTURAL CLEANUP — (1) tee-stem trio: stem
+face layers cross through-wall framing (36-78 SAT pairs); reverse-
+direction tee insets; oblique tees plain thickness/2. (2) foreign-
+group cull: attachForeign face buckets never dollhouse-culled nor
+exemption-checked (gable-wall finishes permanently visible). (3)
+blueprint EXAMINER round — sheets gained condensers/AC circuits/
+compressed framing without a paper review.
+Loop rule unchanged; ship batches as they close through the full
+chain. Localhost currently = prod (041041da).
+
 ## DAWN BATCH SHIPPED (~06:00): prod main f86a5bd3
 Plugin 041041da via editor #677 (main 49a81377) → private-editor #367
 (E2E green). 859→865 tests. Three dawn verify rounds total; final:
