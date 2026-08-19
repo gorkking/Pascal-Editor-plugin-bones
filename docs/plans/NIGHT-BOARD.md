@@ -1,5 +1,32 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-5 TRACK A FINAL ROUND (post-fix, plugin 5973948 + editor branch): PASS both surfaces
+Scene eda991bca689 (default-ON path — NO movableOutlets key in the graph;
+63 device nodes seeded on view). Sequence + panel statuses:
+baseline 1255·77 → Place service points 1241·74 (ONE-TIME host wall
+classification transition — level-scoped CREATES are commit candidates and
+wake space detection; the -3 devices = classified exterior walls correctly
+LOSING their over-placed exterior-face receptacles; deterministic:
+headless compute on the classified scene = 1241·74 exactly) →
+OUTLET drag 1242·74 (+1 blocking, devices stable) → Cmd+Z 1241·74 EXACT →
+Cmd+Shift+Z 1242·74 → PANEL drag 1255·74 (homeruns re-anchor, box visibly
+at the new spot) → Cmd+Z 1242·74 (reverts ONLY the panel move — per-drag
+undo granularity proven) → Cmd+Shift+Z 1255·74. Persistence (API after
+session): outlet wallT 0.0667 vs seed 0.1727 + panel wallT 0.2667, both
+position [0,0,0] (normalized), 147 nodes = 76 + 8 services + 63 devices,
+zero duplication. Evidence: /tmp/qa-n5a/final/*.png + result_final3.json.
+- FIX FOUND IN THE ROUND (5973948): flag guard must read ABSENT as ON —
+  stored scenes never re-parse through the plugin schema on load, so a
+  `=== true` guard left the default-path scene with ZERO device nodes;
+  it's `!== false` now (explicit inspector/MCP false still disables).
+- GESTURE NOTE (pre-existing host design, NOT an outlets defect): the move
+  tool's cursor is a PLAN point resolved on the GROUND plane — dragging a
+  wall-mounted box from an eye-level camera with the pointer at BOX height
+  yields no usable grid:move (near-horizontal ray) and the place click is
+  ignored (hasMovedRef gate). Point the cursor at the FLOOR under the
+  destination (or look down) and everything tracks. Candidate host
+  improvement: raycast the PARENT WALL plane for parentFrame drags.
+
 ## NIGHT-5 TRACK A COMPLETE — outlets live UX: D2/D3/D4 root-caused + fixed, flag ON
 Branch feat/outlets-live-ux (base f495148, final sha = HEAD of branch);
 873 tests green + tsc clean per commit. Root causes from an INSTRUMENTED
