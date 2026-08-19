@@ -95,11 +95,15 @@ export const FramingNode = BaseNode.extend({
   showElectrical: z.boolean().default(false),
   showPlumbing: z.boolean().default(false),
   showHvac: z.boolean().default(false),
-  /** Movable outlets (Q7) — EXPERIMENTAL, default OFF: the bones:device
+  /** Movable outlets (Q7) — default ON since night-5: the bones:device
    * reconciler seeds draggable nodes for every derived receptacle/switch.
-   * Ships dormant until the live drag-commit/undo host-integration defects
-   * are closed (night-4 batch visual round D2/D3/D4). */
-  movableOutlets: z.boolean().default(false),
+   * The night-4 live-drag defects are closed: D2/D3 (commit count drift +
+   * broken undo) died with the no-onCommit drag frames + reconcile-batch
+   * anchor normalization (device/frame.ts, device/place.ts); D4 (dead/
+   * misrouted place-click through hidden walls) is fixed host-side on
+   * editor branch fix/outlets-hidden-wall-clicks — ship this default
+   * alongside that PR. */
+  movableOutlets: z.boolean().default(true),
   /** Fade the architectural shell: 0 = skeleton only (future host affordance). */
   xray: z.number().min(0).max(1).default(1),
   /** X-ray vision: draw the skeleton through walls/finishes (depth-test off). */

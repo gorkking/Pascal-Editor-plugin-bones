@@ -1,3 +1,4 @@
+import { isMovedPosition, nearestUsableWall } from '../service/placement'
 import type { DerivedDevice } from './derive'
 import { isMovedDeviceNode } from './overrides'
 import { DeviceNode } from './schema'
@@ -11,6 +12,14 @@ import { DeviceNode } from './schema'
  *  - CREATE a node (at the derived anchor, seed = anchor) for every derived
  *    device that has none — creation alone never moves anything (the engine
  *    ignores unmoved nodes, checklist parity with A4's idempotent seeding);
+ *  - NORMALIZE a drag-committed `position` into the wall anchor: the host
+ *    move tool's commit writes the on-axis plan point into `position` (the
+ *    drag frame has NO onCommit — device/frame.ts explains the host
+ *    space-detection cascade that retired it); the reconciler converts it to
+ *    `wallId` + `wallT` and resets position to [0,0,0]. Same spot, different
+ *    encoding — the user's move is never altered, only re-keyed to the
+ *    anchor form the inspector slider and the engines read. Runs in the
+ *    history-paused batch, so a drag stays ONE undo entry;
  *  - RE-SEAT nodes the user has NOT moved (anchor still equals seed) when
  *    the derivation changed under them — walls edited, openings added;
  *  - NEVER touch a moved node's anchor (it is the user's override); only its
@@ -97,6 +106,25 @@ export function reconcileDeviceNodes(
     const data: Record<string, unknown> = {}
     // deviceKind is DERIVED — it follows the engine on moved nodes too.
     if (node.deviceKind !== d.deviceKind) data.deviceKind = d.deviceKind
+    // Drag-commit normalization: a moved (non-default) position converts to
+    // the equivalent wall anchor — the exact projection the renderer's
+    // position path draws (nearestUsableWall), so the box never moves.
+    // Converges: once position is [0,0,0] this branch is dead.
+    if (isMovedPosition(node.position as readonly unknown[] | undefined)) {
+      const p = node.position as readonly [number, number, number]
+      const hit = nearestUsableWall(
+        nodes as Record<string, Record<string, unknown>>,
+        node as { parentId?: string | null },
+        [p[0], p[2]],
+      )
+      if (hit) {
+        data.wallId = hit.wallId
+        data.wallT = hit.t
+        data.position = [0, 0, 0]
+      }
+      // No usable wall: leave the position — the engines' position-wins
+      // path (movedOverridePosition) still resolves it.
+    }
     if (!isMovedDeviceNode(node)) {
       // Unmoved = the node tracks auto-placement: re-seat anchor AND seed
       // when the derivation drifted (a wall edit moved the derived spot).

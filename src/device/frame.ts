@@ -13,10 +13,27 @@ import {
  * `capabilities.movable.parentFrame` contract the service points use
  * (service/frame.ts, host source core registry/types.ts): the plan cursor
  * projects onto the wall axis (clamped 0..1), the proxy box rides the wall
- * live through `useLiveNodeOverrides`, and the commit re-arms the wall
- * anchor in ONE update — `wallId` (the drag may have slid onto a DIFFERENT
- * wall) + `wallT`, with `position` reset to the [0,0,0] default so the
- * anchor, not a stale position override, stays authoritative.
+ * live through `useLiveNodeOverrides`, and the commit writes ONE tracked
+ * update — `position` = the on-axis plan point the tool projected through
+ * `planToLocal`. The RECONCILER (device/place.ts) then converts that point
+ * into the wall anchor (`wallId` + `wallT`, position reset to [0,0,0]) inside
+ * its history-paused batch.
+ *
+ * DELIBERATELY NO `onCommit` (night-5 D2/D3 root cause): the host's
+ * MoveRegistryNodeTool runs its `parentFrame.onCommit` branch with history
+ * RESUMED and follows it with `updateNode(parentWall, resolveSupportSlabPatch)`
+ * — a semantic no-op patch that nonetheless flags the WALL as a scene-commit
+ * candidate. That flag wakes the host's space-detection sync mid-commit
+ * (`initSpaceDetectionSync`, core lib/space-detection.ts), which rewrites
+ * every unclassified wall's `frontSide`/`backSide` and materializes zone
+ * schema defaults — partly as a TRACKED history entry. Net effect measured on
+ * the night-4 scene: one outlet drag = THREE undo entries and the engine's
+ * counts drifting 1255·77 → 1218·79 (walls flipping exterior-ness under the
+ * engines), with Cmd+Z landing a third corrupted state (1207·74). Dropping
+ * `onCommit` skips that whole host branch: one drag = one tracked write, and
+ * the anchor conversion happens where every other derived-state write lives —
+ * the paused reconcile batch, which space detection treats as a new baseline
+ * instead of an edit.
  *
  * `heightAff` is deliberately NOT touched by the commit: the host move tool
  * is planar (localY passes through untouched), so height edits ride the
@@ -31,13 +48,10 @@ import {
 type LooseNode = Record<string, unknown>
 type LooseNodes = Readonly<Record<string, LooseNode>>
 
-type FrameSceneApi = {
-  update: (id: string, patch: Record<string, unknown>) => void
-}
-
 /** Plugin-local mirror of the host's MovableParentFrame contract (the pinned
  * @pascal-app/core types predate it — cast at the attach point, like the
- * service definition does). */
+ * service definition does). `onCommit` is part of the host contract but is
+ * OPTIONAL — and intentionally absent here (see the module doc). */
 export type DeviceParentFrame = {
   resolveParent: (node: LooseNode, nodes: LooseNodes) => LooseNode | null
   parentRotationY: (parent: LooseNode, nodes?: LooseNodes) => number
@@ -53,7 +67,11 @@ export type DeviceParentFrame = {
     planZ: number,
     nodes?: LooseNodes,
   ) => [number, number, number]
-  onCommit: (node: LooseNode, parent: LooseNode, sceneApi: FrameSceneApi) => void
+  onCommit?: (
+    node: LooseNode,
+    parent: LooseNode,
+    sceneApi: { update: (id: string, patch: Record<string, unknown>) => void },
+  ) => void
 }
 
 type AnchorNode = { parentId?: string | null; position?: readonly unknown[] }
@@ -108,17 +126,6 @@ export const deviceParentFrame: DeviceParentFrame = {
 
   planToLocal: (parent, planX, localY, planZ) => projectToAxis(parent, planX, localY, planZ),
 
-  onCommit: (node, parent, sceneApi) => {
-    const geom = wallGeom(parent)
-    const id = node.id
-    if (!geom || typeof id !== 'string') return
-    const position = Array.isArray(node.position) ? node.position : [0, 0, 0]
-    const px = typeof position[0] === 'number' && Number.isFinite(position[0]) ? position[0] : 0
-    const pz = typeof position[2] === 'number' && Number.isFinite(position[2]) ? position[2] : 0
-    sceneApi.update(id, {
-      wallId: parent.id,
-      wallT: projectWallT(geom, [px, pz]),
-      position: [0, 0, 0],
-    })
-  },
+  // NO onCommit — see the module doc. The reconciler normalizes the committed
+  // position into wallId/wallT inside its history-paused batch instead.
 }

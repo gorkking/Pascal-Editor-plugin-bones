@@ -11,6 +11,94 @@ on the two fixes + FULL BLUEPRINT EXAMINER round — first paper review
 since condensers/AC circuits/cavity-fit landed).
 PILOT A (outlets live UX) + PILOT B (scene-wipe) RUNNING since ~06:45.
 Pilot A owns the dev server tonight (may bump pin + restart).
+## NIGHT-5 TRACK A FINAL ROUND (post-fix, plugin 5973948 + editor branch): PASS both surfaces
+Scene eda991bca689 (default-ON path — NO movableOutlets key in the graph;
+63 device nodes seeded on view). Sequence + panel statuses:
+baseline 1255·77 → Place service points 1241·74 (ONE-TIME host wall
+classification transition — level-scoped CREATES are commit candidates and
+wake space detection; the -3 devices = classified exterior walls correctly
+LOSING their over-placed exterior-face receptacles; deterministic:
+headless compute on the classified scene = 1241·74 exactly) →
+OUTLET drag 1242·74 (+1 blocking, devices stable) → Cmd+Z 1241·74 EXACT →
+Cmd+Shift+Z 1242·74 → PANEL drag 1255·74 (homeruns re-anchor, box visibly
+at the new spot) → Cmd+Z 1242·74 (reverts ONLY the panel move — per-drag
+undo granularity proven) → Cmd+Shift+Z 1255·74. Persistence (API after
+session): outlet wallT 0.0667 vs seed 0.1727 + panel wallT 0.2667, both
+position [0,0,0] (normalized), 147 nodes = 76 + 8 services + 63 devices,
+zero duplication. Evidence: /tmp/qa-n5a/final/*.png + result_final3.json.
+- FIX FOUND IN THE ROUND (5973948): flag guard must read ABSENT as ON —
+  stored scenes never re-parse through the plugin schema on load, so a
+  `=== true` guard left the default-path scene with ZERO device nodes;
+  it's `!== false` now (explicit inspector/MCP false still disables).
+- GESTURE NOTE (pre-existing host design, NOT an outlets defect): the move
+  tool's cursor is a PLAN point resolved on the GROUND plane — dragging a
+  wall-mounted box from an eye-level camera with the pointer at BOX height
+  yields no usable grid:move (near-horizontal ray) and the place click is
+  ignored (hasMovedRef gate). Point the cursor at the FLOOR under the
+  destination (or look down) and everything tracks. Candidate host
+  improvement: raycast the PARENT WALL plane for parentFrame drags.
+
+## NIGHT-5 TRACK A COMPLETE — outlets live UX: D2/D3/D4 root-caused + fixed, flag ON
+Branch feat/outlets-live-ux (base f495148, final sha = HEAD of branch);
+873 tests green + tsc clean per commit. Root causes from an INSTRUMENTED
+live session (store-subscription write log + wildcard event log + raycast
+picker; scenes ff614df08297 / 71a9776bba81 / f34f62e3a161, traces in
+/tmp/qa-n5a/*.json):
+- D2+D3 ONE ROOT CAUSE, not two: the host MoveRegistryNodeTool runs
+  parentFrame.onCommit with history RESUMED and follows it with
+  updateNode(parentWall, resolveSupportSlabPatch) — a SEMANTIC NO-OP that
+  still flags the wall as a scene-commit candidate. That wakes the host
+  space-detection sync mid-commit (core lib/space-detection.ts), which
+  rewrites every unclassified wall's frontSide/backSide (API-built scenes
+  carry 'unknown'!) + materializes zone schema defaults — as an
+  untracked+tracked TWIN write pair (the tracked twin = detection
+  double-subscription re-running on a stale snapshot; host bug, see
+  below). extractWalls derives exterior-ness from EXACTLY those fields →
+  layers/receptacle faces re-derive → 1255·77 → 1218·79 (D2). One drag =
+  THREE tracked entries (position write, onCommit write, detection write);
+  Cmd+Z pops only the detection entry while detection re-runs against the
+  restored snapshot → third state 1207·74, wiring+panel gone, 5 device
+  nodes orphaned (D3). The night-4 "panel drag 77→74" was THIS, not
+  engine re-derivation.
+  FIX (plugin-only, 2d68b95): drag frames (device AND service) carry NO
+  onCommit → the host branch never runs, a commit is ONE tracked write
+  ({position: on-axis point}); the reconcile batch converts it to
+  wallId+wallT + position [0,0,0] history-paused (device/place.ts,
+  service/normalize.ts — the wallT-slider quirk stays retired). Verified
+  live: drag → 1256·77 exact engine parity, past +1 per drag, Cmd+Z →
+  clean 1255·77 (box AND wiring return), Cmd+Shift+Z → 1256·77, moved
+  nodes persist normalized.
+- D4 DEAD PLACE-CLICK ≠ placement validity: walls hidden by the wall-mode
+  pass ('down' in X-ray, cutaway faces, auto-mode interior partitions)
+  keep FULL-HEIGHT invisible raycast meshes (collision-mesh carries the
+  pointer handlers) and the selection path stopPropagation's — the south
+  arm click hit an invisible wall at 1.03m instead of the visible box at
+  3.93m (raycast-pick evidence), selected the WALL, and the next click
+  ARMED A WALL MOVE (accidental wall commits + zone/slab/ceiling sync =
+  more corruption). Host fix on editor branch fix/outlets-hidden-wall-clicks
+  (c40d7fd9, base 763d1b35, files identical to origin/main 6cfff809):
+  WallCutout stamps userData.wallHidden; wall renderer handlers
+  early-return while hidden (no emit, no stopPropagation) so R3F continues
+  to the next hit; delete-mode excepted (deleteInvisible flow needs hover).
+  PR-TO-BE — not opened per brief. Verified live: south arm 'grabbing',
+  commit lands (1252·77 honest re-route), stray Alt-click harmless.
+- FLAG: movableOutlets now defaults ON (bf980e0) — ship the plugin bump
+  ALONGSIDE the editor PR (without it, D4's phantom-wall misroute stays —
+  a pre-existing class that already bites bones:service in prod today).
+- Gates: place.test.ts normalization matrix (convert/converge/cross-wall/
+  wall-less/kind-compose), frame.test.ts onCommit-ABSENCE pin + rationale
+  + normalizeServiceAnchors matrix; E5 row updated with the drag-commit
+  contract. Host-side gating impossible plugin-side — the editor PR should
+  add a wall-events test.
+- HOST BUGS surfaced for tickets (beyond the PR): (1) space-detection
+  initSpaceDetectionSync appears DOUBLE-SUBSCRIBED — its wall/zone writes
+  land twice, once paused (untracked) then once tracked from a stale
+  snapshot → auto-derived state pollutes undo history scene-wide; (2)
+  MoveRegistryNodeTool pauses the temporal store DIRECTLY (not the
+  depth-counted pauseSceneHistory) so getSceneHistoryPauseDepth()==0
+  mid-commit and detection isn't deferred; (3) detection re-runs on UNDO
+  restores and partially re-applies what the undo removed (fights Cmd+Z on
+  any wall-adjacent edit in API-built scenes).
 
 ## NIGHT-5 PLAN (2026-08-18 ~06:30 → morning) — user: "go, be even more ambitious, all-nighter"
 Three tracks, two ships targeted (mid-night + dawn):
