@@ -94,6 +94,30 @@ describe('lumber stock rounding', () => {
     expect(splice?.unit).toBe('pcs')
   })
 
+  test('an ENGINEERED wall header books by supplier, never as dimensional sticks', () => {
+    // Verify night-6: an over-span header booked 'Wall framing | 4x12 |
+    // 12 ft stock + 48 bd-ft' for a stick the flag itself says to replace.
+    const rows = computeTakeoff(
+      [lumber('4x12', 3.4, { role: 'header', material: 'engineered' })],
+      [],
+    )
+    expect(rows.some((r) => r.section === 'Wall framing' && r.item === '4x12')).toBe(false)
+    const sku = find(rows, 'Engineered header (LVL/PSL — by supplier)')
+    expect(sku?.quantity).toBe(1)
+    expect(sku?.unit).toBe('pcs')
+    const lf = rows.find(
+      (r) => r.item === 'Engineered header (LVL/PSL — by supplier)' && r.unit === 'lf',
+    )
+    expect(lf?.quantity).toBeCloseTo(11.2, 1) // 3.4 m ≈ 11.2 lineal ft
+    // …but a floor girder tagged 'engineered' KEEPS its dimensional rows —
+    // it is drawn at full size (booked == built, verify note on the member)
+    const girderRows = computeTakeoff(
+      [lumber('4x10', 4, { system: 'floor-framing', role: 'girder', material: 'engineered' })],
+      [],
+    )
+    expect(girderRows.some((r) => r.item === '4x10' && r.unit === 'pcs')).toBe(true)
+  })
+
   test('same size groups across stock lengths; different lengths stay separate rows', () => {
     const rows = computeTakeoff(
       [

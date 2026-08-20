@@ -265,8 +265,18 @@ export function computeTakeoff(
   // mixed-wall seam sill on its bond beam, mudsills): PT members book on
   // their own `<size> PT` rows instead of blending into the untreated count.
   const bySystem = new Map<string, Map<string, Member[]>>()
+  // Engineered WALL headers (over prescriptive span) are supplier SKUs —
+  // booking the drawn placeholder as dimensional sticks lied both ways:
+  // bd-ft for lumber that must not be bought, no line for the beam that
+  // must (verify night-6). Floor girders keep their dimensional rows —
+  // they're drawn at full size (booked == built) with a verify note.
+  const engineeredHeaders: Member[] = []
   for (const m of members) {
     if (!m.size || !WOOD_MATERIALS.has(m.material)) continue
+    if (m.material === 'engineered' && m.system === 'wall-framing') {
+      engineeredHeaders.push(m)
+      continue
+    }
     const section = SECTION_OF[m.system]
     const key = m.material === 'pt-lumber' ? `${m.size} PT` : m.size
     const sizes = bySystem.get(section) ?? new Map<string, Member[]>()
@@ -312,6 +322,17 @@ export function computeTakeoff(
         push(section, item, 'board feet', round1(boardFeet), 'bd-ft')
       }
     }
+  }
+  if (engineeredHeaders.length > 0) {
+    const lf = engineeredHeaders.reduce((sum, m) => sum + toFeet(m.length), 0)
+    push(
+      'Wall framing',
+      'Engineered header (LVL/PSL — by supplier)',
+      'exceeds prescriptive header span — see flags',
+      engineeredHeaders.length,
+      'pcs',
+    )
+    push('Wall framing', 'Engineered header (LVL/PSL — by supplier)', 'lineal feet', round1(lf), 'lf')
   }
 
   // Framing nails from the member counts (per-role connection list).

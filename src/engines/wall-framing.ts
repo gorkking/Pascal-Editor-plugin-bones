@@ -129,6 +129,7 @@ type Emit = (
   length: number,
   label?: string,
   flag?: string,
+  material?: Member['material'],
 ) => void
 
 /** Rough-opening vertical extent [bottom, top] above the subfloor. */
@@ -168,7 +169,7 @@ export function frameWall(
   const u1 = Math.max(u0 + 4 * t, len - Math.max(0, hints.endInset ?? 0))
   const runLen = u1 - u0
 
-  const emit: Emit = (role, size, dims, centerU, centerY, length, label, flag) => {
+  const emit: Emit = (role, size, dims, centerU, centerY, length, label, flag, material) => {
     members.push({
       system: 'wall-framing',
       role,
@@ -177,7 +178,7 @@ export function frameWall(
       length,
       position: place(centerU, centerY),
       rotation: [0, yaw, 0],
-      material: 'lumber',
+      material: material ?? 'lumber',
       sourceId: wall.id,
       label,
       // Member-specific flags (engineered header, RO clamp) win; every
@@ -286,6 +287,10 @@ export function frameWall(
       headerDepthFlag,
       roClampFlag,
     ].filter((f): f is string => f !== undefined)
+    // An over-span header is a supplier SKU, not the prescriptive stick —
+    // material 'engineered' routes it to the takeoff's by-supplier line
+    // (verify night-6 PARTIAL: the buy list booked a full 4x12 + 48 bd-ft
+    // for a member the flag itself says must be replaced).
     emit(
       'header',
       headerSize,
@@ -293,8 +298,11 @@ export function frameWall(
       u,
       headerY,
       headerLength,
-      `Header ${headerSize} over ${opening.kind}`,
+      engineered
+        ? `Engineered header over ${opening.kind} (drawn as ${headerSize} — size by supplier)`
+        : `Header ${headerSize} over ${opening.kind}`,
       headerFlagParts.length > 0 ? headerFlagParts.join(' | ') : undefined,
+      engineered ? 'engineered' : undefined,
     )
 
     // Trimmers (jack studs): floor plate → header bottom, tight to the RO.

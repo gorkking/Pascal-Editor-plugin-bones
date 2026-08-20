@@ -395,8 +395,13 @@ function planSheet(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="#e4e7ea" stroke="#c9ced4" stroke-width="0.4" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
   }
-  // Long members first so short hardware reads on top.
-  const sorted = [...mine].sort((a, b2) => b2.dims[0] - a.dims[0])
+  // Long members first so short hardware reads on top — with the subfloor
+  // deck as layer ZERO: strips tile the whole slab and their dims[0] is the
+  // bay width (smallest on the sheet), so long-first alone painted 23
+  // opaque rects LAST, over every joist, girder and stair header (examiner
+  // round-5 blocker: the floor sheet was washed out).
+  const layerOf = (m: Member): number => (m.role === 'subfloor' ? 0 : 1)
+  const sorted = [...mine].sort((a, b2) => layerOf(a) - layerOf(b2) || b2.dims[0] - a.dims[0])
   for (const m of sorted) {
     if (stroked.has(m)) continue
     // Foundation hardware symbols (blueprint round-3): anchor bolts print as
@@ -444,8 +449,11 @@ function planSheet(
         : (m.system === 'plumbing' && m.role === 'pipe-run'
             ? plumbingPipeColor(m.sourceId)
             : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
+    // Deck strips print translucent with a hairline seam — same hue as the
+    // legend swatch, but the framing linework stays legible through them.
+    const isDeck = m.role === 'subfloor'
     shapes.push(
-      `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}" stroke="#444" stroke-width="0.6" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
+      `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
   }
   // Device tags: dedupe identical (kind, position) fixtures and nudge
@@ -555,6 +563,11 @@ function planSheet(
       ([role, size], i) =>
         `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
     )
+  // Legend BOX geometry: circuit rows may flow into a second column — the
+  // backing rect must widen to cover it (examiner round-5: column 2 printed
+  // on bare linework) and must not count wrapped rows twice in its height.
+  let legendCols = 1
+  let legendHeightRows = -1 // -1 → derive from legendLines.length
   if (def.key === 'mep') {
     // Supply/DWV split by sourceId prefix (placed-fixture engine); the
     // legacy room-category fallback keeps its single pipe tint.
@@ -682,6 +695,8 @@ function planSheet(
       )
       circuitIdx++
     }
+    legendCols = Math.max(1, Math.ceil(circuitIdx / CIRCUIT_ROWS_PER_COL))
+    if (legendCols > 1) legendHeightRows = row + CIRCUIT_ROWS_PER_COL
   }
   if (def.key === 'foundation') {
     const bolts = mine.filter((m) => m.role === 'anchor-bolt')
@@ -752,9 +767,11 @@ function planSheet(
     }
   }
 
+  const legendRows = legendHeightRows >= 0 ? legendHeightRows : legendLines.length
+  const legendW = legendCols === 1 ? 250 : legendCols * 230 + 24
   const legend =
     legendLines.length > 0
-      ? `<rect x="${MARGIN - 4}" y="${MARGIN - 6}" width="250" height="${legendLines.length * 14 + 14}" fill="#ffffff" fill-opacity="0.92" stroke="#ccc" stroke-width="0.5"/>${legendLines.join('')}`
+      ? `<rect x="${MARGIN - 4}" y="${MARGIN - 6}" width="${legendW}" height="${legendRows * 14 + 14}" fill="#ffffff" fill-opacity="0.92" stroke="#ccc" stroke-width="0.5"/>${legendLines.join('')}`
       : ''
 
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${shapes.join('')}${chrome(def.title, opts, scale, legend, { ratio: t.ratio })}</svg>`

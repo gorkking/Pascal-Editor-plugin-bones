@@ -1127,3 +1127,71 @@ describe('elevation orientation + section membership (blueprint round-2)', () =>
     expect(lines.length).toBeGreaterThanOrEqual(2)
   })
 })
+
+describe('examiner round-5 — floor sheet legibility + legend box geometry', () => {
+  test('subfloor deck prints FIRST and translucent — joists stay legible on top', () => {
+    // Long-first ordering alone painted the deck LAST (bay width is the
+    // smallest dims[0] on the sheet): 23 opaque rects over every joist,
+    // girder and stair header — the floor sheet was washed out.
+    const members = [
+      member({ role: 'joist', size: '2x10', dims: [4, 0.235, 0.038] }),
+      member({
+        role: 'subfloor',
+        size: undefined,
+        material: 'engineered',
+        dims: [0.41, 0.019, 4],
+        length: 4,
+        position: [2, -0.1, 1],
+        label: 'Subfloor 3/4" T&G — glued + ring-shank fastened (R503.2.3)',
+      }),
+    ]
+    const svg =
+      buildPlanSet(members, [], {
+        projectName: 'p',
+        levelName: 'l',
+        jurisdiction: 'FL',
+        date: 'd',
+      }).find((s) => s.title === 'Floor framing plan')?.svg ?? ''
+    const deckIdx = svg.indexOf('fill-opacity="0.35"')
+    const joistIdx = svg.indexOf('stroke="#444" stroke-width="0.6"')
+    expect(deckIdx).toBeGreaterThan(-1)
+    expect(joistIdx).toBeGreaterThan(-1)
+    expect(deckIdx).toBeLessThan(joistIdx) // deck is the UNDER-layer
+  })
+
+  test('legend backing rect covers the second circuit column, no double-counted height', () => {
+    // 26 circuits wrap into a second column at x = MARGIN + 230; the old
+    // hard-coded 250px rect left that column on bare linework, and the
+    // height counted every wrapped row a second time.
+    const members = Array.from({ length: 26 }, (_, i) =>
+      member({
+        system: 'electrical',
+        role: 'wire-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.013, 0.013],
+        sourceId: `SA-${i + 1}`,
+        position: [1 + 0.1 * i, 0.3, 0],
+      }),
+    )
+    const fixtures = [fixture({ meta: { circuit: 'SA-1', breakerA: 20, gaugeAwg: 12 } })]
+    const svg =
+      buildPlanSet(members, fixtures, {
+        projectName: 'p',
+        levelName: 'l',
+        jurisdiction: 'FL',
+        date: 'd',
+      }).find((s) => s.title === 'Electrical rough-in plan')?.svg ?? ''
+    const rect =
+      /<rect x="[\d.-]+" y="[\d.-]+" width="(\d+)" height="(\d+)" fill="#ffffff" fill-opacity="0.92"/.exec(
+        svg,
+      )
+    expect(rect).not.toBeNull()
+    expect(Number(rect?.[1])).toBe(2 * 230 + 24) // widened for column 2
+    // height covers col-1's rows (pre-circuit lines + 22 circuit rows) but
+    // NOT the naive all-lines count that over-shot the box (pre + 26)
+    const h = Number(rect?.[2])
+    expect(h).toBeGreaterThanOrEqual((0 + 22) * 14 + 14)
+    expect(h).toBeLessThan((4 + 22) * 14 + 14)
+  })
+})

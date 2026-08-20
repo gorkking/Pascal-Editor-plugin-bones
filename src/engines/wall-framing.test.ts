@@ -532,5 +532,21 @@ describe('LOD-400 B1 round 2: header flags COMPOSE, nothing silenced', () => {
     const header = members.find((m) => m.role === 'header')
     expect(header?.flag).toContain('ENGINEERED BEAM REQUIRED')
     expect(header?.flag).toContain('does not fit between the RO and the plates')
+    // …and it books as a supplier SKU, not the prescriptive stick: the
+    // 'engineered' material routes it out of the dimensional lumber rows
+    // (the buy list booked a 4x12 + bd-ft for a member the flag says to
+    // replace — verify night-6 PARTIAL).
+    expect(header?.material).toBe('engineered')
+    expect(header?.label).toContain('size by supplier')
+  })
+
+  test('a prescriptive header stays plain lumber with the size in its label', () => {
+    const members = frameWall(makeWall({ openings: [door(2)] }), {
+      ...DEFAULT_SPEC,
+      detail: '400' as const,
+    })
+    const header = members.find((m) => m.role === 'header')
+    expect(header?.material).toBe('lumber')
+    expect(header?.label).toMatch(/^Header \dx\d+ over door/)
   })
 })
