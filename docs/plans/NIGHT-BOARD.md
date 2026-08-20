@@ -1,3 +1,31 @@
+# Bones night board — night-6 (2026-08-19→20) IN FLIGHT
+
+## NIGHT-6 ~08:00 state — batch verified twice on paper, host fix MERGED
+Plugin master 1555027 (tests 921): b550986 = round-e4ce6fc skeptic fixes
+(live-wiring deps BLOCKER [active] + setLiveResult(null) on [nodes,node];
+B1 flag COMPOSITION ' | '; B3 lo/c/hi span intersection + non-vacuous S4
+gate) → 1555027 = examiner round-5 fixes (floor sheet: deck = layer ZERO
+translucent 0.35 — washout killed; legend rect widens per circuit column;
+engineered headers book as supplier SKU pcs+lf, girders keep dimensional).
+HOST: #689 (hidden-wall pointer HOLD for the four wall-opening tools)
+MERGED to editor main @ 1b9300f7 — the fast CI fails were a transient
+GitHub 504 on the plugin tarball; reruns green.
+DEV 3002: editor main (with #689) + plugin pin 1555027, healthy.
+RUNNING (5 streams): verify loop w63ar7xbr (skeptic+examiner @1555027);
+audit re-run w3wvgr4i6 (foundation/hvac/plumbing/takeoff-paper + 3
+carried verifier claims — MEP penetrations, king studs, veneer ties);
+pilot B4 feat/lod400-b4 (gross-vs-member double-book + climate-zone
+rider); pilot B5 feat/lod400-b5 (PT sole plates R317.1 + anchor-row
+text, 51-jurisdiction expected-diff manifest); full-stack visual QA
+(door/window drag parity + LIVE recompute mid-drag + outlet regression
++ deck strips 3D + composed header flags + undo-once).
+NEXT: process 5 verdicts → fix → merge B4 then B5 (rebase order per
+backlog sequencing) → dawn ship (editor PR pin bump off origin/main
+worktree → private-editor PR community pin + submodule gitlink) →
+morning review file. LOD-400 continuation after: B6-B8.
+
+---
+
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
 ## LOD-400 AUDIT LANDED (~05:00 night-6): docs/plans/LOD400-BACKLOG.md
