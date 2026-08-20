@@ -118,6 +118,17 @@ export type FrameHints = {
   extraStuds?: { u: number; label: string }[]
   /** Partition-backing ladder rows: flat blocks at `heights` centered on `u`. */
   backing?: { u: number; heights: number[] }[]
+  /**
+   * The wall bears on a concrete slab (ground level, slab-on-grade): the
+   * BOTTOM plate is a sole plate in direct concrete contact and must be
+   * preservative-treated or naturally durable wood — IRC R317.1(2). Only the
+   * sole plate changes (material 'pt-lumber' + R317.1 label); studs, top and
+   * cap plates bear on wood and stay untreated. Upper storeys (plates on a
+   * framed floor) never set this. Set by `frameWalls` from its options —
+   * compute.ts forwards the level's ground/slab context there (LOD-400
+   * audit B5).
+   */
+  slabBearing?: boolean
 }
 
 type Emit = (
@@ -200,7 +211,23 @@ export function frameWall(
       : ''
   const plateDims: [number, number, number] = [runLen, t, wFit]
   const runMid = (u0 + u1) / 2
-  emit('bottom-plate', studSize, plateDims, runMid, t / 2, runLen, `Bottom plate${spliceNote}`)
+  // Slab-bearing sole plate (LOD-400 audit B5): untreated lumber in direct
+  // concrete contact violates IRC R317.1(2) — the ground-level bottom plate
+  // emits as PT stock (the takeoff's `<size> PT` SKU split books it on its
+  // own row for free). The label carries the cite so paper says why.
+  emit(
+    'bottom-plate',
+    studSize,
+    plateDims,
+    runMid,
+    t / 2,
+    runLen,
+    hints.slabBearing
+      ? `PT sole plate on slab (R317.1)${spliceNote}`
+      : `Bottom plate${spliceNote}`,
+    undefined,
+    hints.slabBearing ? 'pt-lumber' : undefined,
+  )
   emit('top-plate', studSize, plateDims, runMid, H - t / 2, runLen, `Top plate${spliceNote}`)
   if (spec.topPlateCount === 2) {
     // Cap plate: corner hints extend it over the abutting wall's top plate
@@ -671,6 +698,12 @@ export function frameHints(
   return hints
 }
 
+/** Level context shared by every wall in one `frameWalls` pass. */
+export type FrameWallsOptions = {
+  /** Walls bear on a concrete slab (ground level) — see FrameHints.slabBearing. */
+  slabBearing?: boolean
+}
+
 /**
  * Frame a SET of walls with cross-wall fabrication:
  *  - California corner assembly stud in the through wall (3-stud corner),
@@ -679,17 +712,25 @@ export function frameHints(
  *  - partition backing (ladder blocking) at tees.
  * `overrides` (per wall id) re-sizes a wall's studs/spacing — the resolved
  * per-wall engineering from the framing config; absent = the shared spec.
+ * `opts` carries level context (slab bearing → PT sole plates, R317.1);
+ * absent options keep the output byte-equal.
  */
 export function frameWalls(
   walls: WallSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
   overrides?: ReadonlyMap<string, WallFramingOverride>,
+  opts?: FrameWallsOptions,
 ): Member[] {
   const hints = frameHints(walls, spec, overrides)
   const members: Member[] = []
   for (const wall of walls) {
+    const h = hints.get(wall.id) ?? {}
     members.push(
-      ...frameWall(wall, specForWall(spec, overrides?.get(wall.id)), hints.get(wall.id) ?? {}),
+      ...frameWall(
+        wall,
+        specForWall(spec, overrides?.get(wall.id)),
+        opts?.slabBearing ? { ...h, slabBearing: true } : h,
+      ),
     )
   }
   return members
