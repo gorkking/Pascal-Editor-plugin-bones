@@ -13,7 +13,7 @@
 
 import adoptionData from '../../data/jurisdictions-adoption.json'
 import climateData from '../../data/jurisdictions-climate.json'
-import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
+import { DEFAULT_SPEC, type FramingSpec, rafterSpansForSnow } from '../core/spec'
 import { feet, inches } from '../core/units'
 
 export type JurisdictionProfile = {
@@ -120,6 +120,10 @@ export function applyJurisdiction(
   // Heavy snow bumps the default rafter one size (span tables shrink fast).
   if (profile.groundSnowLoadPsf >= 50) next.rafterSize = '2x8'
   if (profile.groundSnowLoadPsf >= 70) next.rafterSize = '2x10'
+  // …and swaps the allowable-span table to the matching snow band
+  // (R802.4.1(1) low-snow / R802.4.1(5) at ≥ 50 psf) — the sizes and the
+  // spans the roof engine checks against always move together.
+  next.rafterSpans = rafterSpansForSnow(profile.groundSnowLoadPsf)
   return next
 }
 

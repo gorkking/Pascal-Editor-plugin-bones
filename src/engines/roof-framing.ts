@@ -23,9 +23,9 @@
  */
 
 import { LUMBER_CROSS_SECTIONS, type LumberSize } from '../lumber'
-import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
+import { DEFAULT_SPEC, type FramingSpec, tableSpanFor } from '../core/spec'
 import type { Member, WallSlice } from '../core/types'
-import { formatIn, inches } from '../core/units'
+import { feet, formatIn, inches } from '../core/units'
 
 const EPS = 1e-6
 
@@ -212,6 +212,7 @@ type Emit = (
   material: Member['material'],
   label?: string,
   roll?: number,
+  flag?: string,
 ) => void
 
 /**
@@ -236,7 +237,7 @@ export function eulerYawRoll(yaw: number, roll: number): [number, number, number
 function emitter(roof: RoofSegmentSlice, members: Member[]): Emit {
   const cos = Math.cos(roof.yaw)
   const sin = Math.sin(roof.yaw)
-  return (role, size, dims, segPos, extraYaw, tilt, length, material, label, roll) => {
+  return (role, size, dims, segPos, extraYaw, tilt, length, material, label, roll, flag) => {
     const [x, y, z] = segPos
     // three Y-rotation of the segment-local offset: +X → (cos, 0, -sin).
     const wx = x * cos + z * sin
@@ -252,6 +253,7 @@ function emitter(roof: RoofSegmentSlice, members: Member[]): Emit {
       material,
       sourceId: roof.id,
       label,
+      flag,
     })
   }
 }
@@ -338,6 +340,83 @@ function rafterCutData(spec: FramingSpec, theta: number, rafterDepth: number): s
   return ` — plumb cut ${deg}°, birdsmouth seat ${formatIn(seat)}, HAP ${formatIn(hap)}`
 }
 
+// ---------------------------------------------------------------------------
+// Span discipline (LOD-400 audit B2) — R802.4.1 rafters / R802.5.1 supports
+// ---------------------------------------------------------------------------
+
+/** Longest one-piece stock stick the takeoff can buy (20 ft). A structural
+ * rafter/joist beyond this is a FIELD SPLICE — not a prescriptive member
+ * unless the splice lands over a real bearing (purlin row). */
+const MAX_ONE_PIECE = feet(20)
+/** R802.5.1: purlin struts ≤ 4 ft o.c. to bearing. */
+const STRUT_SPACING = 1.2
+const STRUT_SIZE: LumberSize = '2x4'
+
+const fmtM = (v: number) => `${v.toFixed(2)} m`
+const ocIn = (spacing: number) => `${Math.round(spacing / inches(1))}"`
+
+/** Allowable rafter span (horizontal projection, m) for the spec, or
+ * undefined when unchecked (LOD 200, or no tabulated row for the size). */
+function rafterAllowable(spec: FramingSpec): number | undefined {
+  if (spec.detail === '200') return undefined
+  return tableSpanFor(spec.rafterSpans, spec.rafterSize, spec.rafterSpacing)
+}
+
+/** Over-span flag for one slope plane's rafters (shapes without a purlin fix). */
+function rafterOverSpanFlag(
+  spec: FramingSpec,
+  run: number,
+  allowable: number,
+  what = 'Rafter',
+): string {
+  return (
+    `${what} over prescriptive span — ${fmtM(run)} horizontal projection > ` +
+    `${fmtM(allowable)} allowable (${spec.rafterSize} @ ${ocIn(spec.rafterSpacing)} o.c., ` +
+    `SPF #2, R802.4.1) — purlin + 2x4 struts to bearing or engineered member required (R802.5.1)`
+  )
+}
+
+/** One-piece stock flag: a spliced structural member without a bearing under
+ * the splice is not a prescriptive member (the takeoff otherwise books
+ * '20 ft stock (field splice)' silently). */
+function onePieceFlag(what: string, cutLength: number): string | undefined {
+  if (cutLength <= MAX_ONE_PIECE + EPS) return undefined
+  return (
+    `${what} ${fmtM(cutLength)} exceeds 20 ft one-piece stock — field splice needs ` +
+    `bearing at the joint (purlin/wall) or an engineered member (R802.4.1)`
+  )
+}
+
+/** Flag for one slope: over-span first, then the one-piece check. */
+function slopeRafterFlag(
+  spec: FramingSpec,
+  run: number,
+  cutLength: number,
+  what = 'Rafter',
+): string | undefined {
+  if (spec.detail === '200') return undefined
+  const allowable = rafterAllowable(spec)
+  if (allowable !== undefined && run > allowable + EPS) {
+    return rafterOverSpanFlag(spec, run, allowable, what)
+  }
+  return onePieceFlag(what, cutLength)
+}
+
+/** Ceiling-joist span flag (R802.5.1) — the joist is emitted ONE PIECE with
+ * bearing modeled only at the eave walls, so `span` is its full length. */
+function ceilingJoistFlag(spec: FramingSpec, span: number): string | undefined {
+  if (spec.detail === '200') return undefined
+  const allowable = tableSpanFor(spec.ceilingJoistSpans, spec.ceilingJoistSize, spec.ceilingJoistSpacing)
+  if (allowable !== undefined && span > allowable + EPS) {
+    return (
+      `Ceiling joist over prescriptive span — ${fmtM(span)} > ${fmtM(allowable)} allowable ` +
+      `(${spec.ceilingJoistSize} @ ${ocIn(spec.ceilingJoistSpacing)} o.c., SPF #2, ` +
+      `R802.5.1(2) limited storage) — lap over interior bearing or engineered member required`
+    )
+  }
+  return onePieceFlag('Ceiling joist', span)
+}
+
 /** Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path). */
 function tieAt(emit: Emit, x: number, z: number, y: number) {
   emit(
@@ -380,6 +459,47 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
   const slopeLen = run / cosT + roof.overhang - ridgeFaceZ / cosT - 2 * plumbInset
   const cuts = rafterCutData(spec, theta, rd)
   const xs = layout(-roof.width / 2, roof.width / 2, spec.rafterSpacing, halfT)
+
+  // ---- span discipline (R802.4.1): mid-span purlin fix, or the honest flag ----
+  // Ceiling-joist stock decides the strut bearing plane (they exist in every
+  // gable — the rafter ties of R802.4.2), so it is resolved up here.
+  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  const allowable = rafterAllowable(spec)
+  const overSpan = allowable !== undefined && run > allowable + EPS
+  // Purlin line at half the run: the rafter UNDERSIDE there (centerline lies
+  // on the tip→ridge-face slope line; the bottom face sits rd/(2cosθ) below
+  // it measured vertically), purlin plumb on edge right under, struts to the
+  // ceiling joists. A plumb purlin meets the SLOPED underside at its DOWNHILL
+  // top corner — the top face drops (t/2)·tanθ below the plane at the line so
+  // the corner touches instead of burying itself (SAT gate; shimmed on site).
+  const purlinZ = run / 2
+  const purlinYUnder = ridgeFaceY - (purlinZ - ridgeFaceZ) * tan - rd / (2 * cosT)
+  const purlinTop = purlinYUnder - (t / 2) * tan
+  const strutTop = purlinTop - rd // purlin stock = rafter stock, on edge
+  const strutBot = eaveY + cjD // ceiling-joist top face
+  // The purlin fix only holds when the HALVED projection fits the table AND
+  // the struts have real height down to the ceiling-joist bearing (S1: no
+  // floating struts) AND the roof is wide enough for a real purlin between
+  // the end rafters — otherwise keep the flag instead of fake support.
+  const purlinFix =
+    overSpan &&
+    run / 2 <= (allowable ?? 0) + EPS &&
+    strutTop - strutBot >= inches(3) &&
+    (xs[xs.length - 1] ?? 0) - (xs[0] ?? 0) - t > 0.3
+  const rafterFlag =
+    overSpan && !purlinFix
+      ? rafterOverSpanFlag(spec, run, allowable as number)
+      : purlinFix
+        ? undefined
+        : spec.detail === '200'
+          ? undefined
+          : onePieceFlag('Rafter', slopeLen)
+  const purlinNote = purlinFix
+    ? ` — purlin-supported @ mid-span (R802.5.1)${
+        slopeLen > MAX_ONE_PIECE + EPS ? '; splice over purlin bearing' : ''
+      }`
+    : ''
+
   // Rake detail (below) lays flat outlookers OVER the gable-end rafters —
   // those two rafters DROP by the outlooker thickness so the ladder passes
   // (the conventional dropped-gable detail; round-10 gate).
@@ -407,7 +527,9 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
         theta,
         slopeLen,
         'lumber',
-        `Rafter ${spec.rafterSize}${cuts}`,
+        `Rafter ${spec.rafterSize}${cuts}${purlinNote}`,
+        undefined,
+        rafterFlag,
       )
       if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
     }
@@ -511,7 +633,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
   // Running parallel to the rafter span, they double as the RAFTER TIES of
   // R802.4.2 (thrust) — distinct from the collar ties below (uplift, upper
   // third, R802.4.6). The 400 label spells that distinction out.
-  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  // (cjT/cjD hoisted above — the purlin struts bear on these joists.)
   // A joist landing on a rafter plane sisters BESIDE it (framers face-nail
   // ties to the rafter side) — snapped toward the roof center so the end
   // joists never leave the footprint (round-10 gate).
@@ -520,8 +642,11 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     if (clash === undefined) return x0
     return clash + (clash >= 0 ? -1 : 1) * (halfT + half)
   }
-  for (const x0 of layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2)) {
-    const x = besideRafter(x0, cjT / 2)
+  const cjFlag = ceilingJoistFlag(spec, roof.depth)
+  const cjStations = layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2).map(
+    (x0) => besideRafter(x0, cjT / 2),
+  )
+  for (const x of cjStations) {
     // +X box yawed onto +Z: ψ = -π/2 (three: +X → (cosψ, 0, -sinψ)).
     emit(
       'ceiling-joist',
@@ -533,7 +658,60 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
       roof.depth,
       'lumber',
       `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`,
+      undefined,
+      cjFlag,
     )
+  }
+
+  // ---- mid-span purlin + 2x4 struts (R802.5.1) when the table ran out ----
+  // Purlin stock = rafter stock, on edge under the rafters at half the run;
+  // struts ≤ 4 ft o.c. drop to the CEILING JOISTS (the only modeled bearing
+  // below — labeled as the assumption). The purlin stops at the end rafters'
+  // INNER faces: the dropped gable-end rafters sit an outlooker thickness
+  // lower, and a full-width purlin would clip them.
+  if (purlinFix) {
+    const first = xs[0] ?? -roof.width / 2
+    const last = xs[xs.length - 1] ?? roof.width / 2
+    const purlinLen = last - first - t
+    if (purlinLen > 0.3) {
+      const cx = (first + last) / 2
+      const [sT, sW] = LUMBER_CROSS_SECTIONS[STRUT_SIZE]
+      const strutLen = strutTop - strutBot
+      // Strut stations at ≤ 4 ft o.c. along the purlin, each SNAPPED onto the
+      // nearest ceiling joist so the foot lands on real wood (S1).
+      const stations = new Set<number>()
+      for (let sx = first + t / 2 + STRUT_SPACING / 2; sx < last - t / 2; sx += STRUT_SPACING) {
+        let best = cjStations[0] ?? sx
+        for (const cj of cjStations) if (Math.abs(cj - sx) < Math.abs(best - sx)) best = cj
+        if (best >= first + t / 2 - EPS && best <= last - t / 2 + EPS) stations.add(best)
+      }
+      for (const side of [1, -1] as const) {
+        emit(
+          'ridge',
+          spec.rafterSize,
+          [purlinLen, rd, t],
+          [cx, purlinTop - rd / 2, side * purlinZ],
+          0,
+          0,
+          purlinLen,
+          'lumber',
+          `Purlin ${spec.rafterSize} @ mid-span under rafters (R802.5.1) — halves the ${fmtM(run)} projection`,
+        )
+        for (const sx of stations) {
+          emit(
+            'post',
+            STRUT_SIZE,
+            [sT, strutLen, sW],
+            [sx, (strutTop + strutBot) / 2, side * purlinZ],
+            0,
+            0,
+            strutLen,
+            'lumber',
+            `Purlin strut ${STRUT_SIZE} @ ≤4 ft o.c. — bears on ceiling joists (assumed bearing, R802.5.1)`,
+          )
+        }
+      }
+    }
   }
 
   // ---- collar ties in the upper third, every other rafter pair ----
@@ -577,6 +755,9 @@ function frameShed(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
   const slopeLen = roof.depth / cosT + 2 * roof.overhang
   const lowY = roof.wallHeight
   const midY = lowY + (roof.depth / 2) * Math.tan(theta)
+  // Span discipline: the shed's horizontal projection is the FULL depth and
+  // no ceiling joists exist below to strut a purlin to — flag only (S1).
+  const shedFlag = slopeRafterFlag(spec, roof.depth, slopeLen)
   for (const x of layout(-roof.width / 2, roof.width / 2, spec.rafterSpacing, t / 2)) {
     emit(
       'rafter',
@@ -588,6 +769,8 @@ function frameShed(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       slopeLen,
       'lumber',
       `Rafter ${spec.rafterSize} (shed)`,
+      undefined,
+      shedFlag,
     )
     if (spec.hurricaneTies) {
       tieAt(emit, x, roof.depth / 2, lowY)
@@ -644,6 +827,9 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   const [hipRidgeT] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const hipInset = Math.SQRT2 * (hipRidgeT / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
   const hipLen = Math.hypot(run * Math.SQRT2, rise) - hipInset
+  // Hips carry jacks — table spans are a rafter concept, but a field-spliced
+  // hip is no more a structural member than a spliced common (one-piece check).
+  const hipFlag = spec.detail === '200' ? undefined : onePieceFlag('Hip', hipLen)
   for (const se of [1, -1] as const) {
     for (const sc of [1, -1] as const) {
       // Ridge end (segment frame) and its corner.
@@ -674,6 +860,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
             ? ` — plumb ${Math.round((hipTilt * 180) / Math.PI)}°, side cuts 45°`
             : ''
         }`,
+        undefined,
+        hipFlag,
       )
     }
   }
@@ -685,6 +873,10 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   const cPlumbInset = (rd / 2) * tan
   const commonSlopeLen = run / cosT + roof.overhang - cRidgeFace / cosT - 2 * cPlumbInset
   const commonFaceY = ridgeY - cRidgeFace * tan
+  // Span discipline: hip commons/kings project `run` horizontally. No
+  // ceiling joists are modeled under a hip (LOD-400 audit batch 7), so
+  // struts have nothing real to bear on — flag only (S1).
+  const commonFlag = slopeRafterFlag(spec, run, commonSlopeLen)
   const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
   for (const u of commons) {
     for (const side of [1, -1] as const) {
@@ -704,6 +896,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         commonSlopeLen,
         'lumber',
         `Rafter ${spec.rafterSize} (hip common)${commonCuts}`,
+        undefined,
+        commonFlag,
       )
       if (spec.hurricaneTies) {
         tieAt(emit, alongX ? u : side * run, alongX ? side * run : u, eaveY)
@@ -801,6 +995,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           len,
           'lumber',
           `King common ${spec.rafterSize} (hip end)${cuts}`,
+          undefined,
+          slopeRafterFlag(spec, run, len),
         )
         if (spec.hurricaneTies) {
           tieAt(
@@ -888,6 +1084,9 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
   // (round-14: 36 joist×rim interpenetrations).
   const span = 2 * Math.min(halfW, halfD) - 2 * t
   const stationHalf = Math.max(halfW, halfD) - t
+  // Span discipline: a dead-level joist's horizontal projection IS its
+  // length. No mid-span bearing is modeled — flag only (S1).
+  const flatFlag = slopeRafterFlag(spec, span, span, 'Flat roof joist')
   for (const u of layout(-stationHalf, stationHalf, spec.rafterSpacing, t / 2)) {
     emit(
       'rafter',
@@ -899,6 +1098,8 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       span,
       'lumber',
       `Flat roof joist ${spec.rafterSize} — slope to drains with tapered insulation (¼:12 min, R903.4)`,
+      undefined,
+      flatFlag,
     )
   }
   // Long-axis rims run full; short-axis rims BUTT between them.
@@ -963,6 +1164,12 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   const upperHiY = ridgeY - (gRt / 2) * tanPhi
   const upperLen2 = Math.hypot(upperLoZ - upperHiZ, upperHiY - upperLoY) - 2 * upperInset
 
+  // Span discipline per PLANE: the lower rafters bear eave → break purlin,
+  // the uppers purlin → ridge, so each plane's horizontal projection is
+  // checked on its own (the break purlins below are real bearing).
+  const lowerFlag = slopeRafterFlag(spec, lowerRun, lowerLen2)
+  const upperFlag = slopeRafterFlag(spec, upperRun, upperLen2)
+
   const xs = layout(-roof.width / 2, roof.width / 2, spec.rafterSpacing, halfT)
   for (const x of xs) {
     for (const side of [1, -1] as const) {
@@ -978,6 +1185,8 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         lowerLen2,
         'lumber',
         `Rafter ${spec.rafterSize} (gambrel lower)${cuts}`,
+        undefined,
+        lowerFlag,
       )
       emit(
         'rafter',
@@ -989,6 +1198,8 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         upperLen2,
         'lumber',
         `Rafter ${spec.rafterSize} (gambrel upper${spec.detail === '400' ? ` — plumb ${phiDeg}°` : ''})`,
+        undefined,
+        upperFlag,
       )
       if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
     }
@@ -1015,11 +1226,12 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
 
   // ceiling joists at the eave + collar ties in the upper third
   const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  const cjFlag = ceilingJoistFlag(spec, roof.depth)
   for (const x0 of layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2)) {
     // sister BESIDE a coincident rafter plane, toward the center (round-14)
     const clash = xs.find((rx) => Math.abs(rx - x0) < halfT + cjT / 2 - EPS)
     const x = clash === undefined ? x0 : clash + (clash >= 0 ? -1 : 1) * (halfT + cjT / 2)
-    emit('ceiling-joist', spec.ceilingJoistSize, [roof.depth, cjD, cjT], [x, eaveY + cjD / 2, 0], -Math.PI / 2, 0, roof.depth, 'lumber', `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`)
+    emit('ceiling-joist', spec.ceilingJoistSize, [roof.depth, cjD, cjT], [x, eaveY + cjD / 2, 0], -Math.PI / 2, 0, roof.depth, 'lumber', `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`, undefined, cjFlag)
   }
   const collarY = eaveY + (2 / 3) * activeRh
   if (collarY > breakY) {
@@ -1084,6 +1296,9 @@ function frameSkirt(
     const tailInset = (rd / 2) * Math.tan(theta)
     const len = (runH - topSetback) / cosT + roof.overhang - 2 * tailInset
     if (len < 0.2) return
+    // Span discipline: skirt planes project `runH` horizontally; nothing is
+    // modeled to strut a purlin to inside a skirt — flag only (S1).
+    const faceFlag = slopeRafterFlag(spec, runH, len)
     const tipOut = half + roof.overhang * cosT
     const topOut = half - runH + topSetback
     const tipY = eaveY - roof.overhang * Math.sin(theta)
@@ -1102,6 +1317,8 @@ function frameSkirt(
           len,
           'lumber',
           `${label} ${spec.rafterSize}${rafterCutData(spec, theta, rd)}`,
+          undefined,
+          faceFlag,
         )
         if (spec.hurricaneTies) tieAt(emit, stationIsX ? u : side * half, stationIsX ? side * half : u, eaveY)
       }
@@ -1358,6 +1575,8 @@ function emitValley(valley: ValleyLine, spec: FramingSpec, members: Member[]) {
         ? ` — plumb ${Math.round((tilt * 180) / Math.PI)}°, cheek cuts 45°`
         : ''
     }`,
+    undefined,
+    spec.detail === '200' ? undefined : onePieceFlag('Valley', len),
   )
 
   // ---- valley jacks (LOD 400 completion of the 350 valley line) ----
