@@ -315,6 +315,14 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
       mesh.castShadow = mesh === solid
       mesh.receiveShadow = mesh === solid
       mesh.frustumCulled = false
+      // The X-ray is a pure VISUAL: framing meshes must never intercept
+      // the host's event raycast. R3F recurses through the level wrapper
+      // groups, so without this every bucket (even invisible culled ones)
+      // landed in event.intersections at the wall's own depth and starved
+      // the hidden-wall selection gate — hovering a stud highlighted the
+      // furniture behind the wall (F2 QA round). Devices stay clickable:
+      // outlets are separate bones:device HOST nodes, not these meshes.
+      mesh.raycast = () => {}
       group.add(mesh)
     }
   }

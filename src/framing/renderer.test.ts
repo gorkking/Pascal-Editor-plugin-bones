@@ -360,3 +360,24 @@ describe('mountLevelId — render-only mount grouping (F1b closing nit)', () => 
     expect(foreign.get('lvlattic')?.userData.strataAbove).toBe(true)
   })
 })
+
+describe('the X-ray never intercepts the event raycast (F2 selection round)', () => {
+  test('every built mesh has a no-op raycast — zero intersections pushed', () => {
+    // R3F recurses the level wrapper groups, so framing meshes (even
+    // invisible culled buckets) landed in event.intersections at the
+    // wall's own depth and starved the hidden-wall selection gate —
+    // hovering a stud highlighted the furniture BEHIND the wall.
+    const group = buildGroup(synthesizeMembers(200), synthesizeFixtures(20), true)
+    let meshCount = 0
+    group.traverse((obj) => {
+      if (!(obj instanceof Mesh)) return
+      meshCount++
+      const intersects: unknown[] = []
+      // three's signature: raycast(raycaster, intersects) — a no-op must
+      // leave the array empty and never throw on a bare call
+      ;(obj.raycast as (r: unknown, i: unknown[]) => void)({}, intersects)
+      expect(intersects).toHaveLength(0)
+    })
+    expect(meshCount).toBeGreaterThan(0) // non-vacuous
+  })
+})
