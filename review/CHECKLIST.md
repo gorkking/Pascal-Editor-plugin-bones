@@ -90,12 +90,18 @@ AND a gate — a checklist line without a test is a wish.
   (cavity-fit framing): 140 pairs on default 0.15m/2x6 exteriors and the
   explicit-misfit carve-out are retired — framing geometry compresses to
   the drawn cavity (`fitAcross`) so contact replaces overlap at every
-  thickness. KNOWN residual pre-existing classes (byte-identical to the
-  pre-night-4 baseline, queued on the board): tee-stem face layers ×
-  through-wall framing; anchor-bolt × bottom-plate on slab-on-grade
-  (allow-list covers anchor-bolt|mudsill only); framed partition tees
-  into full-CMU through walls (frameWalls never sees CMU walls for
-  insets); stem layer×layer at tees.
+  thickness. The anchor-bolt × bottom-plate slab-on-grade class CLOSED in
+  LOD-400 B5: the foundation's bolts rise through the wall engine's bottom
+  plate — the (PT, R317.1) SOLE PLATE they exist to clamp (R403.1.6) — so
+  the pair is allow-listed as design intent and a foundation+walls compose
+  scenario pins it. KNOWN residual pre-existing classes (byte-identical to
+  the pre-night-4 baseline, queued on the board): tee-stem face layers ×
+  through-wall framing; anchor-bolt × STUD on slab-on-grade (the shank
+  tops out 3" above the slab — 1.5" above the plate — and can land inside
+  a grid stud's footprint; bolt-vs-stud layout nudging queued, surfaced by
+  the B5 compose scenario); framed partition tees into full-CMU through
+  walls (frameWalls never sees CMU walls for insets); stem layer×layer at
+  tees.
   Gate: `src/engines/interpenetration.test.ts` scenario matrix + the
   cavity-fit thickness sweep (8 thicknesses × 3 stud configs × batts)
 - **S2 Every roof family inscribes inside its footprint** (no eave-line

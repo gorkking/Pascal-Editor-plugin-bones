@@ -500,9 +500,13 @@ export function computeTakeoff(
   const hurricaneTies = members.filter(
     (m) => m.role === 'blocking' && m.material === 'steel' && m.system === 'roof-framing',
   ).length
-  // Anchor bolts book PER SYSTEM: the foundation's mudsill anchorage and the
-  // mixed wall's seam-sill bolts (PT sill on the bond beam) are separate
-  // hardware lines — both answer to R403.1.6.
+  // Anchor bolts book PER SYSTEM: the foundation's slab bolts and the mixed
+  // wall's seam-sill bolts (PT sill on the bond beam) are separate hardware
+  // lines — both answer to R403.1.6. The foundation row names the SOLE
+  // PLATE: no mudsill member exists on slab-on-grade — the bolts rise
+  // through the wall engine's (PT, R317.1) bottom plate and clamp it
+  // (LOD-400 audit B5: the old 'mudsill anchorage' text named a member
+  // that isn't there).
   const anchorBoltsBySection = new Map<string, number>()
   for (const m of members) {
     if (m.role !== 'anchor-bolt') continue
@@ -517,7 +521,7 @@ export function computeTakeoff(
       'Anchor bolts',
       section === 'Wall framing'
         ? 'seam sill to bond beam (R403.1.6)'
-        : 'mudsill anchorage (R403.1.6)',
+        : 'sole plate anchorage (R403.1.6)',
       bolts,
       'pcs',
     )
