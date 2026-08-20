@@ -401,6 +401,12 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
       unsub()
     }
   }, [node])
+  // A committed write (drop, or any config edit mid-drag) invalidates the
+  // live snapshot IMMEDIATELY — waiting for the trailing null left `active`
+  // one edit behind the store at the commit render (verify night-6).
+  useEffect(() => {
+    setLiveResult(null)
+  }, [nodes, node])
   const active = liveResult ?? result
 
   // Movable outlets (Q7): mirror every derived wall device into a
@@ -465,7 +471,10 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
 
   const built = useMemo(
     () => buildGroups(active.members, active.fixtures, node.seeThrough !== false),
-    [result, node.seeThrough],
+    // `active` (NOT `result`): during a drag only the override store moves,
+    // so a committed-only dep froze the scene graph — the whole feature was
+    // visually inert (verify night-6 blocker).
+    [active, node.seeThrough],
   )
   const group = built.group
   useEffect(() => {

@@ -252,13 +252,12 @@ export function frameWall(
         : undefined
     const [roBottom, roTopRaw] = roughExtent(opening)
     const roTop = Math.min(roTopRaw, studTop - t) // leave room for the header
-    // The vertical analog of roClampFlag (LOD-400 audit B1): a drawn RO
-    // taller than the framed run fits gets its head pulled DOWN — the
-    // drawn door no longer fits its own rough opening; never silent.
-    const roHeightClampFlag =
-      roTopRaw - roTop > 0.005
-        ? `RO head lowered ${((roTopRaw - roTop) * 100).toFixed(1)}cm to clear the plates — the drawn opening does not fit this wall`
-        : undefined
+    // The vertical clamp fact (LOD-400 audit B1): a drawn RO taller than
+    // the framed run fits gets its head pulled DOWN. Folded into the depth
+    // flag below — whenever the head clamps, the header depth also
+    // collapses (min(hw, t)), so a separate branch was dead code (verify
+    // night-6: zero prints across a 115-case sweep).
+    const roHeadClampCm = roTopRaw - roTop > 0.005 ? (roTopRaw - roTop) * 100 : 0
 
     // Header: bears on the trimmers, so it spans RO + trimmer packs.
     const headerSize = headerFor(spec, ro)
@@ -274,9 +273,19 @@ export function frameWall(
     const headerDepthFlag =
       headerDepth < hw - 0.005
         ? `header ${headerSize} does not fit between the RO and the plates ` +
-          `(${(headerDepth / 0.0254).toFixed(1)}" of ${(hw / 0.0254).toFixed(1)}") — ` +
-          `raise the wall, lower the opening, or use an engineered flat header`
+          `(${(headerDepth / 0.0254).toFixed(1)}" of ${(hw / 0.0254).toFixed(1)}")` +
+          (roHeadClampCm > 0 ? ` — RO head lowered ${roHeadClampCm.toFixed(1)}cm` : '') +
+          ` — raise the wall, lower the opening, or use an engineered flat header`
         : undefined
+    // COMPOSE the applicable truths (verify night-6: single-slot precedence
+    // silenced round-10's roClampFlag whenever depth collapsed, and an
+    // ENGINEERED span hid the depth collapse while the takeoff booked the
+    // full stick — a warning silently dropped is a lie on paper, P4).
+    const headerFlagParts = [
+      engineered ? 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span' : undefined,
+      headerDepthFlag,
+      roClampFlag,
+    ].filter((f): f is string => f !== undefined)
     emit(
       'header',
       headerSize,
@@ -285,9 +294,7 @@ export function frameWall(
       headerY,
       headerLength,
       `Header ${headerSize} over ${opening.kind}`,
-      engineered
-        ? 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span'
-        : (headerDepthFlag ?? roHeightClampFlag ?? roClampFlag),
+      headerFlagParts.length > 0 ? headerFlagParts.join(' | ') : undefined,
     )
 
     // Trimmers (jack studs): floor plate → header bottom, tight to the RO.

@@ -416,7 +416,16 @@ function frameSlab(
       // cross band is carved conservatively — slight under-book, never a
       // clash with the stair framing).
       const [lo, hi] = deckBounds(ri)
-      let deckSpans = polygonSpans(polygon, runAxis, c)
+      // Sample at BOTH strip edges as well as the row line — centerline-only
+      // sampling let strips overhang L-shape notch voids by the half-bay
+      // (verify night-6: 6.7cm overhang over a 2m notch run).
+      let deckSpans = intersectIntervals(
+        intersectIntervals(
+          polygonSpans(polygon, runAxis, c),
+          polygonSpans(polygon, runAxis, Math.min(lo + 0.001, c)),
+        ),
+        polygonSpans(polygon, runAxis, Math.max(hi - 0.001, c)),
+      )
       for (const hole of holeFrames) {
         if (hi > hole.cross[0] - EPS && lo < hole.cross[1] + EPS) {
           deckSpans = subtractInterval(deckSpans, [hole.run[0], hole.run[1]])

@@ -680,19 +680,39 @@ describe('exploded stratum — owner ON the roof level (F1b closure, prod report
 
 describe('LOD-400 B3: subfloor booked == built', () => {
   test('deck members exist wherever the takeoff books T&G sheets, and counts agree', () => {
-    const scene = baselineScene()
-    const cfg = baselineConfig('TX')
+    // On a TWO-STOREY scene (the single-storey baseline is slab-on-grade —
+    // no floor framing, which made the first version of this gate vacuous;
+    // verify night-6). The upper storey needs a SLAB for the floor engine.
+    const scene = twoStoreyScene()
+    scene.slab_up = {
+      id: 'slab_up',
+      type: 'slab',
+      parentId: 'lvl1',
+      polygon: [
+        [0, 0],
+        [8, 0],
+        [8, 5],
+        [0, 5],
+      ],
+      holes: [[[3, 2], [4.2, 2], [4.2, 4.6], [3, 4.6]]],
+      elevation: 0,
+      thickness: 0.3,
+    }
+    const cfg = FramingNode.parse({
+      id: 'bonesframing_up',
+      parentId: 'lvl1',
+      jurisdiction: 'TX',
+      detail: '400',
+      showFloor: true,
+    })
     const result = computeLevel(scene, cfg)
     const rows = computeTakeoff(result.members, result.fixtures, result.areas)
     const row = rows.find((r) => r.item.includes('Subfloor'))
     const deck = result.members.filter((m) => m.role === 'subfloor')
-    if (row) {
-      // pure S4: the sheets on the buy list are derived from real geometry
-      expect(deck.length).toBeGreaterThan(0)
-      const deckArea = deck.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
-      expect(row.quantity).toBe(Math.ceil(deckArea / (1.2192 * 2.4384)))
-    } else {
-      expect(deck.length).toBe(0)
-    }
+    // NON-VACUOUS: the upper storey MUST book and MUST build
+    expect(row).toBeDefined()
+    expect(deck.length).toBeGreaterThan(0)
+    const deckArea = deck.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    expect(row?.quantity).toBe(Math.ceil(deckArea / (1.2192 * 2.4384)))
   })
 })

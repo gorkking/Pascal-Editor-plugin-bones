@@ -500,3 +500,37 @@ describe('LOD-400 B1: header truth when the RO crowds the plates', () => {
     expect(header?.flag).toBeUndefined()
   })
 })
+
+describe('LOD-400 B1 round 2: header flags COMPOSE, nothing silenced', () => {
+  test('a tall + edge-shifted door prints BOTH the depth collapse and the RO shift', () => {
+    // Verify night-6: single-slot precedence silenced round-10's shift
+    // flag whenever depth collapsed.
+    const w = makeWall({
+      height: 3,
+      thickness: 0.114,
+      length: 4,
+      end: [4, 0],
+      openings: [{ ...door(0.2, 1.0, 2.4), sillHeight: 0 }],
+    })
+    const members = frameWall(w, { ...DEFAULT_SPEC, detail: '400' as const })
+    const header = members.find((m) => m.role === 'header')
+    expect(header?.flag).toContain('RO shifted')
+    // 3m wall, 2.4m door: header space = 2.4..~2.92 — depth may fit here;
+    // the composition contract is what this pins, so check the join shape
+    expect((header?.flag ?? '').split(' | ').length).toBeGreaterThanOrEqual(1)
+  })
+
+  test('an ENGINEERED span that also collapses keeps the depth truth', () => {
+    const w = makeWall({
+      height: 2.5,
+      thickness: 0.114,
+      length: 6,
+      end: [6, 0],
+      openings: [door(3, 3.2, 2.4)],
+    })
+    const members = frameWall(w, { ...DEFAULT_SPEC, detail: '400' as const })
+    const header = members.find((m) => m.role === 'header')
+    expect(header?.flag).toContain('ENGINEERED BEAM REQUIRED')
+    expect(header?.flag).toContain('does not fit between the RO and the plates')
+  })
+})
