@@ -32,6 +32,19 @@ FramingRenderer recompute against EFFECTIVE nodes during an active
 drag, throttled (~10Hz), falling back to the memoized path when no
 overrides are live. Perf-gate it (computeLevel is a few ms — budget).
 SHIP through the full chain on double PASS.
+TRACK C (user directive, mid-night): "run the loop all night to make
+sure we are BIM level 400 everywhere" — full-systems LOD-400 AUDIT:
+one auditor per system (wall/floor/roof framing, foundation,
+electrical, plumbing, HVAC, layers/finishes, takeoff/paper) hunting
+anything below fabrication level — symbolic members, missing hardware
+(hangers/straps/nails/clips), unmodeled connections, absent code
+details — then adversarial verify of the findings, then fix batches
+by severity through the loop.
+TRACK B LANDED (51084b6, 881 tests): live framing recompute during
+drags — renderer folds useLiveNodeOverrides into the compute at ~10Hz
+(trailing throttle), falls back to the memoized committed path when
+overrides clear; reconcile stays on committed. Gates: override
+folding, live window move re-derives the header, throttle contract.
 
 ## NIGHT-5 SHIPPED (~04:45): prod main b6bf8acb — OUTLETS ARE LIVE
 Plugin 22d9e7ae via editor #684 (main 751e983a, carrying #682 wipe
