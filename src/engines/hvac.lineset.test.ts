@@ -222,34 +222,151 @@ describe('line-set continuity (E2 for refrigerant pipe)', () => {
 })
 
 // ---------------------------------------------------------------------------
-// 2. Parallel pair — same plan path, constant vertical offset
+// 2. Parallel pair — ONE shared route, ±offset on EVERY member (skeptic
+// round: per-pipe routing collapsed the pair on detours and let a
+// band-splitting sill make the pipes cross)
 // ---------------------------------------------------------------------------
 
-describe('line-set pair parallelism', () => {
-  test('every horizontal suction leg has a liquid twin 2×offset below on the same plan line', () => {
+/** Axis-aligned AABB of a lineset member (the gate scenes' walls run on
+ * plan axes — asserted via the quarter-yaw check before trusting this). */
+function aabbOf(m: Member): { min: [number, number, number]; max: [number, number, number] } {
+  const [a, b] = endpointsOf(m)
+  const vertical = m.rotation[1] === 0 && m.dims[1] === m.length
+  if (vertical) {
+    return {
+      min: [m.position[0] - m.dims[0] / 2, Math.min(a.y, b.y), m.position[2] - m.dims[2] / 2],
+      max: [m.position[0] + m.dims[0] / 2, Math.max(a.y, b.y), m.position[2] + m.dims[2] / 2],
+    }
+  }
+  const minX = Math.min(a.x, b.x)
+  const maxX = Math.max(a.x, b.x)
+  const minZ = Math.min(a.z, b.z)
+  const maxZ = Math.max(a.z, b.z)
+  const alongX = maxX - minX >= maxZ - minZ
+  return {
+    min: [
+      alongX ? minX : m.position[0] - m.dims[2] / 2,
+      m.position[1] - m.dims[1] / 2,
+      alongX ? m.position[2] - m.dims[2] / 2 : minZ,
+    ],
+    max: [
+      alongX ? maxX : m.position[0] + m.dims[2] / 2,
+      m.position[1] + m.dims[1] / 2,
+      alongX ? m.position[2] + m.dims[2] / 2 : maxZ,
+    ],
+  }
+}
+
+/** Suction × liquid volume hits deeper than the 2 mm skin (the skeptic's
+ * SAT harness distilled to the axis-aligned case). */
+function pairHits(suction: Member[], liquid: Member[], skin = 0.002): number {
+  let hits = 0
+  for (const s of suction) {
+    for (const l of liquid) {
+      const A = aabbOf(s)
+      const B = aabbOf(l)
+      let pen = Number.POSITIVE_INFINITY
+      for (let k = 0; k < 3; k++) {
+        pen = Math.min(
+          pen,
+          Math.min(A.max[k] as number, B.max[k] as number) -
+            Math.max(A.min[k] as number, B.min[k] as number),
+        )
+      }
+      if (pen > skin) hits++
+    }
+  }
+  return hits
+}
+
+/** The pair contract: bijective twins — every suction member has a liquid
+ * member of the SAME length exactly 2×offset below. Horizontal legs share
+ * their plan center; RISERS sit 2×offset apart in plan instead (the pair
+ * ROLLS 90° at vertical transitions so the lower pipe's riser never bores
+ * through the upper pipe — coaxial risers were the coincident-stack class). */
+function expectTwinned(members: Member[], n: number): { suction: Member[]; liquid: Member[] } {
+  const suction = runOf(members, `lineset-suction-${n}`)
+  const liquid = runOf(members, `lineset-liquid-${n}`)
+  expect(suction.length).toBeGreaterThan(0)
+  expect(suction.length).toBe(liquid.length)
+  for (const m of [...suction, ...liquid]) {
+    const quarter = m.rotation[1] / (Math.PI / 2)
+    expect(Math.abs(quarter - Math.round(quarter))).toBeLessThan(1e-9)
+  }
+  for (const s of suction) {
+    const sVert = s.rotation[1] === 0 && s.dims[1] === s.length
+    const twin = liquid.find((l) => {
+      if (Math.abs(l.length - s.length) > 1e-9) return false
+      if (Math.abs(s.position[1] - l.position[1] - 2 * LINESET_PAIR_OFFSET) > 1e-9) return false
+      const planD = Math.hypot(
+        l.position[0] - s.position[0],
+        l.position[2] - s.position[2],
+      )
+      return sVert ? Math.abs(planD - 2 * LINESET_PAIR_OFFSET) < 1e-9 : planD < 1e-9
+    })
+    expect(twin).toBeDefined()
+  }
+  return { suction, liquid }
+}
+
+describe('line-set pair parallelism — non-vacuous over E1 detours', () => {
+  test('door-detour scene: every member twins at 2×offset; zero pair SAT hits', () => {
+    // The exact skeptic repro: per-pipe routing left the liquid detour leg
+    // fully INSIDE the suction leg over the header (9 SAT hits).
+    const { walls, rooms } = shell(26, 10, [
+      {
+        id: 'd_mid',
+        kind: 'door',
+        u: 5,
+        width: 0.85,
+        height: 2.03,
+        sillHeight: 0,
+        roughWidth: 0.9,
+        roughHeight: 2.1,
+      },
+    ])
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [8, 0, -0.7] } })
+    const { suction, liquid } = expectTwinned(out.members, 1)
+    // the scene genuinely detours — risers exist on BOTH pipes
+    const risers = (legs: Member[]) =>
+      legs.filter((m) => m.rotation[1] === 0 && m.dims[1] === m.length)
+    expect(risers(suction).length).toBeGreaterThanOrEqual(2)
+    expect(risers(liquid).length).toBe(risers(suction).length)
+    expect(pairHits(suction, liquid)).toBe(0)
+  })
+
+  test('an RO sill landing BETWEEN the two bands still yields ONE shared decision', () => {
+    // Sill 0.43 / top 2.66: the old per-pipe bands split (suction [0.40,
+    // 0.44] detoured under, liquid [0.36,0.40] ran straight) and the
+    // suction risers pierced the liquid horizontal. The shared envelope
+    // band makes one decision for the pair.
+    const splitter: OpeningSlice = {
+      id: 'w_split',
+      kind: 'window',
+      u: 5,
+      width: 0.95,
+      height: 2.2,
+      sillHeight: 0.43,
+      roughWidth: 1.0,
+      roughHeight: 2.23,
+    }
+    const { walls, rooms } = shell(26, 10, [splitter])
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [8, 0, -0.7] } })
+    const { suction, liquid } = expectTwinned(out.members, 1)
+    // same decision on both pipes: identical riser counts …
+    const risers = (legs: Member[]) =>
+      legs.filter((m) => m.rotation[1] === 0 && m.dims[1] === m.length)
+    expect(risers(suction).length).toBe(risers(liquid).length)
+    // … and the pipes never touch, let alone cross
+    expect(pairHits(suction, liquid)).toBe(0)
+  })
+
+  test('plain shell: multi-unit runs stay twinned too', () => {
     const { walls, rooms } = shell(26, 10)
     const { members } = layoutHvac(walls, rooms, LOD400)
     for (let n = 1; n <= 2; n++) {
-      const horiz = (id: string) =>
-        runOf(members, id).filter((m) => !(m.rotation[1] === 0 && m.dims[1] === m.length))
-      const suction = horiz(`lineset-suction-${n}`)
-      const liquid = horiz(`lineset-liquid-${n}`)
-      expect(suction.length).toBeGreaterThan(0)
-      expect(suction.length).toBe(liquid.length)
-      for (const s of suction) {
-        const twin = liquid.find(
-          (l) =>
-            Math.abs(l.position[0] - s.position[0]) < 1e-6 &&
-            Math.abs(l.position[2] - s.position[2]) < 1e-6 &&
-            Math.abs(l.dims[0] - s.dims[0]) < 1e-6,
-        )
-        expect(twin).toBeDefined()
-        // suction rides ABOVE the liquid line by exactly the pair offset
-        expect((s.position[1] - (twin as Member).position[1])).toBeCloseTo(
-          2 * LINESET_PAIR_OFFSET,
-          9,
-        )
-      }
+      const { suction, liquid } = expectTwinned(members, n)
+      expect(pairHits(suction, liquid)).toBe(0)
     }
   })
 })

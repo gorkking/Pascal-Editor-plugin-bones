@@ -207,6 +207,40 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     expect(svg).toContain('water meter')
   })
 
+  test('line-set pair prints BOTH colors at DISTINCT plan positions (examiner blocker)', () => {
+    // The real pair shares one plan path (the 4 cm offset is VERTICAL) — a
+    // truthful projection overprints the two rects and the last-drawn pipe
+    // wins: the suction line never rendered a visible pixel. The schematic
+    // perpendicular nudge must split them on paper.
+    const twinPipe = (sourceId: string, y: number): Member =>
+      member({
+        system: 'hvac',
+        role: 'pipe-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.019, 0.019],
+        length: 2,
+        position: [2, y, 4],
+        sourceId,
+      })
+    const members = [twinPipe('lineset-suction-1', 0.42), twinPipe('lineset-liquid-1', 0.38)]
+    const mep = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    const rectsOf = (color: string): [number, number][] =>
+      [...svg.matchAll(
+        new RegExp(`<rect[^>]*fill="${color}"[^>]*transform="translate\\(([-\\d.]+) ([-\\d.]+)\\)`, 'g'),
+      )].map((m) => [Number(m[1]), Number(m[2])])
+    const suctionRects = rectsOf('#35b8c9')
+    const liquidRects = rectsOf('#d98134')
+    // both pipes DRAW (transform-bearing rects — legend swatches don't count)
+    expect(suctionRects.length).toBe(1)
+    expect(liquidRects.length).toBe(1)
+    // … at distinct plan positions: the nudge splits the pair ~5 px apart
+    const [sx, sz] = suctionRects[0] as [number, number]
+    const [lx, lz] = liquidRects[0] as [number, number]
+    expect(Math.hypot(sx - lx, sz - lz)).toBeGreaterThanOrEqual(4)
+  })
+
   test('room-category fallback keeps the single pipe tint (no phantom legend rows)', () => {
     const mep = buildPlanSet([pipe('r_bath')], [], {}).find((s) => s.title.startsWith('Plumbing'))
     const svg = mep?.svg ?? ''

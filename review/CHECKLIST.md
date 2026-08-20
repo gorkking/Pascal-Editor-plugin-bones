@@ -304,14 +304,24 @@ AND a gate — a checklist line without a test is a wish.
   (face + 0.13 m — brick veneer, R703.8), and nothing fronts a door/window
   RO (the row slides along the wall to clear). Each unit's refrigerant
   LINE-SET — suction ¾" (insulated, the COLD line) + liquid ⅜" (warm) as a
-  PARALLEL pair (same plan path, suction +2 cm / liquid −2 cm) — runs from
-  the cabinet through ONE exterior-wall penetration at ~0.4 m SNAPPED clear
-  of any RO crossing the pipe band (a verbatim heat-pump node can front
-  glazing the row never slid for), then FOLLOWS THE WALL GRAPH to the air
-  handler coil on the plumbing engine's routePipe rails — the same E1 RO
-  detours (over the header / under the sill), junction jumpers, and flagged
-  air-run fallback the supply/vent pipes use; a full-height opening that
-  cannot detour is ⚠-marked in the label, never silent. Both pipes chain
+  PARALLEL pair — runs from the cabinet through ONE exterior-wall
+  penetration at ~0.4 m SNAPPED clear of any RO crossing the pipe band (a
+  verbatim heat-pump node can front glazing the row never slid for), then
+  FOLLOWS THE WALL GRAPH to the air handler coil on the plumbing engine's
+  routePipe rails — the same E1 RO detours (over the header / under the
+  sill), junction jumpers, and flagged air-run fallback the supply/vent
+  pipes use; a full-height opening that cannot detour is ⚠-marked in the
+  label, never silent. The route is solved ONCE at the pair's center plane
+  with the band set to the pair ENVELOPE (one shared detour decision — an
+  RO sill landing between per-pipe bands used to make the pipes CROSS);
+  both pipes derive from that reference: ±2 cm vertical on every horizontal
+  member, and risers ROLL the pair 90° (±2 cm perpendicular to the arriving
+  leg) so the lower pipe's riser never bores through the upper pipe —
+  zero suction×liquid volume hits at a 2 mm skin, gated over a genuine
+  detour scene. On the MEP sheet the pair prints with a ±2.5 px SCHEMATIC
+  perpendicular nudge (drawing convention — the truthful projection
+  overprinted the pair and the suction color never showed); the cover axon
+  still draws the pair as one line (accepted, queued). Both pipes chain
   endpoint-adjacent condenser → air handler (E2 for refrigerant). Runs over
   ~15 m carry a 'verify manufacturer max line-set length / oil return'
   advisory (assumption class — mfr line-set charts govern). Colors mirror

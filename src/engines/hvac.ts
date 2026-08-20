@@ -1073,9 +1073,35 @@ export function layoutHvac(
           // Service-valve elbow: slide OUTSIDE the wall (parallel to it) to
           // face the penetration, then straight in through the wall.
           const elbowOut: Pt = [pen[0] + slot.out[0] * standOff, pen[1] + slot.out[1] * standOff]
+          // In-wall route: solved ONCE at the pair's center plane with the
+          // band set to the pair ENVELOPE (liquid bottom → suction top), so
+          // both pipes inherit the SAME detour decisions. Per-pipe routing
+          // collapsed the pair onto one detour plane (the ±2 cm lived only
+          // on straight legs) and let an RO sill landing BETWEEN the two
+          // bands detour one pipe THROUGH the other (skeptic round).
+          const REF_LABEL = '§LINESET§'
+          const refSpec: PipeSpec = {
+            side: LINESET_SUCTION_DIA,
+            material: 'copper',
+            role: 'pipe-run',
+            sourceId: 'lineset-ref',
+            label: REF_LABEL,
+          }
+          const ref: Member[] = []
+          routePipe(
+            ref, refSpec, linesetGraph,
+            { wall: row.wall, u: penU }, ahAnchor, LINESET_Y, walls,
+            LINESET_PAIR_OFFSET + LINESET_SUCTION_DIA / 2,
+          )
+          // Outside stubs cross ROs as a PAIR too: either pipe's height
+          // clipping an RO volume flags BOTH (one shared decision, one
+          // shared honesty — E1, same contract as the service laterals).
+          const stubCrosses = (a: Pt, b: Pt): boolean =>
+            pipes.some((p) =>
+              segmentCrossesRo(walls, [a[0], p.y, a[1]], [b[0], p.y, b[1]]),
+            )
           for (const pipe of pipes) {
-            // outside stub — can't detour; flagged when it crosses an RO
-            // volume (E1 honesty, same contract as the service laterals)
+            const shift = pipe.y - LINESET_Y
             for (const [a, b] of [
               [at, elbowOut],
               [elbowOut, pen],
@@ -1085,23 +1111,43 @@ export function layoutHvac(
                 'copper', 'pipe-run', 0.02,
               )
               if (!seg) continue
-              if (segmentCrossesRo(walls, [a[0], pipe.y, a[1]], [b[0], pipe.y, b[1]])) {
+              if (stubCrosses(a, b)) {
                 seg.flag = 'line-set crosses a door/window RO — verify routing'
               }
               runMembers.push(seg)
             }
-            // in-wall route: penetration → air-handler wall anchor
-            const spec: PipeSpec = {
-              side: pipe.dia,
-              material: 'copper',
-              role: 'pipe-run',
-              sourceId: pipe.sourceId,
-              label: pipe.label,
+            // BOTH pipes derive from the one reference route: a uniform Y
+            // shift of ±LINESET_PAIR_OFFSET on EVERY member (horizontal
+            // legs and detour crossings — 4 cm vertical separation), Ø
+            // components rewritten per pipe, labels/sourceIds per pipe,
+            // flags copied to both. RISERS additionally ROLL the pair 90°:
+            // a lower pipe's riser must cross the upper pipe's plane on the
+            // way up, so coaxial risers would leave the liquid line inside
+            // the suction line (the skeptic's coincident-stack class) —
+            // each riser steps ±LINESET_PAIR_OFFSET PERPENDICULAR to the
+            // arriving leg's axis instead (side-by-side across the wall,
+            // exactly like field-bent soft copper).
+            let lastYaw = Math.atan2(-row.wall.dir[1], row.wall.dir[0])
+            for (const m of ref) {
+              const vertical = m.rotation[1] === 0 && m.dims[1] === m.length
+              let px = m.position[0]
+              let pz = m.position[2]
+              if (vertical) {
+                px += shift * Math.sin(lastYaw)
+                pz += shift * Math.cos(lastYaw)
+              } else {
+                lastYaw = m.rotation[1]
+              }
+              runMembers.push({
+                ...m,
+                dims: vertical
+                  ? [pipe.dia, m.dims[1], pipe.dia]
+                  : [m.dims[0], pipe.dia, pipe.dia],
+                position: [px, m.position[1] + shift, pz],
+                sourceId: pipe.sourceId,
+                label: (m.label ?? REF_LABEL).replace(REF_LABEL, pipe.label),
+              })
             }
-            routePipe(
-              runMembers, spec, linesetGraph,
-              { wall: row.wall, u: penU }, ahAnchor, pipe.y, walls,
-            )
             // coil stub: wall anchor → the air handler
             const ap = wallPlan(ahAnchor)
             const stub = duct(
