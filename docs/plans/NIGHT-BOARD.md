@@ -1,5 +1,27 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## LOD-400 AUDIT LANDED (~05:00 night-6): docs/plans/LOD400-BACKLOG.md
+8 system auditors → 24 adversarial verifiers → synthesis (26/33 agents
+survived API errors; foundation/hvac/plumbing/takeoff-paper AUDITS
+died — RE-RUN those four next session, the confirmed set below is
+framing/roof/electrical/layers-heavy). ~20 CONFIRMED findings, 3
+BLOCKERS. Backlog is board-ready with batches, gates, blast radii:
+B1 header truth (1.5" sliver booked as 4x8 + silent RO height clamp),
+B2 roof span discipline (26.5ft one-piece rafters, dead span tables),
+B3 subfloor member (booked 33 sheets, zero geometry), B4 sheathing
+double-booking, B5 PT sole plates on concrete (R317.1) + mudsill row,
+B6 life-safety electrical (alarms per R314/R315 incl. no-hallway
+scenes + CO; interconnect; outdoor receptacles 210.52(E); counter
+receptacle heights; GES/grounding; cable staples/protection; fixed-
+equipment circuits), B7 roof completeness (sheathing/underlayment
+members, hip/mansard/dutch ties, structural ridge <3:12, non-perp
+valleys, flat-roof ties, gambrel purlin support), B8 jurisdiction
+fidelity (snow-load header sizing; CA≡INTL structural byte-equality).
+
+## NIGHT-6 (~05:00 status): A pilot finishing (door-drag X-ray fix,
+crashed twice on API errors, resumed, was committing after all-green
+verification), B LANDED (live recompute 51084b6), C = the audit above.
+
 ## NIGHT-6 PLAN (2026-08-19 → morning) — user: doors/windows must move
 ## like in the ORIGINAL editor with Bones on; framing recomputes LIVE
 USER REPORT (verbatim essence): moving windows/doors with Bones on is
