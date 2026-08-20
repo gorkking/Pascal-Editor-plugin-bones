@@ -1,5 +1,27 @@
 # Bones night board — night-6 (2026-08-19→20) IN FLIGHT
 
+## NIGHT-6 ~10:00 state — morning stretch
+Master f402f0c (937 tests): f7db0c2 = round-6 verify fixes (wrapRow
+LOOPS — no ellipsis ever, P4; cross-level lift = DELTA via
+relativeLevelBaseY — upper-storey roof drew a storey high; size-less
+legend rows subfloor/hanger; blocking clipped at BOTH joist faces on
+oblique rims — gate proven to bite; lineal→linear feet). a132f3d =
+B4 MERGED (skeptic APPROVE 7/7 + examiner PASS: one row per material,
+8d re-key, CMU zero gypsum, climate-zone labels LIVE in all 51 states
+— were dead from key mismatch + [object Object] latent). f402f0c =
+WAVE-2 backlog (27/27 confirmed, 0 rejected: B17 slab phantom BLOCKER,
+B18 anchorage, B19 HVAC garage-equipment BLOCKER, B20 plumbing safety,
+B21 paper honesty, 3 carryovers) + B21a/b/c fixed inline (flag block
+PAGINATES to continuation sheets; bolt legend derived from members;
+LOD stamp from composed detail incl. cover).
+B4 advisory for B7: suppression gates need a system filter when roof
+sheathing members land.
+PENDING: B5 skeptic re-run (examiner already PASS — manifest exact,
+piece+bd-ft conservation, storey-1 byte-equal; advisory: no sheet
+cites R317.1 — legend row candidate); visual QA full-stack round;
+then B5 merge → final paper round on merged master → dawn ship →
+morning review. NOT started (queue): B17-B20 pilots, B6-B16.
+
 ## NIGHT-6 ~08:00 state — batch verified twice on paper, host fix MERGED
 Plugin master 1555027 (tests 921): b550986 = round-e4ce6fc skeptic fixes
 (live-wiring deps BLOCKER [active] + setLiveResult(null) on [nodes,node];
