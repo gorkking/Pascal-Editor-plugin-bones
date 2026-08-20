@@ -959,6 +959,112 @@ describe('insulation batts + per-wall cladding rows', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// LOD-400 B4 — one row per material (the takeoff double-booking is dead)
+// ---------------------------------------------------------------------------
+
+import { FramingNode } from '../framing/schema'
+import { computeLevel } from '../framing/compute'
+
+describe('one row per material (LOD-400 B4 — gross rows defer to layer members)', () => {
+  const SQFT = 1 / 0.09290304
+  const layer = (role: 'sheathing' | 'drywall', len = 3, h = 2.4): Member =>
+    mem({ role, size: undefined, dims: [len, h, 0.011], length: len, material: 'lumber' })
+
+  test('a scene with layer members books exactly ONE sheathing row and ONE drywall row', () => {
+    // The panel path: members AND gross areas together. Before B4 this
+    // booked 'Sheathing | Wall sheathing 34 sheets gross' + 'Wall framing |
+    // Sheathing ~33 sheets net' — two disagreeing buy quantities.
+    const members = [
+      ...Array.from({ length: 10 }, () => layer('sheathing')),
+      ...Array.from({ length: 14 }, () => layer('drywall')),
+    ]
+    const rows = computeTakeoff(members, [], { wallSheathingM2: 100, drywallM2: 140 })
+    const sheathingRows = rows.filter((r) => /sheathing/i.test(r.item))
+    const drywallRows = rows.filter((r) => r.item === 'Drywall 1/2"')
+    expect(sheathingRows).toHaveLength(1)
+    expect(drywallRows).toHaveLength(1)
+    // …and the survivor is the MEMBER-derived tally (members are truth).
+    expect(sheathingRows[0]?.section).toBe('Wall framing')
+    expect(sheathingRows[0]?.item).toBe('Sheathing 7/16" WSP')
+    expect(sheathingRows[0]?.unit).toBe('sqft')
+    expect(drywallRows[0]?.section).toBe('Wall framing')
+    expect(drywallRows[0]?.unit).toBe('sqft')
+    expect(find(rows, 'Wall sheathing 7/16" WSP')).toBeUndefined()
+  })
+
+  test('8d WSP nail poundage derives from the SURVIVING member row, not the dead gross row', () => {
+    const members = Array.from({ length: 10 }, () => layer('sheathing'))
+    const memberSheets = Math.ceil((10 * 3 * 2.4 * SQFT) / 32)
+    const grossSheets = Math.ceil(500 / (32 / 10.7639))
+    expect(grossSheets).not.toBe(memberSheets) // the decoy really disagrees
+    const rows = computeTakeoff(members, [], { wallSheathingM2: 500 })
+    const nails = find(rows, 'Nails 8d common')
+    expect(nails?.detail).toContain(`${memberSheets * 44} nails`)
+    expect(nails?.detail).not.toContain(`${grossSheets * 44} nails`)
+  })
+
+  test('LOD-200 fallback: NO layer members → gross rows still book, nails keyed to them', () => {
+    const rows = computeTakeoff([], [], { wallSheathingM2: 60, drywallM2: 90 })
+    const grossSheets = Math.ceil(60 / (32 / 10.7639))
+    expect(find(rows, 'Wall sheathing 7/16" WSP')?.quantity).toBe(grossSheets)
+    expect(find(rows, 'Drywall 1/2"')?.section).toBe('Sheathing')
+    expect(find(rows, 'Nails 8d common')?.detail).toContain(`${grossSheets * 44} nails`)
+  })
+
+  test('a CMU scene books NO drywall row (the layer engine renders zero gypsum on masonry)', () => {
+    // 6×4 shell, every wall CMU (one of them a mixed knee wall — layers
+    // follow the CMU treatment whole-wall, v1): gross drywall used to book
+    // ~both faces of every wall here while the members carried none.
+    const wall = (id: string, start: [number, number], end: [number, number]) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      thickness: 0.2,
+      height: 2.5,
+      frontSide: 'exterior',
+      backSide: 'interior',
+      children: [],
+    })
+    const scene = {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: wall('w_s', [0, 0], [6, 0]),
+      w_e: wall('w_e', [6, 0], [6, 4]),
+      w_n: wall('w_n', [6, 4], [0, 4]),
+      w_w: wall('w_w', [0, 4], [0, 0]),
+    }
+    const config = {
+      ...FramingNode.parse({
+        jurisdiction: 'INTL',
+        detail: '400',
+        showWalls: true,
+        showFloor: false,
+        showRoof: false,
+        showFoundation: false,
+        showElectrical: false,
+        showPlumbing: false,
+        showHvac: false,
+        wallOverrides: {
+          w_s: 'cmu',
+          w_e: 'cmu',
+          w_n: 'cmu',
+          w_w: { construction: 'cmu', cmuHeightM: 1.2 },
+        },
+      }),
+      parentId: 'level_1' as FramingNode['parentId'],
+    }
+    const result = computeLevel(scene, config)
+    expect(result.members.some((m) => m.role === 'block')).toBe(true) // it IS a CMU scene
+    expect(result.members.some((m) => m.role === 'drywall')).toBe(false)
+    expect(result.areas.drywallM2 ?? 0).toBe(0)
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(rows.some((r) => r.item === 'Drywall 1/2"')).toBe(false)
+    expect(rows.some((r) => /sheathing/i.test(r.item))).toBe(false)
+  })
+})
+
 describe('cavity-fit framing flags aggregate (night-4)', () => {
   test('a compressed wall books ONE Flags row with a member count; lumber rows stay nominal', () => {
     const wall: WallSlice = {
