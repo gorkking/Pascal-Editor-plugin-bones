@@ -1,4 +1,39 @@
-# Bones night board — night-6 (2026-08-19→20) IN FLIGHT
+# Bones night board — night-6 SHIPPED TO PROD 2026-08-20 (+ day feedbacks in flight)
+
+## SHIP RECORD (~15:30): private-editor #386 → b836203e
+Chain: plugin 85238a8e (950 tests, examiner ship-stamp) → editor #695
+pin-bump onto main with #689 + #694 (drag fixes; #694 browser-APPROVED
+on the exact defect geometries: no wrong-wall re-parent, ONE undo
+restores exact baseline census) → private-editor community pin +
+submodule gitlink @ 182f7c94, all E2E green, merged = Vercel prod.
+Morning review: docs/morning-review-2026-08-20.txt.
+
+## DAY FEEDBACKS (Julien, ~13:00-14:00) — 3 pilots
+F1 line-set routing feat/ac-lineset-routing: pilot round 1 done
+(routePipe reuse, MEP legend, +9 tests) → verify REVISE (pair collapses
+on detours — height-only offset, no pair awareness; suction invisible
+on paper — plan projection overprints) → pilot round 2 IN FLIGHT
+(route-once + uniform Y shift + schematic plan nudge). Advisories
+queued: cross-unit plane step (SUPPLY_STEP pattern), route cost
+55 lf vs 8.5 crow-flies (try both wall directions), flag counts legs.
+F2 nearest-first selection fix/nearest-first-selection @ cb6faa83
+(rebased on post-ship main): root cause = #683 blanket transparency
+removed hidden walls from hover candidacy entirely; fix = wall handles
+its gated event unless outranked by own subtree / non-wall hit within
+0.35m ε / wall-anchored hit further down ray. 16 tests, root suite
+green. Serving on :3002 NOW; visual verification IN FLIGHT. Trade-off
+noted: manual 'down' walls (no Bones) hoverable again.
+F3 under-floor DWV feat/underfloor-dwv @ a94be32: root cause = the
+room-category FALLBACK drew drains +0.08m ABOVE the slab (placed-
+fixture path already correct); rebuilt to buried sloped tree (P3005.3
+per-size slopes, sewer exit label, sleeves P2603.4, UNDER_FLOOR_CLEAR
+0.45 both paths), MEP flow arrows. +11 tests (961). Verify round
+IN FLIGHT.
+MERGE ORDER when green: F3 → F1 (both touch plumbing.ts; F3 landed
+routePipe changes? no — F1 exports routePipe, F3 doesn't touch it;
+takeoff untouched by F3) → next ship batch with F2 host PR.
+
+# Bones night board — night-6 (2026-08-19→20) ARCHIVE BELOW
 
 ## NIGHT-6 ~10:00 state — morning stretch
 Master f402f0c (937 tests): f7db0c2 = round-6 verify fixes (wrapRow
