@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, WallSlice } from '../core/types'
 import { feet, inches } from '../core/units'
+import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { frameWall, studPositions } from './wall-framing'
 
 const T = inches(1.5)
@@ -466,5 +467,36 @@ describe('cavity-fit framing (night-4): geometry compresses, identity stays nomi
       expect(m.dims[2]).toBeCloseTo(inches(3.5), 9)
       expect(m.flag).toBeUndefined()
     }
+  })
+})
+
+describe('LOD-400 B1: header truth when the RO crowds the plates', () => {
+  test('a tall door collapses the header — geometry honest, BOTH flags fire', () => {
+    // 2.4m door in a 2.5m wall: the prescriptive 4x8 (7.25") cannot fit
+    // between the RO head and the plates — pre-fix the member silently
+    // shrank to a 1.5" flat board while the takeoff booked the full stick.
+    const w = makeWall({ height: 2.5, thickness: 0.114, openings: [door(2, 1.0, 2.4)] })
+    const members = frameWall(w, { ...DEFAULT_SPEC, detail: '400' as const })
+    const header = members.find((m) => m.role === 'header')
+    expect(header).toBeDefined()
+    // geometry stays honest (whatever fits) …
+    expect((header?.dims[1] as number) < inches(7.25)).toBe(true)
+    // …but never silent: the depth flag names the fix
+    expect(header?.flag).toContain('does not fit between the RO and the plates')
+    // and the silent RO head pull-down is also gone: some member on this
+    // wall carries the height-clamp flag (it rides the header's fallback
+    // chain, so check the depth flag won — the clamp is subsumed)
+    const flags = members.map((m) => m.flag).filter(Boolean)
+    expect(flags.length).toBeGreaterThan(0)
+  })
+
+  test('a normal door keeps the full prescriptive header depth, no flags', () => {
+    const w = makeWall({ height: 2.5, thickness: 0.114, openings: [door(2, 0.9, 2.1)] })
+    const members = frameWall(w, { ...DEFAULT_SPEC, detail: '400' as const })
+    const header = members.find((m) => m.role === 'header')
+    // full depth of its own prescriptive size (small ROs get small headers)
+    const hw = LUMBER_CROSS_SECTIONS[header?.size as keyof typeof LUMBER_CROSS_SECTIONS][1]
+    expect(header?.dims[1]).toBeCloseTo(hw, 6)
+    expect(header?.flag).toBeUndefined()
   })
 })

@@ -252,6 +252,13 @@ export function frameWall(
         : undefined
     const [roBottom, roTopRaw] = roughExtent(opening)
     const roTop = Math.min(roTopRaw, studTop - t) // leave room for the header
+    // The vertical analog of roClampFlag (LOD-400 audit B1): a drawn RO
+    // taller than the framed run fits gets its head pulled DOWN — the
+    // drawn door no longer fits its own rough opening; never silent.
+    const roHeightClampFlag =
+      roTopRaw - roTop > 0.005
+        ? `RO head lowered ${((roTopRaw - roTop) * 100).toFixed(1)}cm to clear the plates — the drawn opening does not fit this wall`
+        : undefined
 
     // Header: bears on the trimmers, so it spans RO + trimmer packs.
     const headerSize = headerFor(spec, ro)
@@ -260,6 +267,16 @@ export function frameWall(
     const headerDepth = Math.min(hw, studTop - roTop)
     const headerY = roTop + headerDepth / 2
     const engineered = ro > spec.engineeredHeaderSpan
+    // LOD-400 audit B1 (blocker): when the RO crowds the plates the header
+    // collapsed to a 1.5" sliver while the takeoff booked the full 4x8 —
+    // booked-but-absent. The geometry stays honest; the flag says what a
+    // builder must do about it (the over-SPAN case has its own flag).
+    const headerDepthFlag =
+      headerDepth < hw - 0.005
+        ? `header ${headerSize} does not fit between the RO and the plates ` +
+          `(${(headerDepth / 0.0254).toFixed(1)}" of ${(hw / 0.0254).toFixed(1)}") — ` +
+          `raise the wall, lower the opening, or use an engineered flat header`
+        : undefined
     emit(
       'header',
       headerSize,
@@ -270,7 +287,7 @@ export function frameWall(
       `Header ${headerSize} over ${opening.kind}`,
       engineered
         ? 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span'
-        : roClampFlag,
+        : (headerDepthFlag ?? roHeightClampFlag ?? roClampFlag),
     )
 
     // Trimmers (jack studs): floor plate → header bottom, tight to the RO.
