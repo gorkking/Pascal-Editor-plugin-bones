@@ -234,6 +234,28 @@ AND a gate — a checklist line without a test is a wish.
   (repro, matrix, S1 strut bearing, byte-equality, takeoff rows),
   `src/jurisdiction/profiles.test.ts` (band swap),
   `src/engines/interpenetration.test.ts` (purlin+strut SAT, reproGable).
+- **S11 Wood in concrete contact is preservative-treated and says so.**
+  A bottom plate bearing on the ground-level slab is a SOLE plate in
+  direct concrete contact — IRC R317.1(2): it emits material `pt-lumber`
+  with the cite in its label ('PT sole plate on slab (R317.1)'), books on
+  the takeoff's own `<size> PT` SKU row (never blended into the untreated
+  count), and the foundation's anchor-bolt row names it ('sole plate
+  anchorage (R403.1.6)' — no mudsill member exists on slab-on-grade).
+  ONLY the sole plate changes: studs, headers, top/cap plates bear on
+  wood and stay untreated; upper storeys (plates on framed floors) and
+  mixed CMU walls (framed zone on the PT seam sill, already booked)
+  are byte-equal to pre-B5. `frameWalls` carries the context as
+  `FrameWallsOptions.slabBearing` → `FrameHints.slabBearing`, forwarded
+  from `computeLevelUncached`'s `isGroundLevel`.
+  Origin: LOD-400 audit B5 (untreated lumber on concrete across every
+  ground-level plate; 'mudsill anchorage' row named a member that isn't
+  there). Byte-equality reset: docs/plans/B5-EXPECTED-DIFF.md (52-code
+  sweep — only plate material+label and the enumerated takeoff rows
+  moved). Gates: `src/engines/wall-framing.test.ts` (material pins,
+  PT-swap isolation), `src/engines/takeoff.test.ts` (PT SKU row +
+  conservation, anchor-row text pin),
+  `src/framing/compute.multistorey.test.ts` (storey-0 vs storey-1 split),
+  `src/engines/interpenetration.test.ts` (slab-on-grade compose).
 
 ## M — Mechanical (HVAC)
 

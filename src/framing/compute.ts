@@ -546,7 +546,13 @@ function computeLevelUncached(
         }
       }
     }
-    members.push(...frameWalls(framed, spec, engineering))
+    // Ground level = slab-on-grade in this model (the foundation owns the
+    // slab): bottom plates bear directly on concrete, so frameWalls emits
+    // them as PT sole plates (IRC R317.1(2), LOD-400 audit B5). Upper
+    // storeys bear on framed floors and keep untreated plates. Mixed CMU
+    // walls are untouched — their framed zone bears on the PT seam sill,
+    // which already books PT (cmu.ts).
+    members.push(...frameWalls(framed, spec, engineering, { slabBearing: isGroundLevel }))
     // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
     // face, jurisdiction-defaulted cladding + climate labels. The renderer's
     // dollhouse cut hides the camera-facing stacks. Probe slabs (widened to
