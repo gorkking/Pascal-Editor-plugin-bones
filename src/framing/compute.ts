@@ -778,9 +778,24 @@ function computeLevelUncached(
     // Placed sanitary items (toilet/shower/sinks…) are the demand points;
     // the engine's room-category inference is only the fallback.
     const placedFixtures = extractPlacedFixtures(nodes, levelId)
-    const plumbing = layoutPlumbing(activeWalls, activeRooms, spec, placedFixtures, services)
+    const plumbing = layoutPlumbing(
+      activeWalls,
+      activeRooms,
+      spec,
+      placedFixtures,
+      services,
+      isGroundLevel,
+    )
     members.push(...plumbing.members)
     fixtures.push(...plumbing.fixtures)
+    // Upper storeys have no foundation and no sewer: the buried tree hangs
+    // in the floor cavity and its main ends at a riser nobody models yet —
+    // never silent (skeptic S2; the soffit-duct warning pattern).
+    if (!isGroundLevel && plumbing.members.some((m) => m.sourceId.startsWith('dwv-'))) {
+      warnings.push(
+        'Upper-storey drains need a riser to the storey below — not modeled; runs shown end at the drain main',
+      )
+    }
     // WH / water-entry overrides forced into an RO → same explicit warning
     // (the pipe legs already flag, but the service POINT must too).
     const roChecks = [

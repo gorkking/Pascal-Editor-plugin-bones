@@ -461,6 +461,27 @@ describe('fallback DWV — under-floor evacuation (crawl-space feedback)', () =>
     }
   })
 
+  test('S2: upper storeys drop the foundation/sewer fiction (no sleeve, truthful main)', () => {
+    const upper = layoutPlumbing(xwalls, rooms, DEFAULT_SPEC, [], undefined, false)
+    const labels = upper.members.map((m) => m.label ?? '')
+    expect(labels.some((l) => l.includes('sewer/septic'))).toBe(false)
+    expect(labels.some((l) => l.includes('sleeve') || l.includes('P2603.4'))).toBe(false)
+    expect(labels.some((l) => l.includes('riser to storey below (not modeled)'))).toBe(true)
+    const cleanouts = upper.fixtures.filter((f) => f.kind === 'cleanout')
+    expect(cleanouts.length).toBeGreaterThan(0)
+    expect(cleanouts.some((c) => c.label?.includes('sewer'))).toBe(false)
+    // the buried tree itself is unchanged — drains still hang below the floor
+    const horizontals = upper.members.filter(
+      (m) =>
+        m.role === 'pipe-run' &&
+        m.sourceId.startsWith('dwv-') &&
+        !m.sourceId.startsWith('dwv-vent') &&
+        m.dims[0] > m.dims[1],
+    )
+    expect(horizontals.length).toBeGreaterThan(0)
+    for (const m of horizontals) expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)
+  })
+
   test('takeoff: DWV pipe lf by size + fittings estimate + cleanout count (P3005.2)', () => {
     const rows = computeTakeoff(members, fixtures)
     const find = (item: string) =>

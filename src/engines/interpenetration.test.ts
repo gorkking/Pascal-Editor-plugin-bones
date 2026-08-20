@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { Euler, Matrix4, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
+import { inches } from '../core/units'
 import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
 import { applyDeviceOverrides, layoutElectrical } from './electrical'
 import { frameFloor } from './floor-framing'
@@ -1072,22 +1073,33 @@ describe('under-floor DWV vs footings + floor platform (drainage gate)', () => {
   // Composed structure sharing the under-floor stratum: perimeter footings +
   // stemwalls + the interior thickened footing under w_mid (foundation) and
   // a framed platform (joists/girder/rims) hung under the slab surface.
-  const structure = [
-    ...buildFoundation(shell, slabs, spec400),
-    ...frameFloor(slabs, shell, spec400, 2.4),
-  ].filter((m) =>
-    ['footing', 'stemwall', 'slab-edge', 'joist', 'rim-joist', 'girder', 'blocking', 'subfloor'].includes(
-      m.role,
-    ),
-  )
+  const structureFor = (spec: typeof spec400): Member[] =>
+    [...buildFoundation(shell, slabs, spec), ...frameFloor(slabs, shell, spec, 2.4)].filter((m) =>
+      ['footing', 'stemwall', 'slab-edge', 'joist', 'rim-joist', 'girder', 'blocking', 'subfloor'].includes(
+        m.role,
+      ),
+    )
   const CONCRETE = new Set(['footing', 'stemwall', 'slab-edge'])
+  // Deep frost foundation (footingDepth 60"): the stemwall reaches WELL
+  // below the drain depth — the skeptic's S1 repro class. Wet rooms whose
+  // wet wall is the EXTERIOR south wall put every junction against it.
+  const specFrost = { ...spec400, footingDepth: inches(60) }
+  const wetRoomsExterior: RoomSlice[] = wetRooms.map((r) =>
+    r.id === 'r_laundry' ? r : { ...r, boundaryWallIds: ['w_s'] },
+  )
 
-  function drainClashes(plumbing: Member[]): string[] {
+  function drainClashes(plumbing: Member[], structure: Member[]): string[] {
+    // The DRAIN tree below the floor — including the stack (role
+    // 'vent-stack', S1b: it used to run bare through frost stemwalls).
+    // Sleeve-labeled members are the DESIGNED concrete crossings
+    // (P2603.4); the label is applied per-LEG by the engine, so this
+    // exemption never blankets an interior run (S3a).
     const drains = plumbing.filter(
       (m) =>
-        m.role === 'pipe-run' &&
-        m.sourceId.startsWith('dwv-') &&
-        !m.sourceId.startsWith('dwv-vent') &&
+        ((m.role === 'pipe-run' &&
+          m.sourceId.startsWith('dwv-') &&
+          !m.sourceId.startsWith('dwv-vent')) ||
+          (m.system === 'plumbing' && m.role === 'vent-stack')) &&
         !(m.label ?? '').includes('sleeve'),
     )
     expect(drains.length).toBeGreaterThan(0) // never vacuous
@@ -1109,20 +1121,36 @@ describe('under-floor DWV vs footings + floor platform (drainage gate)', () => {
     return bad
   }
 
+  const placedSet: PlacedFixtureSlice[] = [
+    { id: 'wc', kind: 'toilet', plan: [6.5, 0.6], yaw: 0, hot: false, dfu: 3, drainIn: 3 },
+    { id: 'shw', kind: 'shower', plan: [9.2, 0.7], yaw: 0, hot: true, dfu: 2, drainIn: 2 },
+    { id: 'lav', kind: 'lavatory', plan: [7.6, 0.6], yaw: 0, hot: true, dfu: 1, drainIn: 1.25 },
+    { id: 'ks', kind: 'kitchen-sink', plan: [1.5, 0.6], yaw: 0, hot: true, dfu: 2, drainIn: 1.5 },
+  ]
+
   test('fallback tree (room categories) composes SAT-clean', () => {
     const { members } = layoutPlumbing(shell, wetRooms, spec400)
-    expect(drainClashes(members)).toEqual([])
+    expect(drainClashes(members, structureFor(spec400))).toEqual([])
   })
 
   test('placed-fixture tree composes SAT-clean', () => {
-    const placed: PlacedFixtureSlice[] = [
-      { id: 'wc', kind: 'toilet', plan: [6.5, 0.6], yaw: 0, hot: false, dfu: 3, drainIn: 3 },
-      { id: 'shw', kind: 'shower', plan: [9.2, 0.7], yaw: 0, hot: true, dfu: 2, drainIn: 2 },
-      { id: 'lav', kind: 'lavatory', plan: [7.6, 0.6], yaw: 0, hot: true, dfu: 1, drainIn: 1.25 },
-      { id: 'ks', kind: 'kitchen-sink', plan: [1.5, 0.6], yaw: 0, hot: true, dfu: 2, drainIn: 1.5 },
-    ]
-    const { members } = layoutPlumbing(shell, wetRooms, spec400, placed)
-    expect(drainClashes(members)).toEqual([])
+    const { members } = layoutPlumbing(shell, wetRooms, spec400, placedSet)
+    expect(drainClashes(members, structureFor(spec400))).toEqual([])
+  })
+
+  test('S1: FROST spec + exterior wet wall — fallback junctions stay inboard of the stemwall', () => {
+    const { members } = layoutPlumbing(shell, wetRoomsExterior, specFrost)
+    expect(drainClashes(members, structureFor(specFrost))).toEqual([])
+  })
+
+  test('S1b: FROST spec + placed fixtures on the exterior wall — arms/branches/stack all clear', () => {
+    const { members } = layoutPlumbing(shell, wetRoomsExterior, specFrost, placedSet)
+    expect(drainClashes(members, structureFor(specFrost))).toEqual([])
+    // and the crossing that remains (terminal exit leg through the frost
+    // stemwall) is the LABELED sleeve, scoped to that leg alone
+    const mains = members.filter((m) => m.sourceId === 'dwv-main')
+    const sleeved = mains.filter((m) => m.label?.includes('sleeved through foundation (P2603.4)'))
+    expect(sleeved.length).toBeLessThanOrEqual(1)
   })
 
   test('the concrete crossings that DO exist are labeled sleeves (P2603.4), never silent', () => {

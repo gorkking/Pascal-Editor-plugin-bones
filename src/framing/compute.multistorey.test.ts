@@ -764,3 +764,50 @@ describe('LOD-400 B3: subfloor booked == built', () => {
     expect(row?.quantity).toBe(Math.ceil(deckArea / (1.2192 * 2.4384)))
   })
 })
+
+describe('upper-storey plumbing truth (skeptic S2, feat/underfloor-dwv)', () => {
+  const plumbedBones = (id: string, levelId: string) =>
+    FramingNode.parse({
+      id,
+      parentId: levelId,
+      jurisdiction: 'AUTO',
+      showPlumbing: true,
+    }) as FramingNode
+  const zone = (id: string, levelId: string, wallId: string) => ({
+    id,
+    type: 'zone',
+    parentId: levelId,
+    name: 'Bathroom',
+    polygon: [
+      [0, 0],
+      [4, 0],
+      [4, 5],
+      [0, 5],
+    ],
+    boundaryWallIds: [wallId],
+  })
+
+  test('a first-floor bathroom warns about the missing riser; ground floor stays sewer-labeled', () => {
+    const nodes = twoStoreyScene()
+    nodes.z1bath = zone('z1bath', 'lvl1', 'w1a')
+    const upper = computeLevel(nodes, plumbedBones('bonesframing_up', 'lvl1'))
+    expect(upper.warnings.some((w) => w.includes('riser to the storey below'))).toBe(true)
+    const upperMain = upper.members.filter((m) => m.sourceId === 'dwv-main')
+    expect(upperMain.length).toBeGreaterThan(0)
+    for (const m of upperMain) {
+      expect(m.label).not.toContain('sewer')
+      expect(m.label).toContain('riser to storey below (not modeled)')
+    }
+    expect(upper.members.some((m) => m.label?.includes('P2603.4'))).toBe(false)
+
+    const grounded = twoStoreyScene()
+    grounded.z0bath = zone('z0bath', 'lvl0', 'w0a')
+    const ground = computeLevel(grounded, plumbedBones('bonesframing_gnd', 'lvl0'))
+    expect(ground.warnings.some((w) => w.includes('riser to the storey below'))).toBe(false)
+    expect(
+      ground.members.some(
+        (m) => m.sourceId === 'dwv-main' && m.label?.includes('sewer/septic'),
+      ),
+    ).toBe(true)
+  })
+})

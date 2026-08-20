@@ -268,10 +268,17 @@ describe('P5 gate — bathroom + far kitchen sink (toilet, lav, shower, sink)', 
     expect(members.some((m) => m.sourceId.startsWith('dwv-vent-'))).toBe(true)
   })
 
-  test('one stack through the roof + cleanouts at stack base and sewer exit', () => {
+  test('one stack through the roof + a SLEEVED base drop + cleanouts at base and sewer exit', () => {
     const stack = members.filter((m) => m.role === 'vent-stack')
     expect(stack).toHaveLength(1)
-    expect((stack[0] as Member).dims[1]).toBeGreaterThan(2.5 + 0.6) // roof + burial
+    // The stack stops AT the floor line — a frost stemwall owns the wall
+    // line below grade (S1b), so the buried connection is the separate
+    // sleeved drop at the inboard junction.
+    expect((stack[0] as Member).dims[1]).toBeCloseTo(2.5 + 0.6, 6) // through roof
+    const baseDrop = members.find((m) => m.sourceId === 'dwv-stack-base')
+    expect(baseDrop).toBeDefined()
+    expect(baseDrop?.label).toContain('sleeved')
+    expect(baseDrop?.label).toContain('P2603.4')
     const cleanouts = fixtures.filter((f) => f.kind === 'cleanout')
     expect(cleanouts).toHaveLength(2)
     expect(cleanouts.some((c) => c.label?.includes('sewer'))).toBe(true)
