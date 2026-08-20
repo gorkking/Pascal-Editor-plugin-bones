@@ -6,9 +6,12 @@ import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuWall, cmuWalls, mixedCmuWall } fro
 import { applyDeviceOverrides, layoutElectrical } from './electrical'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
+import { layoutPlumbing } from './plumbing'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
 import { frameWall, frameWalls } from './wall-framing'
 import { layoutWallLayers } from './wall-layers'
+import type { PlacedFixtureSlice } from '../core/wall-model'
+import type { RoomSlice } from '../core/types'
 
 /**
  * Repo-wide interpenetration gate (round-10): no two STRUCTURAL members of
@@ -979,5 +982,154 @@ describe('ship-gate follow-up: blocking bears on joists, never on rim or air', (
       const members = frameFloor([slab(rect(4, 6), { holes: [hole] })], [], spec400)
       expect(violations(members).filter((s) => s.includes('blocking'))).toEqual([])
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Under-floor DWV vs footings + floor platform (feat/underfloor-dwv gate).
+// Drainage members hang below the floor plane, sharing that stratum with the
+// foundation and (on framed floors) the joist platform. MEP stays out of the
+// STRUCTURAL matrix above — in-wall supply/vent pipes legitimately penetrate
+// framing — but the buried DRAIN tree must never share volume with concrete
+// or the platform:
+//  - horizontal drains pass UNDER footings and BELOW joists/girders;
+//  - the ONLY concrete crossings are the labeled sleeves (P2603.4), exempted
+//    by their label — never silently;
+//  - vertical through-floor drops are checked against CONCRETE only: a drop
+//    crosses the platform inside a joist bay in practice — bay coordination
+//    with the joist layout is future routing work (B20 territory).
+// ---------------------------------------------------------------------------
+
+describe('under-floor DWV vs footings + floor platform (drainage gate)', () => {
+  const shellWall = (
+    id: string,
+    start: [number, number],
+    end: [number, number],
+    exterior = true,
+  ): WallSlice => wall({ id, start, end, exterior })
+  const shell: WallSlice[] = [
+    shellWall('w_s', [0, 0], [10, 0]),
+    shellWall('w_e', [10, 0], [10, 8]),
+    shellWall('w_n', [10, 8], [0, 8]),
+    shellWall('w_w', [0, 8], [0, 0]),
+    shellWall('w_mid', [5, 0], [5, 8], false),
+  ]
+  const slabs: SlabSlice[] = [
+    {
+      id: 'slab_gate',
+      polygon: [
+        [0, 0],
+        [10, 0],
+        [10, 8],
+        [0, 8],
+      ],
+      holes: [],
+      elevation: 0.05, // host defaults (extractSlabs)
+      thickness: 0.05,
+    },
+  ]
+  const wetRooms: RoomSlice[] = [
+    {
+      id: 'r_bath',
+      name: 'Bathroom',
+      category: 'bathroom',
+      polygon: [
+        [5, 0],
+        [10, 0],
+        [10, 4],
+        [5, 4],
+      ],
+      boundaryWallIds: ['w_mid'],
+      ceilingHeight: 2.5,
+    },
+    {
+      id: 'r_kitchen',
+      name: 'Kitchen',
+      category: 'kitchen',
+      polygon: [
+        [0, 0],
+        [5, 0],
+        [5, 4],
+        [0, 4],
+      ],
+      boundaryWallIds: ['w_mid'],
+      ceilingHeight: 2.5,
+    },
+    {
+      id: 'r_laundry',
+      name: 'Laundry',
+      category: 'laundry',
+      polygon: [
+        [0, 4],
+        [5, 4],
+        [5, 8],
+        [0, 8],
+      ],
+      boundaryWallIds: [],
+      ceilingHeight: 2.5,
+    },
+  ]
+  // Composed structure sharing the under-floor stratum: perimeter footings +
+  // stemwalls + the interior thickened footing under w_mid (foundation) and
+  // a framed platform (joists/girder/rims) hung under the slab surface.
+  const structure = [
+    ...buildFoundation(shell, slabs, spec400),
+    ...frameFloor(slabs, shell, spec400, 2.4),
+  ].filter((m) =>
+    ['footing', 'stemwall', 'slab-edge', 'joist', 'rim-joist', 'girder', 'blocking', 'subfloor'].includes(
+      m.role,
+    ),
+  )
+  const CONCRETE = new Set(['footing', 'stemwall', 'slab-edge'])
+
+  function drainClashes(plumbing: Member[]): string[] {
+    const drains = plumbing.filter(
+      (m) =>
+        m.role === 'pipe-run' &&
+        m.sourceId.startsWith('dwv-') &&
+        !m.sourceId.startsWith('dwv-vent') &&
+        !(m.label ?? '').includes('sleeve'),
+    )
+    expect(drains.length).toBeGreaterThan(0) // never vacuous
+    const bad: string[] = []
+    for (const d of drains) {
+      const vertical = d.dims[1] > d.dims[0]
+      const dObb = toObb(d)
+      for (const s of structure) {
+        if (vertical && !CONCRETE.has(s.role)) continue
+        const sObb = toObb(s)
+        if (!aabbTouch(dObb, sObb)) continue
+        if (!obbOverlap(dObb, sObb)) continue
+        bad.push(
+          `${d.label ?? d.sourceId} @${d.position.map((v) => v.toFixed(2)).join(',')}` +
+            ` × ${s.role} @${s.position.map((v) => v.toFixed(2)).join(',')}`,
+        )
+      }
+    }
+    return bad
+  }
+
+  test('fallback tree (room categories) composes SAT-clean', () => {
+    const { members } = layoutPlumbing(shell, wetRooms, spec400)
+    expect(drainClashes(members)).toEqual([])
+  })
+
+  test('placed-fixture tree composes SAT-clean', () => {
+    const placed: PlacedFixtureSlice[] = [
+      { id: 'wc', kind: 'toilet', plan: [6.5, 0.6], yaw: 0, hot: false, dfu: 3, drainIn: 3 },
+      { id: 'shw', kind: 'shower', plan: [9.2, 0.7], yaw: 0, hot: true, dfu: 2, drainIn: 2 },
+      { id: 'lav', kind: 'lavatory', plan: [7.6, 0.6], yaw: 0, hot: true, dfu: 1, drainIn: 1.25 },
+      { id: 'ks', kind: 'kitchen-sink', plan: [1.5, 0.6], yaw: 0, hot: true, dfu: 2, drainIn: 1.5 },
+    ]
+    const { members } = layoutPlumbing(shell, wetRooms, spec400, placed)
+    expect(drainClashes(members)).toEqual([])
+  })
+
+  test('the concrete crossings that DO exist are labeled sleeves (P2603.4), never silent', () => {
+    const { members } = layoutPlumbing(shell, wetRooms, spec400)
+    const stackBase = members.find((m) => m.sourceId === 'dwv-stack-base')
+    expect(stackBase).toBeDefined()
+    expect(stackBase?.label).toContain('sleeved')
+    expect(stackBase?.label).toContain('P2603.4')
   })
 })
