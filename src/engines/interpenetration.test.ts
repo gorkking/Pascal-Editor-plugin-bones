@@ -596,6 +596,9 @@ describe('interpenetration gate — structural members never share volume', () =
       ['gambrel', { roofType: 'gambrel' }],
       ['gambrel60', { roofType: 'gambrel', pitch: (60 * Math.PI) / 180 }],
       ['bigGable', { width: 16, depth: 12 }],
+      // the B2 audit repro: purlin row + struts compose SAT-clean against
+      // rafters, ceiling joists, collar ties and the dropped end rafters
+      ['reproGable', { width: 10, depth: 12 }],
       ['hip60', { roofType: 'hip', pitch: (60 * Math.PI) / 180 }],
       ['gable10', { pitch: (10 * Math.PI) / 180 }],
     ]

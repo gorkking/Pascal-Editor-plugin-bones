@@ -280,6 +280,7 @@ function fasciaPair(
   along: number,
   cross: number,
   y: number,
+  note = '',
 ) {
   const [fT, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
   const yaw = alongXAxis ? 0 : -Math.PI / 2
@@ -297,7 +298,7 @@ function fasciaPair(
     0,
     length,
     'lumber',
-    `Sub-fascia ${FASCIA_SIZE}`,
+    `Sub-fascia ${FASCIA_SIZE}${note}`,
   )
   const [nT, nD] = LUMBER_CROSS_SECTIONS[FINISH_FASCIA_SIZE]
   const out = Math.sign(cross) * (fT / 2 + nT / 2)
@@ -310,7 +311,7 @@ function fasciaPair(
     0,
     length,
     'lumber',
-    'Fascia 1x8 (finish, over sub-fascia)',
+    `Fascia 1x8 (finish, over sub-fascia)${note}`,
   )
 }
 
@@ -400,6 +401,16 @@ function slopeRafterFlag(
     return rafterOverSpanFlag(spec, run, allowable, what)
   }
   return onePieceFlag(what, cutLength)
+}
+
+/** Label suffix for CONTINUOUSLY-SUPPORTED members that exceed one-piece
+ * stock (ridge boards between rafter pairs, rims on joist ends, barges on
+ * outlookers, purlins on struts): their field splice lands over real
+ * support, so the takeoff's '20 ft stock (field splice)' row books with the
+ * bearing named instead of silently. Spanning members use the FLAG instead. */
+function splicedNote(spec: FramingSpec, length: number, over: string): string {
+  if (spec.detail === '200') return ''
+  return length > MAX_ONE_PIECE + EPS ? ` — spliced over ${over}` : ''
 }
 
 /** Ceiling-joist span flag (R802.5.1) — the joist is emitted ONE PIECE with
@@ -571,7 +582,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
           theta,
           slopeLen,
           'lumber',
-          `Barge rafter ${spec.rafterSize} (rake)`,
+          `Barge rafter ${spec.rafterSize} (rake)${splicedNote(spec, slopeLen, 'outlooker bearings')}`,
         )
       }
       // outlookers ladder up both slopes at 4' o.c.
@@ -609,7 +620,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     const fasciaLen = roof.width + 2 * roof.overhang
     const fasciaY = eaveY - roof.overhang * Math.sin(theta) + fD / 2
     for (const side of [1, -1] as const) {
-      fasciaPair(emit, true, fasciaLen, 0, side * (run + roof.overhang * cosT), fasciaY)
+      fasciaPair(emit, true, fasciaLen, 0, side * (run + roof.overhang * cosT), fasciaY, splicedNote(spec, fasciaLen, 'rafter tails (scarf joints)'))
     }
   }
 
@@ -626,7 +637,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     0,
     ridgeLen,
     'lumber',
-    `Ridge ${ridgeSize}${spec.detail === '400' ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°` : ''}`,
+    `Ridge ${ridgeSize}${spec.detail === '400' ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°` : ''}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`,
   )
 
   // ---- ceiling joists across the depth at the eave line ----
@@ -695,7 +706,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
           0,
           purlinLen,
           'lumber',
-          `Purlin ${spec.rafterSize} @ mid-span under rafters (R802.5.1) — halves the ${fmtM(run)} projection`,
+          `Purlin ${spec.rafterSize} @ mid-span under rafters (R802.5.1) — halves the ${fmtM(run)} projection${splicedNote(spec, purlinLen, 'struts')}`,
         )
         for (const sx of stations) {
           emit(
@@ -740,6 +751,9 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
         collarLen,
         'lumber',
         'Collar tie 2x4',
+        undefined,
+        // a TENSION member cannot field-splice — over-stock ties flag
+        spec.detail === '200' ? undefined : onePieceFlag('Collar tie', collarLen),
       )
     })
   }
@@ -812,7 +826,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         spec.detail === '400'
           ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°`
           : ''
-      }`,
+      }${splicedNote(spec, ridgeHalf * 2, 'rafter pairs (ridge board)')}`,
     )
   }
 
@@ -955,6 +969,10 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         len,
         'lumber',
         label,
+        undefined,
+        // a near-full-length jack is the same span class as a common —
+        // checked on its OWN bearing run (short corner jacks stay quiet)
+        slopeRafterFlag(spec, bearingRun, len, 'Jack rafter'),
       )
     }
     for (const se of [1, -1] as const) {
@@ -1033,6 +1051,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
             len,
             'lumber',
             jackLabel(jackRun),
+            undefined,
+            slopeRafterFlag(spec, bearingRun, len, 'Jack rafter'),
           )
           if (spec.hurricaneTies) {
             tieAt(
@@ -1055,8 +1075,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
     const halfW = roof.width / 2 + tipOut
     const halfD = roof.depth / 2 + tipOut
     for (const side of [1, -1] as const) {
-      fasciaPair(emit, true, 2 * halfW, 0, side * halfD, fasciaY)
-      fasciaPair(emit, false, 2 * halfD, 0, side * halfW, fasciaY)
+      fasciaPair(emit, true, 2 * halfW, 0, side * halfD, fasciaY, splicedNote(spec, 2 * halfW, 'rafter tails (scarf joints)'))
+      fasciaPair(emit, false, 2 * halfD, 0, side * halfW, fasciaY, splicedNote(spec, 2 * halfD, 'rafter tails (scarf joints)'))
     }
   }
 }
@@ -1104,13 +1124,14 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
   }
   // Long-axis rims run full; short-axis rims BUTT between them.
   const longIsX = halfW >= halfD
+  const rimLabel = (len: number) => `Rim / fascia (flat roof)${splicedNote(spec, len, 'joist ends')}`
   for (const side of [1, -1] as const) {
     if (longIsX) {
-      emit('rim-joist', spec.rafterSize, [2 * halfW, rd, t], [0, centerY, side * halfD], 0, 0, 2 * halfW, 'lumber', 'Rim / fascia (flat roof)')
-      emit('rim-joist', spec.rafterSize, [2 * halfD - 2 * t, rd, t], [side * halfW, centerY, 0], -Math.PI / 2, 0, 2 * halfD - 2 * t, 'lumber', 'Rim / fascia (flat roof)')
+      emit('rim-joist', spec.rafterSize, [2 * halfW, rd, t], [0, centerY, side * halfD], 0, 0, 2 * halfW, 'lumber', rimLabel(2 * halfW))
+      emit('rim-joist', spec.rafterSize, [2 * halfD - 2 * t, rd, t], [side * halfW, centerY, 0], -Math.PI / 2, 0, 2 * halfD - 2 * t, 'lumber', rimLabel(2 * halfD - 2 * t))
     } else {
-      emit('rim-joist', spec.rafterSize, [2 * halfW - 2 * t, rd, t], [0, centerY, side * halfD], 0, 0, 2 * halfW - 2 * t, 'lumber', 'Rim / fascia (flat roof)')
-      emit('rim-joist', spec.rafterSize, [2 * halfD, rd, t], [side * halfW, centerY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', 'Rim / fascia (flat roof)')
+      emit('rim-joist', spec.rafterSize, [2 * halfW - 2 * t, rd, t], [0, centerY, side * halfD], 0, 0, 2 * halfW - 2 * t, 'lumber', rimLabel(2 * halfW - 2 * t))
+      emit('rim-joist', spec.rafterSize, [2 * halfD, rd, t], [side * halfW, centerY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', rimLabel(2 * halfD))
     }
   }
 }
@@ -1209,7 +1230,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   const ridgeSize = ridgeSizeFor(spec.rafterSize)
   const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
   const ridgeLen = roof.width + 2 * roof.overhang
-  emit('ridge', ridgeSize, [ridgeLen, rdd, rt], [0, ridgeY - rdd / 2, 0], 0, 0, ridgeLen, 'lumber', `Ridge ${ridgeSize}`)
+  emit('ridge', ridgeSize, [ridgeLen, rdd, rt], [0, ridgeY - rdd / 2, 0], 0, 0, ridgeLen, 'lumber', `Ridge ${ridgeSize}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`)
   for (const side of [1, -1] as const) {
     emit(
       'ridge',
@@ -1220,7 +1241,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
       0,
       roof.width,
       'lumber',
-      `Purlin ${ridgeSize} @ gambrel break`,
+      `Purlin ${ridgeSize} @ gambrel break${splicedNote(spec, roof.width, 'rafter joints — verify strut support (R802.5.1)')}`,
     )
   }
 
@@ -1242,7 +1263,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         if (i % 2 !== 0) return
         // face-nailed beside the rafter, toward the roof center (round-14)
         const cx = x + (x >= 0 ? -1 : 1) * (halfT + ctT / 2)
-        emit('collar-tie', '2x4', [collarLen, ctD, ctT], [cx, collarY, 0], -Math.PI / 2, 0, collarLen, 'lumber', 'Collar tie 2x4')
+        emit('collar-tie', '2x4', [collarLen, ctD, ctT], [cx, collarY, 0], -Math.PI / 2, 0, collarLen, 'lumber', 'Collar tie 2x4', undefined, spec.detail === '200' ? undefined : onePieceFlag('Collar tie', collarLen))
       })
     }
   }
@@ -1252,7 +1273,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
     const [, fD] = LUMBER_CROSS_SECTIONS[FASCIA_SIZE]
     const fasciaY = eaveY - roof.overhang * Math.sin(theta) + fD / 2
     for (const side of [1, -1] as const) {
-      fasciaPair(emit, true, ridgeLen, 0, side * (run + roof.overhang * cosT), fasciaY)
+      fasciaPair(emit, true, ridgeLen, 0, side * (run + roof.overhang * cosT), fasciaY, splicedNote(spec, ridgeLen, 'rafter tails (scarf joints)'))
     }
   }
 }
@@ -1421,8 +1442,8 @@ function frameMansard(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
     const halfW = roof.width / 2 + tipOut
     const halfD = roof.depth / 2 + tipOut
     for (const side of [1, -1] as const) {
-      fasciaPair(emit, true, 2 * halfW, 0, side * halfD, fasciaY)
-      fasciaPair(emit, false, 2 * halfD, 0, side * halfW, fasciaY)
+      fasciaPair(emit, true, 2 * halfW, 0, side * halfD, fasciaY, splicedNote(spec, 2 * halfW, 'rafter tails (scarf joints)'))
+      fasciaPair(emit, false, 2 * halfD, 0, side * halfW, fasciaY, splicedNote(spec, 2 * halfD, 'rafter tails (scarf joints)'))
     }
   }
 }
@@ -1478,8 +1499,8 @@ function frameDutch(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     const halfW = roof.width / 2 + tipOut
     const halfD = roof.depth / 2 + tipOut
     for (const side of [1, -1] as const) {
-      fasciaPair(emit, true, 2 * halfW, 0, side * halfD, fasciaY)
-      fasciaPair(emit, false, 2 * halfD, 0, side * halfW, fasciaY)
+      fasciaPair(emit, true, 2 * halfW, 0, side * halfD, fasciaY, splicedNote(spec, 2 * halfW, 'rafter tails (scarf joints)'))
+      fasciaPair(emit, false, 2 * halfD, 0, side * halfW, fasciaY, splicedNote(spec, 2 * halfD, 'rafter tails (scarf joints)'))
     }
   }
 }
@@ -1610,6 +1631,8 @@ function emitValley(valley: ValleyLine, spec: FramingSpec, members: Member[]) {
       jackLen,
       'lumber',
       `Valley jack ${spec.rafterSize}${spec.detail === '400' ? ' — cheek 45° at the valley' : ''}`,
+      undefined,
+      slopeRafterFlag(spec, jackRun, jackLen, 'Valley jack'),
     )
   }
 }
