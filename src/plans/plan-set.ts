@@ -251,6 +251,10 @@ type SetTransform = { scale: number; ratio: number; X: (x: number) => number; Z:
 /** 96dpi: px per meter at ratio 1:n = 96/0.0254/n. */
 const RATIOS = [20, 25, 50, 75, 100, 125, 150, 200, 250, 500]
 
+/** DWV flow-arrow glyph fill — a darker slate so the downstream arrows
+ * read ON the PLUMBING_COLORS.dwv runs without a new legend hue. */
+const DWV_FLOW_ARROW = '#41637a'
+
 function setTransform(members: Member[], fixtures: Fixture[]): SetTransform | null {
   const b = planBounds(members, fixtures)
   if (!b) return null
@@ -462,6 +466,26 @@ function planSheet(
     shapes.push(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
+    // DWV flow arrows (MEP sheet): under-floor drains print their FALL
+    // direction — member +X points UPHILL (the leg convention), so
+    // downstream is −X projected to plan. Only sloped drain runs long
+    // enough to carry a legible glyph get one; the legend's standing
+    // slope note names the rates (P3005.3).
+    if (
+      def.key === 'mep' &&
+      m.system === 'plumbing' &&
+      m.role === 'pipe-run' &&
+      m.sourceId.startsWith('dwv-') &&
+      !m.sourceId.startsWith('dwv-vent') &&
+      Math.abs(m.rotation[2]) > 1e-6 &&
+      planFrac > 0.5 &&
+      w > 18 // the 8 px glyph needs paper to read on
+    ) {
+      const ang = deg(Math.atan2(-az, -ax))
+      shapes.push(
+        `<path d="M-3.5 -3 L4.5 0 L-3.5 3 Z" fill="${DWV_FLOW_ARROW}" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${ang.toFixed(2)})"/>`,
+      )
+    }
   }
   // Device tags: dedupe identical (kind, position) fixtures and nudge
   // colliding bubbles apart in a small spiral (quality A6/C3: six tags
@@ -623,11 +647,12 @@ function planSheet(
       )
       row++
     }
-    // Horizontal drainage falls — the drafter's standing note (P3005.3).
+    // Horizontal drainage falls — the drafter's standing note (P3005.3),
+    // paired with the flow arrows printed on the under-floor drain runs.
     if (mine.some((m) => m.system === 'plumbing')) {
       const y = MARGIN + 14 + row * 14
       legendLines.push(
-        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">DWV SLOPE 1/4 IN/FT (P3005.3)</text>`,
+        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">DWV SLOPE 1/4 IN/FT (1/8 IN/FT 3 IN+) — ARROWS POINT TO SEWER (P3005.3)</text>`,
       )
     }
   }

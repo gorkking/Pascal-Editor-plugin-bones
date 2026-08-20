@@ -191,7 +191,7 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     expect(svg).toContain('supply — cold water')
     expect(svg).toContain('supply — hot water')
     expect(svg).toContain('DWV drain / vent')
-    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)')
+    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (1/8 IN/FT 3 IN+) — ARROWS POINT TO SEWER (P3005.3)')
     // the meter tags with M and the tag is named in the legend
     expect(svg).toContain('>M</text>')
     expect(svg).toContain('water meter')
@@ -202,7 +202,40 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     const svg = mep?.svg ?? ''
     expect(svg).toContain('supply / DWV pipe')
     expect(svg).not.toContain('supply — cold water')
-    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)') // plumbing present → note prints
+    // plumbing present → the standing slope note prints
+    expect(svg).toContain('ARROWS POINT TO SEWER (P3005.3)')
+  })
+
+  test('under-floor drains print a downstream flow arrow; level supply does not', () => {
+    // A buried 3" branch falling at 1/8"/ft toward −X: member +X points
+    // UPHILL (leg convention), so the arrow must point downstream (−X).
+    const drain = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'pvc',
+      dims: [4, 0.0762, 0.0762],
+      position: [4, -0.5, 2],
+      rotation: [0, 0, Math.atan(1 / 96)],
+      sourceId: 'dwv-branch-r_bath',
+    })
+    const supply = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'copper',
+      dims: [4, 0.02, 0.02],
+      position: [4, 0.28, 3],
+      rotation: [0, 0, 0],
+      sourceId: 'cold-lav',
+    })
+    const mep = buildPlanSet([drain, supply], [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    const arrows = svg.match(/fill="#41637a"/g) ?? []
+    expect(arrows).toHaveLength(1) // one sloped drain → one arrow, none on supply
+    // pointing −X on paper: the glyph rotates 180° (±)
+    const rot = svg.match(/#41637a" transform="translate\([^)]*\) rotate\((-?[\d.]+)\)/)
+    expect(Math.abs(Math.abs(Number(rot?.[1])) - 180)).toBeLessThan(1.5)
   })
 })
 
