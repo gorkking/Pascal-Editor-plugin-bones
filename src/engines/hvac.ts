@@ -1058,11 +1058,12 @@ export function layoutHvac(
           },
         ]
         if (row.wall && ahAnchor) {
+          const penWall = row.wall
           // Penetration: the unit's anchor slid clear of every RO whose
           // vertical span crosses the pipe band (a verbatim heat-pump node
           // can front a window the ROW never slid for).
           const penU = clearOfOpenings(
-            row.wall,
+            penWall,
             slot.u,
             LINESET_Y - LINESET_PAIR_OFFSET - 0.05,
             LINESET_Y + LINESET_PAIR_OFFSET + 0.05,
@@ -1100,6 +1101,44 @@ export function layoutHvac(
             pipes.some((p) =>
               segmentCrossesRo(walls, [a[0], p.y, a[1]], [b[0], p.y, b[1]]),
             )
+          // A riser's ROLL AXIS comes from the REF ROUTE itself, never from
+          // emission order: a riser and its detour crossing share a wall by
+          // construction (pipeWallLeg emits them as a near-riser / crossing
+          // / far-riser triplet), so the horizontal at the riser's DETOUR
+          // elevation touching its plan point carries the wall's yaw.
+          // Reading the PREVIOUS horizontal went stale at corners — an RO
+          // edge hugging a wall junction drops the <1.5 cm approach leg on
+          // the turned wall, the riser LEADS that wall, and the stale axis
+          // rolled the pair ALONG it: both risers back on the centerline,
+          // one through the other pipe's crossing (skeptic round 2, 9.5 mm
+          // penetration on the corner-hug repro).
+          const isVertical = (m: Member): boolean =>
+            m.rotation[1] === 0 && m.dims[1] === m.length
+          const rollYawOf = (r: Member): number => {
+            const top = r.position[1] + r.dims[1] / 2
+            const bot = r.position[1] - r.dims[1] / 2
+            const detourEnd =
+              Math.abs(top - LINESET_Y) >= Math.abs(bot - LINESET_Y) ? top : bot
+            for (const h of ref) {
+              if (h === r || isVertical(h)) continue
+              if (Math.abs(h.position[1] - detourEnd) > 1e-6) continue
+              const hx = (h.dims[0] / 2) * Math.cos(h.rotation[1])
+              const hz = -(h.dims[0] / 2) * Math.sin(h.rotation[1])
+              const touches =
+                Math.hypot(
+                  h.position[0] - hx - r.position[0],
+                  h.position[2] - hz - r.position[2],
+                ) < 1e-6 ||
+                Math.hypot(
+                  h.position[0] + hx - r.position[0],
+                  h.position[2] + hz - r.position[2],
+                ) < 1e-6
+              if (touches) return h.rotation[1]
+            }
+            // no crossing found (cannot happen for pipeWallLeg risers) —
+            // fall back to the penetration wall's axis
+            return Math.atan2(-penWall.dir[1], penWall.dir[0])
+          }
           for (const pipe of pipes) {
             const shift = pipe.y - LINESET_Y
             for (const [a, b] of [
@@ -1124,19 +1163,17 @@ export function layoutHvac(
             // a lower pipe's riser must cross the upper pipe's plane on the
             // way up, so coaxial risers would leave the liquid line inside
             // the suction line (the skeptic's coincident-stack class) —
-            // each riser steps ±LINESET_PAIR_OFFSET PERPENDICULAR to the
-            // arriving leg's axis instead (side-by-side across the wall,
+            // each riser steps ±LINESET_PAIR_OFFSET PERPENDICULAR to its
+            // own wall's axis (rollYawOf — side-by-side across the wall,
             // exactly like field-bent soft copper).
-            let lastYaw = Math.atan2(-row.wall.dir[1], row.wall.dir[0])
             for (const m of ref) {
-              const vertical = m.rotation[1] === 0 && m.dims[1] === m.length
+              const vertical = isVertical(m)
               let px = m.position[0]
               let pz = m.position[2]
               if (vertical) {
-                px += shift * Math.sin(lastYaw)
-                pz += shift * Math.cos(lastYaw)
-              } else {
-                lastYaw = m.rotation[1]
+                const rollYaw = rollYawOf(m)
+                px += shift * Math.sin(rollYaw)
+                pz += shift * Math.cos(rollYaw)
               }
               runMembers.push({
                 ...m,

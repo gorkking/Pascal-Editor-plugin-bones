@@ -369,6 +369,50 @@ describe('line-set pair parallelism — non-vacuous over E1 detours', () => {
       expect(pairHits(suction, liquid)).toBe(0)
     }
   })
+
+  test('corner-hug RO: a riser LEADING a turned wall still rolls ACROSS that wall (stale-axis class)', () => {
+    // Skeptic round 2: an RO edge within ~6 cm of a wall junction drops the
+    // <1.5 cm approach leg on the turned wall, so the RISER is the first
+    // member there — the emission-order axis pointed along the PREVIOUS
+    // (orthogonal) wall, the roll ran ALONG the new wall, both risers sat
+    // on the centerline and one pierced the other pipe's detour crossing
+    // (1 SAT hit, 9.5 mm penetration at 70638b2).
+    const door: OpeningSlice = {
+      id: 'd_w',
+      kind: 'door',
+      u: 0.48,
+      width: 0.85,
+      height: 2.03,
+      sillHeight: 0,
+      roughWidth: 0.9,
+      roughHeight: 2.1,
+    }
+    const walls = [
+      wall('w_south', [0, 0], [26, 0], true),
+      wall('w_north', [0, 10], [26, 10], true),
+      wall('w_west', [0, 0], [0, 10], true, [door]),
+      wall('w_east', [26, 0], [26, 10], true),
+    ]
+    const rooms = [
+      room('r_laundry', 'Laundry', 'laundry', [[0, 3], [2, 3], [2, 6], [0, 6]]),
+      room('r_living', 'Living', 'other', [[2, 0], [26, 0], [26, 10], [2, 10]]),
+      room('r_bed', 'Bedroom', 'bedroom', [[0, 6], [2, 6], [2, 10], [0, 10]]),
+    ]
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [8, 0, -0.7] } })
+    const { suction, liquid } = expectTwinned(out.members, 1)
+    // the route turns the corner and genuinely detours on the WEST wall:
+    // its risers live near x = 0 …
+    const vertical = (m: Member) => m.rotation[1] === 0 && m.dims[1] === m.length
+    const westRisers = [...suction, ...liquid].filter(
+      (m) => vertical(m) && Math.abs(m.position[0]) < 0.05,
+    )
+    expect(westRisers.length).toBeGreaterThanOrEqual(2)
+    // … rolled ACROSS the wall (x = ±offset), never left ON the centerline
+    for (const r of westRisers) {
+      expect(Math.abs(Math.abs(r.position[0]) - LINESET_PAIR_OFFSET)).toBeLessThan(1e-9)
+    }
+    expect(pairHits(suction, liquid)).toBe(0)
+  })
 })
 
 // ---------------------------------------------------------------------------
