@@ -350,6 +350,53 @@ describe('INTL fallback parity (verify S6: hint said R-30, members said R-13)', 
   })
 })
 
+describe('climate-zone labels live (LOD-400 B4 rider: the raw-value zone lookup was dead)', () => {
+  // stateClimateZone values are labels ('6A', '3A (2A coast)') while the
+  // insulation/vapor maps are keyed '1'..'8'/'4M' — before the normalized
+  // lookup, cavity-R and vapor-retarder labels appeared in ZERO of the 51
+  // jurisdictions (scratch-verified across CT/TX/VT/FL/CA/NY/WA/AK).
+  test('VT (zone 6A): sheathing carries the cavity-R note, gypsum the vapor class', () => {
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'VT')
+    const sheathing = layers.filter((m) => m.role === 'sheathing')
+    expect(sheathing.length).toBeGreaterThan(0)
+    for (const s of sheathing) expect(s.label).toContain('cavity R30 (zone 6A)')
+    const gypsum = layers.filter((m) => m.role === 'drywall')
+    expect(gypsum.length).toBeGreaterThan(0)
+    for (const g of gypsum) expect(g.label).toContain('vapor retarder Class I or II, R702.7')
+    // the note rides the INNERMOST rendered layer only — WRB/cladding labels
+    // (and the takeoff items split off them) stay clean
+    for (const m of layers.filter((m) => m.role === 'cladding' || m.role === 'wrb')) {
+      expect(m.label).not.toContain('cavity')
+    }
+  })
+
+  test('WA (marine 4C) resolves the 4M data row, labeled with its own 4C tag', () => {
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'WA')
+    expect(layers.find((m) => m.role === 'sheathing')?.label).toContain('cavity R30 (zone 4C)')
+    expect(layers.find((m) => m.role === 'drywall')?.label).toContain(
+      'vapor retarder Class I or II',
+    )
+  })
+
+  test('TX (zone 2A): warm-zone truth — R13 cavity, vapor retarder none', () => {
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'TX')
+    expect(layers.find((m) => m.role === 'sheathing')?.label).toContain('cavity R13 (zone 2A)')
+    expect(layers.find((m) => m.role === 'drywall')?.label).toContain('vapor retarder none')
+  })
+
+  test('INTL (no zone data) stays unlabeled — the zone-less fallback is byte-equal', () => {
+    const layers = layoutWallLayers([wall()], [roomAbove], spec400, 'INTL')
+    expect(layers.some((m) => m.label?.includes('cavity'))).toBe(false)
+    expect(layers.some((m) => m.label?.includes('vapor retarder'))).toBe(false)
+  })
+
+  test('interior partitions never carry climate notes (gypsum both faces, plain)', () => {
+    const layers = layoutWallLayers([wall({ exterior: false })], [roomAbove], spec400, 'VT')
+    expect(layers.some((m) => m.label?.includes('cavity'))).toBe(false)
+    expect(layers.some((m) => m.label?.includes('vapor retarder'))).toBe(false)
+  })
+})
+
 describe('brick veneer air gap occupies space (verify S9: collapsed airspace)', () => {
   test('the wythe sits a full 1" gap beyond the WRB face', () => {
     const overrides = new Map<string, WallLayerOverride>([
