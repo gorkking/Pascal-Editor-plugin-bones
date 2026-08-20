@@ -4,11 +4,12 @@ import {
   pauseSceneHistory,
   resumeSceneHistory,
   sceneRegistry,
+  useLiveNodeOverrides,
   useRegistry,
   useScene,
 } from '@pascal-app/core'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   BoxGeometry,
   Euler,
@@ -25,6 +26,7 @@ import { reconcileDeviceNodes } from '../device/place'
 import { circuitColor, plumbingPipeColor } from '../plans/circuit-colors'
 import { normalizeServiceAnchors } from '../service/normalize'
 import { computeLevel } from './compute'
+import { effectiveNodesFor, throttleTrailing } from './live'
 import type { FramingNode } from './schema'
 
 /**
@@ -372,6 +374,35 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     [nodes, node],
   )
 
+  // LIVE-DRAG reactivity (night-6, user report: framing froze while a door
+  // slid): the host's move/placement tools ride transient node overrides
+  // and only commit on drop — fold them in and recompute at ~10Hz so
+  // kings/trimmers/headers/wires FOLLOW the gesture. Falls back to the
+  // memoized committed result the instant the overrides clear.
+  const [liveResult, setLiveResult] = useState<ReturnType<typeof computeLevel> | null>(null)
+  const nodesRef = useRef(nodes)
+  nodesRef.current = nodes
+  useEffect(() => {
+    let disposed = false
+    const recompute = () => {
+      if (disposed) return
+      const overrides = useLiveNodeOverrides.getState().overrides
+      const effective = effectiveNodesFor(
+        nodesRef.current as Record<string, Record<string, unknown>>,
+        overrides,
+      )
+      setLiveResult(effective ? computeLevel(effective, node) : null)
+    }
+    const throttled = throttleTrailing(recompute, 100)
+    const unsub = useLiveNodeOverrides.subscribe(() => throttled.run())
+    return () => {
+      disposed = true
+      throttled.cancel()
+      unsub()
+    }
+  }, [node])
+  const active = liveResult ?? result
+
   // Movable outlets (Q7): mirror every derived wall device into a
   // `bones:device` node so ANY receptacle/switch is hoverable and draggable —
   // create missing nodes at the derived spots, normalize drag-committed
@@ -433,7 +464,7 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   }, [nodes, node, result])
 
   const built = useMemo(
-    () => buildGroups(result.members, result.fixtures, node.seeThrough !== false),
+    () => buildGroups(active.members, active.fixtures, node.seeThrough !== false),
     [result, node.seeThrough],
   )
   const group = built.group
@@ -526,7 +557,7 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     // the KEPT twin's sourceId, so selecting a dropped duplicate must
     // exempt its twin (verify night-4 F5).
     const selectedRaw = viewerStore.current?.getState().selection?.selectedIds
-    const selected = selectedRaw?.map((id) => result.duplicateOf[id] ?? id)
+    const selected = selectedRaw?.map((id) => active.duplicateOf[id] ?? id)
     const cullChildren = (children: readonly { userData: unknown; visible: boolean }[]) => {
       for (const child of children) {
         const face = (child.userData as { face?: readonly [number, number] }).face
