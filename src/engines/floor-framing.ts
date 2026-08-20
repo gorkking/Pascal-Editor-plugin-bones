@@ -404,9 +404,14 @@ function frameSlab(
     )
   }
 
+  // The spans each row ACTUALLY frames (emitJoist's own MIN_SEGMENT
+  // predicate) — the blocking loop below needs joist-face truth, not
+  // polygon containment.
+  const rowJoistSpans: [number, number][][] = []
   for (let ri = 0; ri < rows.length; ri++) {
     const c = rows[ri] as number
     const spans = splitRow(c, insetSpans(polygonSpans(polygon, runAxis, c)), null)
+    rowJoistSpans.push(spans.filter(([s, e]) => !(e - s < MIN_SEGMENT)))
     for (const [s, e] of spans) emitJoist(s, e, c)
     if (spec.detail !== '200') {
       // NOT splitRow — that emits hangers as a side effect (duplicate
@@ -666,18 +671,18 @@ function frameSlab(
       )
         continue
       const cross = ((rows[i] as number) + (rows[i + 1] as number)) / 2
-      // Sample the polygon at BOTH joist faces, not just the bay center:
-      // the block spans the full bay across, and on a 30° oblique rim the
-      // center-only test let a full-width block overhang the rim by 13.9cm
-      // and cross the rim joist (round-6 — the deck's lo/c/hi clip, same
-      // class). No opposing joist face at an end → no block in that bay.
-      const containsMid = (c: number): boolean =>
-        polygonSpans(polygon, runAxis, c).some(([s, e]) => mid > s && mid < e)
-      const inside =
-        containsMid(cross) &&
-        containsMid((rows[i] as number) + t / 2 + 0.001) &&
-        containsMid((rows[i + 1] as number) - t / 2 - 0.001)
-      if (!inside) continue
+      // A bay is only real where OPPOSING JOIST FACES exist. Polygon
+      // containment was a proxy and failed twice at the ship gate: near a
+      // wedge tip the polygon still contains `mid` while the space there
+      // is entirely rim joist (blocking × rim SAT overlap), and a needle
+      // sliver whose every joist span fell under MIN_SEGMENT emitted
+      // blocks bearing on AIR. The recorded per-row spans are exactly
+      // what emitJoist framed — a block emits only between two faces
+      // that exist at `mid` (round-6 follow-up; supersedes the two-face
+      // polygon sampling).
+      const coveredBy = (ri: number): boolean =>
+        (rowJoistSpans[ri] ?? []).some(([s, e]) => mid > s + EPS && mid < e - EPS)
+      if (!coveredBy(i) || !coveredBy(i + 1)) continue
       // Skip blocking that would land inside a stairwell hole.
       const inHole = holeFrames.some(
         (h) => cross > h.cross[0] && cross < h.cross[1] && mid > h.run[0] && mid < h.run[1],

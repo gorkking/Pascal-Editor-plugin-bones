@@ -901,3 +901,30 @@ describe('night-5 skeptic round: tee edge cases', () => {
     expect(violations([...members, ...framing])).toEqual([])
   })
 })
+
+describe('ship-gate follow-up: blocking bears on joists, never on rim or air', () => {
+  test('wedge-sliver slab: no blocking × rim-joist overlap (SAT)', () => {
+    // Ship-gate repro: polygon containment at the joist faces held near
+    // the wedge tip while the space there was entirely rim joist — the
+    // block overlapped the rim until a ~50mm skin. Joist-coverage truth
+    // kills the block instead.
+    const members = frameFloor(
+      [slab([[0, 0], [3.5, 0.18], [0, 0.36]])],
+      [],
+      spec400,
+    )
+    // Scope: BLOCKING pairs (the ship-gate finding). This ~6° sliver also
+    // exhibits rim×rim + joist×rim contact at the acute tip — a distinct
+    // pre-existing miter class, queued in the backlog appendix, and pinned
+    // here so it can't silently widen.
+    const v = violations(members)
+    expect(v.filter((s) => s.includes('blocking'))).toEqual([])
+    expect(v.length).toBeLessThanOrEqual(4) // the acute-tip rim residual, frozen
+  })
+
+  test('needle sliver: zero joists ⇒ zero blocking (no lumber bearing on air)', () => {
+    const members = frameFloor([slab([[0, 0], [5, 0.1], [0, 0.2]])], [], spec400)
+    expect(members.filter((m) => m.role === 'joist')).toHaveLength(0)
+    expect(members.filter((m) => m.role === 'blocking')).toHaveLength(0)
+  })
+})

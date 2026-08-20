@@ -137,6 +137,10 @@ Fiction chain: no slab member (role isn't even in the Member union), zero slab-f
 - King-stud counts vs Table R602.7.5 (always 1/side regardless of RO width) → fold into B1's file (wall-framing opening frames).
 - Brick veneer ties missing (R703.8.4 32"/25" o.c. + row) → wall-layers; pairs with the WAVE-1 appendix cladding-fastener line.
 
+## SHIP-GATE RESIDUALS (2026-08-20, adversarially CONFIRMED, queued)
+- S4 divergence on classified-but-floorless scenes: walls with explicit frontSide 'exterior' but NO rooms/slabs → wall-layers exteriorSide() nulls (whole wall layered interior, drywall booked BOTH faces) while compute's areas block keys off wall.exterior → gross WSP row survives with zero members. applyExteriorFallback's S4 guard covers only the nothing-declares-exterior case. Fix: make the areas block and exteriorSide() share one classification source. (Pre-existing; surfaced by the B4 ship-gate attack.)
+- Acute-tip rim miter: rims meeting at a ~6° polygon tip overlap each other + the tip joist (SAT). Pinned frozen in interpenetration.test.ts (wedge gate allows ≤4 residual pairs, blocking excluded). Fix shape: rim retreat/miter at acute corners, wall-framing tee-retreat math is the pattern.
+
 ## APPENDIX — unverified minors (deduped; verify-then-fold into the nearest batch, or queue)
 - wall-framing: top-plate lap nailing dead in data (→B1/B5 file); soffit/penetration fire-blocking warning-only; finish-layer fasteners unbooked (drywall screws/siding nails/WRB caps — natural rider on B4's fastener re-key); over-wide RO silently narrowed, no flag (sibling of B1's clamp flag — fold into B1).
 - floor/roof: rim toe-nail count fixed at 3 regardless of length + bearing unchecked vs real walls; stair-header hangers exist but header-to-trimmer anchors + girder post caps/bases missing; gable-end bracing absent in high-wind (rider on B10).
