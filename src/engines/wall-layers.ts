@@ -53,7 +53,7 @@ type Assemblies = {
     defaultCladdingByState: Record<string, string>
     stateClimateZone?: Record<string, string>
     insulationByClimateZone?: Record<string, ZoneInsulation>
-    vaporRetarderClassByZone?: Record<string, string>
+    vaporRetarderClassByZone?: Record<string, { required?: string }>
   }
 }
 const DATA = assemblies as unknown as Assemblies
@@ -217,6 +217,25 @@ const ROLE_OF: Record<string, MemberRole> = {
   drainage: 'wrb',
 }
 
+/**
+ * Primary IECC zone for a state: display label ('5A') + data key ('5';
+ * marine 4C → '4M'). stateClimateZone values are free-text zone LABELS
+ * ('5A (4A NYC/LI, 6A Adk)', '3A (2A coast)') while insulationByClimateZone
+ * and vaporRetarderClassByZone are keyed '1'..'8'/'4M' — the raw value
+ * never hit either map, so the cavity-R/vapor labels were DEAD in all 51
+ * states (LOD-400 audit B4 appendix rider). One normalization, shared with
+ * the batt path, so both sides read the same zone.
+ */
+function climateZoneOf(state: string): { label: string | null; key: string | null } {
+  const raw = DATA.exterior.stateClimateZone?.[state]
+  const m = raw ? /^(\d)([ABC])?/.exec(raw.trim()) : null
+  if (!m) return { label: null, key: null }
+  return {
+    label: `${m[1]}${m[2] ?? ''}`,
+    key: m[1] === '4' && m[2] === 'C' ? '4M' : (m[1] as string),
+  }
+}
+
 export function layoutWallLayers(
   walls: WallSlice[],
   rooms: RoomSlice[],
@@ -233,8 +252,8 @@ export function layoutWallLayers(
 
   const state = stateCode
   const defaultCladdingKey = DATA.exterior.defaultCladdingByState[state] ?? 'vinyl'
-  const zone = DATA.exterior.stateClimateZone?.[state]
-  const rValue = zone ? DATA.exterior.insulationByClimateZone?.[zone]?.value : undefined
+  const { label: zone, key: zoneKey } = climateZoneOf(state)
+  const rValue = zoneKey ? DATA.exterior.insulationByClimateZone?.[zoneKey]?.value : undefined
 
   // Insulation batts lay out against the framing's OWN trimmed runs and
   // backing bays — derive the (identical) hint pass only when some wall
@@ -274,6 +293,12 @@ export function layoutWallLayers(
     const emitStack = (side: 1 | -1, layers: LayerSpec[], noteSuffix = '') => {
       const n = normalOf(wall, side)
       let offset = stackOrigin
+      // The note describes the CAVITY the stack bounds (vapor retarder
+      // class / cavity R) — it rides the INNERMOST rendered layer only
+      // (gypsum on the interior stack, sheathing on the exterior), so
+      // outer cladding labels — and the takeoff items derived from them
+      // via `label.split(' (')` — stay clean.
+      let note = noteSuffix
       for (const layer of layers) {
         const t = inches(layer.thicknessIn)
         const role = ROLE_OF[layer.role]
@@ -304,10 +329,11 @@ export function layoutWallLayers(
             rotation: [0, yaw, 0],
             material: 'lumber',
             sourceId: wall.id,
-            label: `${layer.material}${noteSuffix} (${layer.citation})`,
+            label: `${layer.material}${note} (${layer.citation})`,
             face: [n[0], n[1]],
           })
         }
+        note = ''
         offset += t
       }
     }
@@ -318,8 +344,13 @@ export function layoutWallLayers(
       emitStack(1, gypsum)
       emitStack(-1, gypsum)
     } else {
-      // interior face: gypsum (+ vapor retarder note by climate zone)
-      const vapor = zone ? DATA.exterior.vaporRetarderClassByZone?.[zone] : undefined
+      // interior face: gypsum (+ vapor retarder note by climate zone —
+      // keyed by the NORMALIZED zone, and the map holds objects whose
+      // `required` field is the printable class; the old raw-value lookup
+      // never hit, and a hit would have printed '[object Object]')
+      const vapor = zoneKey
+        ? DATA.exterior.vaporRetarderClassByZone?.[zoneKey]?.required
+        : undefined
       emitStack(
         (-extSide) as 1 | -1,
         gypsum,
@@ -364,9 +395,7 @@ type BattZone = { zoneLabel: string | null; minR: number; thicknessIn: number }
  * back to R-13 / 3.5" with no zone tag on the label.
  */
 function battZoneInfo(state: string): BattZone {
-  const raw = DATA.exterior.stateClimateZone?.[state]
-  const m = raw ? /^(\d)([ABC])?/.exec(raw.trim()) : null
-  const key = m ? (m[1] === '4' && m[2] === 'C' ? '4M' : (m[1] as string)) : null
+  const { label, key } = climateZoneOf(state)
   // Zone-less codes (INTL) assume zone 4 — the SAME assumption the
   // characteristics engine (and so the panel's 'code min' hint) makes; a
   // private R-13 fallback here left members labeled R-13 under a hint
@@ -374,7 +403,7 @@ function battZoneInfo(state: string): BattZone {
   const entry = DATA.exterior.insulationByClimateZone?.[key ?? '4']
   const minR = entry?.value ? Number.parseInt(entry.value.replace(/^R/i, ''), 10) || 13 : 13
   return {
-    zoneLabel: m ? `${m[1]}${m[2] ?? ''}` : null,
+    zoneLabel: label,
     minR,
     thicknessIn: entry?.battThicknessIn ?? 3.5,
   }

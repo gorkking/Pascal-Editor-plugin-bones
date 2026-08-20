@@ -104,16 +104,33 @@ AND a gate — a checklist line without a test is a wish.
 - **S3 Foundation corners close** at any angle (oblique multiplier, butt
   claims, splice suppression) — no gaps, no bow-ties on paper.
   Gates: foundation tests + mitered-path pins in `plan-set.test.ts`
-- **S4 Takeoff areas never book material the members don't render.** The
-  gross sheet-goods areas (wallSheathingM2…) and the member list derive from
-  the same wall classification: if the takeoff books WSP sheathing, sheathing
-  members exist on the level — and an interior-only storey books zero.
+- **S4 Takeoff areas never book material the members don't render — and
+  never book one material twice.** The gross sheet-goods areas
+  (wallSheathingM2…) and the member list derive from the same wall
+  classification: if the takeoff books WSP sheathing, sheathing members
+  exist on the level — and an interior-only storey books zero. ONE booked
+  row per material: when the layer engine emitted sheathing/drywall MEMBERS
+  for the level, the member-derived tally is the single surviving row and
+  the gross-area row is suppressed (members are truth; the gross path is
+  the LOD-200 fallback only, mirroring the subfloor deck fallback) — the
+  pre-B4 takeoff booked 'Wall sheathing | 34 sheets gross' AND 'Sheathing
+  7/16" WSP | ~33 sheets net' on one scene, so a purchaser summing sections
+  ordered ~2× (S4 in reverse: renders once, books twice). Fastener basis ==
+  the booked row: 8d WSP nail poundage keys off the SURVIVING row's sheet
+  count, never a suppressed one. CMU walls contribute ZERO gypsum area —
+  the layer engine never sees masonry, so the gross drywall path skips
+  non-framed walls (the ghost drywall on CMU scenes is dead; mixed walls
+  follow the CMU layer treatment whole-wall, v1).
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
   framed exterior/CMU and the takeoff booked sheathing the layer engine never
   rendered. The attic rule now requires a storey BELOW in the same building
-  (`extractWalls` hasLowerStorey).
-  Gate: `src/framing/compute.multistorey.test.ts` (takeoff/member consistency)
+  (`extractWalls` hasLowerStorey). Double-booking: LOD-400 audit B4
+  (2026-08-20).
+  Gates: `src/framing/compute.multistorey.test.ts` (takeoff/member
+  consistency) + `src/engines/takeoff.test.ts` ('one row per material'
+  describe: one-row pin, fastener-basis pin, LOD-200 fallback, CMU scene
+  books no drywall)
 - **S5 A mixed CMU/framed wall seams on a whole course and tops out at its
   architectural height.** The override `{ construction: 'cmu', cmuHeightM }`
   splits the wall at `snapCmuHeight` (8" module, R606 coursing): bond beam as

@@ -343,8 +343,20 @@ export function computeTakeoff(
     }
   }
 
-  // ---- SHEATHING: 4x8 sheet counts from gross areas ----
-  const wspSheets = Math.ceil((areas.wallSheathingM2 ?? 0) / SHEET_M2)
+  // ---- SHEATHING: 4x8 sheet counts, members first (LOD-400 audit B4) ----
+  // One material, ONE buy row: when the layer engine emitted sheathing /
+  // drywall MEMBERS for this level, the member-derived tally below is the
+  // single booked row (members are truth) and the gross-area row is
+  // SUPPRESSED — before this gate the same scene booked 'Wall sheathing |
+  // 34 sheets gross' AND 'Sheathing 7/16" WSP | ~33 sheets net', so a
+  // purchaser summing sections ordered ~2×. The gross path survives only
+  // as the LOD-200 fallback where no layers are framed (the subfloor deck
+  // fallback pattern below).
+  const hasSheathingMembers = members.some((m) => m.role === 'sheathing')
+  const hasDrywallMembers = members.some((m) => m.role === 'drywall')
+  const wspSheets = hasSheathingMembers
+    ? 0
+    : Math.ceil((areas.wallSheathingM2 ?? 0) / SHEET_M2)
   // Subfloor books from the DECK MEMBERS when the floor engine emitted
   // them (LOD-400 audit B3: the area path booked 33 sheets against zero
   // geometry — booked == built now); the area path stays as the LOD-200
@@ -355,7 +367,7 @@ export function computeTakeoff(
   const subfloorSheets = Math.ceil(
     (deckAreaM2 > 0 ? deckAreaM2 : (areas.subfloorM2 ?? 0)) / SHEET_M2,
   )
-  const drywallSheets = Math.ceil((areas.drywallM2 ?? 0) / SHEET_M2)
+  const drywallSheets = hasDrywallMembers ? 0 : Math.ceil((areas.drywallM2 ?? 0) / SHEET_M2)
   if (wspSheets > 0) {
     push('Sheathing', 'Wall sheathing 7/16" WSP', '4x8 sheets, gross (openings cut out)', wspSheets, 'sheets')
     addNails('8d-common', wspSheets * fastening.connections['wallSheathing-sheet'].count)
@@ -466,10 +478,16 @@ export function computeTakeoff(
     layerTallies.set(item, tally)
   }
   for (const tally of layerTallies.values()) {
-    const sheets = tally.item.startsWith('Drywall') || tally.item.startsWith('Sheathing')
-      ? ` (~${Math.ceil(tally.sqft / 32)} 4x8 sheets)`
-      : ''
+    const isBoard = tally.item.startsWith('Drywall') || tally.item.startsWith('Sheathing')
+    const sheetCount = isBoard ? Math.ceil(tally.sqft / 32) : 0
+    const sheets = isBoard ? ` (~${sheetCount} 4x8 sheets)` : ''
     push('Wall framing', tally.item, `${tally.detail}${sheets}`, round1(tally.sqft), 'sqft')
+    // Fastener basis == the booked row (B4): when the member tally is the
+    // surviving sheathing row, the 8d WSP nail poundage keys off ITS sheet
+    // count — never off the suppressed gross row a purchaser no longer sees.
+    if (tally.item.startsWith('Sheathing')) {
+      addNails('8d-common', sheetCount * fastening.connections['wallSheathing-sheet'].count)
+    }
   }
 
   // Rebar: linear feet per system (steel role 'rebar' — CMU cells, bond

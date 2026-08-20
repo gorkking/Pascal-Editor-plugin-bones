@@ -857,8 +857,14 @@ function computeLevelUncached(
     if (wall.exterior && construction === 'framed') {
       areas.wallSheathingM2 = (areas.wallSheathingM2 ?? 0) + faceArea
     }
-    // Drywall: both faces of interior walls, the inside face of exterior ones.
-    areas.drywallM2 = (areas.drywallM2 ?? 0) + faceArea * (wall.exterior ? 1 : 2)
+    // Drywall: both faces of interior walls, the inside face of exterior
+    // ones — FRAMED walls only (LOD-400 audit B4 sibling): the layer engine
+    // never sees masonry walls, so a CMU wall renders ZERO gypsum and
+    // booking its faces was a ghost buy on every CMU scene. Mixed walls
+    // resolve 'cmu' too and follow the CMU layer treatment whole-wall (v1).
+    if (construction === 'framed') {
+      areas.drywallM2 = (areas.drywallM2 ?? 0) + faceArea * (wall.exterior ? 1 : 2)
+    }
   }
   if (!isGroundLevel) {
     for (const slab of slabs) {
