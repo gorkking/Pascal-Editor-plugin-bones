@@ -36,6 +36,7 @@ export type MemberRole =
   | 'rim-joist'
   | 'girder'
   | 'post'
+  | 'subfloor'
   // roof framing
   | 'rafter'
   | 'ridge'

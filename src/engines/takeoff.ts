@@ -324,7 +324,16 @@ export function computeTakeoff(
 
   // ---- SHEATHING: 4x8 sheet counts from gross areas ----
   const wspSheets = Math.ceil((areas.wallSheathingM2 ?? 0) / SHEET_M2)
-  const subfloorSheets = Math.ceil((areas.subfloorM2 ?? 0) / SHEET_M2)
+  // Subfloor books from the DECK MEMBERS when the floor engine emitted
+  // them (LOD-400 audit B3: the area path booked 33 sheets against zero
+  // geometry — booked == built now); the area path stays as the LOD-200
+  // fallback where no deck is framed.
+  const deckAreaM2 = members
+    .filter((m) => m.role === 'subfloor')
+    .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+  const subfloorSheets = Math.ceil(
+    (deckAreaM2 > 0 ? deckAreaM2 : (areas.subfloorM2 ?? 0)) / SHEET_M2,
+  )
   const drywallSheets = Math.ceil((areas.drywallM2 ?? 0) / SHEET_M2)
   if (wspSheets > 0) {
     push('Sheathing', 'Wall sheathing 7/16" WSP', '4x8 sheets, gross (openings cut out)', wspSheets, 'sheets')

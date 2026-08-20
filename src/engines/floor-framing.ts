@@ -367,9 +367,63 @@ function frameSlab(
     return spans
   }
 
-  for (const c of rows) {
+  // 3/4" T&G subfloor deck (LOD-400 audit B3 — the takeoff booked 33
+  // sheets while ZERO deck geometry existed; pure S4 booked-but-absent).
+  // One strip per joist row, bay-wide, clipped by the SAME hole/polygon
+  // machinery the joists use (stair holes carve automatically), running
+  // edge-to-edge over the rims. Rendered ghosted so the joist grid stays
+  // readable in the X-ray; the takeoff derives its sheet count from these
+  // members now.
+  const DECK_T = inches(0.75)
+  const deckY = topY + DECK_T / 2
+  // Strips tile between ROW MIDPOINTS (edge rows shift inward, so a fixed
+  // ±half-bay width overlapped neighbours wherever rows sit closer than
+  // the o.c. spacing).
+  const deckBounds = (i: number): [number, number] => {
+    const c = rows[i] as number
+    const lo = i === 0 ? layoutStart : ((rows[i - 1] as number) + c) / 2
+    const hi =
+      i === rows.length - 1 ? layoutStart + layoutLength : (c + (rows[i + 1] as number)) / 2
+    return [lo, hi]
+  }
+  const emitDeck = (s: number, e: number, lo: number, hi: number) => {
+    const width = hi - lo
+    const len = e - s
+    if (len < MIN_SEGMENT || width < MIN_SEGMENT) return
+    const dims: [number, number, number] =
+      runAxis === 'x' ? [len, DECK_T, width] : [width, DECK_T, len]
+    emit(
+      'subfloor',
+      undefined,
+      dims,
+      placeRun((s + e) / 2, (lo + hi) / 2, deckY),
+      0,
+      len,
+      'engineered',
+      'Subfloor 3/4" T&G — glued + ring-shank fastened (R503.2.3)',
+    )
+  }
+
+  for (let ri = 0; ri < rows.length; ri++) {
+    const c = rows[ri] as number
     const spans = splitRow(c, insetSpans(polygonSpans(polygon, runAxis, c)), null)
     for (const [s, e] of spans) emitJoist(s, e, c)
+    if (spec.detail !== '200') {
+      // NOT splitRow — that emits hangers as a side effect (duplicate
+      // hardware at identical coordinates when called twice per row). The
+      // deck only needs the polygon spans minus the HOLE itself (it runs
+      // OVER girders and headers; a strip partially straddling the hole's
+      // cross band is carved conservatively — slight under-book, never a
+      // clash with the stair framing).
+      const [lo, hi] = deckBounds(ri)
+      let deckSpans = polygonSpans(polygon, runAxis, c)
+      for (const hole of holeFrames) {
+        if (hi > hole.cross[0] - EPS && lo < hole.cross[1] + EPS) {
+          deckSpans = subtractInterval(deckSpans, [hole.run[0], hole.run[1]])
+        }
+      }
+      for (const [s, e] of deckSpans) emitDeck(s, e, lo, hi)
+    }
   }
 
   // ---- stairwell headers (doubled) + trimmer joists (doubled) ----

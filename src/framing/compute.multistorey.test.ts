@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { baselineConfig, baselineScene } from './baseline-scene'
+import { computeTakeoff } from '../engines/takeoff'
 import { extractLevels, extractWalls } from '../core/wall-model'
 import { FramingNode } from './schema'
 import { computeLevel } from './compute'
@@ -649,5 +651,24 @@ describe('exploded stratum — owner ON the roof level (F1b closure, prod report
     const roof = computeLevel(nodes, node).members.filter((m) => m.system === 'roof-framing')
     expect(roof.length).toBeGreaterThan(0)
     expect(roof.every((m) => m.strataAbove !== true)).toBe(true)
+  })
+})
+
+describe('LOD-400 B3: subfloor booked == built', () => {
+  test('deck members exist wherever the takeoff books T&G sheets, and counts agree', () => {
+    const scene = baselineScene()
+    const cfg = baselineConfig('TX')
+    const result = computeLevel(scene, cfg)
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    const row = rows.find((r) => r.item.includes('Subfloor'))
+    const deck = result.members.filter((m) => m.role === 'subfloor')
+    if (row) {
+      // pure S4: the sheets on the buy list are derived from real geometry
+      expect(deck.length).toBeGreaterThan(0)
+      const deckArea = deck.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+      expect(row.quantity).toBe(Math.ceil(deckArea / (1.2192 * 2.4384)))
+    } else {
+      expect(deck.length).toBe(0)
+    }
   })
 })
