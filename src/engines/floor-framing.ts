@@ -666,7 +666,17 @@ function frameSlab(
       )
         continue
       const cross = ((rows[i] as number) + (rows[i + 1] as number)) / 2
-      const inside = polygonSpans(polygon, runAxis, cross).some(([s, e]) => mid > s && mid < e)
+      // Sample the polygon at BOTH joist faces, not just the bay center:
+      // the block spans the full bay across, and on a 30° oblique rim the
+      // center-only test let a full-width block overhang the rim by 13.9cm
+      // and cross the rim joist (round-6 — the deck's lo/c/hi clip, same
+      // class). No opposing joist face at an end → no block in that bay.
+      const containsMid = (c: number): boolean =>
+        polygonSpans(polygon, runAxis, c).some(([s, e]) => mid > s && mid < e)
+      const inside =
+        containsMid(cross) &&
+        containsMid((rows[i] as number) + t / 2 + 0.001) &&
+        containsMid((rows[i + 1] as number) - t / 2 - 0.001)
       if (!inside) continue
       // Skip blocking that would land inside a stairwell hole.
       const inHole = holeFrames.some(

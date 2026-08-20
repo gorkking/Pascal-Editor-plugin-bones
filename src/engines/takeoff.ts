@@ -332,7 +332,7 @@ export function computeTakeoff(
       engineeredHeaders.length,
       'pcs',
     )
-    push('Wall framing', 'Engineered header (LVL/PSL — by supplier)', 'lineal feet', round1(lf), 'lf')
+    push('Wall framing', 'Engineered header (LVL/PSL — by supplier)', 'linear feet', round1(lf), 'lf')
   }
 
   // Framing nails from the member counts (per-role connection list).

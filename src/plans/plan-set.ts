@@ -29,8 +29,11 @@ export type PlanSetOptions = {
   date?: string
   /** Stud spacing (inches o.c.) for the framing-sheet callout. */
   studSpacingIn?: number
-  /** Storey elevations by level id — members tagged levelId (cross-level
-   * roofs) are level-local; elevations/sections/cover lift them by this. */
+  /** Storey lifts by level id, RELATIVE TO THE OWNER LEVEL — members
+   * tagged levelId (cross-level roofs) are level-local; elevations/
+   * sections/cover lift them by this DELTA (owner members lift 0).
+   * Build it with relativeLevelBaseY — passing absolute elevations drew
+   * an upper-storey owner's roof a full storey too high (round-6). */
   levelBaseY?: Record<string, number>
   /** Whole-building metrics — printed as a compact block on the schedules
    * sheet (above the flags on the last page). */
@@ -557,8 +560,20 @@ function planSheet(
   for (const [role, counts] of roleSizeCounts) {
     roleSizes.set(role, [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '')
   }
+  // Size-less roles the legend must still name — the deck is the floor
+  // sheet's dominant ink and printed UNLABELED (round-6 carried FAIL, P2);
+  // hangers shared the gap.
+  const SIZELESS_LEGEND: Record<string, string> = {
+    subfloor: '3/4" T&G deck (drawn translucent)',
+    hanger: 'joist hanger',
+  }
+  for (const [role, desc] of Object.entries(SIZELESS_LEGEND)) {
+    if (!roleSizes.has(role) && mine.some((m) => m.role === role)) roleSizes.set(role, desc)
+  }
+  // Cap 10 (was 8): the size-less rows append LAST and a stair-holed floor
+  // sheet carries 9 roles — an 8-cap re-dropped the deck row it just gained.
   const legendLines: string[] = [...roleSizes.entries()]
-    .slice(0, 8)
+    .slice(0, 10)
     .map(
       ([role, size], i) =>
         `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
@@ -1293,16 +1308,22 @@ function schedulesSheets(
   // costs 2, and one line of slack per column keeps a 2-line row from ever
   // straddling into the reserved blocks.
   const wrapRow = (text: string, max = 62): string[] => {
-    if (text.length <= max) return [text]
-    const cut = text.lastIndexOf(' ', max)
-    const at = cut > 24 ? cut : max
-    const head = text.slice(0, at)
-    let rest = text.slice(at).trim()
-    if (rest.length > max) {
-      const rcut = rest.lastIndexOf(' ', max - 1)
-      rest = `${rest.slice(0, rcut > 24 ? rcut : max - 1)}…`
+    // LOOP until the text is exhausted — the old 2-line cap ELLIPSIZED
+    // past ~2×max, silently dropping composed flag components and remedy
+    // tails from paper ('RO shifted…' and the S10 '(R802.5.1)' cite both
+    // vanished, round-6 skeptic+examiner — P4: a dropped warning is a lie).
+    // Capacity math counts lines, so long flags just cost more lines and
+    // pagination absorbs the overflow.
+    const lines: string[] = []
+    let rest = text
+    while (rest.length > max) {
+      const cut = rest.lastIndexOf(' ', max)
+      const at = cut > 24 ? cut : max
+      lines.push(rest.slice(0, at))
+      rest = rest.slice(at).trim()
     }
-    return [head, rest]
+    if (rest.length > 0 || lines.length === 0) lines.push(rest)
+    return lines
   }
   const wrapped = rows.map((r) => {
     const detail = r.detail && r.detail !== 'linear feet' ? ` (${r.detail})` : ''
@@ -1480,6 +1501,23 @@ function schedulesSheets(
 }
 
 /** Every sheet the current level's members can support, in print order. */
+/**
+ * Storey lift map for cross-level members, RELATIVE to the owner level:
+ * owner members draw level-local (no levelId → lift 0), so tagged members
+ * must lift by the baseY DELTA. Passing absolute elevations put an
+ * upper-storey owner's lvlroof roof at 5.4 m instead of 2.7 — a full
+ * storey of daylight between cap plates and rafters on every elevation,
+ * the section, and the cover (round-6 examiner; ridge datum +7.77 m vs
+ * true +5.07 m).
+ */
+export function relativeLevelBaseY(
+  levels: { id: string; baseY: number }[],
+  ownerLevelId: string | null,
+): Record<string, number> {
+  const ownerY = levels.find((l) => l.id === ownerLevelId)?.baseY ?? 0
+  return Object.fromEntries(levels.map((l) => [l.id, l.baseY - ownerY]))
+}
+
 export function buildPlanSet(
   members: Member[],
   fixtures: Fixture[],

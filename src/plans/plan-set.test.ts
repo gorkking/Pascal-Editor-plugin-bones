@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Fixture, Member } from '../core/types'
 import type { BuildingCharacteristics } from '../engines/characteristics'
-import { buildPlanSet, planSetHtml } from './plan-set'
+import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
   system: 'floor-framing',
@@ -1193,5 +1193,73 @@ describe('examiner round-5 — floor sheet legibility + legend box geometry', ()
     const h = Number(rect?.[2])
     expect(h).toBeGreaterThanOrEqual((0 + 22) * 14 + 14)
     expect(h).toBeLessThan((4 + 22) * 14 + 14)
+  })
+})
+
+describe('round-6 — flags print VERBATIM (no ellipsis), cross-level lift is a DELTA', () => {
+  test('a 297-char composed flag and the S10 span flag print whole; no … anywhere', () => {
+    const flags = [
+      'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span | header 4x12 does not fit between the RO and the plates (1.5" of 11.3") — RO head lowered 5.2cm — raise the wall, lower the opening, or use an engineered flat header | RO shifted 153.3cm to fit the framed run — verify the drawn position',
+      'flat roof joists 2x8 @ 16" o.c. span 10.7 m exceeds the R802.4.1 allowable 4.1 m — purlin + 2x4 struts to bearing or engineered member required (R802.5.1)',
+    ]
+    const sheets = buildPlanSet([member({})], [], {
+      projectName: 'p',
+      levelName: 'l',
+      jurisdiction: 'FL',
+      date: 'd',
+      warnings: flags,
+    })
+    const svg = sheets.find((s) => s.title.startsWith('Schedules'))?.svg ?? ''
+    // wrapRow cuts at spaces — single tokens survive wrapping intact, so
+    // the previously-ellipsized TAILS are the assertion targets
+    expect(svg).toContain('153.3cm') // third composed component (was silently dropped)
+    expect(svg).toContain('drawn')
+    expect(svg).toContain('(R802.5.1)') // S10 remedy cite (was ellipsized)
+    expect(svg).not.toContain('…')
+  })
+
+  test('relativeLevelBaseY: lifts are deltas from the OWNER level', () => {
+    const levels = [
+      { id: 'lvl0', baseY: 0 },
+      { id: 'lvl1', baseY: 2.7 },
+      { id: 'lvlroof', baseY: 5.4 },
+    ]
+    // upper-storey owner: its own lift is 0, the roof sits ONE storey up
+    expect(relativeLevelBaseY(levels, 'lvl1')).toEqual({ lvl0: -2.7, lvl1: 0, lvlroof: 2.7 })
+    // ground owner: identity (absolute == relative)
+    expect(relativeLevelBaseY(levels, 'lvl0')).toEqual({ lvl0: 0, lvl1: 2.7, lvlroof: 5.4 })
+    // unknown owner falls back to absolute (no shift)
+    expect(relativeLevelBaseY(levels, null)).toEqual({ lvl0: 0, lvl1: 2.7, lvlroof: 5.4 })
+  })
+
+  test('size-less roles get legend rows — the deck and hangers are named', () => {
+    const members = [
+      member({ role: 'joist', size: '2x10', dims: [4, 0.235, 0.038] }),
+      member({
+        role: 'subfloor',
+        size: undefined,
+        material: 'engineered',
+        dims: [0.41, 0.019, 4],
+        length: 4,
+        position: [2, -0.1, 1],
+      }),
+      member({
+        role: 'hanger',
+        size: undefined,
+        material: 'steel',
+        dims: [0.05, 0.15, 0.05],
+        length: 0.05,
+        position: [1, -0.2, 0],
+      }),
+    ]
+    const svg =
+      buildPlanSet(members, [], {
+        projectName: 'p',
+        levelName: 'l',
+        jurisdiction: 'FL',
+        date: 'd',
+      }).find((s) => s.title === 'Floor framing plan')?.svg ?? ''
+    expect(svg).toContain('T&amp;G deck (drawn translucent)')
+    expect(svg).toContain('joist hanger')
   })
 })

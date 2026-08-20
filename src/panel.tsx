@@ -26,7 +26,7 @@ import {
   selectedWallInfo,
   wallOverridePatch,
 } from './panel-selection'
-import { buildPlanSet, planSetHtml } from './plans/plan-set'
+import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plans/plan-set'
 import { characteristicsCsv, characteristicsRows } from './engines/characteristics'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
 import { guessJurisdiction } from './jurisdiction/guess'
@@ -856,12 +856,14 @@ function ExportPlansButton({
           // whole-building metrics block on the schedules sheet
           characteristics: result.characteristics ?? undefined,
           studSpacingIn: framingNode.studSpacingIn,
-          // storey elevations so cross-level (tagged) members draw at the
-          // right height on elevations/section/cover
-          levelBaseY: Object.fromEntries(
+          // storey lifts RELATIVE to the owner level — owner members draw
+          // level-local, so absolute elevations put an upper-storey owner's
+          // roof a full storey too high on elevations/section (round-6)
+          levelBaseY: relativeLevelBaseY(
             extractLevels(
               useScene.getState().nodes as Record<string, Record<string, unknown>>,
-            ).map((l) => [l.id, l.baseY]),
+            ),
+            activeLevelId,
           ),
         })
         if (sheets.length === 0) return

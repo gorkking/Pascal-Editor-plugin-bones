@@ -1141,3 +1141,30 @@ describe('frameFloor — round-9 fabrication exactness', () => {
     expect(seated.flag).toBeUndefined()
   })
 })
+
+describe('round-6: blocking clipped at BOTH joist faces on oblique rims', () => {
+  test('sheared slab — no block end passes the polygon boundary', () => {
+    // 26.6°-sheared parallelogram: the bay-center-only containment test
+    // let full-width blocks overhang the oblique rim by up to 13.9cm and
+    // cross the rim joist (round-6 examiner; deck lo/c/hi clip, same class).
+    const P: [number, number][] = [
+      [0, 0],
+      [6, 0],
+      [8, 4],
+      [2, 4],
+    ]
+    const members = frameFloor([slab(P)])
+    const blocks = byRole(members, 'blocking')
+    expect(blocks.length).toBeGreaterThan(0) // non-vacuous
+    for (const b of blocks) {
+      const yaw = b.rotation[1]
+      const half = (b.dims[0] - 0.002) / 2 // 2mm grace, matches the clip
+      for (const s of [-1, 1] as const) {
+        const ex = b.position[0] + s * Math.cos(yaw) * half
+        const ez = b.position[2] - s * Math.sin(yaw) * half
+        const spans = polygonSpans(P, 'x', ez)
+        expect(spans.some(([lo, hi]) => ex >= lo - 1e-6 && ex <= hi + 1e-6)).toBe(true)
+      }
+    }
+  })
+})
