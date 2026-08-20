@@ -90,12 +90,18 @@ AND a gate — a checklist line without a test is a wish.
   (cavity-fit framing): 140 pairs on default 0.15m/2x6 exteriors and the
   explicit-misfit carve-out are retired — framing geometry compresses to
   the drawn cavity (`fitAcross`) so contact replaces overlap at every
-  thickness. KNOWN residual pre-existing classes (byte-identical to the
-  pre-night-4 baseline, queued on the board): tee-stem face layers ×
-  through-wall framing; anchor-bolt × bottom-plate on slab-on-grade
-  (allow-list covers anchor-bolt|mudsill only); framed partition tees
-  into full-CMU through walls (frameWalls never sees CMU walls for
-  insets); stem layer×layer at tees.
+  thickness. The anchor-bolt × bottom-plate slab-on-grade class CLOSED in
+  LOD-400 B5: the foundation's bolts rise through the wall engine's bottom
+  plate — the (PT, R317.1) SOLE PLATE they exist to clamp (R403.1.6) — so
+  the pair is allow-listed as design intent and a foundation+walls compose
+  scenario pins it. KNOWN residual pre-existing classes (byte-identical to
+  the pre-night-4 baseline, queued on the board): tee-stem face layers ×
+  through-wall framing; anchor-bolt × STUD on slab-on-grade (the shank
+  tops out 3" above the slab — 1.5" above the plate — and can land inside
+  a grid stud's footprint; bolt-vs-stud layout nudging queued, surfaced by
+  the B5 compose scenario); framed partition tees into full-CMU through
+  walls (frameWalls never sees CMU walls for insets); stem layer×layer at
+  tees.
   Gate: `src/engines/interpenetration.test.ts` scenario matrix + the
   cavity-fit thickness sweep (8 thicknesses × 3 stud configs × batts)
 - **S2 Every roof family inscribes inside its footprint** (no eave-line
@@ -245,6 +251,28 @@ AND a gate — a checklist line without a test is a wish.
   (repro, matrix, S1 strut bearing, byte-equality, takeoff rows),
   `src/jurisdiction/profiles.test.ts` (band swap),
   `src/engines/interpenetration.test.ts` (purlin+strut SAT, reproGable).
+- **S11 Wood in concrete contact is preservative-treated and says so.**
+  A bottom plate bearing on the ground-level slab is a SOLE plate in
+  direct concrete contact — IRC R317.1(2): it emits material `pt-lumber`
+  with the cite in its label ('PT sole plate on slab (R317.1)'), books on
+  the takeoff's own `<size> PT` SKU row (never blended into the untreated
+  count), and the foundation's anchor-bolt row names it ('sole plate
+  anchorage (R403.1.6)' — no mudsill member exists on slab-on-grade).
+  ONLY the sole plate changes: studs, headers, top/cap plates bear on
+  wood and stay untreated; upper storeys (plates on framed floors) and
+  mixed CMU walls (framed zone on the PT seam sill, already booked)
+  are byte-equal to pre-B5. `frameWalls` carries the context as
+  `FrameWallsOptions.slabBearing` → `FrameHints.slabBearing`, forwarded
+  from `computeLevelUncached`'s `isGroundLevel`.
+  Origin: LOD-400 audit B5 (untreated lumber on concrete across every
+  ground-level plate; 'mudsill anchorage' row named a member that isn't
+  there). Byte-equality reset: docs/plans/B5-EXPECTED-DIFF.md (52-code
+  sweep — only plate material+label and the enumerated takeoff rows
+  moved). Gates: `src/engines/wall-framing.test.ts` (material pins,
+  PT-swap isolation), `src/engines/takeoff.test.ts` (PT SKU row +
+  conservation, anchor-row text pin),
+  `src/framing/compute.multistorey.test.ts` (storey-0 vs storey-1 split),
+  `src/engines/interpenetration.test.ts` (slab-on-grade compose).
 
 ## M — Mechanical (HVAC)
 

@@ -531,6 +531,54 @@ describe('takeoff/member consistency (checklist S4, verify round 2026-08-16)', (
   })
 })
 
+describe('LOD-400 B5: PT sole plates split by storey (IRC R317.1(2))', () => {
+  test('storey-0 bottom plates bear on the slab and book PT; studs/top plates stay untreated', () => {
+    const nodes = twoStoreyScene()
+    const node = bones('bonesframing_pt0', 'lvl0')
+    nodes.bonesframing_pt0 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const plates = result.members.filter(
+      (m) => m.system === 'wall-framing' && m.role === 'bottom-plate',
+    )
+    expect(plates.length).toBe(4) // one per wall of the rectangle
+    for (const p of plates) {
+      expect(p.material).toBe('pt-lumber')
+      expect(p.label).toContain('PT sole plate')
+      expect(p.label).toContain('R317.1')
+    }
+    // ONLY the sole plate is concrete-contact — everything else untreated
+    for (const m of result.members.filter(
+      (m) => m.system === 'wall-framing' && m.role !== 'bottom-plate',
+    )) {
+      expect(m.material).not.toBe('pt-lumber')
+    }
+    // and the takeoff books the PT SKU from those members (booked == built)
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(
+      rows.some((r) => r.section === 'Wall framing' && r.item === '2x4 PT' && r.unit === 'pcs'),
+    ).toBe(true)
+  })
+
+  test('storey-1 bottom plates bear on the framed floor and stay untreated lumber', () => {
+    const nodes = twoStoreyScene()
+    const node = bones('bonesframing_pt1', 'lvl1')
+    nodes.bonesframing_pt1 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const plates = result.members.filter(
+      (m) => m.system === 'wall-framing' && m.role === 'bottom-plate',
+    )
+    expect(plates.length).toBe(4)
+    for (const p of plates) {
+      expect(p.material).toBe('lumber')
+      expect(p.label).toContain('Bottom plate')
+      expect(p.label).not.toContain('R317.1')
+    }
+    // no PT SKU row anywhere on the upper storey
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(rows.some((r) => r.item.endsWith(' PT'))).toBe(false)
+  })
+})
+
 describe('multi-storey — mixed roof levels (re-verify regression)', () => {
   test('porch on the ground level + main roof above: the owner frames BOTH', () => {
     const nodes = twoStoreyScene()

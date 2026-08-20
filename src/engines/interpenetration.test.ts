@@ -125,6 +125,11 @@ const ALLOWED: ReadonlySet<string> = new Set(
     ['hanger', 'cap-plate'],
     // Anchor hardware threads through the sill into the concrete below.
     ['anchor-bolt', 'mudsill'],
+    // …and on slab-on-grade there IS no mudsill member: the foundation's
+    // bolts rise through the wall engine's bottom plate — the (PT, R317.1)
+    // sole plate they exist to clamp (R403.1.6). Closes the S1 residual
+    // 'anchor-bolt × bottom-plate' class (LOD-400 audit B5).
+    ['anchor-bolt', 'bottom-plate'],
     ['anchor-bolt', 'stemwall'],
     ['anchor-bolt', 'slab-edge'],
     ['anchor-bolt', 'footing'],
@@ -672,6 +677,25 @@ describe('interpenetration gate — structural members never share volume', () =
 
   test('foundation: closed rectangle with slab', () => {
     expect(violations(buildFoundation(rectWalls(), [slab(rect(6, 4))], spec400))).toEqual([])
+  })
+
+  test('slab-on-grade compose: anchor bolts clamp the PT sole plate — design intent, never a clash (B5)', () => {
+    // Foundation + ground-level walls composed in one SAT pass: the bolts
+    // rise through the wall engine's bottom plate — the (PT, R317.1) sole
+    // plate they exist to clamp (R403.1.6). The allow-listed pair keeps the
+    // S1 gate honest about it.
+    const walls = rectWalls()
+    const composed = [
+      ...buildFoundation(walls, [slab(rect(6, 4))], spec400),
+      ...frameWalls(walls, spec400, undefined, { slabBearing: true }),
+    ]
+    const v = violations(composed)
+    expect(v.filter((s) => s.includes('bottom-plate'))).toEqual([])
+    // KNOWN pre-existing residual (S1 row): a bolt shank tops out 3" above
+    // the slab — 1.5" above the plate — and can land inside a grid stud's
+    // footprint. Bolt-vs-stud layout nudging is queued on the board, not
+    // B5 scope; the compose must not silently widen beyond that class.
+    expect(v.every((s) => s.includes('anchor-bolt') && s.includes('stud'))).toBe(true)
   })
 
   test('foundation: oblique 45° chamfer corner (round-10)', () => {

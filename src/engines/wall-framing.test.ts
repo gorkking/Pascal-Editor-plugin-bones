@@ -550,3 +550,71 @@ describe('LOD-400 B1 round 2: header flags COMPOSE, nothing silenced', () => {
     expect(header?.label).toMatch(/^Header \dx\d+ over door/)
   })
 })
+
+/**
+ * GATE (LOD-400 B5, IRC R317.1(2)): a bottom plate bearing on a concrete
+ * slab is a SOLE PLATE and must be preservative-treated — slab-bearing
+ * walls emit it as 'pt-lumber' with the code cite in the label. ONLY the
+ * bottom plate changes: studs, headers, top/cap plates bear on wood and
+ * stay untreated; walls without the context (upper storeys on framed
+ * floors) stay byte-equal to today.
+ */
+describe('LOD-400 B5: PT sole plate on slab (R317.1)', () => {
+  const rectWalls = () => [
+    makeWall({ id: 'w_s', start: [0, 0], end: [4, 0], openings: [door(2)] }),
+    makeWall({ id: 'w_e', start: [4, 0], end: [4, 3] }),
+  ]
+
+  test('slab-bearing walls: bottom plate books PT with the R317.1 cite; everything else stays lumber', () => {
+    const members = frameWalls(rectWalls(), DEFAULT_SPEC, undefined, { slabBearing: true })
+    const plates = members.filter((m) => m.role === 'bottom-plate')
+    expect(plates.length).toBe(2)
+    for (const plate of plates) {
+      expect(plate.material).toBe('pt-lumber')
+      expect(plate.label).toContain('PT sole plate')
+      expect(plate.label).toContain('R317.1')
+    }
+    for (const m of members) {
+      if (m.role === 'bottom-plate') continue
+      expect(m.material).toBe('lumber') // studs/kings/trimmers/headers/sills…
+    }
+    // top + cap plates named explicitly — the pin the batch brief asks for
+    expect(members.filter((m) => m.role === 'top-plate').every((m) => m.material === 'lumber')).toBe(true)
+    expect(members.filter((m) => m.role === 'cap-plate').every((m) => m.material === 'lumber')).toBe(true)
+  })
+
+  test('upper-storey walls (no slab context) keep the untreated bottom plate — byte-equal to today', () => {
+    const base = frameWalls(rectWalls(), DEFAULT_SPEC)
+    const plate = base.find((m) => m.role === 'bottom-plate')
+    expect(plate?.material).toBe('lumber')
+    expect(plate?.label).toBe('Bottom plate')
+    // absent/false options are the identity — no field moves
+    expect(frameWalls(rectWalls(), DEFAULT_SPEC, undefined, {})).toEqual(base)
+    expect(frameWalls(rectWalls(), DEFAULT_SPEC, undefined, { slabBearing: false })).toEqual(base)
+  })
+
+  test('the PT swap moves ONLY material + label — geometry/dims/flags identical', () => {
+    const dry = frameWalls(rectWalls(), DEFAULT_SPEC)
+    const wet = frameWalls(rectWalls(), DEFAULT_SPEC, undefined, { slabBearing: true })
+    expect(wet.length).toBe(dry.length)
+    for (let i = 0; i < dry.length; i++) {
+      const a = dry[i] as Member
+      const b = wet[i] as Member
+      if (a.role === 'bottom-plate') {
+        expect(b.material).toBe('pt-lumber')
+        const { material: _bm, label: _bl, ...bRest } = b
+        const { material: _am, label: _al, ...aRest } = a
+        expect(bRest).toEqual(aRest)
+      } else {
+        expect(b).toEqual(a)
+      }
+    }
+  })
+
+  test('frameWall honors the hint directly (single-wall path)', () => {
+    const members = frameWall(makeWall(), DEFAULT_SPEC, { slabBearing: true })
+    const plate = members.find((m) => m.role === 'bottom-plate')
+    expect(plate?.material).toBe('pt-lumber')
+    expect(plate?.label).toContain('R317.1')
+  })
+})

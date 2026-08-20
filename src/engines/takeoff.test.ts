@@ -4,7 +4,7 @@ import { feet } from '../core/units'
 import type { LumberSize } from '../lumber'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { WallSlice } from '../core/types'
-import { frameWall } from './wall-framing'
+import { frameWall, frameWalls } from './wall-framing'
 import { computeTakeoff, takeoffCsv, takeoffMarkdown, type TakeoffRow } from './takeoff'
 
 // ---------------------------------------------------------------------------
@@ -334,7 +334,7 @@ describe('steel hardware', () => {
     }
   })
 
-  test('anchor bolts split per system: foundation mudsill vs mixed-wall seam sill', () => {
+  test('anchor bolts split per system: foundation sole plate vs mixed-wall seam sill', () => {
     const foundationBolt = mem({
       system: 'foundation',
       role: 'anchor-bolt',
@@ -344,11 +344,13 @@ describe('steel hardware', () => {
     })
     const rows = computeTakeoff([bolt, bolt, foundationBolt, foundationBolt, foundationBolt], [])
     const seam = rows.find((r) => r.item === 'Anchor bolts' && r.section === 'Wall framing')
-    const mudsill = rows.find((r) => r.item === 'Anchor bolts' && r.section === 'Foundation')
+    const solePlate = rows.find((r) => r.item === 'Anchor bolts' && r.section === 'Foundation')
     expect(seam?.quantity).toBe(2)
     expect(seam?.detail).toBe('seam sill to bond beam (R403.1.6)')
-    expect(mudsill?.quantity).toBe(3)
-    expect(mudsill?.detail).toBe('mudsill anchorage (R403.1.6)')
+    expect(solePlate?.quantity).toBe(3)
+    // LOD-400 B5 text pin: the row names the SOLE PLATE the bolts clamp —
+    // no mudsill member exists on slab-on-grade (the old text was a lie).
+    expect(solePlate?.detail).toBe('sole plate anchorage (R403.1.6)')
   })
 
   test('hardware rows are omitted when absent', () => {
@@ -1062,6 +1064,69 @@ describe('one row per material (LOD-400 B4 — gross rows defer to layer members
     const rows = computeTakeoff(result.members, result.fixtures, result.areas)
     expect(rows.some((r) => r.item === 'Drywall 1/2"')).toBe(false)
     expect(rows.some((r) => /sheathing/i.test(r.item))).toBe(false)
+  })
+})
+
+describe('LOD-400 B5: PT sole plates book on their own SKU row (R317.1)', () => {
+  const groundWalls = (): WallSlice[] => [
+    {
+      id: 'w_s',
+      start: [0, 0],
+      end: [6, 0],
+      dir: [1, 0],
+      length: 6,
+      thickness: 0.114,
+      height: 2.44,
+      exterior: true,
+      openings: [],
+      curved: false,
+    },
+    {
+      id: 'w_e',
+      start: [6, 0],
+      end: [6, 4],
+      dir: [0, 1],
+      length: 4,
+      thickness: 0.114,
+      height: 2.44,
+      exterior: true,
+      openings: [],
+      curved: false,
+    },
+  ]
+
+  test('a ground-level walled scene books the 2x4 PT row; upper storeys book none', () => {
+    const ground = computeTakeoff(
+      frameWalls(groundWalls(), DEFAULT_SPEC, undefined, { slabBearing: true }),
+      [],
+    )
+    const pt = ground.filter((r) => r.section === 'Wall framing' && r.item === '2x4 PT')
+    expect(pt.length).toBeGreaterThan(0) // stock row(s) + bd-ft row
+    // exactly the two sole plates' worth of sticks on the PT stock rows
+    const ptSticks = pt
+      .filter((r) => r.unit === 'pcs')
+      .reduce((sum, r) => sum + r.quantity, 0)
+    expect(ptSticks).toBe(2)
+    expect(pt.every((r) => r.detail.includes('pressure-treated') || r.unit === 'bd-ft')).toBe(true)
+
+    const upper = computeTakeoff(frameWalls(groundWalls(), DEFAULT_SPEC), [])
+    expect(upper.some((r) => r.item === '2x4 PT')).toBe(false)
+    // the untreated bucket keeps everything on the upper storey
+    expect(upper.some((r) => r.item === '2x4')).toBe(true)
+  })
+
+  test('PT plates leave the untreated row: total stick count is conserved', () => {
+    const count = (rows: TakeoffRow[], item: string) =>
+      rows
+        .filter((r) => r.section === 'Wall framing' && r.item === item && r.unit === 'pcs')
+        .reduce((sum, r) => sum + r.quantity, 0)
+    const dry = computeTakeoff(frameWalls(groundWalls(), DEFAULT_SPEC), [])
+    const wet = computeTakeoff(
+      frameWalls(groundWalls(), DEFAULT_SPEC, undefined, { slabBearing: true }),
+      [],
+    )
+    expect(count(wet, '2x4') + count(wet, '2x4 PT')).toBe(count(dry, '2x4'))
+    expect(count(wet, '2x4 PT')).toBe(2)
   })
 })
 
