@@ -11,6 +11,7 @@
  */
 
 import type { Fixture, Member } from '../core/types'
+import { formatFtIn } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { computeTakeoff } from '../engines/takeoff'
 import { PLUMBING_COLORS, circuitColor, circuitZoneHint, plumbingPipeColor } from './circuit-colors'
@@ -29,6 +30,9 @@ export type PlanSetOptions = {
   date?: string
   /** Stud spacing (inches o.c.) for the framing-sheet callout. */
   studSpacingIn?: number
+  /** BIM level of detail actually composed — stamps every title block.
+   * A detail-200 export must not claim LOD 400 (wave-2 audit). */
+  detail?: '200' | '300' | '400'
   /** Storey lifts by level id, RELATIVE TO THE OWNER LEVEL — members
    * tagged levelId (cross-level roofs) are level-local; elevations/
    * sections/cover lift them by this DELTA (owner members lift 0).
@@ -201,7 +205,7 @@ function chrome(
   const line1 = clip(`Jurisdiction: ${opts.jurisdiction ?? 'AUTO'}${head ? ` — ${head}` : ''}`, 66)
   const line1b = rest ? clip(rest, 66) : ''
   const line2 = clip(
-    `LOD 400 · Bones${ratio ? ` · scale 1:${ratio}` : ''}${opts.date ? ` · ${opts.date}` : ''} · __SHEET_NO__`,
+    `LOD ${opts.detail ?? '400'} · Bones${ratio ? ` · scale 1:${ratio}` : ''}${opts.date ? ` · ${opts.date}` : ''} · __SHEET_NO__`,
     72,
   )
   const bar = scaleBar
@@ -716,10 +720,33 @@ function planSheet(
   if (def.key === 'foundation') {
     const bolts = mine.filter((m) => m.role === 'anchor-bolt')
     if (bolts.length > 0) {
+      // Derived from the MEMBERS, never hardcoded (wave-2 audit: the fixed
+      // '1/2" @ 6'-0"' text contradicted the drawn 5/8" shanks AND the 4-ft
+      // seismic spacing on the same sheet). Diameter from the bolt label;
+      // spacing = the largest on-center gap between neighbors on a wall.
+      const dia = /^([\d/]+″|[\d/]+")/.exec(bolts[0]?.label ?? '')?.[1]
+      const byWall = new Map<string, Member[]>()
+      for (const b of bolts) {
+        const list = byWall.get(b.sourceId) ?? []
+        list.push(b)
+        byWall.set(b.sourceId, list)
+      }
+      let maxGap = 0
+      for (const group of byWall.values()) {
+        const sorted = [...group].sort(
+          (a, b) => a.position[0] - b.position[0] || a.position[2] - b.position[2],
+        )
+        for (let i = 1; i < sorted.length; i++) {
+          const dx = (sorted[i] as Member).position[0] - (sorted[i - 1] as Member).position[0]
+          const dz = (sorted[i] as Member).position[2] - (sorted[i - 1] as Member).position[2]
+          maxGap = Math.max(maxGap, Math.hypot(dx, dz))
+        }
+      }
+      const spacing = maxGap > 0 ? ` @ ${formatFtIn(maxGap)} o.c. max` : ''
       const y = MARGIN + 14 + legendLines.length * 14
       legendLines.push(
         `<circle cx="${MARGIN + 7}" cy="${y - 3}" r="2.2" fill="#444"/>` +
-          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`1/2" anchor bolts @ 6'-0" o.c. max — ${bolts.length} pcs`)}</text>`,
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`${dia ?? ''}${dia ? ' ' : ''}anchor bolts${spacing} — ${bolts.length} pcs`)}</text>`,
       )
     }
     const dowels = mine.filter(
@@ -1264,7 +1291,9 @@ function coverSheet(members: Member[], opts: PlanSetOptions, index: string[]): P
   if (!f) return null
   const title = opts.projectName ?? 'Pascal project'
   const lines = [
-    `${opts.levelName ?? 'Level'} — full construction set`,
+    // The cover states the composed LOD too — a Generic (200) export must
+    // announce itself on the first sheet, not just the title blocks.
+    `${opts.levelName ?? 'Level'} — full construction set · LOD ${opts.detail ?? '400'}`,
     [opts.jurisdiction, opts.codeName].filter(Boolean).join(' · '),
     `${opts.date ?? ''} · Drafting aid, not engineering — verify with your local building department`,
   ].filter((l) => l.length > 0)
@@ -1337,14 +1366,10 @@ function schedulesSheets(
   // '… +1 more flags' truncated exactly the new roof-coverage safety flag);
   // pagination adds sheets when the shrunken cap overflows.
   // Flag lines wrap at the column width (the blocks live in ONE column now)
-  // — flags still print VERBATIM, a long one just takes two lines.
-  const flagLines: { text: string; indent: boolean }[] = flags.flatMap((fl) =>
-    wrapRow(`⚑ ${fl}`, 92).map((text, k) => ({ text, indent: k > 0 })),
-  )
-  const flagRows = flagLines.length
+  // — flags print VERBATIM at any length (wrapRow loops, round-6).
   // Building characteristics print just above the flags on the same page —
-  // built HERE so the reserve counts the real line total (the citation/notes
-  // line WRAPS at the column width instead of clipping, round-3 fixCheck2).
+  // built FIRST so the flag budget below knows the block's real line total
+  // (the citation/notes line WRAPS at the column width, round-3 fixCheck2).
   const charBlockLines: string[] = []
   if (opts.characteristics) {
     const c = opts.characteristics
@@ -1368,6 +1393,41 @@ function schedulesSheets(
       ),
     )
   }
+  const flagGroups: { text: string; indent: boolean }[][] = flags.map((fl) =>
+    wrapRow(`⚑ ${fl}`, 92).map((text, k) => ({ text, indent: k > 0 })),
+  )
+  // The flag block PAGINATES (wave-2 audit): bottom-anchored growth with no
+  // cap overprinted takeoff rows, then the sheet title, then went negative-y
+  // at ~40+ lines — silently INVISIBLE flags, the worst P4 failure mode.
+  // Whole flags spill to dedicated continuation sheets; a one-line pointer
+  // stays on the schedules sheet. Wrapped flags never split mid-group.
+  const colCapForFlags = maxLines - 1
+  const charNeed0 = charBlockLines.length > 0 ? charBlockLines.length + 1 : 0
+  const flagBudget = Math.max(0, colCapForFlags - charNeed0 - 1 - 4) // 4-row takeoff floor
+  const keptGroups: { text: string; indent: boolean }[][] = []
+  const spiltGroups: { text: string; indent: boolean }[][] = []
+  {
+    let used = 0
+    const totalFlagLines = flagGroups.reduce((s, g) => s + g.length, 0)
+    for (const g of flagGroups) {
+      // reserve one budget line for the pointer as soon as spilling is possible
+      const pointerCost = totalFlagLines > flagBudget ? 1 : 0
+      if (spiltGroups.length === 0 && used + g.length <= flagBudget - pointerCost) {
+        keptGroups.push(g)
+        used += g.length
+      } else {
+        spiltGroups.push(g)
+      }
+    }
+  }
+  const flagLines: { text: string; indent: boolean }[] = keptGroups.flat()
+  if (spiltGroups.length > 0) {
+    flagLines.push({
+      text: `⚑ + ${spiltGroups.length} more flag${spiltGroups.length > 1 ? 's' : ''} — see "Flags (continued)"`,
+      indent: false,
+    })
+  }
+  const flagRows = flagLines.length
   // title + the block's real line count — reserved out of the last page too.
   const charLines = charBlockLines.length > 0 ? charBlockLines.length + 1 : 0
   // P1 balance (round-3 carried): the reserve consumes the SECOND column
@@ -1460,10 +1520,10 @@ function schedulesSheets(
         line++
       }
     }
-    // Flags on the LAST page — ALL of them, bottom-anchored in the SECOND
-    // column (the reserve consumes that column's capacity, P1); the reserve
-    // grows with the list, so nothing truncates (round-3 scorecard C5: the
-    // old '… +N more flags' line dropped exactly the newest safety flag).
+    // Flags on the LAST page — bottom-anchored in the SECOND column (the
+    // reserve consumes that column's capacity, P1). The kept set is budget-
+    // bounded; overflow flags print WHOLE on continuation sheets below with
+    // a pointer line here — nothing truncates and nothing goes negative-y.
     let flagText = ''
     if (page === pages - 1 && flagLines.length > 0) {
       flagText = flagLines
@@ -1496,6 +1556,46 @@ function schedulesSheets(
       title,
       svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${charText}${flagText}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
     })
+  }
+  // Overflow flags — whole groups, two columns, top-down, paginated.
+  if (spiltGroups.length > 0) {
+    const capPerCol = maxLines - 1
+    type Positioned = { text: string; indent: boolean; col: number; line: number }
+    const flagPages: Positioned[][] = []
+    let cur: Positioned[] = []
+    let col = 0
+    let line = 0
+    for (const g of spiltGroups) {
+      if (line > 0 && line + g.length > capPerCol) {
+        if (col === 0) {
+          col = 1
+        } else {
+          flagPages.push(cur)
+          cur = []
+          col = 0
+        }
+        line = 0
+      }
+      for (const l of g) {
+        cur.push({ ...l, col, line })
+        line++
+      }
+    }
+    if (cur.length > 0) flagPages.push(cur)
+    for (const [fp, lines] of flagPages.entries()) {
+      const title =
+        flagPages.length > 1 ? `Flags (continued ${fp + 1}/${flagPages.length})` : 'Flags (continued)'
+      const body = lines
+        .map(
+          (l) =>
+            `<text x="${MARGIN + l.col * colW + (l.indent ? 12 : 0)}" y="${MARGIN + 24 + l.line * lineH}" font-size="9.5" font-family="Helvetica, Arial, sans-serif" fill="#a03015">${esc(l.text)}</text>`,
+        )
+        .join('')
+      sheets.push({
+        title,
+        svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Engine flags — continued from the schedules sheet</text>${body}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
+      })
+    }
   }
   return sheets
 }
@@ -1557,7 +1657,7 @@ export function planSetHtml(sheets: PlanSheet[], opts: PlanSetOptions = {}): str
     .map((s) => `<section class="sheet">${s.svg}</section>`)
     .join('\n')
   return `<!doctype html>
-<html><head><meta charset="utf-8"><title>${esc(opts.projectName ?? 'Pascal')} — Full plans (LOD 400)</title>
+<html><head><meta charset="utf-8"><title>${esc(opts.projectName ?? 'Pascal')} — Full plans (LOD ${opts.detail ?? '400'})</title>
 <style>
   @page { size: letter landscape; margin: 0; }
   html, body { margin: 0; padding: 0; background: #6b7078; }

@@ -856,6 +856,9 @@ function ExportPlansButton({
           // whole-building metrics block on the schedules sheet
           characteristics: result.characteristics ?? undefined,
           studSpacingIn: framingNode.studSpacingIn,
+          // the stamp must say what was actually composed (wave-2 audit:
+          // a Generic export shipped paper claiming LOD 400)
+          detail: framingNode.detail,
           // storey lifts RELATIVE to the owner level — owner members draw
           // level-local, so absolute elevations put an upper-storey owner's
           // roof a full storey too high on elevations/section (round-6)
@@ -867,7 +870,7 @@ function ExportPlansButton({
           ),
         })
         if (sheets.length === 0) return
-        const html = planSetHtml(sheets, { projectName: levelName })
+        const html = planSetHtml(sheets, { projectName: levelName, detail: framingNode.detail })
         const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
         window.open(url, '_blank', 'noopener')
         // The tab owns the blob from here; revoke after it had time to load.

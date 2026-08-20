@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { Fixture, Member } from '../core/types'
+import { feet } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
@@ -1261,5 +1262,70 @@ describe('round-6 — flags print VERBATIM (no ellipsis), cross-level lift is a 
       }).find((s) => s.title === 'Floor framing plan')?.svg ?? ''
     expect(svg).toContain('T&amp;G deck (drawn translucent)')
     expect(svg).toContain('joist hanger')
+  })
+})
+
+describe('wave-2 paper honesty — flag pagination, derived bolt legend, LOD stamp', () => {
+  test('a 50-flag set spills to "Flags (continued)" sheets — nothing invisible, nothing negative-y', () => {
+    const flags = Array.from(
+      { length: 50 },
+      (_, i) => `synthetic warning number ${i} — some remedy text citing R000.${i} for realism`,
+    )
+    const sheets = buildPlanSet([member({})], [], {
+      projectName: 'p',
+      levelName: 'l',
+      jurisdiction: 'FL',
+      date: 'd',
+      warnings: flags,
+    })
+    const sched = sheets.filter((s) => s.title.startsWith('Schedules'))
+    const cont = sheets.filter((s) => s.title.startsWith('Flags (continued'))
+    expect(cont.length).toBeGreaterThan(0)
+    const schedSvg = sched.map((s) => s.svg).join('')
+    expect(schedSvg).toMatch(/\+ \d+ more flag/) // pointer line on the schedules sheet
+    // no text element above the top margin (the old bottom-anchored growth
+    // went negative-y and printed silently invisible flags)
+    for (const s of [...sched, ...cont]) {
+      for (const m of s.svg.matchAll(/<text[^>]* y="(-?[\d.]+)"/g)) {
+        expect(Number(m[1])).toBeGreaterThan(0)
+      }
+    }
+    // EVERY flag prints somewhere across the set
+    const all = sheets.map((s) => s.svg).join('')
+    for (const fl of flags) expect(all).toContain(`R000.${flags.indexOf(fl)}`)
+  })
+
+  test('foundation legend derives bolt diameter + spacing from members', () => {
+    const bolt = (x: number): Member =>
+      member({
+        system: 'foundation',
+        role: 'anchor-bolt',
+        size: undefined,
+        material: 'steel',
+        dims: [0.016, 0.25, 0.016],
+        length: 0.25,
+        position: [x, -0.1, 0],
+        label: '5/8" anchor bolt',
+        sourceId: 'wall_a',
+      })
+    const svg =
+      buildPlanSet([bolt(0.3), bolt(0.3 + feet(6)), bolt(0.3 + 2 * feet(6))], [], {
+        projectName: 'p',
+        levelName: 'l',
+        jurisdiction: 'FL',
+        date: 'd',
+      }).find((s) => s.title === 'Foundation plan')?.svg ?? ''
+    expect(svg).toContain('5/8')
+    expect(svg).toContain('o.c. max — 3 pcs')
+    expect(svg).not.toContain('1/2&quot; anchor bolts') // the old hardcoded text
+  })
+
+  test('the title-block stamp says what was composed, not always LOD 400', () => {
+    const opts = { projectName: 'p', levelName: 'l', jurisdiction: 'FL', date: 'd' }
+    const s200 = buildPlanSet([member({})], [], { ...opts, detail: '200' as const })
+    expect(s200.every((s) => s.svg.includes('LOD 200'))).toBe(true)
+    expect(s200.some((s) => s.svg.includes('LOD 400'))).toBe(false)
+    const sDefault = buildPlanSet([member({})], [], opts)
+    expect(sDefault.every((s) => s.svg.includes('LOD 400'))).toBe(true)
   })
 })

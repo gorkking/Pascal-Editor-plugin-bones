@@ -114,6 +114,29 @@ Fix shape: tag WH/AHU/fan/thermostat fixtures into assignCircuits + route like t
 Gate: circuit census per equipment kind; E2 continuity incl. new homeruns; label pins.
 Blast radius: panel schedule + legend + plan-set (examiner round); panel meta count drift (appendix item) should be fixed in passing here.
 
+## WAVE 2 (2026-08-20 re-run of the 4 dead audits + 3 carried verifiers — 27/27 adversarially CONFIRMED, 0 rejected)
+Status ledger: B1-B5 SHIPPED (B1/B3 night-6 rounds, B2 pilot, B4 a132f3d incl. climate-zone rider, B5 pending merge); B17a/B21b/B21c fixed night-6 dawn (f7db0c2 follow-up).
+
+## BATCH 17 [BLOCKER][foundation+takeoff] Slab-on-grade phantom — the biggest pour on the job is unbooked
+Fiction chain: no slab member (role isn't even in the Member union), zero slab-field yd³ (≈11.2 yd³ on baseline — more than footings+stemwalls combined), no R506.2.3 vapor retarder / base course / edge insulation member-or-row-or-label, while compute.ts:611 prints 'see Foundation for the slab' pointing at nothing, foundation.ts:262 hasSlab is dead, takeoff.ts 'slab-edge' maps a role nothing emits. Fix: slab field member (polygon extent × R506.1 3.5", holes carved), vapor retarder membrane member + row, concrete yd³ row, kill-or-honor the promise warning. Gate: S4 parity slab member↔yd³ row; the warning names geometry that exists. Visual round (new stratum below joists).
+
+## BATCH 18 [MAJOR][foundation] Anchorage truth — bolts vs openings, CMU interface, SDC-D bar, post footings
+(a) foundation.ts:501 bolt layout ignores wall.openings: J-bolts inside door ROs booked as installable + no R403.1.6 per-plate-SECTION end bolts at jambs — port cmu.ts:766-773 boltSegments split (the convention exists in-repo). (b) CMU walls get 'mudsill anchorage' J-bolts embedded up into block cells where no sill exists + stemwall dowels never lap the wall's vertical bars. (c) SDC D stemwall missing R403.1.3.1 top-of-wall #4 horizontal bar (AK: nearest horizontal steel 38.8" below top of a 34" stemwall). (d) upper-floor girder 4x4 posts bear on the unmodeled slab with no R403.1/R407.3 pad footing. Gate per letter; interpenetration rows for (a)/(b).
+
+## BATCH 19 [BLOCKER+][hvac] Equipment placement + airflow truth
+(a) BLOCKER: air handler + open central return modeled INSIDE the garage silently (M1602.2(1) forbids garage return; R302.5.2 duct penetration rules) — placement must prefer conditioned utility/closet space, or flag loudly. (b) duct sizing ignores tonnage (trunkSizeInByTons ships dead; labels print CFM the tin can't carry). (c) no return-air path from closable rooms and no return-side duct member at all. (d) kitchen local exhaust missing (M1503; exhaust loop hard-gated to bath/laundry). (e) condensate: no aux pan/float switch at LOD-400; ¾" drain terminates at the wall CENTERLINE. (f) exhaust ducts skip routing/termination checks (dryer vent exits through the front-door RO unflagged; 35-ft budget, 3-ft opening clearance). Split (a)+(c) / (b)+(d) / (e)+(f) if it runs long.
+
+## BATCH 20 [MAJOR][plumbing] Fixture-unit + safety truth
+(a) water heater: no T&P valve/discharge, no pan, no seismic strapping even in CA, tank floats 18" above floor. (b) P3105.1 trap-arm measured fixture→wall not trap-weir→vent; one re-vent per wall serves every trap at any distance; island venting silent. (c) P2603.2.1 shield plates dead data; 3" stack centered in a 2x4 partition (0.25" cover) unflagged — pairs with B15's nail-plate mandate. (d) water meter + cold main land inside the panel's NEC 110.26(E) dedicated space (both trades elect the same wall at panelMountU). (e) MINOR: supply never sized (no WSFU, ¾"+½" always); hot-water R-3 insulation absent (N1103.5.3). (d) is a cross-engine spatial reservation — do it with B12/B16 panel work.
+
+## BATCH 21 [MAJOR][paper] Sheet honesty batch
+(a) FIXED f7db0c2-follow-up (night-6 dawn): flag block pagination. (b) FIXED: foundation legend hardcoded '1/2" bolts @ 6ft' contradicting 5/8" members + 4ft seismic spacing — now derived. (c) FIXED: 'LOD 400' stamped unconditionally on detail-200 exports — now from spec.detail. (d) door/window SCHEDULE sheet absent with no out-of-scope label — real feature, own iteration (columns from OpeningSlice + header members). (e) sheet-goods convention header says GROSS buys while member rows book NET, zero waste factor, subfloor row mislabeled — reconcile wording + add stated waste factors per material (B4's convention owns this).
+
+## CARRYOVER CONFIRMED (from the 3 dead wave-1 verifiers)
+- MEP penetrations unframed/unprotected (R302.11 fire-blocking at penetrations, R602.6 bore limits) → fold into B15 (nail plates) + B19/B20 routing.
+- King-stud counts vs Table R602.7.5 (always 1/side regardless of RO width) → fold into B1's file (wall-framing opening frames).
+- Brick veneer ties missing (R703.8.4 32"/25" o.c. + row) → wall-layers; pairs with the WAVE-1 appendix cladding-fastener line.
+
 ## APPENDIX — unverified minors (deduped; verify-then-fold into the nearest batch, or queue)
 - wall-framing: top-plate lap nailing dead in data (→B1/B5 file); soffit/penetration fire-blocking warning-only; finish-layer fasteners unbooked (drywall screws/siding nails/WRB caps — natural rider on B4's fastener re-key); over-wide RO silently narrowed, no flag (sibling of B1's clamp flag — fold into B1).
 - floor/roof: rim toe-nail count fixed at 3 regardless of length + bearing unchecked vs real walls; stair-header hangers exist but header-to-trimmer anchors + girder post caps/bases missing; gable-end bracing absent in high-wind (rider on B10).
