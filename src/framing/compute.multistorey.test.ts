@@ -111,6 +111,30 @@ describe('multi-storey elevations (prod 2026-08-15)', () => {
     expect(roof.every((m) => m.strataAbove !== true && m.mountLevelId === undefined)).toBe(true)
   })
 
+  test('span tables reach computeLevel: honest R802.5.1 flags on the 5.6 m ceiling joists (B2/S10)', () => {
+    const nodes = twoStoreyScene()
+    const node = bones('bonesframing_0', 'lvl0')
+    nodes.bonesframing_0 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const roof = result.members.filter((m) => m.system === 'roof-framing')
+    // 8.6×5.6 gable @30°, 2x6 @24": run 2.8 m fits the 20-psf table (3.57 m)
+    // — rafters clean, no purlins/struts
+    const rafters = roof.filter((m) => m.role === 'rafter')
+    expect(rafters.length).toBeGreaterThan(0)
+    expect(rafters.every((m) => !m.flag)).toBe(true)
+    expect(roof.some((m) => m.role === 'post')).toBe(false)
+    // …but the ONE-PIECE 5.6 m ceiling joists exceed 2x6 @16" limited
+    // storage (3.90 m): the honest flag rides through to the takeoff
+    const cjs = roof.filter((m) => m.role === 'ceiling-joist')
+    expect(cjs.length).toBeGreaterThan(0)
+    expect(cjs.every((m) => m.flag?.includes('R802.5.1'))).toBe(true)
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    const flagRow = rows.find(
+      (r) => r.section === 'Flags' && r.detail.includes('Ceiling joist over prescriptive span'),
+    )
+    expect(flagRow?.quantity).toBe(cjs.length)
+  })
+
   test('a shared roof is framed by exactly one X-ray — the highest storey wins', () => {
     const nodes = twoStoreyScene()
     const node0 = bones('bonesframing_0', 'lvl0')

@@ -197,6 +197,33 @@ AND a gate — a checklist line without a test is a wish.
   solid mode changes too. Gates: `wall-layers.test.ts` (family members),
   `src/framing/cladding-colors.test.ts` (distinct colors),
   `src/framing/cladding-paint.test.ts` (paint plans).
+- **S10 Roof members respect the wired span tables; splices never book
+  silently.** data/framing-tables.json is LIVE: R802.4.1 rafter spans
+  (horizontal projection, SPF #2) reach the spec as `rafterSpans`, swapped
+  by ground-snow band in `applyJurisdiction` exactly beside the rafterSize
+  bump (<50 psf → 20-psf-live table per its low-snow note, ≥50 → 50-psf);
+  ceiling joists check R802.5.1(2) limited storage. Every shape verifies
+  each slope plane's projection at LOD 300+: the GABLE gets the real fix —
+  a purlin row (rafter stock, plumb on edge, its downhill top corner
+  MEETING the rafter underside, stopped at the end rafters' inner faces)
+  plus 2x4 struts ≤ 4 ft o.c. SNAPPED onto ceiling-joist lines, feet on
+  the joist top face (assumed bearing, labeled — no floating struts), and
+  its rafters read 'purlin-supported @ mid-span'; shapes with no modeled
+  bearing below (shed / hip commons+kings / LONG jacks on their own
+  bearing run / flat joists / gambrel planes / mansard+dutch skirts /
+  valley jacks) flag instead. One-piece discipline: any spanning member
+  beyond 20-ft stock flags its field splice (collar ties are tension —
+  they always flag); continuously-supported members (ridge boards, flat
+  rims, barges, purlins, fascia) NAME their splice bearing in the label,
+  so the takeoff's '20 ft stock (field splice)' rows are never silent.
+  Unknown sizes / LOD 200 stay unchecked; spacing between table columns
+  snaps UP (conservative). Compact roofs — every plane and joist within
+  its table — are BYTE-EQUAL to a tables-emptied spec at 300 and 400.
+  Origin: LOD-400 audit B2 (26.5-ft one-piece rafters ×40, 12 m ceiling
+  joists, zero flags). Gates: `src/engines/roof-framing.spans.test.ts`
+  (repro, matrix, S1 strut bearing, byte-equality, takeoff rows),
+  `src/jurisdiction/profiles.test.ts` (band swap),
+  `src/engines/interpenetration.test.ts` (purlin+strut SAT, reproGable).
 
 ## M — Mechanical (HVAC)
 
