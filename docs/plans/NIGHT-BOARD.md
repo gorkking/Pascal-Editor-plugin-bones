@@ -1,5 +1,38 @@
 # Bones day board — 2026-08-16 — DAY COMPLETE (shipped ~17:30)
 
+## NIGHT-6 PLAN (2026-08-19 → morning) — user: doors/windows must move
+## like in the ORIGINAL editor with Bones on; framing recomputes LIVE
+USER REPORT (verbatim essence): moving windows/doors with Bones on is
+broken — "it disconnects, rotates in place in red 90° from the wall";
+it should slide easily along the wall; the framing around the opening
+should recompute live; "look for what makes it so easy in the original
+editor... make sure that same experience is available when using
+bones"; smooth, great experience. All-nighter + adversarial loop.
+PRIME SUSPECT (regression, ~hours old): #683 made HIDDEN walls
+pointer-transparent (the D4 outlet fix) — but the host door/window
+MOVE tool almost certainly finds its wall by raycasting wall meshes;
+with X-ray on (wallMode 'down' hides walls) the drag now loses the
+wall → detached ghost, red 90° invalid pose. Before #683 the invisible
+meshes caught the ray (that's WHY outlets misfired), so door drags
+worked in X-ray by accident of the same defect.
+TRACK A (pilot): repro at the shipped build (X-ray on → drag a door),
+root-cause in the host move/placement path, STUDY the original
+editor's door/window placement UX end-to-end (attach/slide/snap/live
+preview mechanics), fix so the SAME experience holds in X-ray:
+likely amend #683's guard — hidden walls stay pointer-transparent for
+SELECTION but remain ray targets while a door/window/device MOVE or
+PLACE tool is active (or the tools raycast the active wall's plane
+directly). Host PR; visual verify both modes: outlets clicks still
+pass through, door drags slide.
+TRACK B (me): LIVE framing recompute during drags — bones recompute
+today keys on useScene.nodes (committed writes only); host drags ride
+transient live-node overrides (core useLiveNodeOverrides /
+getEffectiveNode), so kings/trimmers/header only update on DROP. Make
+FramingRenderer recompute against EFFECTIVE nodes during an active
+drag, throttled (~10Hz), falling back to the memoized path when no
+overrides are live. Perf-gate it (computeLevel is a few ms — budget).
+SHIP through the full chain on double PASS.
+
 ## NIGHT-5 SHIPPED (~04:45): prod main b6bf8acb — OUTLETS ARE LIVE
 Plugin 22d9e7ae via editor #684 (main 751e983a, carrying #682 wipe
 guard + #683 pointer-transparent hidden walls) → private-editor #371.
