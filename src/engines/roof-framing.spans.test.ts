@@ -334,11 +334,14 @@ describe('takeoff — span flags surface, splices are never silent', () => {
   })
 
   test('property: no roof member beyond 20 ft stock books without a flag or purlin bearing', () => {
+    // 400 = the shipped default detail; splice-bearing NOTES are fabrication
+    // data (the rafterCutData convention), flags fire from 300 up.
+    const spec400: FramingSpec = { ...DEFAULT_SPEC, detail: '400' }
     const scenes: Member[][] = [
-      frameRoofs([seg({ width: 10, depth: 12 })], [], DEFAULT_SPEC),
-      frameRoofs([seg({ roofType: 'shed', depth: 8 })], [], DEFAULT_SPEC),
-      frameRoofs([seg({ roofType: 'flat', width: 12, depth: 14 })], [], DEFAULT_SPEC),
-      frameRoofs([seg({ roofType: 'hip', width: 16, depth: 14 })], [], DEFAULT_SPEC),
+      frameRoofs([seg({ width: 10, depth: 12 })], [], spec400),
+      frameRoofs([seg({ roofType: 'shed', depth: 8 })], [], spec400),
+      frameRoofs([seg({ roofType: 'flat', width: 12, depth: 14 })], [], spec400),
+      frameRoofs([seg({ roofType: 'hip', width: 16, depth: 14 })], [], spec400),
     ]
     for (const members of scenes) {
       for (const m of members) {

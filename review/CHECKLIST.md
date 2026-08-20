@@ -214,11 +214,15 @@ AND a gate — a checklist line without a test is a wish.
   valley jacks) flag instead. One-piece discipline: any spanning member
   beyond 20-ft stock flags its field splice (collar ties are tension —
   they always flag); continuously-supported members (ridge boards, flat
-  rims, barges, purlins, fascia) NAME their splice bearing in the label,
-  so the takeoff's '20 ft stock (field splice)' rows are never silent.
-  Unknown sizes / LOD 200 stay unchecked; spacing between table columns
-  snaps UP (conservative). Compact roofs — every plane and joist within
-  its table — are BYTE-EQUAL to a tables-emptied spec at 300 and 400.
+  rims, barges, purlins, fascia) NAME their splice bearing in the label
+  AT 400 (fabrication data, the rafterCutData convention — the shipped
+  default detail), so the takeoff's '20 ft stock (field splice)' rows are
+  never silent where users live. Unknown sizes / LOD 200 stay unchecked;
+  spacing between table columns snaps UP (conservative). Compact roofs —
+  every plane and joist within its table — are BYTE-EQUAL to a
+  tables-emptied spec at 300 and 400, and byte-equal to the SHIPPED
+  master at 300 (at 400 the splice notes are the only delta on span-legal
+  members longer than 20-ft stock).
   Origin: LOD-400 audit B2 (26.5-ft one-piece rafters ×40, 12 m ceiling
   joists, zero flags). Gates: `src/engines/roof-framing.spans.test.ts`
   (repro, matrix, S1 strut bearing, byte-equality, takeoff rows),

@@ -407,9 +407,11 @@ function slopeRafterFlag(
  * stock (ridge boards between rafter pairs, rims on joist ends, barges on
  * outlookers, purlins on struts): their field splice lands over real
  * support, so the takeoff's '20 ft stock (field splice)' row books with the
- * bearing named instead of silently. Spanning members use the FLAG instead. */
+ * bearing named instead of silently. Spanning members use the FLAG instead.
+ * FABRICATION data → 400 only, exactly like rafterCutData (plumb cuts/HAP):
+ * at 300 these members stay byte-equal to the shipped output. */
 function splicedNote(spec: FramingSpec, length: number, over: string): string {
-  if (spec.detail === '200') return ''
+  if (spec.detail !== '400') return ''
   return length > MAX_ONE_PIECE + EPS ? ` — spliced over ${over}` : ''
 }
 
