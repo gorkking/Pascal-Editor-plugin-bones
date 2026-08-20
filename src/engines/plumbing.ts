@@ -314,7 +314,7 @@ export function wetWallFor(
 // Pipe emitters
 // ---------------------------------------------------------------------------
 
-type PipeSpec = {
+export type PipeSpec = {
   side: number
   material: Member['material']
   role: Member['role']
@@ -704,7 +704,10 @@ function pointInAnyRO(walls: WallSlice[], pt: Pt, y: number): boolean {
   return false
 }
 
-function routePipe(
+/** Exported for the HVAC engine: the refrigerant line-set follows the SAME
+ * wall rails as supply/vent pipe (E1 detours, junction jumpers, flagged
+ * air-run fallback) — one routing machinery, not two (M2 line-set round). */
+export function routePipe(
   members: Member[],
   spec: PipeSpec,
   graph: ReturnType<typeof buildWallGraph>,

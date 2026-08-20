@@ -449,11 +449,12 @@ function planSheet(
     const h = Math.max(1.2, m.dims[2] * scale)
     // Per-member colors: wires by circuit; plumbing runs by system —
     // cold blue / hot red / DWV slate via the sourceId prefix (identical
-    // to the 3D X-ray, invariant E3's spirit).
+    // to the 3D X-ray, invariant E3's spirit). HVAC line-set pipes join
+    // the convention: suction cold-blue / liquid warm-red (M2 round).
     const fill =
       m.system === 'electrical' && m.role === 'wire-run'
         ? circuitColor(m.sourceId)
-        : (m.system === 'plumbing' && m.role === 'pipe-run'
+        : ((m.system === 'plumbing' || m.system === 'hvac') && m.role === 'pipe-run'
             ? plumbingPipeColor(m.sourceId)
             : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
     // Deck strips print translucent with a hairline seam — same hue as the
@@ -603,6 +604,17 @@ function planSheet(
     }
     if (pipes.some((m) => plumbingPipeColor(m.sourceId) === null)) {
       entries.push(['supply / DWV pipe', def.fill['pipe-run'] ?? '#8fb0c4'])
+    }
+    // Refrigerant line-set (hvac pipe-runs): one legend row per drawn pipe
+    // color — the examiner round-5 'MEP line-set legend row' carried minor.
+    const lineset = mine.filter(
+      (m) => m.system === 'hvac' && m.role === 'pipe-run' && m.sourceId.startsWith('lineset-'),
+    )
+    if (lineset.some((m) => m.sourceId.startsWith('lineset-suction-'))) {
+      entries.push(['line-set — suction ¾" (insulated)', PLUMBING_COLORS.linesetSuction])
+    }
+    if (lineset.some((m) => m.sourceId.startsWith('lineset-liquid-'))) {
+      entries.push(['line-set — liquid ⅜"', PLUMBING_COLORS.linesetLiquid])
     }
     const NAMES: Record<string, string> = {
       'vent-stack': 'vent stack',

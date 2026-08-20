@@ -173,7 +173,14 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     })
 
   test('cold/hot/DWV runs carry their prefix colors; legend + slope note print', () => {
-    const members = [pipe('cold-lav'), pipe('hot-lav'), pipe('dwv-main')]
+    const members = [
+      pipe('cold-lav'),
+      pipe('hot-lav'),
+      pipe('dwv-main'),
+      // hvac line-set pair — the M2 line-set round: same sheet, own colors
+      { ...pipe('lineset-suction-1'), system: 'hvac' as const },
+      { ...pipe('lineset-liquid-1'), system: 'hvac' as const },
+    ]
     const fixtures = [
       fixture({
         system: 'plumbing',
@@ -191,6 +198,9 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     expect(svg).toContain('supply — cold water')
     expect(svg).toContain('supply — hot water')
     expect(svg).toContain('DWV drain / vent')
+    // refrigerant line-set legend rows (examiner round-5 carried minor)
+    expect(svg).toContain('line-set — suction ¾&quot; (insulated)')
+    expect(svg).toContain('line-set — liquid ⅜&quot;')
     expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)')
     // the meter tags with M and the tag is named in the legend
     expect(svg).toContain('>M</text>')

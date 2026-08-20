@@ -33,10 +33,16 @@
  *    Manual J/S govern), one condenser per ≤ 5 tons. Each unit gets a 4"
  *    concrete pad + cabinet outside an exterior wall (≥ 0.3 m off the face,
  *    ≥ 0.6 m between units, clear of door/window ROs — per mfr clearance +
- *    IRC M1403), a refrigerant line-set (Ø22 suction + Ø10 liquid) through
- *    a wall penetration at ~0.4 m Manhattan-routed to the air handler, and
+ *    IRC M1403), a refrigerant LINE-SET — suction ¾" (insulated) + liquid
+ *    ⅜" running as a parallel pair — from the cabinet through ONE
+ *    exterior-wall penetration at ~0.4 m (snapped clear of ROs), then
+ *    following the WALL GRAPH to the air handler coil on the plumbing
+ *    engine's routePipe rails (E1 RO detours, junction jumpers, flagged
+ *    air-run fallback — never a straight diagonal through room air), and
  *    a wall disconnect + whip (NEC 440.14; the dedicated branch circuit is
- *    routed separately). The heat-pump service node still wins unit #1's
+ *    routed separately). A run longer than ~15 m carries a 'verify
+ *    manufacturer max line-set length / oil return' advisory (mfr specs
+ *    govern). The heat-pump service node still wins unit #1's
  *    position verbatim (checklist A4) and the row re-anchors to it.
  *    NOTE: the climate-zone divisor keys off `context.stateCode` — the
  *    one-line compute.ts hookup (`stateCode: code`) is deferred while
@@ -50,14 +56,18 @@ import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Fixture, Member, RoomSlice, ServiceOverrides, WallSlice } from '../core/types'
 import { inches, toFeet } from '../core/units'
 import {
+  buildWallGraph,
   clearOfOpenings,
+  nearestWallPoint,
   openingSpans,
   overridePlanPoint,
   overrideWallPoint,
   pointInPolygon,
   polygonCentroid,
   segmentCrossesRo,
+  wallPlan,
 } from './electrical'
+import { routePipe, type PipeSpec } from './plumbing'
 
 type Pt = readonly [number, number]
 
@@ -78,6 +88,7 @@ const rules = mepRules as {
       linesetSuctionDiaM?: number
       linesetLiquidDiaM?: number
       linesetHeightM?: number
+      linesetMaxLenAdvisoryM?: number
       disconnectAboveUnitM?: number
     }
   }
@@ -134,10 +145,19 @@ const COND_DIMS: readonly [number, number, number] = [
 const COND_UNIT_CLEAR = COND?.unitClearM ?? 0.6
 /** Clear space between the wall FACE and the cabinet. */
 const COND_WALL_CLEAR = COND?.wallClearM ?? 0.3
-/** Refrigerant line-set: insulated suction + liquid pair, through-wall ~0.4 m. */
-const LINESET_SUCTION_DIA = COND?.linesetSuctionDiaM ?? 0.022
-const LINESET_LIQUID_DIA = COND?.linesetLiquidDiaM ?? 0.01
+/** Refrigerant line-set: suction ¾" (insulated) + liquid ⅜" pair, through
+ * ONE wall penetration at ~0.4 m, then wall-following to the air handler. */
+const LINESET_SUCTION_DIA = COND?.linesetSuctionDiaM ?? 0.019
+const LINESET_LIQUID_DIA = COND?.linesetLiquidDiaM ?? 0.0095
 const LINESET_Y = COND?.linesetHeightM ?? 0.4
+/** The suction rides +2 cm / liquid −2 cm off LINESET_Y: a PARALLEL pair
+ * with a 4 cm offset — two pipes, never one coincident stack. */
+export const LINESET_PAIR_OFFSET = 0.02
+/** Runs longer than this get the oil-return advisory — an ASSUMPTION class
+ * (typical mfr line-set charts top out 15–30 m; the manufacturer governs). */
+const LINESET_MAX_LEN_ADVISORY = COND?.linesetMaxLenAdvisoryM ?? 15
+const LINESET_LONG_FLAG =
+  'line-set over ~15 m — verify manufacturer max line-set length / oil return (mfr specs govern)'
 /** Disconnect box center above the unit top, on the wall face (NEC 440.14). */
 const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
 /**
@@ -300,11 +320,12 @@ function duct(
   label: string,
   material: Member['material'] = 'duct',
   role: Member['role'] = 'duct-run',
+  minLen = 0.15,
 ): Member | null {
   const dx = to[0] - from[0]
   const dz = to[1] - from[1]
   const length = Math.hypot(dx, dz)
-  if (length < 0.15) return null
+  if (length < minLen) return null
   return {
     system: 'hvac',
     role,
@@ -939,6 +960,10 @@ export function layoutHvac(
       const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt)
       warnings.push(...row.warnings)
       const unitTopY = COND_PAD_T + COND_DIMS[1]
+      // Line-set rails: the wall graph + the air handler's wall anchor are
+      // shared by every unit's run (the coil is one point).
+      const linesetGraph = buildWallGraph(walls)
+      const ahAnchor = nearestWallPoint(walls, equipAt)
       const sizingNote = `assumed 1 ton/${plan.divisor} sqft${plan.zone ? `, zone ${plan.zone}` : ''}`
       for (let i = 0; i < row.slots.length; i++) {
         const slot = row.slots[i] as CondenserSlot
@@ -1007,52 +1032,114 @@ export function layoutHvac(
             totalTons: plan.totalTons,
           },
         })
-        // Refrigerant LINE-SET (Ø22 suction + Ø10 liquid, insulated): unit →
-        // through-wall penetration at the pad's cleared along-wall spot
-        // (~0.4 m up) → Manhattan along to the air handler. Every segment is
-        // plan-axis-aligned; when the default elbow crosses a door/window RO
-        // the alternate elbow is tried, and a path that cannot clear is
-        // ⚠-flagged, never silent (E1 applied to refrigerant pipe).
-        const pen = row.wall ? wallPointAt(row.wall, slot.u) : at
-        const e1: Pt = [equipAt[0], pen[1]]
-        const e2: Pt = [pen[0], equipAt[1]]
-        const legA: Pt[] = [at, [pen[0], at[1]], pen]
-        const crossesRo = (pts: Pt[]): boolean =>
-          pts.some(
-            (p, j) =>
-              j > 0 &&
-              segmentCrossesRo(
-                walls,
-                [(pts[j - 1] as Pt)[0], LINESET_Y, (pts[j - 1] as Pt)[1]],
-                [p[0], LINESET_Y, p[1]],
-              ),
-          )
-        const defPath = [...legA, e1, equipAt]
-        const altPath = [...legA, e2, equipAt]
-        const useAlt = crossesRo(defPath) && !crossesRo(altPath)
-        const path = useAlt ? altPath : defPath
-        const flagged = crossesRo(path)
+        // Refrigerant LINE-SET (suction ¾" insulated + liquid ⅜", M1411):
+        // cabinet service-valve side → ONE exterior-wall penetration at the
+        // unit's along-wall spot SNAPPED clear of any RO crossing the pipe
+        // band (~0.4 m up) → the WALL GRAPH to the air handler's wall anchor
+        // on the plumbing engine's routePipe rails (E1 RO detours over the
+        // header / under the sill, junction jumpers, flagged air-run
+        // fallback) → a coil stub into the equipment room. The two pipes run
+        // the SAME plan path as a parallel pair, suction +2 cm / liquid
+        // −2 cm — cold line insulated, warm line bare. A run over ~15 m
+        // carries the oil-return advisory (mfr line-set charts govern).
+        const runMembers: Member[] = []
         const pipes = [
-          { dia: LINESET_SUCTION_DIA, y: LINESET_Y + 0.02, name: 'Ø22mm suction' },
-          { dia: LINESET_LIQUID_DIA, y: LINESET_Y - 0.02, name: 'Ø10mm liquid' },
+          {
+            dia: LINESET_SUCTION_DIA,
+            y: LINESET_Y + LINESET_PAIR_OFFSET,
+            sourceId: `lineset-suction-${n}`,
+            label: 'Line-set suction ¾" — insulated (M1411)',
+          },
+          {
+            dia: LINESET_LIQUID_DIA,
+            y: LINESET_Y - LINESET_PAIR_OFFSET,
+            sourceId: `lineset-liquid-${n}`,
+            label: 'Line-set liquid ⅜" (M1411)',
+          },
         ]
-        for (const pipe of pipes) {
-          for (let j = 1; j < path.length; j++) {
-            const seg = duct(
-              path[j - 1] as Pt,
-              path[j] as Pt,
-              pipe.y,
-              pipe.dia,
-              pipe.dia,
-              `lineset-${n}`,
-              `Refrigerant lineset — ${pipe.name} (insulated, M1411)`,
-              'copper',
-              'pipe-run',
+        if (row.wall && ahAnchor) {
+          // Penetration: the unit's anchor slid clear of every RO whose
+          // vertical span crosses the pipe band (a verbatim heat-pump node
+          // can front a window the ROW never slid for).
+          const penU = clearOfOpenings(
+            row.wall,
+            slot.u,
+            LINESET_Y - LINESET_PAIR_OFFSET - 0.05,
+            LINESET_Y + LINESET_PAIR_OFFSET + 0.05,
+          )
+          const pen = wallPointAt(row.wall, penU)
+          const foot = wallPointAt(row.wall, slot.u)
+          const standOff = (at[0] - foot[0]) * slot.out[0] + (at[1] - foot[1]) * slot.out[1]
+          // Service-valve elbow: slide OUTSIDE the wall (parallel to it) to
+          // face the penetration, then straight in through the wall.
+          const elbowOut: Pt = [pen[0] + slot.out[0] * standOff, pen[1] + slot.out[1] * standOff]
+          for (const pipe of pipes) {
+            // outside stub — can't detour; flagged when it crosses an RO
+            // volume (E1 honesty, same contract as the service laterals)
+            for (const [a, b] of [
+              [at, elbowOut],
+              [elbowOut, pen],
+            ] as const) {
+              const seg = duct(
+                a, b, pipe.y, pipe.dia, pipe.dia, pipe.sourceId, pipe.label,
+                'copper', 'pipe-run', 0.02,
+              )
+              if (!seg) continue
+              if (segmentCrossesRo(walls, [a[0], pipe.y, a[1]], [b[0], pipe.y, b[1]])) {
+                seg.flag = 'line-set crosses a door/window RO — verify routing'
+              }
+              runMembers.push(seg)
+            }
+            // in-wall route: penetration → air-handler wall anchor
+            const spec: PipeSpec = {
+              side: pipe.dia,
+              material: 'copper',
+              role: 'pipe-run',
+              sourceId: pipe.sourceId,
+              label: pipe.label,
+            }
+            routePipe(
+              runMembers, spec, linesetGraph,
+              { wall: row.wall, u: penU }, ahAnchor, pipe.y, walls,
             )
-            if (!seg) continue
-            if (flagged) seg.flag = 'lineset crosses a door/window RO — verify routing'
-            members.push(seg)
+            // coil stub: wall anchor → the air handler
+            const ap = wallPlan(ahAnchor)
+            const stub = duct(
+              [ap[0], ap[1]], equipAt, pipe.y, pipe.dia, pipe.dia,
+              pipe.sourceId, pipe.label, 'copper', 'pipe-run', 0.02,
+            )
+            if (stub) runMembers.push(stub)
           }
+        } else {
+          // No exterior wall / no wall anchor (degenerate scene): flagged
+          // Manhattan air legs — never silent (routePipe fallback semantics).
+          for (const pipe of pipes) {
+            const elbow: Pt = [equipAt[0], at[1]]
+            for (const [a, b] of [
+              [at, elbow],
+              [elbow, equipAt],
+            ] as const) {
+              const seg = duct(
+                a, b, pipe.y, pipe.dia, pipe.dia, pipe.sourceId,
+                `${pipe.label} (air run — no wall path, verify)`,
+                'copper', 'pipe-run', 0.02,
+              )
+              if (!seg) continue
+              seg.flag = 'AIR RUN: line-set found no wall path — route along a wall'
+              runMembers.push(seg)
+            }
+          }
+        }
+        // routePipe emits system 'plumbing' — the line-set is HVAC scope
+        // (S4 sections, M2 row); the >15 m advisory rides every leg of the
+        // long run so it aggregates as ONE flag line.
+        const suctionLen = runMembers
+          .filter((m) => m.sourceId === `lineset-suction-${n}`)
+          .reduce((sum, m) => sum + m.length, 0)
+        for (const m of runMembers) {
+          m.system = 'hvac'
+          if (suctionLen > LINESET_MAX_LEN_ADVISORY && !m.flag) m.flag = LINESET_LONG_FLAG
+          members.push(m)
         }
         // DISCONNECT on the wall face above the unit (NEC 440.14 — within
         // sight) + a short liquid-tight whip down to the cabinet. The

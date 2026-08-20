@@ -572,10 +572,12 @@ export function computeTakeoff(
   // Service-entrance cable (street → meter → panel) is SE/USE conductor, not
   // NM-B — booked on its own line, never under a phantom NM gauge.
   let seCableLf = 0
-  // Refrigerant line-sets are BOUGHT as insulated suction+liquid pairs, not
-  // cut copper pipe — booked by pair-run lf on their own row, never under
-  // the plumbing-style copper lf or elbow fittings (soft copper bends).
-  let linesetLf = 0
+  // Refrigerant line-sets are soft-copper suction/liquid pairs, not cut
+  // plumbing pipe — booked by SIZE on their own rows (suction ¾" + liquid
+  // ⅜") plus the suction line's insulation sleeve lf, never under the
+  // plumbing-style copper lf or elbow fittings (soft copper bends).
+  let linesetSuctionLf = 0
+  let linesetLiquidLf = 0
   const linesetRuns = new Set<string>()
   // Condenser whips are liquid-tight conduit kits (NEC 440.14), one per
   // unit — never NM-B lineal feet.
@@ -591,9 +593,11 @@ export function computeTakeoff(
     } else if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) {
       connectorHoses.add(m.sourceId)
     } else if (m.role === 'pipe-run' && m.sourceId.startsWith('lineset-')) {
-      // The pair runs the same path — book the PAIR length once (suction leg).
-      if (m.label?.includes('suction')) linesetLf += toFeet(m.length)
-      linesetRuns.add(m.sourceId)
+      if (m.sourceId.startsWith('lineset-suction-')) linesetSuctionLf += toFeet(m.length)
+      else if (m.sourceId.startsWith('lineset-liquid-')) linesetLiquidLf += toFeet(m.length)
+      // one RUN per unit — 'lineset-suction-2' and 'lineset-liquid-2' are
+      // the same physical pair
+      linesetRuns.add(m.sourceId.replace(/^lineset-(?:suction|liquid)-/, ''))
     } else if (m.role === 'pipe-run' || m.role === 'vent-stack') {
       const sizeIn = Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
       const materialName = m.material === 'copper' ? 'Copper' : m.material === 'pvc' ? 'PVC' : 'Pipe'
@@ -631,12 +635,29 @@ export function computeTakeoff(
       'pcs',
     )
   }
-  if (linesetLf > 0) {
+  const linesetRunsNote = `${linesetRuns.size} run${linesetRuns.size === 1 ? '' : 's'} (M1411)`
+  if (linesetSuctionLf > 0) {
     push(
       'HVAC',
-      'Refrigerant line-set',
-      `Ø22 suction + Ø10 liquid pair, insulated — ${linesetRuns.size} run${linesetRuns.size === 1 ? '' : 's'} (M1411)`,
-      round1(linesetLf),
+      'Line-set suction ¾"',
+      `soft copper, insulated — ${linesetRunsNote}`,
+      round1(linesetSuctionLf),
+      'lf',
+    )
+    push(
+      'HVAC',
+      'Line-set insulation',
+      '¾" suction line — closed-cell pipe sleeve (M1411)',
+      round1(linesetSuctionLf),
+      'lf',
+    )
+  }
+  if (linesetLiquidLf > 0) {
+    push(
+      'HVAC',
+      'Line-set liquid ⅜"',
+      `soft copper — ${linesetRunsNote}`,
+      round1(linesetLiquidLf),
       'lf',
     )
   }

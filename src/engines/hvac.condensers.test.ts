@@ -22,9 +22,11 @@ import { computeTakeoff } from './takeoff'
  *  3. every pad/cabinet sits OUTSIDE the exterior wall, ≥ 0.6 m clear of
  *     its neighbors, never in front of a door/window RO (slides along the
  *     wall to clear);
- *  4. each unit's line-set reaches the air handler (endpoint tolerance)
- *     through a WALL PENETRATION at ~0.4 m — Manhattan segments only (every
- *     leg plan-axis-aligned), no diagonal air runs;
+ *  4. each unit's line-set (suction ¾" insulated + liquid ⅜") reaches the
+ *     air handler (endpoint tolerance) through ONE wall penetration at
+ *     ~0.4 m, then FOLLOWS THE WALLS on the plumbing routePipe rails —
+ *     E1 RO detours over headers, no diagonal air runs (line-set round
+ *     continuity/parallelism gates live in hvac.lineset.test.ts);
  *  5. a disconnect lands within sight (≤ 1 m) of each unit (NEC 440.14);
  *  6. takeoff rows mirror the rendered counts (checklist S4);
  *  7. the heat-pump service override MOVES unit #1 verbatim and the row
@@ -280,7 +282,7 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
 // Line-set + disconnect
 // ---------------------------------------------------------------------------
 
-describe('line-set — Manhattan wall penetration to the air handler; disconnect within sight', () => {
+describe('line-set — one RO-clear wall penetration, wall-following pair to the air handler', () => {
   const { walls, rooms } = shell(26, 10)
   const { members, fixtures } = layoutHvac(walls, rooms, LOD400)
   const handler = fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
@@ -289,11 +291,20 @@ describe('line-set — Manhattan wall penetration to the air handler; disconnect
   test('each unit has a suction+liquid pair whose run reaches the air handler', () => {
     expect(units.length).toBe(2)
     for (let n = 1; n <= units.length; n++) {
-      const legs = members.filter((m) => m.sourceId === `lineset-${n}` && m.role === 'pipe-run')
-      const suction = legs.filter((m) => m.label?.includes('suction'))
-      const liquid = legs.filter((m) => m.label?.includes('liquid'))
+      const suction = members.filter(
+        (m) => m.sourceId === `lineset-suction-${n}` && m.role === 'pipe-run',
+      )
+      const liquid = members.filter(
+        (m) => m.sourceId === `lineset-liquid-${n}` && m.role === 'pipe-run',
+      )
       expect(suction.length).toBeGreaterThan(0)
       expect(liquid.length).toBeGreaterThan(0)
+      // distinct member labels: the cold line says insulated, the warm one
+      // carries its own size (the M2 line-set round contract)
+      expect(suction.every((m) => m.label?.includes('suction ¾" — insulated'))).toBe(true)
+      expect(liquid.every((m) => m.label?.includes('liquid ⅜"'))).toBe(true)
+      // line-set members are HVAC scope even on the plumbing rails
+      expect(suction.every((m) => m.system === 'hvac')).toBe(true)
       // endpoint lands at the handler plan point
       const reaches = suction.some((m) =>
         endpointsOf(m).some(
@@ -342,27 +353,43 @@ describe('line-set — Manhattan wall penetration to the air handler; disconnect
     for (const m of suction) expect(m.position[1]).toBeCloseTo(0.42, 6)
   })
 
-  test('a door RO on the default elbow path reroutes the line-set (E1 for pipe)', () => {
-    // Force unit #1 to (8, −0.7): the default path runs pen(8,0) → (1.5,0)
-    // ALONG the south wall band — straight through the door RO at u=5. The
-    // alternate elbow (inward first, then across) clears it.
+  test('a door RO on the in-wall path DETOURS over the header (E1 for pipe)', () => {
+    // Force unit #1 to (8, −0.7): the in-wall route runs pen(8,0) → the AH
+    // anchor (1.5,0) ALONG the south wall — straight through the door RO at
+    // u=5 at pipe height. The plumbing rails rise inside the king-stud bay,
+    // cross ABOVE the header and drop back (never through the doorway).
     const withDoor = shell(26, 10, [opening('d_mid', 5, 0.9)])
     const out = layoutHvac(withDoor.walls, withDoor.rooms, DEFAULT_SPEC, {
       heatPump: { position: [8, 0, -0.7] },
     })
     const suction = out.members.filter(
-      (m) => m.sourceId === 'lineset-1' && m.label?.includes('suction'),
+      (m) => m.sourceId === 'lineset-suction-1' && m.label?.includes('suction'),
     )
     expect(suction.length).toBeGreaterThan(0)
-    // no leg runs along the wall band across the door (both endpoints z≈0
-    // spanning x=5) …
-    const crossesDoorInWall = suction.some((m) => {
+    // RO span [4.55, 5.45]; the detour risers stand 4.5 cm past its edges
+    const spansDoor = (a: Endpoint, b: Endpoint) =>
+      Math.min(a.x, b.x) < 4.56 && Math.max(a.x, b.x) > 5.44
+    // no leg crosses the door AT PIPE HEIGHT inside the wall band …
+    const crossesDoorAtPipeY = suction.some((m) => {
       const [a, b] = endpointsOf(m)
-      const spansDoor = Math.min(a.x, b.x) < 4.5 && Math.max(a.x, b.x) > 5.5
-      return spansDoor && Math.abs(a.z) < 0.11 && Math.abs(b.z) < 0.11
+      return (
+        spansDoor(a, b) &&
+        Math.abs(a.z) < 0.11 &&
+        Math.abs(b.z) < 0.11 &&
+        Math.max(a.y, b.y) < 2.1
+      )
     })
-    expect(crossesDoorInWall).toBe(false)
-    // … the rerouted run still reaches the handler, unflagged
+    expect(crossesDoorAtPipeY).toBe(false)
+    // … the crossing happens ABOVE the door header (topY = 2.1) …
+    const crossesOverHeader = suction.some((m) => {
+      const [a, b] = endpointsOf(m)
+      return spansDoor(a, b) && Math.abs(a.z) < 0.11 && a.y > 2.1 && b.y > 2.1
+    })
+    expect(crossesOverHeader).toBe(true)
+    // … with riser legs connecting the detour back to the pipe plane
+    const risers = suction.filter((m) => m.dims[1] === m.length && m.rotation[1] === 0)
+    expect(risers.length).toBeGreaterThanOrEqual(2)
+    // the detoured run stays unflagged and still reaches the handler
     for (const m of suction) expect(m.flag).toBeUndefined()
     const reaches = suction.some((m) =>
       endpointsOf(m).some((e) => Math.hypot(e.x - 1.5, e.z - 1.5) < 0.06),
@@ -370,17 +397,36 @@ describe('line-set — Manhattan wall penetration to the air handler; disconnect
     expect(reaches).toBe(true)
   })
 
-  test('a run that CANNOT clear an RO is ⚠-flagged, never silent', () => {
-    // Interior wall with a door dead between the penetration and the air
-    // handler at the same x — both elbows produce the same blocked path.
-    const blocked = shell(26, 10)
-    blocked.walls.push(
-      wall('w_block', [0, 1.0], [3, 1.0], false, [opening('d_block', 1.5, 0.9)]),
-    )
-    const out = layoutHvac(blocked.walls, blocked.rooms, LOD400)
-    const legs = out.members.filter((m) => m.sourceId === 'lineset-1')
+  test('a run that CANNOT clear an RO is ⚠-marked, never silent', () => {
+    // Full-height glazing dead between the penetration and the AH anchor —
+    // no wall remains above the header or below the sill to detour through.
+    const glazing: OpeningSlice = {
+      id: 'w_full',
+      kind: 'window',
+      u: 5,
+      width: 0.95,
+      height: 2.65,
+      sillHeight: 0,
+      roughWidth: 1.0,
+      roughHeight: 2.7,
+    }
+    const blocked = shell(26, 10, [glazing])
+    const out = layoutHvac(blocked.walls, blocked.rooms, DEFAULT_SPEC, {
+      heatPump: { position: [8, 0, -0.7] },
+    })
+    const legs = out.members.filter((m) => m.sourceId.startsWith('lineset-suction-1'))
     expect(legs.length).toBeGreaterThan(0)
-    expect(legs.some((m) => m.flag?.includes('lineset crosses a door/window RO'))).toBe(true)
+    expect(legs.some((m) => m.label?.includes('⚠ crosses full-height opening'))).toBe(true)
+  })
+
+  test('a degenerate scene without walls keeps a FLAGGED air run (routePipe fallback semantics)', () => {
+    // No exterior wall at all (heat-pump node forces the row): the pair
+    // still connects unit → handler, but every leg carries the AIR RUN
+    // flag — honesty over silence.
+    const out = layoutHvac([], rooms, LOD400, { heatPump: { position: [5, 0, -1] } })
+    const legs = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+    expect(legs.length).toBeGreaterThan(0)
+    expect(legs.every((m) => m.flag?.includes('AIR RUN'))).toBe(true)
   })
 
   test('a disconnect mounts within 1 m of each unit, one per unit (NEC 440.14)', () => {
@@ -423,7 +469,7 @@ describe('heat-pump override moves unit #1 and the row follows (A4)', () => {
     expect(units[1]?.position[0]).toBeCloseTo(28, 6)
     expect(Math.abs((units[1]?.position[2] ?? 0) - 3)).toBeCloseTo(0.95 + 0.6, 6)
     // line-set #1 re-anchors with it
-    const legs = moved.members.filter((m) => m.sourceId === 'lineset-1')
+    const legs = moved.members.filter((m) => m.sourceId === 'lineset-suction-1')
     expect(legs.length).toBeGreaterThan(0)
     const reaches = legs.some((m) =>
       endpointsOf(m).some((e) => Math.hypot(e.x - 28, e.z - 3) < 0.06),
@@ -465,13 +511,25 @@ describe('takeoff — condenser rows mirror the rendered members/fixtures (S4)',
     expect(find('Condenser whips')?.quantity).toBe(n)
   })
 
-  test('line-set books by pair length on its own row — never copper lf or elbows', () => {
-    const suctionM = members
-      .filter((m) => m.sourceId.startsWith('lineset-') && m.label?.includes('suction'))
-      .reduce((sum, m) => sum + m.length, 0)
-    const row = find('Refrigerant line-set')
-    expect(row).toBeDefined()
-    expect(row?.quantity).toBeCloseTo(Math.round(suctionM * 3.28084 * 10) / 10, 1)
+  test('line-set books by SIZE + insulation lf — never copper lf or elbows', () => {
+    const lfOf = (prefix: string) =>
+      members
+        .filter((m) => m.sourceId.startsWith(prefix))
+        .reduce((sum, m) => sum + m.length, 0) * 3.28084
+    const suction = find('Line-set suction ¾"')
+    const liquid = find('Line-set liquid ⅜"')
+    const sleeve = find('Line-set insulation')
+    expect(suction).toBeDefined()
+    expect(liquid).toBeDefined()
+    expect(sleeve).toBeDefined()
+    expect(suction?.quantity).toBeCloseTo(Math.round(lfOf('lineset-suction-') * 10) / 10, 1)
+    expect(liquid?.quantity).toBeCloseTo(Math.round(lfOf('lineset-liquid-') * 10) / 10, 1)
+    // the COLD suction line is the insulated one — sleeve lf mirrors it
+    expect(sleeve?.quantity).toBe(suction?.quantity as number)
+    expect(sleeve?.detail).toContain('¾" suction')
+    // both size rows count the physical PAIRS, one run per unit
+    expect(suction?.detail).toContain('2 runs')
+    expect(liquid?.detail).toContain('2 runs')
     // no phantom plumbing-style copper rows or fittings out of the line-set
     const hvacCopper = rows.filter((r) => r.section === 'HVAC' && r.item.startsWith('Copper'))
     expect(hvacCopper).toHaveLength(0)
