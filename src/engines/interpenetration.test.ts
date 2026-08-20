@@ -916,15 +916,68 @@ describe('ship-gate follow-up: blocking bears on joists, never on rim or air', (
     // Scope: BLOCKING pairs (the ship-gate finding). This ~6° sliver also
     // exhibits rim×rim + joist×rim contact at the acute tip — a distinct
     // pre-existing miter class, queued in the backlog appendix, and pinned
-    // here so it can't silently widen.
+    // EXACTLY so the frozen class can't silently grow (ship-gate round 2
+    // advisory: a ≤4 pin left room for the class to double unnoticed).
     const v = violations(members)
     expect(v.filter((s) => s.includes('blocking'))).toEqual([])
-    expect(v.length).toBeLessThanOrEqual(4) // the acute-tip rim residual, frozen
+    expect(v).toHaveLength(2)
+    for (const pair of v) expect(pair).toContain('rim-joist')
   })
 
   test('needle sliver: zero joists ⇒ zero blocking (no lumber bearing on air)', () => {
     const members = frameFloor([slab([[0, 0], [5, 0.1], [0, 0.2]])], [], spec400)
     expect(members.filter((m) => m.role === 'joist')).toHaveLength(0)
     expect(members.filter((m) => m.role === 'blocking')).toHaveLength(0)
+    // the tip rim×rim miter residual — same queued class, pinned exactly
+    const v = violations(members)
+    expect(v).toHaveLength(1)
+    expect(v[0]).toContain('rim-joist')
+  })
+
+  test('L-notch with the cross edge just past a bay mid: the FULL block stays inside (no rim poke)', () => {
+    // Ship-gate round 2: the centerline-only coverage test left a ≤t/2
+    // window — a notch edge at mid + t + 8mm produced FIVE blocking×rim
+    // SAT pairs while every block was 'covered' at its center.
+    const members = frameFloor(
+      [
+        slab([
+          [0, 0],
+          [4, 0],
+          [4, 2],
+          [2.0461, 2],
+          [2.0461, 4],
+          [4, 4],
+          [4, 6],
+          [0, 6],
+        ]),
+      ],
+      [],
+      spec400,
+    )
+    expect(violations(members).filter((s) => s.includes('blocking'))).toEqual([])
+    expect(members.some((m) => m.role === 'blocking')).toBe(true) // non-vacuous
+  })
+
+  test('narrow stair hole strictly BETWEEN rows: no block over the well, no trimmer impale', () => {
+    // Ship-gate round 2: (a) off-center hole in its bay — the center-only
+    // inHole test kept the block over the stairwell; (b) even centered,
+    // the NEIGHBORING bay's block clipped a trimmer ply.
+    for (const hole of [
+      [
+        [1, 2.09],
+        [3, 2.09],
+        [3, 2.25],
+        [1, 2.25],
+      ],
+      [
+        [1, 2.1],
+        [3, 2.1],
+        [3, 2.4],
+        [1, 2.4],
+      ],
+    ] as [number, number][][]) {
+      const members = frameFloor([slab(rect(4, 6), { holes: [hole] })], [], spec400)
+      expect(violations(members).filter((s) => s.includes('blocking'))).toEqual([])
+    }
   })
 })

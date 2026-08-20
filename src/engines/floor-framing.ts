@@ -662,14 +662,16 @@ function frameSlab(
       // blocks (round-11).
       const bayLen = (rows[i + 1] as number) - (rows[i] as number) - t
       if (bayLen < inches(3)) continue
-      // A sistered joist INSIDE this bay occupies the blocking line —
-      // skip the bay (round-14: full-bay blocks impaled the sisters).
-      if (
-        sisterLines.some(
-          (sl) => sl > (rows[i] as number) + t / 2 && sl < (rows[i + 1] as number) - t / 2,
-        )
-      )
-        continue
+      // A sistered joist OR a stair trimmer ply intruding into this bay
+      // occupies the blocking line — skip the bay (round-14: full-bay
+      // blocks impaled the sisters; ship-gate round 2: same impale on
+      // trimmer plies). The block fills cross [rows[i]+t/2, rows[i+1]−t/2]
+      // and a ply at `l` spans l ± t/2, so they overlap iff the ply CENTER
+      // is strictly between the row lines — a ply 1mm outside the old
+      // ±t/2-shrunk window still poked 18mm into the block.
+      const occupiesBay = (line: number): boolean =>
+        line > (rows[i] as number) + EPS && line < (rows[i + 1] as number) - EPS
+      if (sisterLines.some(occupiesBay) || [...trimmerLines].some(occupiesBay)) continue
       const cross = ((rows[i] as number) + (rows[i + 1] as number)) / 2
       // A bay is only real where OPPOSING JOIST FACES exist. Polygon
       // containment was a proxy and failed twice at the ship gate: near a
@@ -677,15 +679,24 @@ function frameSlab(
       // is entirely rim joist (blocking × rim SAT overlap), and a needle
       // sliver whose every joist span fell under MIN_SEGMENT emitted
       // blocks bearing on AIR. The recorded per-row spans are exactly
-      // what emitJoist framed — a block emits only between two faces
-      // that exist at `mid` (round-6 follow-up; supersedes the two-face
-      // polygon sampling).
+      // what emitJoist framed — and the FULL block (t thick, mid ± t/2)
+      // must sit inside the span: the centerline-only test left a ≤t/2
+      // rim-poke window when a cross edge landed just past mid (ship-gate
+      // round 2, 5 SAT pairs on an L-notch at mid + t + 8mm).
       const coveredBy = (ri: number): boolean =>
-        (rowJoistSpans[ri] ?? []).some(([s, e]) => mid > s + EPS && mid < e - EPS)
+        (rowJoistSpans[ri] ?? []).some(
+          ([s, e]) => mid - t / 2 > s + EPS && mid + t / 2 < e - EPS,
+        )
       if (!coveredBy(i) || !coveredBy(i + 1)) continue
-      // Skip blocking that would land inside a stairwell hole.
+      // Skip blocking that would land inside a stairwell hole — tested
+      // against the BLOCK'S full extent, not the bay center (ship-gate
+      // round 2: an off-center narrow hole between rows kept its block).
       const inHole = holeFrames.some(
-        (h) => cross > h.cross[0] && cross < h.cross[1] && mid > h.run[0] && mid < h.run[1],
+        (h) =>
+          (rows[i + 1] as number) - t / 2 > h.cross[0] &&
+          (rows[i] as number) + t / 2 < h.cross[1] &&
+          mid + t / 2 > h.run[0] &&
+          mid - t / 2 < h.run[1],
       )
       if (inHole) continue
       emit(
