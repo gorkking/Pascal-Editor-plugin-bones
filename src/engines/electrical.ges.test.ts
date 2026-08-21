@@ -230,15 +230,32 @@ describe('GES census (checklist E7)', () => {
     }
   })
 
-  test('GEC below-grade legs really are below the living band', () => {
-    const { members } = route()
+  test('GEC horizontal legs: at/below the grade line, or strapped ON the wall (E4)', () => {
+    const { walls, members } = route()
     for (const m of members.filter((w) => w.sourceId === 'GES-1')) {
       const [a, b] = endpointsOf(m)
-      if (Math.abs(a.y - b.y) < 0.005) {
-        // horizontal GEC runs live at/below the grade line
-        expect((a.y + b.y) / 2).toBeLessThanOrEqual(0.01)
-      }
+      if (Math.abs(a.y - b.y) >= 0.005) continue
+      const y = (a.y + b.y) / 2
+      if (y <= 0.01) continue // grade-line / buried — legal
+      // the meter strap-out rides the wall band (never open room air)
+      const onWall = walls.some((w) => {
+        const near = (x: number, z: number): boolean => {
+          const dx = x - w.start[0]
+          const dz = z - w.start[1]
+          const along = dx * w.dir[0] + dz * w.dir[1]
+          const perp = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
+          return along > -0.15 && along < w.length + 0.15 && perp < w.thickness / 2 + 0.08
+        }
+        return near(a.x, a.z) && near(b.x, b.z)
+      })
+      expect(onWall, `${m.label} @y=${y.toFixed(2)}`).toBe(true)
     }
+    // …and the legs that CARRY the run to the rods really are down at grade
+    const gradeLegs = members.filter(
+      (w) => w.sourceId === 'GES-1' && (w.label?.includes('grade run') || w.label?.includes('rod 1 → rod 2')),
+    )
+    expect(gradeLegs.length).toBeGreaterThanOrEqual(2)
+    for (const m of gradeLegs) expect(m.position[1]).toBeLessThanOrEqual(0.01)
   })
 
   test('NO water entry: bond absent, assumption LABELED on the termination — never silent', () => {

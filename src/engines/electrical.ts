@@ -2320,15 +2320,25 @@ export function routeServiceCable(
     })
   })
 
-  // GEC: meter → down the exterior face to the grade line → out to rod 1 →
-  // drop onto the rod → one CONTINUOUS run to rod 2 (250.53(C) — the
-  // rod-to-rod jumper is the same unbroken conductor). The grade-line run
-  // sits above the stemwall top (y=0) so nothing bores the foundation.
+  // GEC: meter → a short strap-out beside the SE riser (the riser member
+  // stands on the SAME plan point — a coincident drop would bury the thin
+  // conductor inside its volume) → down the exterior face to the grade
+  // line → out to rod 1 → drop onto the rod → one CONTINUOUS run to rod 2
+  // (250.53(C) — the rod-to-rod jumper is the same unbroken conductor).
+  // The grade-line run sits above the stemwall top (y=0) so nothing bores
+  // the foundation.
   const gecLabel = `GEC ${gecAwg} AWG Cu — grounding electrode conductor (NEC 250.66)${ampNote}`
-  gesFlagged('GES-1', [mx, my, mz], [mx, GES_GRADE_Y, mz], `${gecLabel} — meter → grade`)
+  const strap: readonly [number, number] = [mx + rodAxis[0] * 0.08, mz + rodAxis[1] * 0.08]
+  gesFlagged('GES-1', [mx, my, mz], [strap[0], my, strap[1]], `${gecLabel} — meter strap-out`)
+  gesFlagged(
+    'GES-1',
+    [strap[0], my, strap[1]],
+    [strap[0], GES_GRADE_Y, strap[1]],
+    `${gecLabel} — meter → grade`,
+  )
   gesWire(
     'GES-1',
-    [mx, GES_GRADE_Y, mz],
+    [strap[0], GES_GRADE_Y, strap[1]],
     [rod1[0], GES_GRADE_Y, rod1[1]],
     `${gecLabel} — grade run to rod 1`,
   )

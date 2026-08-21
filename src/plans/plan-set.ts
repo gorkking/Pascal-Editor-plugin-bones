@@ -1856,10 +1856,12 @@ function memberSegs(
       color: SYSTEM_STROKE[m.system] ?? '#9a9a9a',
       // below-grade work prints dashed ('hidden' convention) — the
       // foundation AND the buried DWV tree (top of pipe under the floor
-      // line, the renderer's ghost predicate)
+      // line, the renderer's ghost predicate). Below-grade electrical
+      // (B12: the driven ground rods) joins the same convention.
       dashed:
         m.system === 'foundation' ||
-        (m.system === 'plumbing' && m.position[1] + m.dims[1] / 2 < 0.02),
+        ((m.system === 'plumbing' || m.system === 'electrical') &&
+          m.position[1] + m.dims[1] / 2 < 0.02),
     })
   }
   return segs.sort((p, q) => p.depth - q.depth)
