@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import type { Fixture, Member } from '../core/types'
-import { feet } from '../core/units'
+import { DEFAULT_SPEC } from '../core/spec'
+import type { Fixture, Member, RoomSlice, SlabSlice, WallSlice } from '../core/types'
+import { feet, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
+import { buildFoundation } from '../engines/foundation'
+import { layoutPlumbing } from '../engines/plumbing'
 import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
@@ -1463,5 +1466,123 @@ describe('wave-2 paper honesty — flag pagination, derived bolt legend, LOD sta
     expect(s200.some((s) => s.svg.includes('LOD 400'))).toBe(false)
     const sDefault = buildPlanSet([member({})], [], opts)
     expect(sDefault.every((s) => s.svg.includes('LOD 400'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Examiner round 3 (P1/P2): the sleeve story must reach PAPER, and the
+// sewer marker must respect the sheet edge and the device bubbles. These
+// gates compose REAL engine scenes (frost spec — the sleeves exist).
+// ---------------------------------------------------------------------------
+
+describe('sleeve crossings + sewer marker on composed scenes (examiner round 3)', () => {
+  const xwall = (id: string, s: [number, number], e: [number, number]): WallSlice => {
+    const dx = e[0] - s[0]
+    const dz = e[1] - s[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start: s,
+      end: e,
+      length,
+      dir: [dx / length, dz / length],
+      thickness: 0.114,
+      height: 2.5,
+      exterior: true,
+      openings: [],
+      curved: false,
+    }
+  }
+  const room = (
+    id: string,
+    category: RoomSlice['category'],
+    polygon: [number, number][],
+    boundaryWallIds: string[],
+  ): RoomSlice => ({ id, name: category, category, polygon, boundaryWallIds, ceilingHeight: 2.5 })
+  const slab = (polygon: [number, number][]): SlabSlice => ({
+    id: 'slab_paper',
+    polygon,
+    holes: [],
+    elevation: 0.05,
+    thickness: 0.05,
+  })
+  const specFrost = { ...DEFAULT_SPEC, detail: '400' as const, footingDepth: inches(60) }
+  const TICK = /M-2\.5 -6 L-2\.5 6 M2\.5 -6 L2\.5 6/g
+
+  test('P1: corner powder room — the w_w crossing prints tick + cite', () => {
+    const shell = [
+      xwall('w_s', [0, 0], [10, 0]),
+      xwall('w_e', [10, 0], [10, 8]),
+      xwall('w_n', [10, 8], [0, 8]),
+      xwall('w_w', [0, 8], [0, 0]),
+    ]
+    const powder = [room('r_pow', 'bathroom', [[0, 0], [1, 0], [1, 2], [0, 2]], ['w_s'])]
+    const p = layoutPlumbing(shell, powder, specFrost, [], {
+      sewerExit: { position: [-0.8, 0, 0.9] },
+    })
+    const f = buildFoundation(shell, [slab([[0, 0], [10, 0], [10, 8], [0, 8]])], specFrost)
+    const mep = buildPlanSet([...p.members, ...f], p.fixtures, {}).find((s) =>
+      s.title.startsWith('Plumbing'),
+    )
+    const svg = mep?.svg ?? ''
+    // exactly ONE sleeved crossing exists in this scene (main X-leg × w_w)
+    expect((svg.match(TICK) ?? []).length).toBe(1)
+    expect((svg.match(/SLEEVE \(P2603\.4\)/g) ?? []).length).toBeGreaterThanOrEqual(1)
+  })
+
+  const courtyardCompose = () => {
+    const uWalls = [
+      xwall('u_s', [0, 0], [12, 0]),
+      xwall('u_e', [12, 0], [12, 8]),
+      xwall('u_n', [12, 8], [0, 8]),
+      xwall('u_w', [0, 8], [0, 0]),
+      xwall('u_c1', [5, 2], [5, 6]),
+      xwall('u_c2', [7, 2], [7, 6]),
+    ]
+    const uRooms = [
+      room('r_ubath', 'bathroom', [[8, 2], [11, 2], [11, 6], [8, 6]], ['u_e']),
+      room('r_ukitchen', 'kitchen', [[1, 2], [4, 2], [4, 6], [1, 6]], ['u_w']),
+    ]
+    const p = layoutPlumbing(uWalls, uRooms, specFrost)
+    const f = buildFoundation(uWalls, [slab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
+    const mep = buildPlanSet([...p.members, ...f], p.fixtures, {}).find((s) =>
+      s.title.startsWith('Plumbing'),
+    )
+    return mep?.svg ?? ''
+  }
+
+  test('P1: courtyard — BOTH courtyard stemwall crossings marked (+ the exit one)', () => {
+    const svg = courtyardCompose()
+    // kitchen branch × u_c1 + × u_c2, main × u_e
+    expect((svg.match(TICK) ?? []).length).toBe(3)
+    expect((svg.match(/SLEEVE \(P2603\.4\)/g) ?? []).length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('P2: east exit — sewer text fully inside the viewBox, glyph clear of bubbles', () => {
+    const svg = courtyardCompose()
+    const txt = svg.match(
+      /<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>SEWER\/SEPTIC/,
+    )
+    expect(txt).not.toBeNull()
+    const tx = Number(txt?.[1])
+    const anchor = txt?.[3]
+    const wTxt = 'SEWER/SEPTIC (P3005.4)'.length * 6
+    const left = anchor === 'start' ? tx : anchor === 'end' ? tx - wTxt : tx - wTxt / 2
+    // the pre-fix marker anchored 'start' at ~1015 and ran ~40 px off the
+    // 1056 viewBox — the text must now fit with margin on both sides
+    expect(left).toBeGreaterThan(48)
+    expect(left + wTxt).toBeLessThan(1056 - 48)
+    // and the glyph keeps the arrows' bubble clearance
+    const glyph = svg.match(
+      /M-5 -4 L6 0 L-5 4 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/,
+    )
+    expect(glyph).not.toBeNull()
+    const gx = Number(glyph?.[1])
+    const gy = Number(glyph?.[2])
+    const bubbles = [...svg.matchAll(/<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="7"/g)]
+    expect(bubbles.length).toBeGreaterThan(0)
+    for (const b of bubbles) {
+      expect(Math.hypot(Number(b[1]) - gx, Number(b[2]) - gy)).toBeGreaterThanOrEqual(12)
+    }
   })
 })
