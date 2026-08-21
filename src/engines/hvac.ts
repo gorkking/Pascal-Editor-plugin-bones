@@ -530,6 +530,45 @@ function clearOfSegs(segs: PlanSeg[], q: Pt, half: number): boolean {
   return segs.every((s) => planSegDist(s, q) >= s.half + half + DUCT_CLEAR_GAP)
 }
 
+/** Plan intersection point of segments a→b and c→d (null when disjoint). */
+function segSegHit(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
+  const d1: Pt = [b[0] - a[0], b[1] - a[1]]
+  const d2: Pt = [d[0] - c[0], d[1] - c[1]]
+  const den = d1[0] * d2[1] - d1[1] * d2[0]
+  if (Math.abs(den) < 1e-9) return null
+  const t = ((c[0] - a[0]) * d2[1] - (c[1] - a[1]) * d2[0]) / den
+  const s = ((c[0] - a[0]) * d1[1] - (c[1] - a[1]) * d1[0]) / den
+  if (t < 0 || t > 1 || s < 0 || s > 1) return null
+  return [a[0] + d1[0] * t, a[1] + d1[1] * t]
+}
+
+/**
+ * True when the horizontal duct leg a→b (occupying [yLo, yHi], half-width
+ * `halfW` along the crossed wall) passes through a ROUGH OPENING of any
+ * wall it crosses — a duct through an open doorway is physically impossible
+ * (round-3 finding: the soffit return leg crossed dead center of a door,
+ * half a meter below the head). Attic legs ride above wall tops, so only
+ * soffit paths consult this.
+ */
+function legCrossesRo(
+  walls: WallSlice[],
+  a: Pt,
+  b: Pt,
+  yLo: number,
+  yHi: number,
+  halfW: number,
+): boolean {
+  for (const w of walls) {
+    if (w.curved || w.length < 0.1 || w.openings.length === 0) continue
+    const hit = segSegHit(a, b, [w.start[0], w.start[1]], [w.end[0], w.end[1]])
+    if (!hit) continue
+    const u = (hit[0] - w.start[0]) * w.dir[0] + (hit[1] - w.start[1]) * w.dir[1]
+    const spans = openingSpans(w, yLo, yHi)
+    if (spans.some((s) => u > s.lo - halfW && u < s.hi + halfW)) return true
+  }
+  return false
+}
+
 /** Half the RETURN section's widest plan face (verticals present 14" × 8"). */
 const RETURN_VERT_HALF = Math.max(TRUNK_W, TRUNK_H) / 2
 
@@ -1026,6 +1065,35 @@ export function layoutHvac(
   const u = (p: Pt): number => (alongX ? p[0] : p[1])
   const onAxis = (uu: number): Pt => (alongX ? [uu, axisCross] : [axisCross, uu])
 
+  // SOFFIT legs run inside the storey — a leg crossing a wall through a
+  // rough opening hangs in the doorway (round-3 finding; the 2.0–2.2 m
+  // supply band grazes a standard 2.17 m head). The supply axis is fixed by
+  // the registers, so supply legs FLAG the crossing — never silent; the
+  // return path (below) actively routes around ROs first. Attic legs ride
+  // above every wall top — immune.
+  const doorwayCheck = (
+    m: Member | null,
+    a: Pt,
+    b: Pt,
+    kind: 'supply' | 'return',
+  ): Member | null => {
+    if (
+      m &&
+      interiorStorey &&
+      legCrossesRo(
+        walls,
+        a,
+        b,
+        m.position[1] - m.dims[1] / 2,
+        m.position[1] + m.dims[1] / 2,
+        m.dims[2] / 2,
+      )
+    ) {
+      m.flag = `${kind} duct crosses a doorway — verify routing (soffit/floor-web coordination)`
+    }
+    return m
+  }
+
   // Feed: the air handler rises into the attic at its own plan point, then a
   // perpendicular leg reaches the trunk axis — every trunk/branch run lives
   // at attic elevation (trunkY), never in the plate band.
@@ -1040,14 +1108,19 @@ export function layoutHvac(
     `Trunk riser ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${interiorStorey ? 'to soffit (M1601)' : 'to attic (M1601)'}`,
   )
   if (riser) members.push(riser)
-  const feed = duct(
+  const feed = doorwayCheck(
+    duct(
+      equipAt,
+      onAxis(uEq),
+      trunkY,
+      TRUNK_W,
+      TRUNK_H,
+      equipRoom.id,
+      `Trunk feed ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}"`,
+    ),
     equipAt,
     onAxis(uEq),
-    trunkY,
-    TRUNK_W,
-    TRUNK_H,
-    equipRoom.id,
-    `Trunk feed ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}"`,
+    'supply',
   )
   if (feed) members.push(feed)
 
@@ -1063,14 +1136,19 @@ export function layoutHvac(
     for (const takeoff of takeoffs) {
       const next = u(takeoff.at)
       const w = Math.max(TRUNK_MIN_W, TRUNK_W * (remaining / Math.max(1, totalCfm)))
-      const segment = duct(
+      const segment = doorwayCheck(
+        duct(
+          onAxis(cursor),
+          onAxis(next),
+          trunkY,
+          w,
+          TRUNK_H,
+          equipRoom.id,
+          `Trunk ${Math.round(toFeet(w) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${remaining} cfm`,
+        ),
         onAxis(cursor),
         onAxis(next),
-        trunkY,
-        w,
-        TRUNK_H,
-        equipRoom.id,
-        `Trunk ${Math.round(toFeet(w) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${remaining} cfm`,
+        'supply',
       )
       if (segment) members.push(segment)
       cursor = next
@@ -1080,14 +1158,19 @@ export function layoutHvac(
   // Branches leave the trunk at right angles to each register (still in the
   // attic), then a drop boot carries the air through the CEILING plane.
   for (const { room, at, cfm, transferAssumed } of registers) {
-    const branch = duct(
+    const branch = doorwayCheck(
+      duct(
+        onAxis(u(at)),
+        at,
+        trunkY,
+        BRANCH_SIDE,
+        BRANCH_SIDE,
+        room.id,
+        `6" branch — ${cfm} cfm`,
+      ),
       onAxis(u(at)),
       at,
-      trunkY,
-      BRANCH_SIDE,
-      BRANCH_SIDE,
-      room.id,
-      `6" branch — ${cfm} cfm`,
+      'supply',
     )
     if (branch) members.push(branch)
     const boot = ductDrop(
@@ -1160,8 +1243,10 @@ export function layoutHvac(
       }
       return depth
     }
-    let ahReturnAt = dropCands.find((q) => intrusion(q) === 0)
-    if (!ahReturnAt) {
+    const clearDrops = dropCands.filter((q) => intrusion(q) === 0)
+    let ahReturnAt: Pt
+    if (clearDrops.length > 0) ahReturnAt = clearDrops[0] as Pt
+    else {
       ahReturnAt = dropCands.reduce((best, q) => (intrusion(q) < intrusion(best) ? q : best))
       warnings.push(
         `return drop cannot clear walls in ${equipRoom.name || equipRoom.id} — verify routing`,
@@ -1183,15 +1268,27 @@ export function layoutHvac(
     )
     if (rise) members.push(rise)
     // Manhattan legs: in a SOFFIT the return plane sits below the supply
-    // plane, inside the supply riser's vertical span — pick the elbow whose
-    // legs clear the riser in plan (attic legs ride above every supply
-    // vertical, either elbow is safe there).
+    // plane, inside the supply riser's vertical span, AND inside the storey
+    // — so soffit legs must (i) clear the supply riser in plan and (ii)
+    // cross walls only at SOLID segments: a 14×8 duct through an open
+    // doorway is physically impossible (round-3 finding — the leg crossed
+    // dead center of a door, half a meter below its head). The search walks
+    // every clear drop candidate × both elbows for a path clearing BOTH;
+    // the head-band raise (crossing above the door) is NOT modeled — over a
+    // standard 2.17 m head a 2.5 m wall leaves ~0.24 m to the plate band,
+    // under the section + margins — so a path that cannot clear keeps the
+    // preferred route and FLAGS its crossing legs (never silent). Attic
+    // legs ride above every wall top, either elbow is safe there.
     const legLabel = `Return trunk ${sizeTag} — ${totalCfm} cfm (M1602)`
-    const legsClearRiser = (via: Pt): boolean => {
+    const legYLo = returnY - TRUNK_H / 2
+    const legYHi = returnY + TRUNK_H / 2
+    const roClear = (a: Pt, b: Pt): boolean =>
+      !legCrossesRo(walls, a, b, legYLo, legYHi, TRUNK_W / 2)
+    const legsClearRiser = (via: Pt, drop: Pt): boolean => {
       const need = RETURN_VERT_HALF + TRUNK_W / 2 + DUCT_CLEAR_GAP
       for (const [a, b] of [
         [grilleAt, via],
-        [via, ahReturnAt as Pt],
+        [via, drop],
       ] as const) {
         const p = projectOnto(a, b, equipAt)
         if (Math.hypot(p[0] - equipAt[0], p[1] - equipAt[1]) < need) return false
@@ -1199,14 +1296,47 @@ export function layoutHvac(
       return true
     }
     let elbow: Pt = [ahReturnAt[0], grilleAt[1]]
-    if (interiorStorey && !legsClearRiser(elbow)) {
-      const alt: Pt = [grilleAt[0], ahReturnAt[1]]
-      if (legsClearRiser(alt)) elbow = alt
-      else warnings.push('return trunk cannot clear the supply riser — verify routing')
+    if (interiorStorey) {
+      let found: { drop: Pt; via: Pt } | null = null
+      for (const drop of clearDrops.length > 0 ? clearDrops : [ahReturnAt]) {
+        for (const via of [
+          [drop[0], grilleAt[1]],
+          [grilleAt[0], drop[1]],
+        ] as Pt[]) {
+          if (legsClearRiser(via, drop) && roClear(grilleAt, via) && roClear(via, drop)) {
+            found = { drop, via }
+            break
+          }
+        }
+        if (found) break
+      }
+      if (found) {
+        ahReturnAt = found.drop
+        elbow = found.via
+      } else {
+        // No combination clears everything: keep the preferred drop, take
+        // the riser-clear elbow when one exists, and let doorwayCheck flag
+        // any leg still crossing an RO.
+        if (!legsClearRiser(elbow, ahReturnAt)) {
+          const alt: Pt = [grilleAt[0], ahReturnAt[1]]
+          if (legsClearRiser(alt, ahReturnAt)) elbow = alt
+          else warnings.push('return trunk cannot clear the supply riser — verify routing')
+        }
+      }
     }
-    const legA = duct(grilleAt, elbow, returnY, TRUNK_W, TRUNK_H, 'return-trunk', legLabel)
+    const legA = doorwayCheck(
+      duct(grilleAt, elbow, returnY, TRUNK_W, TRUNK_H, 'return-trunk', legLabel),
+      grilleAt,
+      elbow,
+      'return',
+    )
     if (legA) members.push(legA)
-    const legB = duct(elbow, ahReturnAt, returnY, TRUNK_W, TRUNK_H, 'return-trunk', legLabel)
+    const legB = doorwayCheck(
+      duct(elbow, ahReturnAt, returnY, TRUNK_W, TRUNK_H, 'return-trunk', legLabel),
+      elbow,
+      ahReturnAt,
+      'return',
+    )
     if (legB) members.push(legB)
     const drop = ductDrop(
       ahReturnAt,

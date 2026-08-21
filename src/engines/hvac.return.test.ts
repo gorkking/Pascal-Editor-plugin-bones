@@ -268,6 +268,102 @@ describe('B19 round 2 — the return path NEVER shares tin with the supply syste
   })
 })
 
+describe('B19 round 3 — soffit legs never hang in a doorway (unflagged)', () => {
+  const DOOR_FLAG = (kind: string) =>
+    `${kind} duct crosses a doorway — verify routing (soffit/floor-web coordination)`
+
+  /** The confirmed compose verbatim: 8×6 interior storey, hall/laundry
+   * split by interior wall m at x=4 with a door at u=2.5 (RO z≈2.03–2.98,
+   * head 2.17) — the round-3 return leg crossed at z=2.50, dead center of
+   * the doorway, half a meter below the head, unflagged. */
+  function doorwayPlan(doorOverrides: Partial<OpeningSlice> = {}) {
+    const d: OpeningSlice = {
+      id: 'd_m',
+      kind: 'door',
+      u: 2.5,
+      width: 0.9,
+      height: 2.1,
+      sillHeight: 0,
+      roughWidth: 0.95,
+      roughHeight: 2.17,
+      ...doorOverrides,
+    }
+    const walls = [
+      wall('w_s', [0, 0], [8, 0]),
+      wall('w_e', [8, 0], [8, 6]),
+      wall('w_n', [8, 6], [0, 6]),
+      wall('w_w', [0, 6], [0, 0]),
+      wall('w_m', [4, 0], [4, 6], false, [d]),
+    ]
+    const rooms = [
+      room('r_hall', 'Hallway', 'hallway', [
+        [0, 0],
+        [4, 0],
+        [4, 6],
+        [0, 6],
+      ]),
+      room('r_laundry', 'Laundry', 'laundry', [
+        [4, 0],
+        [8, 0],
+        [8, 6],
+        [4, 6],
+      ]),
+    ]
+    return { walls, rooms, ro: { lo: d.u - d.roughWidth / 2, hi: d.u + d.roughWidth / 2 } }
+  }
+
+  test('the confirmed compose: the return crossing slides to a SOLID segment', () => {
+    const { walls, rooms, ro } = doorwayPlan()
+    const { members, fixtures } = layoutHvac(walls, rooms, DEFAULT_SPEC, undefined, {
+      hasLevelAbove: true,
+    })
+    const legs = returnDucts(members).filter(
+      (m) => m.label?.startsWith('Return trunk') && m.dims[0] >= m.dims[1],
+    )
+    expect(legs.length).toBeGreaterThan(0)
+    // no return member hangs in the doorway…
+    for (const m of returnDucts(members)) expect(m.flag).toBeUndefined()
+    // …because every leg crossing wall m (x=4) does so OUTSIDE the RO span
+    const pad = 0.3556 / 2 // TRUNK_W / 2 along the crossed wall
+    for (const m of legs) {
+      const yaw = m.rotation[1]
+      const dx = (Math.cos(yaw) * m.dims[0]) / 2
+      const x0 = m.position[0] - Math.abs(dx)
+      const x1 = m.position[0] + Math.abs(dx)
+      if (x0 < 4 && x1 > 4) {
+        const z = m.position[2]
+        expect(z < ro.lo - pad || z > ro.hi + pad).toBe(true)
+      }
+    }
+    // the return still reaches the AH and shares no tin with the supply
+    expect(returnReachesAh(members, fixtures)).toBe(true)
+    expect(returnSupplyOverlaps(members)).toEqual([])
+    // the SUPPLY soffit path (axis fixed by the registers) crosses the
+    // doorway at z=3.0 inside the padded span — it must say so
+    const supplyFlagged = members.filter((m) => m.flag === DOOR_FLAG('supply'))
+    expect(supplyFlagged.length).toBeGreaterThan(0)
+    expect(supplyFlagged.some((m) => m.label?.startsWith('Trunk feed'))).toBe(true)
+  })
+
+  test('no solid segment on the wall: the crossing leg FLAGS, never silent', () => {
+    // the door spans nearly the whole wall — every reachable crossing is in-RO
+    const { walls, rooms } = doorwayPlan({ u: 3, width: 5.3, roughWidth: 5.5 })
+    const { members, fixtures } = layoutHvac(walls, rooms, DEFAULT_SPEC, undefined, {
+      hasLevelAbove: true,
+    })
+    const flagged = returnDucts(members).filter((m) => m.flag === DOOR_FLAG('return'))
+    expect(flagged.length).toBeGreaterThan(0)
+    // honesty over silence: the geometry stays drawn + continuous
+    expect(returnReachesAh(members, fixtures)).toBe(true)
+  })
+
+  test('attic mode is immune — same plan, no level above, no doorway flags', () => {
+    const { walls, rooms } = doorwayPlan()
+    const { members } = layoutHvac(walls, rooms)
+    expect(members.some((m) => m.flag?.includes('crosses a doorway'))).toBe(false)
+  })
+})
+
 describe('B19 round 2 — compromised placements are LOUD, never silent', () => {
   /** 0.8×0.8 mech closet hugged by its own four walls: no drop candidate
    * and no grille spot can clear — both fallbacks must ⚠ (round-1 findings
