@@ -647,14 +647,6 @@ function planBounds(polygon: readonly (readonly [number, number])[]): {
   return { minX, maxX, minZ, maxZ }
 }
 
-/**
- * Run-axis interval a carve band occupies WITHIN one strip's cross band
- * [lo, hi] — the band rectangle clipped to the two half-planes
- * (Sutherland–Hodgman), then its run extent. Null when the band misses the
- * strip. The extent is a conservative box carve: an oblique band removes
- * its full clipped reach across the strip (slight under-pour beside skewed
- * walls, never concrete inside a stemwall — the deck's hole-carve stance).
- */
 /** Cross-axis extent of a carve band's rectangle (strip-splitting cuts). */
 function bandCrossExtent(band: CarveBand, runAxis: 'x' | 'z'): [number, number] | null {
   const [ax, az] = band.a
@@ -674,6 +666,14 @@ function bandCrossExtent(band: CarveBand, runAxis: 'x' | 'z'): [number, number] 
   return [Math.min(...crosses), Math.max(...crosses)]
 }
 
+/**
+ * Run-axis interval a carve band occupies WITHIN one strip's cross band
+ * [lo, hi] — the band rectangle clipped to the two half-planes
+ * (Sutherland–Hodgman), then its run extent. Null when the band misses the
+ * strip. The extent is a conservative box carve: an oblique band removes
+ * its full clipped reach across the strip (slight under-pour beside skewed
+ * walls, never concrete inside a stemwall — the deck's hole-carve stance).
+ */
 function bandRunInterval(
   band: CarveBand,
   runAxis: 'x' | 'z',
