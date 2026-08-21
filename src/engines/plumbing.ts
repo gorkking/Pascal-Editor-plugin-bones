@@ -59,6 +59,7 @@ import {
   overridePlanPoint,
   overrideWallPoint,
   panelMountU,
+  placePanelSpot,
   pointInPolygon,
   wallPath,
   wallPlan,
@@ -69,6 +70,9 @@ type Pt = readonly [number, number]
 
 const rules = mepRules as {
   plumbing?: {
+    wetWall?: {
+      shieldPlateRequiredWithinInOfStudFace?: number
+    }
     dwv?: {
       buildingDrainIn?: number
       ventStackIn?: number
@@ -77,7 +81,15 @@ const rules = mepRules as {
       maxDfuHorizontalBranchBySize?: Record<string, number>
       maxDfuBuildingDrainBySizeAtQuarterInSlope?: Record<string, number>
     }
-    supply?: { mainIn?: number; branchIn?: number }
+    supply?: {
+      mainIn?: number
+      branchIn?: number
+      waterHeater?: {
+        garageIgnitionElevationIn?: number
+        tpDischargeMaxAboveFloorIn?: number
+        panMinDepthIn?: number
+      }
+    }
     fixtureRoughIn?: {
       toiletCenterFromWallIn?: number
       lavHeightIn?: number
@@ -442,6 +454,90 @@ function sleeveNoteFor(
     if (yAt + side / 2 > -depth) return ' — sleeved through foundation (P2603.4)'
   }
   return undefined
+}
+
+/**
+ * Concrete band half-width + clearance a buried DROP vertical must keep
+ * from a wall's centerline — the SAME concrete model sleeveNoteFor uses:
+ * exterior walls carry stemwall+footing (to spec.footingDepth), interior
+ * BEARING walls (≥ 2.4 m, the foundation's INTERIOR_BEARING_MIN_LENGTH)
+ * a 12" thickened footing, short partitions bear on the slab (no
+ * concrete). Null = no concrete under this wall.
+ */
+function dropClearNeed(w: WallSlice, fspec: FramingSpec, side: number): number | null {
+  if (w.curved || w.length < 0.1) return null
+  if (!w.exterior && w.length < 2.4) return null
+  return Math.max(fspec.footingWidth, fspec.stemwallThickness) / 2 + side / 2 + 0.02
+}
+
+/**
+ * F3 residuals (B20): trap-DROP verticals were validated only against the
+ * fixture's OWN anchor wall — a corner-flush lav's drop riser ran bare
+ * through the PERPENDICULAR frost stemwall, and a toilet 0.22 m off an
+ * interior bearing wall dropped inside that wall's 12" thickened footing.
+ * Push the drop point out of EVERY wall's concrete band (4 passes cover
+ * corners where clearing one wall approaches another); a point that cannot
+ * clear (pinched between bands) reports clear:false and the caller SLEEVES
+ * the drop (P2603.4) — never a silent bare crossing.
+ */
+function clampDropClear(
+  walls: WallSlice[],
+  fspec: FramingSpec,
+  at: Pt,
+  side: number,
+): { at: Pt; clear: boolean } {
+  let p: Pt = at
+  for (let pass = 0; pass < 4; pass++) {
+    let moved = false
+    for (const w of walls) {
+      const need = dropClearNeed(w, fspec, side)
+      if (need === null) continue
+      const dx = p[0] - w.start[0]
+      const dz = p[1] - w.start[1]
+      const u = dx * w.dir[0] + dz * w.dir[1]
+      if (u < -need || u > w.length + need) continue
+      const off = -dx * w.dir[1] + dz * w.dir[0]
+      if (Math.abs(off) >= need) continue
+      // push across the wall to the band edge, on the side the point
+      // already leans (drops arrive inboard of their OWN wall, so the
+      // lean picks the room side of the offending wall)
+      const s = off >= 0 ? 1 : -1
+      p = [
+        w.start[0] + w.dir[0] * u - w.dir[1] * s * need,
+        w.start[1] + w.dir[1] * u + w.dir[0] * s * need,
+      ]
+      moved = true
+    }
+    if (!moved) return { at: p, clear: true }
+  }
+  return { at, clear: false }
+}
+
+const toIn = (m: number): number => m / 0.0254
+
+/**
+ * P2603.2.1 (B20 — the shield-plate data was DEAD): pipe closer than 1.5"
+ * to the stud face takes steel shield plates. The 3" stack centers in its
+ * wet wall, so the drawn thickness tells the cover story — a 2x4 partition
+ * leaves ~0.3" (the hub does not even fit; wet walls frame 2x6, see
+ * mep-rules wetWall), a default 0.15 m wall ~1.45" — both under the 1.5"
+ * threshold. The FLAG ships here; the physical nail-plate members ride B15.
+ */
+function stackShieldFlag(wallThickness: number): string | undefined {
+  const shieldIn = rules.plumbing?.wetWall?.shieldPlateRequiredWithinInOfStudFace ?? 1.5
+  const coverIn = toIn((wallThickness - STACK_SIDE) / 2)
+  if (coverIn >= shieldIn) return undefined
+  const thickIn = toIn(wallThickness).toFixed(1)
+  if (coverIn < 0.5) {
+    return (
+      `SHIELD: 3" DWV stack in a ${thickIn}" wall has ${Math.max(0, coverIn).toFixed(2)}" of cover — ` +
+      `it does not fit the stud bay; frame the wet wall 2x6 and add steel shield plates (P2603.2.1)`
+    )
+  }
+  return (
+    `SHIELD: 3" DWV stack sits ${coverIn.toFixed(2)}" from the wall face (< ${shieldIn}") — ` +
+    `steel shield plates required (P2603.2.1)`
+  )
 }
 
 /**
@@ -892,6 +988,9 @@ type Anchored = {
    * the frost stemwall (R4b); the real closet bend sits ~12" off the
    * wall under the bowl anyway. */
   dropAt: Pt
+  /** Drop point could not clear every wall's concrete band (pinched at a
+   * corner) — the drop emits SLEEVED per P2603.4 instead of bare. */
+  dropSleeved: boolean
   /** Too far from every wall — island air-run fallback. */
   island: boolean
   /** Where the stub-out fixture sits (the wall bay; the item itself for islands). */
@@ -960,6 +1059,7 @@ function placedPlumbing(
       plan,
       node,
       dropAt: offWall >= DROP_SETBACK ? f.plan : node,
+      dropSleeved: false,
       island,
       stubAt: island ? f.plan : plan,
       stubY: STUB_HEIGHT[f.kind],
@@ -976,6 +1076,23 @@ function placedPlumbing(
   }
   if (anchored.length === 0) return { members, fixtures }
 
+  // ---- F3 residuals: validate every DROP vertical against ALL walls'
+  // concrete, not just the anchor wall — clamp the junction + drop point
+  // out of every band (corner-flush fixtures, perpendicular stemwalls,
+  // interior thickened footings); an unclampable point sleeves instead.
+  // Upper storeys have no foundation — geometry stays byte-pure there. ----
+  if (groundLevel) {
+    for (const a of anchored) {
+      const dropSide = pipeSide(Math.max(a.f.drainIn, 1.25))
+      const n = clampDropClear(walls, spec, a.node, dropSide)
+      const d = clampDropClear(walls, spec, a.dropAt, dropSide)
+      a.node = n.at
+      a.dropAt = d.at
+      a.dropSleeved = !n.clear || !d.clear
+      a.armLen = Math.hypot(a.node[0] - a.f.plan[0], a.node[1] - a.f.plan[1])
+    }
+  }
+
   // ---- the stack lands on the wall nearest the DFU-weighted centroid (the
   // wet wall carrying the most drainage) ----
   const totalDfu = anchored.reduce((s, a) => s + a.f.dfu, 0)
@@ -986,8 +1103,13 @@ function placedPlumbing(
   const stackAt = wallPlan(stackAnchor) as Pt
   // Buried root junction — inboard of the stack wall (toward the DFU
   // centroid), so the under-floor tee and the drop never sit inside a
-  // frost-depth stemwall (S1/S1b).
-  const stackNode = inboardOf(stackAt, stackAnchor.wall, [wx, wz])
+  // frost-depth stemwall (S1/S1b) — then clamped clear of EVERY wall's
+  // concrete band (a corner stack's junction can land in the
+  // perpendicular wall's stemwall, F3 residual class).
+  const stackNodeRaw = inboardOf(stackAt, stackAnchor.wall, [wx, wz])
+  const stackNode = groundLevel
+    ? clampDropClear(walls, spec, stackNodeRaw, STACK_SIDE).at
+    : stackNodeRaw
 
   // ---- drain tree: each node's parent is the nearest node strictly closer
   // to the stack (acyclic by construction; distances only fall downstream) ----
@@ -1055,6 +1177,7 @@ function placedPlumbing(
     material: 'pvc',
     sourceId: 'dwv-stack',
     label: '3" DWV stack — through roof (P3103.1)',
+    flag: stackShieldFlag(stackAnchor.wall.thickness),
   })
   // Floor-line jog bridging the stack (wall line) to the buried drop at the
   // inboard junction — round-2 skeptic R1: stopping the stack at the floor
@@ -1099,6 +1222,27 @@ function placedPlumbing(
     sourceId: 'dwv-stack',
     label: 'Cleanout at stack base (P3005.2)',
   })
+
+  // ---- one re-vent riser per wet wall (P3104.4): the carrier is the
+  // wall's trap nearest the stack. HOISTED before the trap loop so every
+  // trap can measure its TRUE weir→vent distance against the riser that
+  // actually serves it — the old flag measured fixture→wall, so one
+  // re-vent "served" every trap on the wall at ANY distance (B20). ----
+  const ventWalls = new Map<string, Anchored>()
+  for (const a of anchored) {
+    if (a.island) continue
+    const prev = ventWalls.get(a.anchor.wall.id)
+    if (!prev || a.dist < prev.dist) ventWalls.set(a.anchor.wall.id, a)
+  }
+  /** The vent point serving a trap: its wall's re-vent riser when that
+   * wall carries one, else the stack (which IS the vent when the carrier
+   * stands on the stack wall bay — the loop below skips the redundant
+   * riser). Islands have NO modeled vent — the stack is the nearest one. */
+  const ventNodeFor = (a: Anchored): Pt => {
+    const carrier = ventWalls.get(a.anchor.wall.id)
+    if (carrier && !a.island && manhattanDist(carrier.plan, stackAt) >= 0.3) return carrier.node
+    return stackNode
+  }
 
   // ---- per fixture: stub-out + P-trap + trap arm + DFU-sized branch ----
   for (const a of anchored) {
@@ -1160,6 +1304,10 @@ function placedPlumbing(
       const roFlag = inRO
         ? `OPENING: ${KIND_LABEL[a.f.kind]} sits in a door/window rough opening — its trap riser crosses the RO; move the fixture`
         : undefined
+      // A drop pinched between concrete bands (unclampable corner) emits
+      // SLEEVED — the label is what the drainage SAT gate exempts, and
+      // what the paper prints (P2603.4, F3 residuals).
+      const dropSleeveNote = a.dropSleeved ? ' — sleeved where it crosses concrete (P2603.4)' : ''
       riser(
         members,
         {
@@ -1167,7 +1315,7 @@ function placedPlumbing(
           material: 'pvc',
           role: 'pipe-run',
           sourceId: `dwv-trap-${a.f.id}`,
-          label: `${a.f.drainIn}" P-trap + drop — ${KIND_LABEL[a.f.kind]} (P3201)`,
+          label: `${a.f.drainIn}" P-trap + drop — ${KIND_LABEL[a.f.kind]} (P3201)${dropSleeveNote}`,
           flag:
             roFlag ??
             (crowd
@@ -1178,9 +1326,23 @@ function placedPlumbing(
         DRAIN_CONN_Y[a.f.kind],
         yArm,
       )
-      // Trap arm to the wet wall — Table P3105.1 length limit by trap size
-      // (WCs are exempt in the IRC; flagged anyway when clearly unroutable).
+      // Trap arm — Table P3105.1 limits the TRAP WEIR → VENT FITTING
+      // distance, not fixture → wall (B20: the old measure let one re-vent
+      // serve every trap on its wall at any distance). The developed
+      // distance runs down the emitted arm to the junction, then along the
+      // branch to the vent riser serving this wall (or the stack when it
+      // IS the vent — islands' nearest vent is always the stack). WCs are
+      // exempt in the IRC; flagged anyway when clearly unroutable.
       const limit = trapArmMax(a.f.drainIn)
+      const weirToVent = armPlan + manhattanDist(a.node, ventNodeFor(a))
+      const islandFlag = a.island
+        ? `ISLAND VENT: ${KIND_LABEL[a.f.kind]} is an island fixture — island venting required (P3112), not modeled; verify loop vent/AAV with the AHJ`
+        : undefined
+      const armFlag =
+        weirToVent > limit
+          ? `TRAP ARM: ${KIND_LABEL[a.f.kind]} trap weir sits ${round1ft(weirToVent)} ft from its vent — exceeds ${toFeet(limit).toFixed(0)} ft for a ${a.f.drainIn}" arm (Table P3105.1); vent closer to the trap`
+          : undefined
+      const ventFlags = [islandFlag, armFlag].filter(Boolean).join(' | ')
       leg(
         members,
         {
@@ -1188,11 +1350,8 @@ function placedPlumbing(
           material: 'pvc',
           role: 'pipe-run',
           sourceId: `dwv-arm-${a.f.id}`,
-          label: `${a.f.drainIn}" trap arm — ${KIND_LABEL[a.f.kind]} (≤ ${toFeet(limit).toFixed(0)} ft, P3105.1)`,
-          flag:
-            a.armLen > limit
-              ? `TRAP ARM: ${KIND_LABEL[a.f.kind]} sits ${round1ft(a.armLen)} ft from its wall — exceeds ${toFeet(limit).toFixed(0)} ft for a ${a.f.drainIn}" arm (P3105.1); move it closer or vent at the island`
-              : undefined,
+          label: `${a.f.drainIn}" trap arm — ${KIND_LABEL[a.f.kind]} (weir→vent ≤ ${toFeet(limit).toFixed(0)} ft, P3105.1)${dropSleeveNote}`,
+          flag: ventFlags.length > 0 ? ventFlags : undefined,
         },
         a.dropAt,
         a.node,
@@ -1285,14 +1444,9 @@ function placedPlumbing(
   })
 
   // ---- re-vents: one per wet wall, rising to 6" above the flood rim and
-  // returning to the stack along the wall graph (P3104.4) ----
+  // returning to the stack along the wall graph (P3104.4). The map is
+  // hoisted above the trap loop (weir→vent measurement). ----
   if (fab) {
-    const ventWalls = new Map<string, Anchored>()
-    for (const a of anchored) {
-      if (a.island) continue
-      const prev = ventWalls.get(a.anchor.wall.id)
-      if (!prev || a.dist < prev.dist) ventWalls.set(a.anchor.wall.id, a)
-    }
     for (const [wallId, a] of ventWalls) {
       if (manhattanDist(a.plan, stackAt) < 0.3) continue // the stack IS this wall's vent
       const ventSpec: PipeSpec = {
@@ -1322,13 +1476,28 @@ function placedPlumbing(
   const meterAnchor: WallPoint = { wall: meterWall, u: meterU }
   const meterPlan = wallPlan(meterAnchor) as Pt
   const METER_Y = meterSpot.heightAff
+  // NEC 110.26(E): the panel's dedicated space (equipment footprint, floor
+  // → 6 ft above) admits NO foreign piping — and both trades elect the
+  // longest wall at panelMountU, so the meter + cold-main riser land
+  // exactly there (wave-2 confirmed). HONEST WARNING here; the cross-
+  // engine spatial reservation itself rides B12/B16. Threshold: half the
+  // 30" working-space width + half a meter body.
+  const panelForced = overrideWallPoint(walls, overrides?.panel)
+  const panelSpot = panelForced ?? placePanelSpot(walls, rooms)
+  const meterInPanelSpace =
+    panelSpot !== null &&
+    panelSpot.wall.id === meterWall.id &&
+    Math.abs(panelSpot.u - meterU) < inches(15) + 0.15
+  const panelClashFlag = meterInPanelSpace
+    ? `TRADE CLASH: water meter + cold main sit in the electrical panel's dedicated space (NEC 110.26(E) — no foreign piping over the panel footprint); move the water entry along the wall`
+    : undefined
   fixtures.push({
     system: 'plumbing',
     kind: 'water-meter',
     position: [meterPlan[0], METER_Y, meterPlan[1]],
     rotationY: 0,
     sourceId: meterWall.id,
-    label: 'Water service meter — ¾" min (P2903.7)',
+    label: `Water service meter — ¾" min (P2903.7)${meterInPanelSpace ? ' — ⚠ in panel dedicated space (NEC 110.26(E))' : ''}`,
   })
 
   // ---- water heater: garage wall like the electrical panel (tank, M1307.3
@@ -1384,6 +1553,114 @@ function placedPlumbing(
     label: tank ? 'Water heater (50 gal tank)' : 'Water heater (tankless)',
   })
 
+  // ---- WH safety hardware (B20 — the tank used to ship BARE and floating
+  // 18" in the air): a STAND is what holds the burner at the M1307.3
+  // ignition height, the tank sits in a drain pan (P2801.6), every heater
+  // carries a T&P relief valve with a full-size discharge terminating
+  // within 6" of the floor (P2803.6.1), and SDC-D specs strap the tank at
+  // its upper + lower thirds (P2801.8). Low-seismic specs ship NO straps —
+  // the matrix is spec-driven, never blanket. ----
+  const whRules = rules.plumbing?.supply?.waterHeater
+  const whBot = whCenterY - whDims[1] / 2
+  const whYaw = Math.atan2(nx, nz)
+  const PAN_DEPTH = Math.max(inches(whRules?.panMinDepthIn ?? 1.5), 0.05)
+  if (tank) {
+    const standH = whBot - (fab ? PAN_DEPTH : 0)
+    if (standH > 0.02) {
+      members.push({
+        system: 'plumbing',
+        role: 'equipment',
+        dims: [whDims[0] + 0.06, standH, whDims[2] + 0.06],
+        length: standH,
+        position: [whPlan[0], standH / 2, whPlan[1]],
+        rotation: [0, whYaw, 0],
+        material: 'steel',
+        sourceId: 'wh-stand',
+        label: 'Water-heater stand — ignition source 18" above the garage floor (M1307.3)',
+      })
+    }
+    if (fab) {
+      // Pan directly under the tank, on the stand — tank rests IN the pan.
+      members.push({
+        system: 'plumbing',
+        role: 'equipment',
+        dims: [whDims[0] + 0.1, PAN_DEPTH, whDims[2] + 0.1],
+        length: whDims[0] + 0.1,
+        position: [whPlan[0], Math.max(PAN_DEPTH / 2, whBot - PAN_DEPTH / 2), whPlan[1]],
+        rotation: [0, whYaw, 0],
+        material: 'steel',
+        sourceId: 'wh-pan',
+        label: 'Water-heater drain pan — ¾" drain to approved location (P2801.6)',
+      })
+    }
+    if (fab && spec.seismicHoldDowns) {
+      // P2801.8 (SDC D0–D2 / state amendments incl. CA): strap within the
+      // upper AND lower thirds of the tank; the lower one ≥ 4" above the
+      // controls. Each strap = a 3-leg band (wall face → around the tank
+      // front → wall face), lagged to the wall framing.
+      const wallFace: Pt = [
+        whWallPlan[0] + nx * (whWall.thickness / 2),
+        whWallPlan[1] + nz * (whWall.thickness / 2),
+      ]
+      const halfW = whDims[0] / 2 + 0.02
+      const frontOff = whOff + whDims[2] / 2 + 0.02
+      const frontC: Pt = [whWallPlan[0] + nx * frontOff, whWallPlan[1] + nz * frontOff]
+      const strapYs: [string, number][] = [
+        ['upper', whBot + whDims[1] * (5 / 6)],
+        ['lower', whBot + whDims[1] * (1 / 4)],
+      ]
+      for (const [zone, strapY] of strapYs) {
+        const sSpec: PipeSpec = {
+          side: 0.03,
+          material: 'steel',
+          role: 'equipment',
+          sourceId: `wh-strap-${zone}`,
+          label: `Seismic strap — ${zone} third of tank, lagged to wall framing (P2801.8)`,
+        }
+        const along = (p: Pt, s: number): Pt => [
+          p[0] + whWall.dir[0] * s,
+          p[1] + whWall.dir[1] * s,
+        ]
+        leg(members, sSpec, along(wallFace, -halfW), along(frontC, -halfW), strapY, false, 0.01)
+        leg(members, sSpec, along(frontC, -halfW), along(frontC, halfW), strapY, false, 0.01)
+        leg(members, sSpec, along(frontC, halfW), along(wallFace, halfW), strapY, false, 0.01)
+      }
+    }
+  }
+  if (fab) {
+    // T&P relief valve on the tank side (tankless: cabinet bottom), its
+    // discharge dropping OUTSIDE the pan rim to within 6" of the floor.
+    const TP_TERM_IN = whRules?.tpDischargeMaxAboveFloorIn ?? 6
+    const bodyHalf = tank ? whDims[0] / 2 : Math.max(whDims[0], whDims[2]) / 2
+    const tpY = tank ? whCenterY + whDims[1] / 2 - 0.15 : whBot + 0.08
+    const alongWall = (p: Pt, s: number): Pt => [
+      p[0] + whWall.dir[0] * s,
+      p[1] + whWall.dir[1] * s,
+    ]
+    const valveAt = alongWall(whPlan, bodyHalf + 0.04)
+    const dischargeAt = alongWall(whPlan, bodyHalf + 0.13)
+    members.push({
+      system: 'plumbing',
+      role: 'equipment',
+      dims: [0.09, 0.08, 0.06],
+      length: 0.09,
+      position: [valveAt[0], tpY, valveAt[1]],
+      rotation: [0, Math.atan2(-whWall.dir[1], whWall.dir[0]), 0],
+      material: 'copper',
+      sourceId: 'wh-tp-valve',
+      label: 'T&P relief valve (P2803.1)',
+    })
+    const tpSpec: PipeSpec = {
+      side: SUPPLY_MAIN,
+      material: 'copper',
+      role: 'pipe-run',
+      sourceId: 'wh-tp-discharge',
+      label: `¾" T&P discharge — terminates ${TP_TERM_IN}" above the floor (P2803.6.1)`,
+    }
+    leg(members, tpSpec, valveAt, dischargeAt, tpY, false, 0.01)
+    riser(members, tpSpec, dischargeAt, tpY, inches(TP_TERM_IN))
+  }
+
   // ---- supply: ¾" cold main meter → WH, manifolds at the WH wall, then
   // ½" hot/cold homeruns along the wall graph on stepped planes ----
   if (fab) {
@@ -1394,7 +1671,15 @@ function placedPlumbing(
       sourceId: 'cold-main',
       label: 'Cold main ¾" — water service (P2903.7)',
     }
-    riser(members, mainSpec, meterPlan, METER_Y, SUPPLY_COLD_Y)
+    // The meter riser is the pipe that physically stands in the panel's
+    // dedicated space when the trades collide — it carries the warning.
+    riser(
+      members,
+      panelClashFlag ? { ...mainSpec, flag: panelClashFlag } : mainSpec,
+      meterPlan,
+      METER_Y,
+      SUPPLY_COLD_Y,
+    )
     routePipe(members, mainSpec, graph, meterAnchor, whAnchor, SUPPLY_COLD_Y, walls)
     // Manifold riser at the WH wall bay: crosses every stepped cold plane,
     // then feeds the tank inlet.
@@ -1648,6 +1933,7 @@ function roomPlumbing(
     material: 'pvc',
     sourceId: stackRoom.id,
     label: '3" DWV vent stack (through roof)',
+    flag: stackShieldFlag(stackWall.thickness),
   })
   fixtures.push({
     system: 'plumbing',
