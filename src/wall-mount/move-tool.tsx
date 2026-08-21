@@ -188,7 +188,7 @@ const WallMountMoveTool = ({ node }: { node: MovingNode }) => {
         new Vector3(target.plan[0], y, target.plan[1]),
         new Vector3(Math.sin(target.rotationY), 0, Math.cos(target.rotationY)),
       )
-      tickGridStep(target.t * 100, target.heightAff)
+      tickGridStep(target.plan[0], target.plan[1], target.heightAff)
     }
 
     const wallEventIgnored = (event: WallEvent) =>
