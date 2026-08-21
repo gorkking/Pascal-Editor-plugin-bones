@@ -196,3 +196,33 @@ export function buildingDrainExit(members: Member[]): Vector3 | null {
   }
   return exit
 }
+
+/**
+ * R1 (round-2 skeptic): the through-roof stack must physically TIE INTO the
+ * drainage tree (P3104) — stopping it at the floor line severed it from the
+ * inboard sleeved drop on every placed scene. Returns the minimum
+ * segment-to-segment gap between any vent-stack member and the DWV drain
+ * runs (vents excluded); connected trees measure ≤ ATTACH_TOL.
+ */
+export function stackToTreeGap(members: Member[]): number {
+  const stacks = members.filter((m) => m.role === 'vent-stack')
+  const drains = members.filter(
+    (m) =>
+      m.role === 'pipe-run' && m.sourceId.startsWith('dwv-') && !m.sourceId.startsWith('dwv-vent'),
+  )
+  let best = Number.POSITIVE_INFINITY
+  for (const s of stacks) {
+    const [s1, s2] = endpointsOf(s)
+    for (const d of drains) {
+      const [d1, d2] = endpointsOf(d)
+      best = Math.min(
+        best,
+        segDist(d1, s1, s2),
+        segDist(d2, s1, s2),
+        segDist(s1, d1, d2),
+        segDist(s2, d1, d2),
+      )
+    }
+  }
+  return best
+}

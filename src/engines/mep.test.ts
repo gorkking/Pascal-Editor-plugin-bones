@@ -62,9 +62,9 @@ describe('layoutPlumbing', () => {
     expect(stack.sourceId).toBe('r_bath')
   })
 
-  test('every wet room gets stub-outs (2 bath, 1 kitchen, 1 laundry)', () => {
+  test('every wet room gets stub-outs (3 bath — WC/shower/lav, 1 kitchen, 1 laundry)', () => {
     const stubs = byKind(fixtures, 'stub-out')
-    expect(stubs.filter((s) => s.sourceId === 'r_bath')).toHaveLength(2)
+    expect(stubs.filter((s) => s.sourceId === 'r_bath')).toHaveLength(3)
     expect(stubs.filter((s) => s.sourceId === 'r_kitchen')).toHaveLength(1)
     expect(stubs.filter((s) => s.sourceId === 'r_laundry')).toHaveLength(1)
   })
@@ -211,10 +211,13 @@ describe('plumbing — sizes, rough-in heights, slope (round-1 gaps)', () => {
   test('pipe diameters: 3" stack, 3" bathroom branch, 2" others, ½/¾" supply', () => {
     const stack = byRole(members, 'vent-stack')[0] as Member
     expect(stack.dims[0]).toBeCloseTo(inches(3), 6)
-    const bathBranch = pipes.filter((p) => p.sourceId === 'r_bath' && p.label?.includes('branch drain'))
+    const bathBranch = pipes.filter(
+      (p) => p.sourceId === 'dwv-branch-r_bath' && p.label?.includes('branch drain'),
+    )
+    expect(bathBranch.length).toBeGreaterThan(0)
     for (const b of bathBranch) expect(b.dims[1]).toBeCloseTo(inches(3), 6)
     const laundryBranch = pipes.filter(
-      (p) => p.sourceId === 'r_laundry' && p.label?.includes('branch drain — '),
+      (p) => p.sourceId === 'dwv-branch-r_laundry' && p.label?.includes('branch drain — '),
     )
     expect(laundryBranch.length).toBeGreaterThan(0)
     for (const b of laundryBranch) expect(b.dims[1]).toBeCloseTo(inches(2), 6)
@@ -244,11 +247,14 @@ describe('plumbing — sizes, rough-in heights, slope (round-1 gaps)', () => {
     expect(main[0]?.flag).toBeUndefined() // 10 < 42 — properly sized
   })
 
-  test('horizontal drains render the 1/4"/ft slope; supplies stay level', () => {
+  test('horizontal drains render the P3005.3 slope FOR THEIR SIZE; supplies stay level', () => {
     const sloped = pipes.filter((p) => p.label?.includes('branch drain') && p.length > 0.2)
     expect(sloped.length).toBeGreaterThan(0)
     for (const p of sloped) {
-      expect(p.rotation[2]).toBeCloseTo(Math.atan(DRAIN_SLOPE), 6)
+      // 1/4"/ft below 3", 1/8"/ft allowed at 3"+ (data/mep-rules.json)
+      const sizeIn = Math.round((Math.min(p.dims[1], p.dims[2]) / 0.0254) * 8) / 8
+      const slope = sizeIn >= 3 ? 1 / 96 : 1 / 48
+      expect(p.rotation[2]).toBeCloseTo(Math.atan(slope), 6)
     }
     const supplies = pipes.filter((p) => p.label?.includes('Supply') && p.dims[0] > 0.2)
     for (const s of supplies) expect(s.rotation[2]).toBe(0)
@@ -270,15 +276,26 @@ describe('plumbing — sizes, rough-in heights, slope (round-1 gaps)', () => {
     for (const v of vents) expect(v.dims[2]).toBeCloseTo(inches(1.5), 6)
   })
 
-  test('fixture drops (trap arms) land at every stub plan point', () => {
+  test('every stub gets a through-floor drop just off the wall (crawl-space feedback)', () => {
+    // Drops leave the wet wall DROP_SETBACK (0.3 m) into the room so the
+    // through-floor risers clear the footings under the wall — one riser
+    // per stub, crossing the floor plane into the under-floor tree.
     for (const stub of byKind(fixtures, 'stub-out')) {
       const drop = pipes.find(
         (p) =>
-          p.label?.includes('trap arm') &&
-          Math.abs((p.position[0] as number) - stub.position[0]) < 1e-6 &&
-          Math.abs((p.position[2] as number) - stub.position[2]) < 1e-6,
+          p.sourceId.startsWith('dwv-trap-') &&
+          p.dims[1] > p.dims[0] && // vertical
+          Math.hypot(
+            (p.position[0] as number) - stub.position[0],
+            (p.position[2] as number) - stub.position[2],
+          ) <
+            0.3 + 1e-6,
       )
       expect(drop).toBeDefined()
+      const d = drop as Member
+      // crosses the floor: top at the fixture connection, bottom buried
+      expect(d.position[1] + d.dims[1] / 2).toBeGreaterThanOrEqual(-1e-9)
+      expect(d.position[1] - d.dims[1] / 2).toBeLessThan(-0.3)
     }
   })
 
@@ -334,6 +351,159 @@ describe('plumbing — sizes, rough-in heights, slope (round-1 gaps)', () => {
     // …but the stack and drains remain
     expect(byRole(members, 'vent-stack')).toHaveLength(1)
     expect(members.some((m) => m.label?.includes('building drain'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Under-floor DWV gates (user feedback 2026-08-20: "the crawlspace should
+// have pipes — toilets, shower, sink — there should be evacuation/drainage").
+// The room-category fallback used to render its drains on a schematic plane
+// INSIDE the room volume (+0.08 m); now every drainage fixture drops through
+// the floor and the whole tree hangs below the floor plane like the
+// placed-fixture engine's.
+// ---------------------------------------------------------------------------
+
+import { Vector3 } from 'three'
+import { endpointsOf } from './electrical.test-helpers'
+import {
+  ATTACH_TOL,
+  buildingDrainExit,
+  drainFailures,
+  levelDrains,
+  stackToTreeGap,
+} from './plumbing.test-helpers'
+import { computeTakeoff } from './takeoff'
+
+describe('fallback DWV — under-floor evacuation (crawl-space feedback)', () => {
+  const { walls: xwalls } = exteriorPlan()
+  const { members, fixtures } = layoutPlumbing(xwalls, rooms)
+  const drains = members.filter(
+    (m) =>
+      m.role === 'pipe-run' &&
+      m.sourceId.startsWith('dwv-') &&
+      !m.sourceId.startsWith('dwv-vent'),
+  )
+  const sizeOf = (m: Member): number =>
+    Math.round((Math.min(m.dims[1], m.dims[2]) / 0.0254) * 8) / 8
+
+  test('drain presence per fixture class: WC 3", shower 2", lav 1.5", sink 1.5", washer 2"', () => {
+    const expectDrop = (sourceId: string, sizeIn: number, labelBit: string) => {
+      const drop = members.find((m) => m.sourceId === sourceId && m.dims[1] > m.dims[0])
+      expect(drop).toBeDefined()
+      const d = drop as Member
+      expect(sizeOf(d)).toBe(sizeIn)
+      expect(d.label).toContain(labelBit)
+      expect(d.label).toContain('P3005.4.1')
+    }
+    expectDrop('dwv-trap-r_bath-0', 3, 'closet bend')
+    expectDrop('dwv-trap-r_bath-1', 2, 'shower trap')
+    expectDrop('dwv-trap-r_bath-2', 1.5, 'lav trap')
+    expectDrop('dwv-trap-r_kitchen-0', 1.5, 'sink trap')
+    expectDrop('dwv-trap-r_laundry-0', 2, 'standpipe')
+  })
+
+  test('R1: the fallback stack physically ties into the drainage tree (P3104)', () => {
+    expect(stackToTreeGap(members)).toBeLessThanOrEqual(ATTACH_TOL)
+  })
+
+  test('continuity: every trap reaches the building-drain exit strictly downhill', () => {
+    expect(
+      drainFailures(members, ['r_bath-0', 'r_bath-1', 'r_bath-2', 'r_kitchen-0', 'r_laundry-0']),
+    ).toEqual([])
+    expect(levelDrains(members)).toEqual([])
+  })
+
+  test('every horizontal drain hangs FULLY below the floor plane', () => {
+    // The one above-floor horizontal is the stack's floor-line jog (R1 —
+    // it bridges the wall-line stack to the inboard sleeved drop).
+    const horizontals = drains.filter(
+      (m) => m.dims[0] > m.dims[1] && !m.label?.includes('floor-line jog'),
+    )
+    expect(horizontals.length).toBeGreaterThan(0)
+    for (const m of horizontals) {
+      expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)
+    }
+  })
+
+  test('slope pin: every under-floor segment drops its plan length × the P3005.3 slope', () => {
+    let pinned = 0
+    for (const m of drains) {
+      if (m.dims[1] > m.dims[0] || m.length <= 0.06) continue // vertical / stub
+      const sizeIn = sizeOf(m)
+      const slope = Math.tan(m.rotation[2])
+      // legal for the size (1/8"/ft floor at 3"+, 1/4"/ft below) and one of
+      // the two code slopes — the building drain keeps 1/4"/ft at 3" (its
+      // DFU capacity table is tabulated at that slope)
+      const minSlope = sizeIn >= 3 ? 1 / 96 : 1 / 48
+      expect(slope).toBeGreaterThanOrEqual(minSlope - 1e-9)
+      expect(Math.abs(slope - 1 / 96) < 1e-9 || Math.abs(slope - 1 / 48) < 1e-9).toBe(true)
+      const [a, b] = endpointsOf(m)
+      const plan = Math.hypot(b.x - a.x, b.z - a.z)
+      expect(Math.abs(Math.abs(b.y - a.y) - plan * slope)).toBeLessThan(1e-6)
+      pinned++
+    }
+    expect(pinned).toBeGreaterThan(3)
+  })
+
+  test('exit: buried building drain leaves the footprint — labeled → sewer/septic (P3005.4)', () => {
+    const main = members.filter((m) => m.sourceId === 'dwv-main')
+    expect(main.length).toBeGreaterThan(0)
+    expect(main[0]?.label).toContain('→ sewer/septic (P3005.4')
+    const exit = buildingDrainExit(members)
+    expect(exit).not.toBeNull()
+    const e = exit as Vector3
+    expect(e.y).toBeLessThan(-0.4)
+    // at/beyond the shell (10×8 footprint) — one exit point, street side
+    const inside = e.x > 0.05 && e.x < 9.95 && e.z > 0.05 && e.z < 7.95
+    expect(inside).toBe(false)
+  })
+
+  test('LOD 200 keeps the buried skeleton (branches + main below the floor)', () => {
+    const at200 = layoutPlumbing(xwalls, rooms, { ...DEFAULT_SPEC, detail: '200' })
+    const buried = at200.members.filter(
+      (m) => m.role === 'pipe-run' && m.sourceId.startsWith('dwv-'),
+    )
+    expect(buried.some((m) => m.sourceId.startsWith('dwv-branch-'))).toBe(true)
+    expect(buried.some((m) => m.sourceId === 'dwv-main')).toBe(true)
+    for (const m of buried) {
+      if (m.dims[1] > m.dims[0]) continue
+      if (m.label?.includes('floor-line jog')) continue // the R1 stack bridge
+      expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)
+    }
+  })
+
+  test('S2: upper storeys drop the foundation/sewer fiction (no sleeve, truthful main)', () => {
+    const upper = layoutPlumbing(xwalls, rooms, DEFAULT_SPEC, [], undefined, false)
+    const labels = upper.members.map((m) => m.label ?? '')
+    expect(labels.some((l) => l.includes('sewer/septic'))).toBe(false)
+    expect(labels.some((l) => l.includes('sleeve') || l.includes('P2603.4'))).toBe(false)
+    expect(labels.some((l) => l.includes('riser to storey below (not modeled)'))).toBe(true)
+    const cleanouts = upper.fixtures.filter((f) => f.kind === 'cleanout')
+    expect(cleanouts.length).toBeGreaterThan(0)
+    expect(cleanouts.some((c) => c.label?.includes('sewer'))).toBe(false)
+    // the buried tree itself is unchanged — drains still hang below the floor
+    const horizontals = upper.members.filter(
+      (m) =>
+        m.role === 'pipe-run' &&
+        m.sourceId.startsWith('dwv-') &&
+        !m.sourceId.startsWith('dwv-vent') &&
+        m.dims[0] > m.dims[1] &&
+        !m.label?.includes('floor-line jog'), // the R1 stack bridge
+    )
+    expect(horizontals.length).toBeGreaterThan(0)
+    for (const m of horizontals) expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)
+  })
+
+  test('takeoff: DWV pipe lf by size + fittings estimate + cleanout count (P3005.2)', () => {
+    const rows = computeTakeoff(members, fixtures)
+    const find = (item: string) =>
+      rows.find((r) => r.item === item && r.section === 'Plumbing')
+    expect(find('PVC 3"')?.quantity ?? 0).toBeGreaterThan(0)
+    expect(find('PVC 2"')?.quantity ?? 0).toBeGreaterThan(0)
+    expect(find('PVC 1.5"')?.quantity ?? 0).toBeGreaterThan(0)
+    expect(find('PVC 3" fittings')).toBeDefined()
+    expect(find('Cleanouts')?.quantity).toBe(2)
+    expect(find('Cleanouts')?.detail).toContain('P3005.2')
   })
 })
 

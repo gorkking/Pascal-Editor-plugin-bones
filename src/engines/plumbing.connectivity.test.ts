@@ -6,10 +6,12 @@ import type { PlacedFixtureSlice } from '../core/wall-model'
 import { endpointsOf } from './electrical.test-helpers'
 import { layoutPlumbing } from './plumbing'
 import {
+  ATTACH_TOL,
   byPrefix,
   checkSupply,
   drainFailures,
   levelDrains,
+  stackToTreeGap,
   stubs,
   unreachableFrom,
 } from './plumbing.test-helpers'
@@ -268,13 +270,27 @@ describe('P5 gate — bathroom + far kitchen sink (toilet, lav, shower, sink)', 
     expect(members.some((m) => m.sourceId.startsWith('dwv-vent-'))).toBe(true)
   })
 
-  test('one stack through the roof + cleanouts at stack base and sewer exit', () => {
+  test('one stack through the roof + a SLEEVED base drop + cleanouts at base and sewer exit', () => {
     const stack = members.filter((m) => m.role === 'vent-stack')
     expect(stack).toHaveLength(1)
-    expect((stack[0] as Member).dims[1]).toBeGreaterThan(2.5 + 0.6) // roof + burial
+    // The stack stops AT the floor line — a frost stemwall owns the wall
+    // line below grade (S1b), so the buried connection is the separate
+    // sleeved drop at the inboard junction.
+    expect((stack[0] as Member).dims[1]).toBeCloseTo(2.5 + 0.6, 6) // through roof
+    const baseChain = members.filter((m) => m.sourceId === 'dwv-stack-base')
+    // the floor-line jog bridges the stack to the drop (R1)…
+    expect(baseChain.some((m) => m.label?.includes('floor-line jog'))).toBe(true)
+    // …and the drop itself is the labeled slab sleeve
+    const drop = baseChain.find((m) => m.label?.includes('sleeved'))
+    expect(drop).toBeDefined()
+    expect(drop?.label).toContain('P2603.4')
     const cleanouts = fixtures.filter((f) => f.kind === 'cleanout')
     expect(cleanouts).toHaveLength(2)
     expect(cleanouts.some((c) => c.label?.includes('sewer'))).toBe(true)
+  })
+
+  test('R1: the through-roof stack physically ties into the drainage tree (P3104)', () => {
+    expect(stackToTreeGap(members)).toBeLessThanOrEqual(ATTACH_TOL)
   })
 })
 
@@ -341,6 +357,10 @@ describe('P5 gate — two bathrooms accumulate DFU downstream', () => {
     checkSupply(members, fixtures)
     expect(drainFailures(members, ['wc_a', 'lav_a', 'wc_b', 'lav_b', 'tub_b'])).toEqual([])
     expect(levelDrains(members)).toEqual([])
+  })
+
+  test('R1: the stack ties into the tree on the two-bath scene too', () => {
+    expect(stackToTreeGap(members)).toBeLessThanOrEqual(ATTACH_TOL)
   })
 
   test('sizes never decrease downstream: WC branches 3", main carries 10 DFU', () => {

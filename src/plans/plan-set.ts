@@ -251,6 +251,10 @@ type SetTransform = { scale: number; ratio: number; X: (x: number) => number; Z:
 /** 96dpi: px per meter at ratio 1:n = 96/0.0254/n. */
 const RATIOS = [20, 25, 50, 75, 100, 125, 150, 200, 250, 500]
 
+/** DWV flow-arrow glyph fill — a darker slate so the downstream arrows
+ * read ON the PLUMBING_COLORS.dwv runs without a new legend hue. */
+const DWV_FLOW_ARROW = '#41637a'
+
 function setTransform(members: Member[], fixtures: Fixture[]): SetTransform | null {
   const b = planBounds(members, fixtures)
   if (!b) return null
@@ -409,6 +413,11 @@ function planSheet(
   // round-5 blocker: the floor sheet was washed out).
   const layerOf = (m: Member): number => (m.role === 'subfloor' ? 0 : 1)
   const sorted = [...mine].sort((a, b2) => layerOf(a) - layerOf(b2) || b2.dims[0] - a.dims[0])
+  // DWV flow-arrow candidates (drawn AFTER the device bubbles, E2) and the
+  // building-drain legs (the sewer-exit marker anchors to one, E3).
+  type FlowRec = { x: number; y: number; ang: number; half: number; sourceId: string }
+  const dwvArrows: FlowRec[] = []
+  const dwvMainLegs: FlowRec[] = []
   for (const m of sorted) {
     if (stroked.has(m)) continue
     // Foundation hardware symbols (blueprint round-3): anchor bolts print as
@@ -462,6 +471,32 @@ function planSheet(
     shapes.push(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
+    // DWV flow direction (MEP sheet): under-floor drains print their FALL
+    // — member +X points UPHILL (the leg convention), so downstream is −X
+    // projected to plan. Candidates are COLLECTED here and drawn after
+    // the device bubbles with a slide-along-the-run de-collision pass
+    // (examiner E2: an arrow printed 0 px under an SR bubble).
+    if (
+      def.key === 'mep' &&
+      m.system === 'plumbing' &&
+      m.role === 'pipe-run' &&
+      m.sourceId.startsWith('dwv-') &&
+      !m.sourceId.startsWith('dwv-vent') &&
+      Math.abs(m.rotation[2]) > 1e-6 &&
+      planFrac > 0.5
+    ) {
+      const ang = Math.atan2(-az, -ax) // screen radians, downhill
+      const rec = {
+        x: X(m.position[0]),
+        y: Z(m.position[2]),
+        ang,
+        half: w / 2,
+        sourceId: m.sourceId,
+      }
+      // the 8 px glyph needs paper to read on
+      if (w > 18) dwvArrows.push(rec)
+      if (m.sourceId === 'dwv-main') dwvMainLegs.push(rec)
+    }
   }
   // Device tags: dedupe identical (kind, position) fixtures and nudge
   // colliding bubbles apart in a small spiral (quality A6/C3: six tags
@@ -491,6 +526,204 @@ function planSheet(
     shapes.push(
       `<g transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle r="7" fill="#fff" stroke="#a05c10" stroke-width="1.2"/><text y="3.5" font-size="8" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text></g>`,
     )
+  }
+
+  // Sleeve annotations (examiner P1: the engine labels every concrete
+  // crossing 'sleeved … P2603.4' but the story never reached paper —
+  // grep over all sheets found zero). Each sleeved DWV leg is intersected
+  // with the foundation runs and the CROSSING itself is typeset: a
+  // double-tick glyph across the pipe at the foundation line + a halo'd
+  // cite that de-collides like the arrows. Drawn BEFORE the arrows so
+  // they dodge the ticks via placed[].
+  if (def.key === 'mep') {
+    const planSeg = (m: Member): { a: [number, number]; b: [number, number] } => {
+      // member +X projected to plan (same XYZ-euler math as the rect pass)
+      const [rx, ry, rz] = m.rotation
+      const ax = Math.cos(ry) * Math.cos(rz)
+      const az = Math.sin(rx) * Math.sin(rz) - Math.cos(rx) * Math.sin(ry) * Math.cos(rz)
+      return {
+        a: [m.position[0] - (ax * m.dims[0]) / 2, m.position[2] - (az * m.dims[0]) / 2],
+        b: [m.position[0] + (ax * m.dims[0]) / 2, m.position[2] + (az * m.dims[0]) / 2],
+      }
+    }
+    const sleevedLegs = members.filter(
+      (m) =>
+        m.system === 'plumbing' &&
+        m.role === 'pipe-run' &&
+        m.sourceId.startsWith('dwv-') &&
+        m.dims[0] >= m.dims[1] && // the slab drop crosses no foundation LINE
+        m.label?.includes('P2603.4'),
+    )
+    const concrete = members.filter(
+      (m) => m.system === 'foundation' && (m.role === 'footing' || m.role === 'stemwall'),
+    )
+    const marks: { x: number; y: number; ang: number }[] = []
+    for (const s of sleevedLegs) {
+      const sp = planSeg(s)
+      const d1x = sp.b[0] - sp.a[0]
+      const d1z = sp.b[1] - sp.a[1]
+      for (const c of concrete) {
+        const cp = planSeg(c)
+        const d2x = cp.b[0] - cp.a[0]
+        const d2z = cp.b[1] - cp.a[1]
+        const den = d1x * d2z - d1z * d2x
+        if (Math.abs(den) < 1e-9) continue
+        const t = ((cp.a[0] - sp.a[0]) * d2z - (cp.a[1] - sp.a[1]) * d2x) / den
+        const u = ((cp.a[0] - sp.a[0]) * d1z - (cp.a[1] - sp.a[1]) * d1x) / den
+        if (t < 0 || t > 1 || u < 0 || u > 1) continue
+        const mx = X(sp.a[0] + d1x * t)
+        const my = Z(sp.a[1] + d1z * t)
+        // footing + stemwall share the wall line — one mark per crossing
+        if (marks.some((k) => Math.hypot(k.x - mx, k.y - my) < 8)) continue
+        marks.push({ x: mx, y: my, ang: Math.atan2(d1z, d1x) })
+      }
+    }
+    const SLEEVE_TXT = 'SLEEVE (P2603.4)'
+    const sleeveW = SLEEVE_TXT.length * 6
+    for (const k of marks) {
+      shapes.push(
+        `<path d="M-2.5 -6 L-2.5 6 M2.5 -6 L2.5 6" stroke="${DWV_FLOW_ARROW}" stroke-width="1.6" fill="none" transform="translate(${k.x.toFixed(1)} ${k.y.toFixed(1)}) rotate(${deg(k.ang).toFixed(2)})"/>`,
+      )
+      placed.push({ x: k.x, y: k.y })
+      // the cite slides perpendicular/along the pipe until it fits the
+      // sheet and clears every bubble — a crowded crossing keeps only its
+      // glyph rather than overprinting
+      const nx2 = -Math.sin(k.ang)
+      const ny2 = Math.cos(k.ang)
+      const ax2 = Math.cos(k.ang)
+      const ay2 = Math.sin(k.ang)
+      // near ring first, then a wider ring (small rooms cluster their
+      // bubbles right on top of the crossing — powder-room compose)
+      const spots: [number, number][] = [14, 26, 38].flatMap((r) => [
+        [k.x + nx2 * r, k.y + ny2 * r] as [number, number],
+        [k.x - nx2 * r, k.y - ny2 * r] as [number, number],
+        [k.x + ax2 * (r + 12), k.y + ay2 * (r + 12)] as [number, number],
+        [k.x - ax2 * (r + 12), k.y - ay2 * (r + 12)] as [number, number],
+      ])
+      const spot = spots.find(
+        ([tx, ty]) =>
+          tx - sleeveW / 2 > MARGIN &&
+          tx + sleeveW / 2 < W - MARGIN &&
+          ty > MARGIN + 10 &&
+          ty < H - MARGIN &&
+          !placed.some((q) => Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12),
+      )
+      if (!spot) continue
+      shapes.push(
+        `<text x="${spot[0].toFixed(1)}" y="${(spot[1] + 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${DWV_FLOW_ARROW}" stroke="#fff" stroke-width="2" paint-order="stroke">${SLEEVE_TXT}</text>`,
+      )
+      placed.push({ x: spot[0], y: spot[1] })
+    }
+  }
+
+  // DWV flow arrows — drawn AFTER the bubbles so they can dodge them: each
+  // glyph slides ALONG ITS RUN (it must stay on the pipe) until it clears
+  // every device bubble; a run too crowded to host a clear glyph drops it
+  // rather than overprinting (examiner E2: sewer arrow 0 px under 'SR').
+  for (const a of dwvArrows) {
+    const dx = Math.cos(a.ang)
+    const dy = Math.sin(a.ang)
+    const maxT = Math.max(0, a.half - 6)
+    let spot: { x: number; y: number } | null = null
+    for (const t of [0, 10, -10, 16, -16, 22, -22, 28, -28]) {
+      if (Math.abs(t) > maxT) continue
+      const px = a.x + dx * t
+      const py = a.y + dy * t
+      if (!placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) {
+        spot = { x: px, y: py }
+        break
+      }
+    }
+    if (!spot) continue
+    placed.push(spot)
+    shapes.push(
+      `<path d="M-3.5 -3 L4.5 0 L-3.5 3 Z" fill="${DWV_FLOW_ARROW}" transform="translate(${spot.x.toFixed(1)} ${spot.y.toFixed(1)}) rotate(${deg(a.ang).toFixed(2)})"/>`,
+    )
+  }
+
+  // Sewer-exit marker (examiner E3: '→ sewer/septic' lived only in member
+  // labels the sheet never typesets — the exit read as one more CO bubble).
+  // Anchor at the sewer-exit cleanout, pointing out along the terminal
+  // building-drain leg, with a halo'd SEWER tag beyond the glyph.
+  const sewerCo = devs.find((f) => f.kind === 'cleanout' && f.label?.includes('sewer'))
+  if (def.key === 'mep' && sewerCo && dwvMainLegs.length > 0) {
+    const cx2 = X(sewerCo.position[0])
+    const cy2 = Z(sewerCo.position[2])
+    // the main leg whose DOWNHILL end lands nearest the exit cleanout
+    let bestLeg = dwvMainLegs[0] as FlowRec
+    let bestD = Number.POSITIVE_INFINITY
+    for (const l of dwvMainLegs) {
+      const ex = l.x + Math.cos(l.ang) * l.half
+      const ey = l.y + Math.sin(l.ang) * l.half
+      const d = Math.hypot(ex - cx2, ey - cy2)
+      if (d < bestD) {
+        bestD = d
+        bestLeg = l
+      }
+    }
+    const dx = Math.cos(bestLeg.ang)
+    const dy = Math.sin(bestLeg.ang)
+    // P2 (examiner round 3): the glyph printed 3 px from an SO bubble and
+    // the text ran ~40 px off the viewBox on an east exit. The glyph
+    // slides outward along the terminal leg (with perpendicular escapes)
+    // until it clears every bubble; the text tries outboard, inboard and
+    // above/below spots and must FIT the sheet AND clear the bubbles.
+    let gx = cx2 + dx * 13
+    let gy = cy2 + dy * 13
+    const glyphSpots: [number, number][] = [
+      [13, 0],
+      [21, 0],
+      [29, 0],
+      [13, 10],
+      [13, -10],
+      [21, 10],
+      [21, -10],
+      [37, 0],
+    ]
+    for (const [t, n] of glyphSpots) {
+      const px = cx2 + dx * t - dy * n
+      const py = cy2 + dy * t + dx * n
+      if (!placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) {
+        gx = px
+        gy = py
+        break
+      }
+    }
+    shapes.push(
+      `<path d="M-5 -4 L6 0 L-5 4 Z" fill="${DWV_FLOW_ARROW}" transform="translate(${gx.toFixed(1)} ${gy.toFixed(1)}) rotate(${deg(bestLeg.ang).toFixed(2)})"/>`,
+    )
+    placed.push({ x: gx, y: gy })
+    const SEWER_TXT = 'SEWER/SEPTIC (P3005.4)'
+    const sewerW = SEWER_TXT.length * 6
+    type TextSpot = { x: number; y: number; anchor: 'start' | 'end' | 'middle' }
+    const outAnchor: TextSpot['anchor'] = dx > 0.3 ? 'start' : dx < -0.3 ? 'end' : 'middle'
+    const inAnchor: TextSpot['anchor'] = dx > 0.3 ? 'end' : dx < -0.3 ? 'start' : 'middle'
+    const textSpots: TextSpot[] = [
+      { x: gx + dx * 12, y: gy + dy * 12, anchor: outAnchor }, // beyond the glyph
+      { x: cx2 - dx * 14, y: cy2 - dy * 14, anchor: inAnchor }, // inboard of the exit
+      { x: gx, y: gy - 14, anchor: 'middle' }, // above the glyph
+      { x: gx, y: gy + 16, anchor: 'middle' }, // below the glyph
+    ]
+    const fits = (s: TextSpot): boolean => {
+      const left = s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2
+      const right = left + sewerW
+      if (left < MARGIN + 2 || right > W - MARGIN - 2) return false
+      if (s.y < MARGIN + 10 || s.y > H - MARGIN) return false
+      const cx3 = (left + right) / 2
+      return !placed.some((q) => Math.abs(q.x - cx3) < sewerW / 2 + 9 && Math.abs(q.y - s.y) < 12)
+    }
+    const spot2 = textSpots.find(fits) ?? textSpots.find((s) => {
+      // last resort: sheet fit only — an overprinted cite still beats a
+      // clipped one (the bubbles keep their own halo)
+      const left = s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2
+      return left > MARGIN + 2 && left + sewerW < W - MARGIN - 2
+    })
+    if (spot2) {
+      shapes.push(
+        `<text x="${spot2.x.toFixed(1)}" y="${(spot2.y + 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="${spot2.anchor}" font-family="Helvetica, Arial, sans-serif" fill="${DWV_FLOW_ARROW}" stroke="#fff" stroke-width="2" paint-order="stroke">${SEWER_TXT}</text>`,
+      )
+      placed.push({ x: spot2.x, y: spot2.y })
+    }
   }
 
   // Circuit-ID text on each circuit's longest horizontal run — the examiner
@@ -623,12 +856,21 @@ function planSheet(
       )
       row++
     }
-    // Horizontal drainage falls — the drafter's standing note (P3005.3).
+    // Horizontal drainage falls — the drafter's standing note (P3005.3),
+    // paired with the flow arrows printed on the under-floor drain runs.
+    // TWO short rows: the one-line version overflowed the legend box by
+    // ~200 px and overprinted the plan (examiner E1).
     if (mine.some((m) => m.system === 'plumbing')) {
-      const y = MARGIN + 14 + row * 14
-      legendLines.push(
-        `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">DWV SLOPE 1/4 IN/FT (P3005.3)</text>`,
-      )
+      for (const note of [
+        'DWV SLOPE 1/4 IN/FT (1/8 AT 3 IN+)',
+        'ARROWS POINT TO SEWER (P3005.3)',
+      ]) {
+        const y = MARGIN + 14 + row * 14
+        legendLines.push(
+          `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">${note}</text>`,
+        )
+        row++
+      }
     }
   }
   if (def.key === 'electrical' || def.key === 'mep') {
@@ -1088,8 +1330,12 @@ function memberSegs(
       w,
       depth: (depthOf(a) + depthOf(b)) / 2,
       color: SYSTEM_STROKE[m.system] ?? '#9a9a9a',
-      // below-grade work prints dashed ('hidden' convention)
-      dashed: m.system === 'foundation',
+      // below-grade work prints dashed ('hidden' convention) — the
+      // foundation AND the buried DWV tree (top of pipe under the floor
+      // line, the renderer's ghost predicate)
+      dashed:
+        m.system === 'foundation' ||
+        (m.system === 'plumbing' && m.position[1] + m.dims[1] / 2 < 0.02),
     })
   }
   return segs.sort((p, q) => p.depth - q.depth)
@@ -1263,7 +1509,11 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
     const sliceH = Math.min(vDim / Math.max(cosPitch, 0.35), Math.abs(dy) + vDim)
     const wPx = Math.max(1.5, sliceW * f.scale)
     const hPx = Math.max(1.5, sliceH * f.scale)
-    const dashed = m.system === 'foundation' ? ' stroke="#222" stroke-width="0.9" stroke-dasharray="5 3"' : ''
+    const dashed =
+      m.system === 'foundation' ||
+      (m.system === 'plumbing' && m.position[1] + m.dims[1] / 2 < 0.02)
+        ? ' stroke="#222" stroke-width="0.9" stroke-dasharray="5 3"'
+        : ''
     poche.push(
       `<rect x="${(f.sx(cz) - wPx / 2).toFixed(1)}" y="${(f.sy(-cyW) - hPx / 2).toFixed(1)}" width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}" fill="#222"${dashed}/>`,
     )

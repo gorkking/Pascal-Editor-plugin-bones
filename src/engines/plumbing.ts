@@ -19,15 +19,20 @@
  *    plumbing core to minimize runs;
  *  - ONE 3" vent stack rises inside the wet wall nearest the bathroom and
  *    penetrates the roof (IRC P3102/P3103);
- *  - drains route MANHATTAN (axis-aligned legs, no diagonal air runs) and
- *    every horizontal run is rendered with the code slope — 1/4" per foot
- *    (P3005.3), so remote rooms arrive at the stack lower than they left;
- *  - the 3" building drain continues from the stack base to a sewer exit at
- *    the nearest exterior wall, with a cleanout at each end (P3005.2) and a
- *    DFU check against Table P3005.4.1 (flags when 3" is undersized);
- *  - each fixture stub drops to the drain plane (trap arm, P3105) and each
- *    remote room re-vents: a 1½" riser to 6" above the flood rim (P3104.4)
- *    then level legs back to the stack;
+ *  - drains route MANHATTAN (axis-aligned legs, no diagonal air runs)
+ *    UNDER THE FLOOR (user feedback 2026-08-20: the crawl space showed no
+ *    evacuation for toilets/showers/sinks — drains used to float on a
+ *    schematic plane INSIDE the room volume): every fixture class drops
+ *    through the floor (3" closet bend, 2" shower trap, 1½" lav/sink
+ *    trap — Table P3005.4.1 sizes) and every horizontal run hangs below
+ *    the floor plane falling at the P3005.3 slope for its size, so remote
+ *    rooms arrive at the stack lower than they left;
+ *  - the 3" building drain continues from the stack base, buried, to a
+ *    sewer exit at the nearest exterior wall, with a cleanout at each end
+ *    (P3005.2) and a DFU check against Table P3005.4.1 (flags when 3" is
+ *    undersized);
+ *  - each remote room re-vents: a 1½" riser to 6" above the flood rim
+ *    (P3104.4) then level legs back to the stack;
  *  - supplies split at the water heater: a ¾" cold service from the nearest
  *    exterior wall feeds the WH, ½" cold branches serve every stub, ½" hot
  *    branches (the WH loop) serve everything but toilets;
@@ -89,14 +94,25 @@ const rules = mepRules as {
 const pipeSide = (nominalIn: number): number => inches(nominalIn)
 
 const MAIN_DRAIN = pipeSide(rules.plumbing?.dwv?.buildingDrainIn ?? 3)
-const BRANCH_DRAIN = pipeSide(2)
 const STACK_SIDE = pipeSide(rules.plumbing?.dwv?.ventStackIn ?? 3)
 const SUPPLY_MAIN = pipeSide(0.75)
 const SUPPLY_BRANCH = pipeSide(0.5)
 const VENT_SIDE = pipeSide(1.5)
 
-/** Schematic drain plane above the slab (renders inside the room volume). */
-const DRAIN_Y = 0.08
+/**
+ * Under-floor burial margin: the HIGHEST under-floor drain node hangs this
+ * far below the floor plane (level-local y = 0), so every horizontal DWV
+ * run clears the structure sharing that stratum — a default framed
+ * platform (2x12 joists + deck hung under the slab surface, band bottom
+ * ≈ −0.29) and the 12" interior thickened footings (R403.1, bottom
+ * −0.305) — and the renderer's buried ghost pass picks the whole tree up
+ * (top of pipe below the floor line). Slab-on-grade drains render as
+ * below-grade ghosts exactly like the buried electric service lateral.
+ */
+export const UNDER_FLOOR_CLEAR = 0.45
+/** Drain drops leave the wet wall this far INTO the room so through-floor
+ * risers clear the 16"-wide footings/stemwalls under the wall (R403.1). */
+const DROP_SETBACK = 0.3
 /** P3005.3: horizontal DWV slope — 1/4" per foot = 1:48. */
 export const DRAIN_SLOPE = 1 / 48
 /** P3104.4: vents reconnect >= 6" above the fixture flood rim (~36" lav). */
@@ -380,6 +396,93 @@ function manhattan(
 
 /** Total Manhattan plan distance. */
 const manhattanDist = (a: Pt, b: Pt): number => Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1])
+
+/**
+ * The P2603.4 sleeve note when a horizontal leg passes THROUGH the
+ * concrete under some wall (round-2 skeptic R2/R3: the old terminal-leg
+ * heuristic sleeved the leg that reached the EXIT, not the legs that
+ * actually crossed concrete — a corner powder room ran its main's X-leg
+ * bare through the west stemwall; a courtyard branch crossed both
+ * courtyard stemwalls bare). Concrete extents from the same spec the
+ * foundation engine builds from: perimeter stemwall+footing reach
+ * −spec.footingDepth; interior BEARING walls (≥ 2.4 m — the foundation's
+ * INTERIOR_BEARING_MIN_LENGTH) carry a 12" thickened footing; short
+ * partitions bear on the slab (no concrete). Transversal crossings only —
+ * parallel coexistence is prevented by the DROP_SETBACK inboard geometry.
+ */
+function sleeveNoteFor(
+  walls: WallSlice[],
+  fspec: FramingSpec,
+  from: Pt,
+  to: Pt,
+  yHigh: number,
+  side: number,
+  slope: number,
+): string | undefined {
+  const dx = to[0] - from[0]
+  const dz = to[1] - from[1]
+  const len = Math.hypot(dx, dz)
+  if (len < 1e-6) return undefined
+  for (const w of walls) {
+    if (w.curved || w.length < 0.1) continue
+    if (!w.exterior && w.length < 2.4) continue // partition on slab
+    const depth = w.exterior ? fspec.footingDepth : inches(12)
+    // widest concrete under the wall + the pipe's half side
+    const half = Math.max(fspec.footingWidth, fspec.stemwallThickness) / 2 + side / 2
+    const wx = w.dir[0] * w.length
+    const wz = w.dir[1] * w.length
+    const den = dx * wz - dz * wx
+    if (Math.abs(den) < 1e-9) continue // parallel — setback geometry owns it
+    const t = ((w.start[0] - from[0]) * wz - (w.start[1] - from[1]) * wx) / den
+    const u = ((w.start[0] - from[0]) * dz - (w.start[1] - from[1]) * dx) / den
+    if (t < -half / len || t > 1 + half / len) continue
+    if (u < -half / w.length || u > 1 + half / w.length) continue
+    // pipe TOP at the crossing point vs the concrete's bottom
+    const yAt = yHigh - Math.max(0, Math.min(1, t)) * len * slope
+    if (yAt + side / 2 > -depth) return ' — sleeved through foundation (P2603.4)'
+  }
+  return undefined
+}
+
+/**
+ * Buried drain run: Manhattan legs falling at `slope`, each leg carrying
+ * the P2603.4 sleeve note IFF it crosses concrete (sleeveNoteFor) — the
+ * drainage SAT gate exempts crossings by label, so the note must sit on
+ * exactly the crossing legs, never blanket the run (S3a/R2/R3). Above the
+ * ground storey there is no foundation — no leg ever sleeves.
+ */
+function drainManhattan(
+  members: Member[],
+  spec: PipeSpec,
+  walls: WallSlice[],
+  fspec: FramingSpec,
+  from: Pt,
+  to: Pt,
+  yHigh: number,
+  slope: number,
+  groundLevel: boolean,
+): number {
+  const elbow: Pt = [to[0], from[1]]
+  const specFor = (a: Pt, b: Pt, y: number): PipeSpec => {
+    const note = groundLevel ? sleeveNoteFor(walls, fspec, a, b, y, spec.side, slope) : undefined
+    return note ? { ...spec, label: `${spec.label}${note}` } : spec
+  }
+  const y1 = leg(members, specFor(from, elbow, yHigh), from, elbow, yHigh, true, 0.05, slope)
+  return leg(members, specFor(elbow, to, y1), elbow, to, y1, true, 0.05, slope)
+}
+
+/**
+ * A wall point pulled DROP_SETBACK off the wall centerline toward `inside`
+ * — the under-floor junctions live INBOARD so buried runs and their
+ * through-floor verticals never enter the stemwall/footing volume under
+ * the wall (skeptic S1: frost stemwalls reach the drain depth).
+ */
+function inboardOf(at: Pt, wall: WallSlice, inside: Pt): Pt {
+  const nx = -wall.dir[1]
+  const nz = wall.dir[0]
+  const side = Math.sign((inside[0] - at[0]) * nx + (inside[1] - at[1]) * nz) || 1
+  return [at[0] + nx * side * DROP_SETBACK, at[1] + nz * side * DROP_SETBACK]
+}
 
 /** Vertical pipe segment at a plan point. */
 function riser(
@@ -769,14 +872,25 @@ type Anchored = {
   anchor: WallPoint
   /** Wall-anchor plan point (stub bay, clear of ROs). */
   plan: Pt
+  /** Buried drain junction — `plan` pulled DROP_SETBACK into the room so
+   * under-floor runs never enter the concrete under the wall (S1). */
+  node: Pt
+  /** Where the trap riser drops through the floor: the fixture's plan
+   * point, pulled to the junction when the fixture sits closer to the
+   * wall than DROP_SETBACK — a flush fixture's bare vertical ran through
+   * the frost stemwall (R4b); the real closet bend sits ~12" off the
+   * wall under the bowl anyway. */
+  dropAt: Pt
   /** Too far from every wall — island air-run fallback. */
   island: boolean
   /** Where the stub-out fixture sits (the wall bay; the item itself for islands). */
   stubAt: Pt
   stubY: number
-  /** Trap-arm plan length fixture → anchor. */
+  /** Fixture → wall-anchor plan distance (supply hoses, island detection). */
+  offWall: number
+  /** Trap-arm plan length fixture → buried junction. */
   armLen: number
-  /** Manhattan distance anchor → stack (drain-tree ordering). */
+  /** Manhattan distance junction → stack junction (drain-tree ordering). */
   dist: number
   /** Drain rise above the stack base at this node (P3005.3 chaining). */
   rise: number
@@ -805,6 +919,7 @@ function placedPlumbing(
   spec: FramingSpec,
   placed: PlacedFixtureSlice[],
   overrides?: ServiceOverrides,
+  groundLevel = true,
 ): { members: Member[]; fixtures: Fixture[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -815,20 +930,29 @@ function placedPlumbing(
 
   // ---- anchors: snap each fixture to its nearest wall stud bay, clear of
   // every RO the stub/vent band crosses ----
+  // Fixture centroid — the inboard fallback for a fixture dropped EXACTLY
+  // on its wall centerline (its own offset can't pick the room side).
+  const cx = placed.reduce((s, f) => s + f.plan[0], 0) / Math.max(1, placed.length)
+  const cz = placed.reduce((s, f) => s + f.plan[1], 0) / Math.max(1, placed.length)
   const anchored: Anchored[] = []
   for (const f of placed) {
     const anchor = nearestWallPoint(walls, f.plan, ANCHOR_CLEAR_TOP)
     if (!anchor) continue
     const plan = wallPlan(anchor) as Pt
-    const armLen = Math.hypot(plan[0] - f.plan[0], plan[1] - f.plan[1])
-    const island = armLen > ISLAND_DIST
+    const offWall = Math.hypot(plan[0] - f.plan[0], plan[1] - f.plan[1])
+    const node = inboardOf(plan, anchor.wall, offWall > 0.01 ? f.plan : [cx, cz])
+    const armLen = Math.hypot(node[0] - f.plan[0], node[1] - f.plan[1])
+    const island = offWall > ISLAND_DIST
     anchored.push({
       f,
       anchor,
       plan,
+      node,
+      dropAt: offWall >= DROP_SETBACK ? f.plan : node,
       island,
       stubAt: island ? f.plan : plan,
       stubY: STUB_HEIGHT[f.kind],
+      offWall,
       armLen,
       dist: 0,
       rise: 0,
@@ -849,10 +973,14 @@ function placedPlumbing(
   const stackAnchor = nearestWallPoint(walls, [wx, wz], Number.POSITIVE_INFINITY)
   if (!stackAnchor) return { members, fixtures }
   const stackAt = wallPlan(stackAnchor) as Pt
+  // Buried root junction — inboard of the stack wall (toward the DFU
+  // centroid), so the under-floor tee and the drop never sit inside a
+  // frost-depth stemwall (S1/S1b).
+  const stackNode = inboardOf(stackAt, stackAnchor.wall, [wx, wz])
 
   // ---- drain tree: each node's parent is the nearest node strictly closer
   // to the stack (acyclic by construction; distances only fall downstream) ----
-  for (const a of anchored) a.dist = manhattanDist(a.plan, stackAt)
+  for (const a of anchored) a.dist = manhattanDist(a.node, stackNode)
   const order = anchored
     .map((_, i) => i)
     .sort((i, j) => (anchored[i] as Anchored).dist - (anchored[j] as Anchored).dist)
@@ -864,7 +992,7 @@ function placedPlumbing(
       if (j === i) continue
       const other = anchored[j] as Anchored
       if (other.dist >= me.dist - 0.01) continue
-      const d = manhattanDist(me.plan, other.plan)
+      const d = manhattanDist(me.node, other.node)
       if (d < bestDist) {
         bestDist = d
         best = j
@@ -889,35 +1017,73 @@ function placedPlumbing(
     const me = anchored[i] as Anchored
     me.edgeSize = branchSize(me.subDfu, me.subMaxDrain, me.subWC)
     const parent = me.parent >= 0 ? (anchored[me.parent] as Anchored) : null
-    const pPlan = parent ? parent.plan : stackAt
+    const pNode = parent ? parent.node : stackNode
     const pRise = parent ? parent.rise : 0
-    me.rise = pRise + manhattanDist(me.plan, pPlan) * slopeFor(me.edgeSize)
+    me.rise = pRise + manhattanDist(me.node, pNode) * slopeFor(me.edgeSize)
   }
-  // Bury the whole DWV tree under the slab: the stack base sits deep enough
-  // that the farthest trap arm still arrives below floor level.
+  // Bury the whole DWV tree under the floor: the stack base sits deep
+  // enough that the farthest trap arm still arrives UNDER_FLOOR_CLEAR
+  // below the floor plane — clear of joists/girders and interior footings.
   let maxRise = 0
   for (const a of anchored) {
     maxRise = Math.max(maxRise, a.rise + a.armLen * slopeFor(a.f.drainIn))
   }
-  const base = -(maxRise + 0.12)
+  const base = -(maxRise + UNDER_FLOOR_CLEAR)
 
-  // ---- stack: below the building drain up through the roof (P3103.1) ----
+  // ---- stack: floor line up through the roof (P3103.1). It stops AT the
+  // floor — a frost stemwall owns the wall line below grade (S1b), so the
+  // buried connection is a separate SLEEVED drop at the inboard junction. ----
   const stackTop = stackAnchor.wall.height + 0.6
   members.push({
     system: 'plumbing',
     role: 'vent-stack',
-    dims: [STACK_SIDE, stackTop - base, STACK_SIDE],
-    length: stackTop - base,
-    position: [stackAt[0], (stackTop + base) / 2, stackAt[1]],
+    dims: [STACK_SIDE, stackTop, STACK_SIDE],
+    length: stackTop,
+    position: [stackAt[0], stackTop / 2, stackAt[1]],
     rotation: [0, 0, 0],
     material: 'pvc',
     sourceId: 'dwv-stack',
     label: '3" DWV stack — through roof (P3103.1)',
   })
+  // Floor-line jog bridging the stack (wall line) to the buried drop at the
+  // inboard junction — round-2 skeptic R1: stopping the stack at the floor
+  // SEVERED it from the drainage (a through-roof vent tied to nothing,
+  // P3104). The jog's bottom face rides ON the slab (contact, never inside
+  // the concrete) and falls at 1/4"/ft toward the drop.
+  const yJog = leg(
+    members,
+    {
+      side: STACK_SIDE,
+      material: 'pvc',
+      role: 'pipe-run',
+      sourceId: 'dwv-stack-base',
+      label: '3" stack base — floor-line jog to the buried drop',
+    },
+    stackAt,
+    stackNode,
+    STACK_SIDE / 2 + 0.04, // bottom face clears the 3/4" deck top over its fall
+    true,
+    0.01,
+  )
+  riser(
+    members,
+    {
+      side: STACK_SIDE,
+      material: 'pvc',
+      role: 'pipe-run',
+      sourceId: 'dwv-stack-base',
+      label: groundLevel
+        ? '3" stack base drop — sleeved through slab (P2603.4)'
+        : '3" stack base drop — into the floor cavity',
+    },
+    stackNode,
+    yJog,
+    base,
+  )
   fixtures.push({
     system: 'plumbing',
     kind: 'cleanout',
-    position: [stackAt[0], 0.15, stackAt[1]],
+    position: [stackNode[0], 0.15, stackNode[1]],
     rotationY: 0,
     sourceId: 'dwv-stack',
     label: 'Cleanout at stack base (P3005.2)',
@@ -964,14 +1130,17 @@ function placedPlumbing(
                 !wallBetween(a.f.plan, o.plan),
             )
           : undefined
-      const yArm = yNode + a.armLen * slopeFor(a.f.drainIn)
-      // A fixture dropped inside a door/window rough opening puts its trap
-      // riser THROUGH the RO — never silent (verify round D4: unflagged
-      // 1.25" riser through a doorway).
+      // The arm's EMITTED plan length: dropAt → junction (a flush fixture's
+      // drop is pulled to the junction, R4b — the arm then vanishes).
+      const armPlan = Math.hypot(a.node[0] - a.dropAt[0], a.node[1] - a.dropAt[1])
+      const yArm = yNode + armPlan * slopeFor(a.f.drainIn)
+      // A trap riser dropping inside a door/window rough opening is never
+      // silent (verify round D4: unflagged 1.25" riser through a doorway).
+      // Tested at the riser's ACTUAL plan point (dropAt).
       const riserTop = Math.max(DRAIN_CONN_Y[a.f.kind], 0.5)
       const inRO = walls.some((w) => {
-        const dx = a.f.plan[0] - w.start[0]
-        const dz = a.f.plan[1] - w.start[1]
+        const dx = a.dropAt[0] - w.start[0]
+        const dz = a.dropAt[1] - w.start[1]
         const u = dx * w.dir[0] + dz * w.dir[1]
         const off = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
         if (off > w.thickness / 2 + 0.06 || u < 0 || u > w.length) return false
@@ -994,7 +1163,7 @@ function placedPlumbing(
               ? `CLEARANCE: ${KIND_LABEL[crowd.kind]} sits within 30" of the WC centerline (P2705.1)`
               : undefined),
         },
-        a.f.plan,
+        a.dropAt,
         DRAIN_CONN_Y[a.f.kind],
         yArm,
       )
@@ -1014,8 +1183,8 @@ function placedPlumbing(
               ? `TRAP ARM: ${KIND_LABEL[a.f.kind]} sits ${round1ft(a.armLen)} ft from its wall — exceeds ${toFeet(limit).toFixed(0)} ft for a ${a.f.drainIn}" arm (P3105.1); move it closer or vent at the island`
               : undefined,
         },
-        a.f.plan,
-        a.plan,
+        a.dropAt,
+        a.node,
         yArm,
         true,
         0.015,
@@ -1023,9 +1192,12 @@ function placedPlumbing(
       )
     }
     // Branch drain toward the parent node — DFU-sized (P3004.1/P3005.4.1),
-    // falling at the P3005.3 slope for its size.
-    const pPlan = a.parent >= 0 ? (anchored[a.parent] as Anchored).plan : stackAt
-    manhattan(
+    // falling at the P3005.3 slope for its size. Junction-to-junction:
+    // every buried node sits DROP_SETBACK inboard of its wall (S1); legs
+    // that still cross concrete transversally (courtyard stemwalls, R3)
+    // carry the per-crossing sleeve note.
+    const pNode = a.parent >= 0 ? (anchored[a.parent] as Anchored).node : stackNode
+    drainManhattan(
       members,
       {
         side: pipeSide(a.edgeSize),
@@ -1034,11 +1206,13 @@ function placedPlumbing(
         sourceId: `dwv-branch-${a.f.id}`,
         label: `${a.edgeSize}" branch drain — ${a.subDfu} DFU @ ${a.edgeSize >= 3 ? '1/8' : '1/4'}"/ft (P3004.1, P3005.3)`,
       },
-      a.plan,
-      pPlan,
+      walls,
+      spec,
+      a.node,
+      pNode,
       yNode,
-      true,
       slopeFor(a.edgeSize),
+      groundLevel,
     )
   }
 
@@ -1059,24 +1233,34 @@ function placedPlumbing(
     totalDfu > cap3 ? 4 : (rules.plumbing?.dwv?.buildingDrainIn ?? 3),
     maxBranchIn,
   )
-  manhattan(
+  // Every main leg that passes through concrete carries its own P2603.4
+  // sleeve note (per-crossing, R2); legs shallower than a wall's footing
+  // sleeve, deep frost footings are passed under. Above the ground storey
+  // there is no foundation and no sewer: the run is a branch main that
+  // NEEDS a riser to the storey below — say so instead of printing
+  // foundation fiction (S2).
+  drainManhattan(
     members,
     {
       side: pipeSide(mainSize),
       material: 'pvc',
       role: 'pipe-run',
       sourceId: 'dwv-main',
-      label: `${mainSize}" building drain — ${totalDfu} DFU @ 1/4"/ft to sewer (P3005.4.1)`,
+      label: groundLevel
+        ? `${mainSize}" building drain — ${totalDfu} DFU @ 1/4"/ft → sewer/septic (P3005.4.1)`
+        : `${mainSize}" drain main — ${totalDfu} DFU @ 1/4"/ft → riser to storey below (not modeled)`,
       flag:
         totalDfu > cap4
           ? `UNDERSIZED: ${totalDfu} DFU exceeds ${cap4} on a 4" building drain (P3005.4.1) — engineered sizing required`
           : undefined,
     },
-    stackAt,
+    walls,
+    spec,
+    stackNode,
     exit,
     base,
-    true,
     0.25 / 12,
+    groundLevel,
   )
   fixtures.push({
     system: 'plumbing',
@@ -1084,7 +1268,9 @@ function placedPlumbing(
     position: [exit[0], 0.15, exit[1]],
     rotationY: 0,
     sourceId: 'dwv-main',
-    label: 'Cleanout @ sewer exit (P3005.2.1)',
+    label: groundLevel
+      ? 'Cleanout @ sewer exit (P3005.2.1)'
+      : 'Cleanout @ drain main terminus (P3005.2)',
   })
 
   // ---- re-vents: one per wet wall, rising to 6" above the flood rim and
@@ -1105,7 +1291,11 @@ function placedPlumbing(
         sourceId: `dwv-vent-${wallId}`,
         label: '1½" re-vent — reconnects 6" above flood rim (P3104.4)',
       }
-      riser(members, ventSpec, a.plan, base + a.rise, VENT_RECONNECT_Y)
+      // Rise at the buried junction (inboard — never inside a frost
+      // stemwall), jog to the wall above the flood rim, then follow the
+      // wall graph back to the stack.
+      riser(members, ventSpec, a.node, base + a.rise, VENT_RECONNECT_Y)
+      leg(members, ventSpec, a.node, a.plan, VENT_RECONNECT_Y, false, 0.015)
       routePipe(members, ventSpec, graph, a.anchor, stackAnchor, VENT_RECONNECT_Y, walls)
     }
   }
@@ -1229,14 +1419,14 @@ function placedPlumbing(
           {
             ...cold,
             label: `${cold.label} (island — air run under floor, verify)`,
-            flag: `ISLAND: ${KIND_LABEL[a.f.kind]} sits ${round1ft(a.armLen)} ft from the nearest wall — supply routed as an air run; run it under the floor`,
+            flag: `ISLAND: ${KIND_LABEL[a.f.kind]} sits ${round1ft(a.offWall)} ft from the nearest wall — supply routed as an air run; run it under the floor`,
           },
           a.plan,
           a.stubAt,
           a.stubY,
           false,
         )
-      } else if (a.armLen > CONN_MIN) {
+      } else if (a.offWall > CONN_MIN) {
         // Visible braided connector stub → fixture (islands keep air runs).
         connectorArc(
           members,
@@ -1274,7 +1464,7 @@ function placedPlumbing(
             a.stubY,
             false,
           )
-        } else if (a.armLen > CONN_MIN) {
+        } else if (a.offWall > CONN_MIN) {
           // Hot connector lands beside the cold one — same 1" nudge along
           // the wall as the hot drop, so red and blue hoses never z-fight.
           connectorArc(
@@ -1312,14 +1502,17 @@ export function layoutPlumbing(
   spec: FramingSpec = DEFAULT_SPEC,
   placed: PlacedFixtureSlice[] = [],
   overrides?: ServiceOverrides,
+  /** False on upper storeys: no foundation to sleeve, no sewer to reach —
+   * the drain main truthfully labels its missing riser instead (S2). */
+  groundLevel = true,
 ): { members: Member[]; fixtures: Fixture[] } {
   if (placed.length > 0) {
-    const result = placedPlumbing(walls, rooms, spec, placed, overrides)
+    const result = placedPlumbing(walls, rooms, spec, placed, overrides, groundLevel)
     // Placed fixtures but no usable walls → let the fallback try (it
     // returns empty on wall-less scenes too, but never crashes).
     if (result.members.length > 0 || result.fixtures.length > 0) return result
   }
-  return roomPlumbing(walls, rooms, spec, overrides)
+  return roomPlumbing(walls, rooms, spec, overrides, groundLevel)
 }
 
 type Stub = {
@@ -1329,6 +1522,79 @@ type Stub = {
   offset: number
   /** Toilets are cold-only — everything else joins the water-heater loop. */
   hot: boolean
+  /** Drain size (in) by fixture class — Table P3005.4.1 labels. */
+  drainIn: number
+  /** Where the tailpiece leaves the fixture (closet flange / shower pan at
+   * the floor, lav/sink trap under the rim) — the drop's TOP. */
+  dropY: number
+  dropLabel: string
+}
+
+/** Room-category fixture set: the drainage fixtures a wet room implies.
+ * Supply stub heights are practice rough-ins (fixtureRoughIn.*); drain
+ * sizes are the Table P3005.4.1 fixture classes (WC 3", shower 2",
+ * lav/sink 1½", washer standpipe 2"). */
+function fallbackStubs(category: RoomSlice['category']): Stub[] {
+  if (category === 'bathroom') {
+    return [
+      {
+        kind: 'stub-out',
+        y: inches(rules.plumbing?.fixtureRoughIn?.toiletCenterFromWallIn ?? 12),
+        label: 'Toilet rough-in 12" off wall',
+        offset: -0.4,
+        hot: false,
+        drainIn: 3,
+        dropY: 0,
+        dropLabel: '3" closet bend — toilet drop through floor (Table P3005.4.1)',
+      },
+      {
+        kind: 'stub-out',
+        y: inches(rules.plumbing?.fixtureRoughIn?.showerValveHeightIn ?? 44),
+        label: 'Shower valve rough-in 44" AFF',
+        offset: 0,
+        hot: true,
+        drainIn: 2,
+        dropY: 0,
+        dropLabel: '2" shower trap — drop through floor (Table P3005.4.1)',
+      },
+      {
+        kind: 'stub-out',
+        y: inches(rules.plumbing?.fixtureRoughIn?.lavHeightIn ?? 21),
+        label: 'Lavatory supply/drain',
+        offset: 0.4,
+        hot: true,
+        drainIn: 1.5,
+        dropY: inches(rules.plumbing?.fixtureRoughIn?.lavDrainHeightIn ?? 19),
+        dropLabel: '1.5" lav trap + drop through floor (Table P3005.4.1)',
+      },
+    ]
+  }
+  if (category === 'kitchen') {
+    return [
+      {
+        kind: 'stub-out',
+        y: inches(18),
+        label: 'Kitchen sink supply/drain',
+        offset: 0,
+        hot: true,
+        drainIn: 1.5,
+        dropY: inches(18),
+        dropLabel: '1.5" sink trap + drop through floor (Table P3005.4.1)',
+      },
+    ]
+  }
+  return [
+    {
+      kind: 'stub-out',
+      y: inches(42),
+      label: 'Laundry box',
+      offset: 0,
+      hot: true,
+      drainIn: 2,
+      dropY: inches(30),
+      dropLabel: '2" washer standpipe + drop through floor (Table P3005.4.1)',
+    },
+  ]
 }
 
 /** Room-category fallback — used when the scene carries no placed fixtures. */
@@ -1337,6 +1603,7 @@ function roomPlumbing(
   rooms: RoomSlice[],
   spec: FramingSpec,
   overrides?: ServiceOverrides,
+  groundLevel = true,
 ): { members: Member[]; fixtures: Fixture[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -1354,6 +1621,10 @@ function roomPlumbing(
   const stackWall = wetWallFor(stackRoom, walls, core)
   if (!stackWall) return { members, fixtures }
   const stackAt = nearestOnWall(stackWall, polygonCentroid(stackRoom.polygon)).point
+  // Buried root junction — inboard of the stack wall (toward the wet
+  // core), so the under-floor tee and its drop never sit inside a
+  // frost-depth stemwall (S1).
+  const stackNode = inboardOf(stackAt, stackWall, core)
   const stackHeight = stackWall.height + 0.6 // through-roof vent (P3103.1)
 
   members.push({
@@ -1376,148 +1647,246 @@ function roomPlumbing(
     label: 'Cleanout (P3005.2)',
   })
 
-  // ---- per wet room: stubs + trap drops + sloped Manhattan branch drains ----
+  // ---- per wet room: geometry pre-pass. Drops leave the wet wall
+  // DROP_SETBACK into the room (through-floor risers clear the footings
+  // under the wall) and rises chain from the stack per P3005.3 so the
+  // whole tree can be buried in one pass. ----
+  type RoomDwv = {
+    room: RoomSlice
+    wall: WallSlice
+    /** Wall point nearest the room centroid — supply stubs live here. */
+    at: Pt
+    rotationY: number
+    /** Unit normal, wall → room centroid. */
+    normal: Pt
+    /** Under-floor branch collection point, DROP_SETBACK into the room. */
+    roomAt: Pt
+    stubs: Stub[]
+    /** Along-wall stub offsets CLAMPED into the room polygon (R4a: a 1 m
+     * corner bath put the toilet drop inside the side wall's stemwall; a
+     * 0.7 m one dropped it outside the building). Aligned with `stubs`. */
+    offsets: number[]
+    drainIn: number
+    branchPlan: number
+    /** Branch arrival rise above the stack base at roomAt (P3005.3). */
+    rise: number
+  }
+  const plans: RoomDwv[] = []
   for (const room of wetRooms) {
     const wall = wetWallFor(room, walls, core)
     if (!wall) continue
     const centroid = polygonCentroid(room.polygon)
     const at = nearestOnWall(wall, centroid).point
     // Face the room: normal pointing from the wall point toward the centroid.
-    const nx = centroid[0] - at[0]
-    const nz = centroid[1] - at[1]
-    const rotationY = Math.atan2(nx, nz)
-
-    const stubs: Stub[] =
-      room.category === 'bathroom'
-        ? [
-            {
-              kind: 'stub-out',
-              y: inches(rules.plumbing?.fixtureRoughIn?.toiletCenterFromWallIn ?? 12),
-              label: 'Toilet rough-in 12" off wall',
-              offset: -0.4,
-              hot: false,
-            },
-            {
-              kind: 'stub-out',
-              y: inches(rules.plumbing?.fixtureRoughIn?.lavHeightIn ?? 21),
-              label: 'Lavatory supply/drain',
-              offset: 0.4,
-              hot: true,
-            },
-          ]
-        : room.category === 'kitchen'
-          ? [{ kind: 'stub-out' as const, y: inches(18), label: 'Kitchen sink supply/drain', offset: 0, hot: true }]
-          : [{ kind: 'stub-out' as const, y: inches(42), label: 'Laundry box', offset: 0, hot: true }]
-
+    let nx = centroid[0] - at[0]
+    let nz = centroid[1] - at[1]
+    const nLen = Math.hypot(nx, nz)
+    if (nLen < 1e-6) {
+      nx = -wall.dir[1]
+      nz = wall.dir[0]
+    } else {
+      nx /= nLen
+      nz /= nLen
+    }
+    const roomAt: Pt = [at[0] + nx * DROP_SETBACK, at[1] + nz * DROP_SETBACK]
     // Branch size: the bathroom group carries the WC — its branch must be 3"
     // (P3005 water closets discharge to min 3"); sinks/laundry run 2".
-    const isBathroom = room.category === 'bathroom'
-    const drainSide = isBathroom ? MAIN_DRAIN : BRANCH_DRAIN
-    const drainLabelSize = isBathroom ? '3"' : '2"'
-    const dfu = DFU_BY_CATEGORY[room.category] ?? 2
-
-    // Heights chain backward from the stack so every leg falls toward it.
-    const branchPlan = manhattanDist(at, stackAt)
-    const yAt = DRAIN_Y + branchPlan * DRAIN_SLOPE
-
-    for (const stub of stubs) {
-      const stubAt: Pt = [at[0] + wall.dir[0] * stub.offset, at[1] + wall.dir[1] * stub.offset]
-      fixtures.push({
-        system: 'plumbing',
-        kind: stub.kind,
-        position: [stubAt[0], stub.y, stubAt[1]],
-        rotationY,
-        sourceId: room.id,
-        label: stub.label,
-      })
-      if (!fab) continue
-      // Trap arm + drop: the fixture falls to its collector height, which
-      // sits above yAt by the along-wall distance's worth of slope.
-      const collectorY = yAt + Math.abs(stub.offset) * DRAIN_SLOPE
-      riser(
-        members,
-        {
-          side: BRANCH_DRAIN,
-          material: 'pvc',
-          role: 'pipe-run',
-          sourceId: room.id,
-          label: `Fixture drop + trap arm (within P3105 limit)`,
-        },
-        stubAt,
-        stub.y,
-        collectorY,
-      )
-      // Collector along the wet wall back to the branch point (sloped).
-      leg(
-        members,
-        {
-          side: drainSide,
-          material: 'pvc',
-          role: 'pipe-run',
-          sourceId: room.id,
-          label: `${drainLabelSize} branch drain (collector, 1/4"/ft)`,
-        },
-        stubAt,
-        at,
-        collectorY,
-        true,
-      )
-    }
-
-    // Branch drain to the stack: Manhattan, sloped 1/4"/ft, arriving at
-    // DRAIN_Y. The bathroom usually shares the stack wall (zero length).
-    manhattan(
-      members,
-      {
-        side: drainSide,
-        material: 'pvc',
-        role: 'pipe-run',
-        sourceId: room.id,
-        label: `${drainLabelSize} branch drain — ${dfu} DFU, 1/4"/ft (P3005.3)`,
-      },
-      at,
-      stackAt,
-      yAt,
-      true,
-    )
-
-    // Re-vent (P3104.4): rise to 6" above the flood rim at the branch point,
-    // then run level back to the stack. The stack room IS the stack's vent.
-    if (fab && branchPlan > 0.3) {
-      const ventSpec: PipeSpec = {
-        side: VENT_SIDE,
-        material: 'pvc',
-        role: 'pipe-run',
-        sourceId: room.id,
-        label: '1½" vent — reconnects 6" above flood rim (P3104.4)',
+    const drainIn = room.category === 'bathroom' ? (rules.plumbing?.dwv?.buildingDrainIn ?? 3) : 2
+    const branchPlan = manhattanDist(roomAt, stackNode)
+    const stubs = fallbackStubs(room.category)
+    // R4a: shrink each along-wall offset until the DROP point (with the
+    // perpendicular pull applied) sits inside the room polygon with a
+    // 0.25 m margin from the side edges — clear of a side wall's 16"
+    // footing band. A room too small even at offset 0 keeps the center.
+    const clampOffset = (want: number): number => {
+      const margin = 0.25
+      const sign = want < 0 ? -1 : 1
+      for (let mag = Math.abs(want); mag >= 0; mag = Math.round((mag - 0.05) * 100) / 100) {
+        const off = sign * mag
+        const px = at[0] + wall.dir[0] * off + nx * DROP_SETBACK
+        const pz = at[1] + wall.dir[1] * off + nz * DROP_SETBACK
+        const inside =
+          pointInPolygon([px, pz], room.polygon) &&
+          pointInPolygon([px + wall.dir[0] * margin, pz + wall.dir[1] * margin], room.polygon) &&
+          pointInPolygon([px - wall.dir[0] * margin, pz - wall.dir[1] * margin], room.polygon)
+        if (inside) return off
       }
-      riser(members, ventSpec, at, yAt, VENT_RECONNECT_Y)
-      manhattan(members, ventSpec, at, stackAt, VENT_RECONNECT_Y, false)
+      return 0
+    }
+    plans.push({
+      room,
+      wall,
+      at,
+      rotationY: Math.atan2(nx, nz),
+      normal: [nx, nz],
+      roomAt,
+      stubs,
+      offsets: stubs.map((s) => clampOffset(s.offset)),
+      drainIn,
+      branchPlan,
+      rise: branchPlan * slopeFor(drainIn),
+    })
+  }
+  // Bury the tree: the highest drop arrival still sits UNDER_FLOOR_CLEAR
+  // below the floor plane (same convention as the placed-fixture engine).
+  let maxRise = 0
+  for (const p of plans) {
+    for (const [i, stub] of p.stubs.entries()) {
+      maxRise = Math.max(
+        maxRise,
+        p.rise + Math.abs(p.offsets[i] ?? stub.offset) * slopeFor(stub.drainIn),
+      )
     }
   }
+  const base = -(maxRise + UNDER_FLOOR_CLEAR)
 
-  // ---- 3" building drain: stack base → sewer exit at an exterior wall
-  // (or the sewer-exit service node, verbatim) ----
-  const totalDfu = wetRooms.reduce((sum, r) => sum + (DFU_BY_CATEGORY[r.category] ?? 2), 0)
-  const exit: Pt =
-    overridePlanPoint(walls, overrides?.sewerExit) ?? sewerExitFrom(walls, stackAt, core)
-  const undersized = totalDfu > MAIN_CAPACITY_DFU
-  manhattan(
+  // The stack's below-floor connection to the buried building drain: a
+  // floor-line jog from the wall to the INBOARD junction (R1 — without it
+  // the through-roof stack tied into NOTHING), then a vertical drop
+  // sleeved through the slab per P2603.4: concrete is never pierced bare.
+  // Above the ground storey there is no slab to sleeve.
+  const yJog = leg(
     members,
     {
       side: MAIN_DRAIN,
       material: 'pvc',
       role: 'pipe-run',
-      sourceId: stackRoom.id,
-      label: `3" building drain — ${totalDfu} DFU @ 1/4"/ft to sewer`,
+      sourceId: 'dwv-stack-base',
+      label: '3" stack base — floor-line jog to the buried drop',
+    },
+    stackAt,
+    stackNode,
+    MAIN_DRAIN / 2 + 0.04, // bottom face clears the 3/4" deck top over its fall
+    true,
+    0.01,
+  )
+  riser(
+    members,
+    {
+      side: MAIN_DRAIN,
+      material: 'pvc',
+      role: 'pipe-run',
+      sourceId: 'dwv-stack-base',
+      label: groundLevel
+        ? '3" stack base drop — sleeved through slab (P2603.4)'
+        : '3" stack base drop — into the floor cavity',
+    },
+    stackNode,
+    yJog,
+    base,
+  )
+
+  // ---- per wet room: stubs + through-floor drops + buried branch drains ----
+  for (const p of plans) {
+    const { room, wall } = p
+    const dfu = DFU_BY_CATEGORY[room.category] ?? 2
+    const yRoom = base + p.rise
+    for (const [i, stub] of p.stubs.entries()) {
+      const off = p.offsets[i] ?? stub.offset
+      const stubAt: Pt = [p.at[0] + wall.dir[0] * off, p.at[1] + wall.dir[1] * off]
+      fixtures.push({
+        system: 'plumbing',
+        kind: stub.kind,
+        position: [stubAt[0], stub.y, stubAt[1]],
+        rotationY: p.rotationY,
+        sourceId: room.id,
+        label: stub.label,
+      })
+      if (!fab) continue
+      // Through-floor drop at the fixture class's Table P3005.4.1 size,
+      // DROP_SETBACK off the wall, falling to the buried trap-arm height.
+      const dropAt: Pt = [p.roomAt[0] + wall.dir[0] * off, p.roomAt[1] + wall.dir[1] * off]
+      const yDrop = yRoom + Math.abs(off) * slopeFor(stub.drainIn)
+      const dropSpec: PipeSpec = {
+        side: pipeSide(stub.drainIn),
+        material: 'pvc',
+        role: 'pipe-run',
+        sourceId: `dwv-trap-${room.id}-${i}`,
+        label: stub.dropLabel,
+      }
+      riser(members, dropSpec, dropAt, stub.dropY, yDrop)
+      // Buried trap arm to the room's branch point (P3105.1 — fallback
+      // arms are ≤ 0.4 m, far inside every size's limit).
+      manhattan(
+        members,
+        { ...dropSpec, label: `${stub.drainIn}" trap arm → branch (P3105.1)` },
+        dropAt,
+        p.roomAt,
+        yDrop,
+        true,
+        slopeFor(stub.drainIn),
+      )
+    }
+
+    // Branch drain to the stack base: Manhattan under the floor, falling at
+    // the P3005.3 slope for its size (1/4"/ft < 3", 1/8"/ft allowed 3"+);
+    // legs that cross concrete transversally (courtyard stemwalls, R3)
+    // carry the per-crossing sleeve note.
+    drainManhattan(
+      members,
+      {
+        side: pipeSide(p.drainIn),
+        material: 'pvc',
+        role: 'pipe-run',
+        sourceId: `dwv-branch-${room.id}`,
+        label: `${p.drainIn}" branch drain — ${dfu} DFU @ ${p.drainIn >= 3 ? '1/8' : '1/4'}"/ft (P3004.1, P3005.3)`,
+      },
+      walls,
+      spec,
+      p.roomAt,
+      stackNode,
+      yRoom,
+      slopeFor(p.drainIn),
+      groundLevel,
+    )
+
+    // Re-vent (P3104.4): rise from the buried branch to 6" above the flood
+    // rim, then run level back to the stack. The stack room IS its vent.
+    if (fab && p.branchPlan > 0.3) {
+      const ventSpec: PipeSpec = {
+        side: VENT_SIDE,
+        material: 'pvc',
+        role: 'pipe-run',
+        sourceId: `dwv-vent-${room.id}`,
+        label: '1½" vent — reconnects 6" above flood rim (P3104.4)',
+      }
+      riser(members, ventSpec, p.roomAt, yRoom, VENT_RECONNECT_Y)
+      manhattan(members, ventSpec, p.roomAt, stackAt, VENT_RECONNECT_Y, false)
+    }
+  }
+
+  // ---- 3" building drain: stack base → sewer exit at an exterior wall
+  // (or the sewer-exit service node, verbatim), buried, at 1/4"/ft ----
+  const totalDfu = wetRooms.reduce((sum, r) => sum + (DFU_BY_CATEGORY[r.category] ?? 2), 0)
+  const exit: Pt =
+    overridePlanPoint(walls, overrides?.sewerExit) ?? sewerExitFrom(walls, stackAt, core)
+  const undersized = totalDfu > MAIN_CAPACITY_DFU
+  // Every main leg that passes through concrete carries its own P2603.4
+  // sleeve note (per-crossing, R2); legs shallower than a wall's footing
+  // sleeve, deep frost footings are passed under. Above the ground storey
+  // there is no foundation and no sewer — the run is a branch main that
+  // NEEDS a riser to the storey below; say so (S2).
+  drainManhattan(
+    members,
+    {
+      side: MAIN_DRAIN,
+      material: 'pvc',
+      role: 'pipe-run',
+      sourceId: 'dwv-main',
+      label: groundLevel
+        ? `3" building drain — ${totalDfu} DFU @ 1/4"/ft → sewer/septic (P3005.4)`
+        : `3" drain main — ${totalDfu} DFU @ 1/4"/ft → riser to storey below (not modeled)`,
       flag: undersized
         ? `UNDERSIZED: ${totalDfu} DFU exceeds ${MAIN_CAPACITY_DFU} on a 3" building drain (P3005.4.1) — upsize to 4"`
         : undefined,
     },
-    stackAt,
+    walls,
+    spec,
+    stackNode,
     exit,
-    DRAIN_Y,
-    true,
+    base,
+    DRAIN_SLOPE,
+    groundLevel,
   )
   fixtures.push({
     system: 'plumbing',
@@ -1525,7 +1894,9 @@ function roomPlumbing(
     position: [exit[0], 0.15, exit[1]],
     rotationY: 0,
     sourceId: stackRoom.id,
-    label: 'Cleanout @ sewer exit (P3005.2.1)',
+    label: groundLevel
+      ? 'Cleanout @ sewer exit (P3005.2.1)'
+      : 'Cleanout @ drain main terminus (P3005.2)',
   })
 
   // ---- supplies: cold service → WH; hot/cold branches to every stub ----
@@ -1564,18 +1935,18 @@ function roomPlumbing(
         false,
       )
     }
-    // Branches: cold to every stub, hot (the WH loop) to all but toilets.
-    for (const room of wetRooms) {
-      const wall = wetWallFor(room, walls, core)
-      if (!wall) continue
-      const at = nearestOnWall(wall, polygonCentroid(room.polygon)).point
-      const stubs: { at: Pt; y: number; hot: boolean }[] =
-        room.category === 'bathroom'
-          ? [
-              { at: [at[0] - wall.dir[0] * 0.4, at[1] - wall.dir[1] * 0.4], y: inches(12), hot: false },
-              { at: [at[0] + wall.dir[0] * 0.4, at[1] + wall.dir[1] * 0.4], y: inches(21), hot: true },
-            ]
-          : [{ at, y: room.category === 'kitchen' ? inches(18) : inches(42), hot: true }]
+    // Branches: cold to every stub, hot (the WH loop) to all but toilets —
+    // at the SAME clamped along-wall offsets as the drainage stubs (R4a).
+    for (const p of plans) {
+      const { room, wall, at } = p
+      const stubs: { at: Pt; y: number; hot: boolean }[] = p.stubs.map((stub, i) => {
+        const off = p.offsets[i] ?? stub.offset
+        return {
+          at: [at[0] + wall.dir[0] * off, at[1] + wall.dir[1] * off] as Pt,
+          y: stub.y,
+          hot: stub.hot,
+        }
+      })
       for (const stub of stubs) {
         const cold: PipeSpec = {
           side: SUPPLY_BRANCH,

@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import type { Fixture, Member } from '../core/types'
-import { feet } from '../core/units'
+import { DEFAULT_SPEC } from '../core/spec'
+import type { Fixture, Member, RoomSlice, SlabSlice, WallSlice } from '../core/types'
+import { feet, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
+import { buildFoundation } from '../engines/foundation'
+import { layoutPlumbing } from '../engines/plumbing'
 import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
@@ -191,7 +194,9 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     expect(svg).toContain('supply — cold water')
     expect(svg).toContain('supply — hot water')
     expect(svg).toContain('DWV drain / vent')
-    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)')
+    // two short rows — the one-liner overflowed the legend box (E1)
+    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (1/8 AT 3 IN+)')
+    expect(svg).toContain('ARROWS POINT TO SEWER (P3005.3)')
     // the meter tags with M and the tag is named in the legend
     expect(svg).toContain('>M</text>')
     expect(svg).toContain('water meter')
@@ -202,7 +207,141 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     const svg = mep?.svg ?? ''
     expect(svg).toContain('supply / DWV pipe')
     expect(svg).not.toContain('supply — cold water')
-    expect(svg).toContain('DWV SLOPE 1/4 IN/FT (P3005.3)') // plumbing present → note prints
+    // plumbing present → the standing slope note prints
+    expect(svg).toContain('ARROWS POINT TO SEWER (P3005.3)')
+  })
+
+  test('under-floor drains print a downstream flow arrow; level supply does not', () => {
+    // A buried 3" branch falling at 1/8"/ft toward −X: member +X points
+    // UPHILL (leg convention), so the arrow must point downstream (−X).
+    const drain = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'pvc',
+      dims: [4, 0.0762, 0.0762],
+      position: [4, -0.5, 2],
+      rotation: [0, 0, Math.atan(1 / 96)],
+      sourceId: 'dwv-branch-r_bath',
+    })
+    const supply = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'copper',
+      dims: [4, 0.02, 0.02],
+      position: [4, 0.28, 3],
+      rotation: [0, 0, 0],
+      sourceId: 'cold-lav',
+    })
+    const mep = buildPlanSet([drain, supply], [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    const arrows = svg.match(/fill="#41637a"/g) ?? []
+    expect(arrows).toHaveLength(1) // one sloped drain → one arrow, none on supply
+    // pointing −X on paper: the glyph rotates 180° (±)
+    const rot = svg.match(/#41637a" transform="translate\([^)]*\) rotate\((-?[\d.]+)\)/)
+    expect(Math.abs(Math.abs(Number(rot?.[1])) - 180)).toBeLessThan(1.5)
+  })
+
+  test('E2: an arrow under a device bubble slides along its run instead of vanishing', () => {
+    const drain = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'pvc',
+      dims: [4, 0.0762, 0.0762],
+      position: [4, -0.5, 2],
+      rotation: [0, 0, Math.atan(1 / 96)],
+      sourceId: 'dwv-branch-r_bath',
+    })
+    // a supply register bubble EXACTLY on the run's midpoint (the E2 repro)
+    const reg = fixture({ system: 'hvac', kind: 'register', position: [4, 2.6, 2], sourceId: 'r' })
+    const mep = buildPlanSet([drain], [reg], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    const arrow = svg.match(/fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/)
+    expect(arrow).not.toBeNull()
+    const bubble = svg.match(/<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="7"/)
+    expect(bubble).not.toBeNull()
+    const d = Math.hypot(
+      Number(arrow?.[1]) - Number(bubble?.[1]),
+      Number(arrow?.[2]) - Number(bubble?.[2]),
+    )
+    expect(d).toBeGreaterThanOrEqual(12)
+  })
+
+  test('E3: the sewer exit prints a marker + SEWER/SEPTIC tag, not just a CO bubble', () => {
+    const main = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'pvc',
+      dims: [3, 0.0762, 0.0762],
+      position: [2, -0.6, 1],
+      rotation: [0, 0, Math.atan(1 / 48)], // +X uphill → downhill toward −X
+      sourceId: 'dwv-main',
+      label: '3" building drain — 8 DFU @ 1/4"/ft → sewer/septic (P3005.4)',
+    })
+    const co = fixture({
+      system: 'plumbing',
+      kind: 'cleanout',
+      position: [0.5, 0.15, 1],
+      sourceId: 'dwv-main',
+      label: 'Cleanout @ sewer exit (P3005.2.1)',
+    })
+    const mep = buildPlanSet([main], [co], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    expect(svg).toContain('SEWER/SEPTIC (P3005.4)')
+    // upper-storey wording (no 'sewer' cleanout) prints NO marker
+    const upperCo = fixture({
+      system: 'plumbing',
+      kind: 'cleanout',
+      position: [0.5, 0.15, 1],
+      sourceId: 'dwv-main',
+      label: 'Cleanout @ drain main terminus (P3005.2)',
+    })
+    const upper = buildPlanSet([main], [upperCo], {}).find((s) => s.title.startsWith('Plumbing'))
+    expect(upper?.svg ?? '').not.toContain('SEWER/SEPTIC (P3005.4)')
+  })
+
+  test('below-grade DWV prints DASHED on elevations (foundation hidden-work convention)', () => {
+    const buried = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'pvc',
+      dims: [3, 0.0762, 0.0762],
+      position: [2, -0.6, 1],
+      rotation: [0, 0, Math.atan(1 / 48)],
+      sourceId: 'dwv-main',
+    })
+    const supply = member({
+      system: 'plumbing',
+      role: 'pipe-run',
+      size: undefined,
+      material: 'copper',
+      dims: [3, 0.02, 0.02],
+      position: [2, 0.28, 2],
+      sourceId: 'cold-lav',
+    })
+    // a wall member so the elevation sheet has a facade to draw
+    const stud = member({
+      system: 'wall-framing',
+      role: 'stud',
+      size: '2x4',
+      dims: [0.038, 2.3, 0.089],
+      position: [2, 1.2, 0],
+    })
+    const sheets = buildPlanSet([buried, supply, stud], [], {})
+    const south = sheets.find((s) => s.title.startsWith('South elevation'))
+    expect(south).toBeDefined()
+    const svg = south?.svg ?? ''
+    const dashed = svg.match(/stroke-dasharray="5 3"/g) ?? []
+    expect(dashed.length).toBeGreaterThan(0)
+    // the dashes belong to the buried run, not the in-wall supply: every
+    // plumbing line above the floor stays solid
+    const lines = svg.match(/<line [^/]*\/>/g) ?? []
+    const plumbLines = lines.filter((l) => l.includes('stroke-dasharray'))
+    expect(plumbLines.length).toBeGreaterThan(0)
   })
 })
 
@@ -1327,5 +1466,123 @@ describe('wave-2 paper honesty — flag pagination, derived bolt legend, LOD sta
     expect(s200.some((s) => s.svg.includes('LOD 400'))).toBe(false)
     const sDefault = buildPlanSet([member({})], [], opts)
     expect(sDefault.every((s) => s.svg.includes('LOD 400'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Examiner round 3 (P1/P2): the sleeve story must reach PAPER, and the
+// sewer marker must respect the sheet edge and the device bubbles. These
+// gates compose REAL engine scenes (frost spec — the sleeves exist).
+// ---------------------------------------------------------------------------
+
+describe('sleeve crossings + sewer marker on composed scenes (examiner round 3)', () => {
+  const xwall = (id: string, s: [number, number], e: [number, number]): WallSlice => {
+    const dx = e[0] - s[0]
+    const dz = e[1] - s[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start: s,
+      end: e,
+      length,
+      dir: [dx / length, dz / length],
+      thickness: 0.114,
+      height: 2.5,
+      exterior: true,
+      openings: [],
+      curved: false,
+    }
+  }
+  const room = (
+    id: string,
+    category: RoomSlice['category'],
+    polygon: [number, number][],
+    boundaryWallIds: string[],
+  ): RoomSlice => ({ id, name: category, category, polygon, boundaryWallIds, ceilingHeight: 2.5 })
+  const slab = (polygon: [number, number][]): SlabSlice => ({
+    id: 'slab_paper',
+    polygon,
+    holes: [],
+    elevation: 0.05,
+    thickness: 0.05,
+  })
+  const specFrost = { ...DEFAULT_SPEC, detail: '400' as const, footingDepth: inches(60) }
+  const TICK = /M-2\.5 -6 L-2\.5 6 M2\.5 -6 L2\.5 6/g
+
+  test('P1: corner powder room — the w_w crossing prints tick + cite', () => {
+    const shell = [
+      xwall('w_s', [0, 0], [10, 0]),
+      xwall('w_e', [10, 0], [10, 8]),
+      xwall('w_n', [10, 8], [0, 8]),
+      xwall('w_w', [0, 8], [0, 0]),
+    ]
+    const powder = [room('r_pow', 'bathroom', [[0, 0], [1, 0], [1, 2], [0, 2]], ['w_s'])]
+    const p = layoutPlumbing(shell, powder, specFrost, [], {
+      sewerExit: { position: [-0.8, 0, 0.9] },
+    })
+    const f = buildFoundation(shell, [slab([[0, 0], [10, 0], [10, 8], [0, 8]])], specFrost)
+    const mep = buildPlanSet([...p.members, ...f], p.fixtures, {}).find((s) =>
+      s.title.startsWith('Plumbing'),
+    )
+    const svg = mep?.svg ?? ''
+    // exactly ONE sleeved crossing exists in this scene (main X-leg × w_w)
+    expect((svg.match(TICK) ?? []).length).toBe(1)
+    expect((svg.match(/SLEEVE \(P2603\.4\)/g) ?? []).length).toBeGreaterThanOrEqual(1)
+  })
+
+  const courtyardCompose = () => {
+    const uWalls = [
+      xwall('u_s', [0, 0], [12, 0]),
+      xwall('u_e', [12, 0], [12, 8]),
+      xwall('u_n', [12, 8], [0, 8]),
+      xwall('u_w', [0, 8], [0, 0]),
+      xwall('u_c1', [5, 2], [5, 6]),
+      xwall('u_c2', [7, 2], [7, 6]),
+    ]
+    const uRooms = [
+      room('r_ubath', 'bathroom', [[8, 2], [11, 2], [11, 6], [8, 6]], ['u_e']),
+      room('r_ukitchen', 'kitchen', [[1, 2], [4, 2], [4, 6], [1, 6]], ['u_w']),
+    ]
+    const p = layoutPlumbing(uWalls, uRooms, specFrost)
+    const f = buildFoundation(uWalls, [slab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
+    const mep = buildPlanSet([...p.members, ...f], p.fixtures, {}).find((s) =>
+      s.title.startsWith('Plumbing'),
+    )
+    return mep?.svg ?? ''
+  }
+
+  test('P1: courtyard — BOTH courtyard stemwall crossings marked (+ the exit one)', () => {
+    const svg = courtyardCompose()
+    // kitchen branch × u_c1 + × u_c2, main × u_e
+    expect((svg.match(TICK) ?? []).length).toBe(3)
+    expect((svg.match(/SLEEVE \(P2603\.4\)/g) ?? []).length).toBeGreaterThanOrEqual(2)
+  })
+
+  test('P2: east exit — sewer text fully inside the viewBox, glyph clear of bubbles', () => {
+    const svg = courtyardCompose()
+    const txt = svg.match(
+      /<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>SEWER\/SEPTIC/,
+    )
+    expect(txt).not.toBeNull()
+    const tx = Number(txt?.[1])
+    const anchor = txt?.[3]
+    const wTxt = 'SEWER/SEPTIC (P3005.4)'.length * 6
+    const left = anchor === 'start' ? tx : anchor === 'end' ? tx - wTxt : tx - wTxt / 2
+    // the pre-fix marker anchored 'start' at ~1015 and ran ~40 px off the
+    // 1056 viewBox — the text must now fit with margin on both sides
+    expect(left).toBeGreaterThan(48)
+    expect(left + wTxt).toBeLessThan(1056 - 48)
+    // and the glyph keeps the arrows' bubble clearance
+    const glyph = svg.match(
+      /M-5 -4 L6 0 L-5 4 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/,
+    )
+    expect(glyph).not.toBeNull()
+    const gx = Number(glyph?.[1])
+    const gy = Number(glyph?.[2])
+    const bubbles = [...svg.matchAll(/<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="7"/g)]
+    expect(bubbles.length).toBeGreaterThan(0)
+    for (const b of bubbles) {
+      expect(Math.hypot(Number(b[1]) - gx, Number(b[2]) - gy)).toBeGreaterThanOrEqual(12)
+    }
   })
 })
