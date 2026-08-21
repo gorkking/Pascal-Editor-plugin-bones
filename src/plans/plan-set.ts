@@ -14,7 +14,14 @@ import type { Fixture, Member } from '../core/types'
 import { formatFtIn } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { computeTakeoff } from '../engines/takeoff'
-import { PLUMBING_COLORS, circuitColor, circuitZoneHint, plumbingPipeColor } from './circuit-colors'
+import {
+  DUCT_COLORS,
+  PLUMBING_COLORS,
+  circuitColor,
+  circuitZoneHint,
+  hvacDuctColor,
+  plumbingPipeColor,
+} from './circuit-colors'
 
 export type PlanSheet = { title: string; svg: string }
 
@@ -449,13 +456,16 @@ function planSheet(
     const h = Math.max(1.2, m.dims[2] * scale)
     // Per-member colors: wires by circuit; plumbing runs by system —
     // cold blue / hot red / DWV slate via the sourceId prefix (identical
-    // to the 3D X-ray, invariant E3's spirit).
+    // to the 3D X-ray, invariant E3's spirit); RETURN-air duct in its
+    // darker tone (B19c — supply and return must read apart on paper).
     const fill =
       m.system === 'electrical' && m.role === 'wire-run'
         ? circuitColor(m.sourceId)
         : (m.system === 'plumbing' && m.role === 'pipe-run'
             ? plumbingPipeColor(m.sourceId)
-            : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
+            : m.system === 'hvac' && m.role === 'duct-run'
+              ? hvacDuctColor(m.sourceId)
+              : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
     // Deck strips print translucent with a hairline seam — same hue as the
     // legend swatch, but the framing linework stays legible through them.
     const isDeck = m.role === 'subfloor'
@@ -610,8 +620,22 @@ function planSheet(
       'water-heater': 'water heater',
     }
     for (const role of Object.keys(NAMES)) {
-      if (mine.some((m) => m.role === role)) {
+      // The base 'duct' row covers SUPPLY runs only; return-air duct (B19c)
+      // prints its own darker swatch right below it — every color on the
+      // sheet gets a legend row (P2), and a return-only sheet never shows a
+      // supply swatch it doesn't draw.
+      const roleHit =
+        role === 'duct-run'
+          ? mine.some((m) => m.role === role && hvacDuctColor(m.sourceId) === null)
+          : mine.some((m) => m.role === role)
+      if (roleHit) {
         entries.push([NAMES[role] as string, def.fill[role] ?? def.fill.default ?? '#8fb0c4'])
+      }
+      if (
+        role === 'duct-run' &&
+        mine.some((m) => m.role === 'duct-run' && hvacDuctColor(m.sourceId) !== null)
+      ) {
+        entries.push(['duct — return air', DUCT_COLORS.return])
       }
     }
     let row = legendLines.length
