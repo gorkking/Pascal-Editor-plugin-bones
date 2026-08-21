@@ -343,13 +343,35 @@ AND a gate — a checklist line without a test is a wish.
   #4 within 12" of the TOP of the wall (2" cover, run mirrors the
   interlocked stemwall extent) in addition to the footing-bottom mat —
   AK's 34" stemwall used to have its nearest horizontal steel 38.8" below
-  the top; non-seismic jurisdictions stay byte-equal.
-  Origin: LOD-400 wave-2 audit B18 (a)+(c), 2026-08-20 (3 bolts booked
-  installable inside a 16-ft garage door RO; dead per-section end rule).
+  the top; non-seismic jurisdictions stay byte-equal. CMU-BASED walls
+  (full-CMU and mixed knee walls) carry NO sole plate at the foundation
+  top, so the whole sole-plate kit is off them — zero foundation anchor
+  bolts, plate washers and HDU hold-downs (a J-bolt used to rise 3" into
+  a block cell where no plate exists; an HDU body is wood-frame hardware
+  inside the first course) — and their anchorage is the grouted-cell
+  story instead: #5 foundation DOWELS rise from the footing mat 48d_b
+  (30") past y = 0, one BESIDE every wall vertical (1" across-wall
+  offset, same cell — cmu.ts `cmuDowelPositions` is the one layout truth
+  compute feeds the foundation), replacing the generic 48"-grid stemwall
+  verticals that never lapped the wall bars. Mixed walls keep their
+  seam-sill bolts on the bond beam (cmu.ts) — on a CMU scene the ONLY
+  'Anchor bolts' takeoff row is the seam sill's, and the dowels book on
+  the Foundation rebar lf row. No new S1 allow-list pair: rebar×block /
+  rebar×rebar / rebar×stemwall / rebar×footing already cover embedment
+  and bar-to-bar laps.
+  Origin: LOD-400 wave-2 audit B18 (a)+(b)+(c), 2026-08-20 (3 bolts
+  booked installable inside a 16-ft garage door RO; dead per-section end
+  rule; 'sole plate anchorage' J-bolts up into block cells; dowels never
+  lapping the wall verticals).
   Gates: `src/engines/foundation.test.ts` (B18a describe: RO exclusion,
-  per-section layout, window byte-equality, washer parity, vertical nudge;
-  B18c describe: seismic top bar presence/position, INTL absence,
-  AK/CA-vs-INTL profile matrix).
+  per-section layout, window byte-equality, washer parity, vertical
+  nudge; B18b describes: kit absence, dowel geometry/lap, per-wall
+  interface, interior-CMU dowels, computeLevel FL scene truth + takeoff
+  rows; B18c describe: seismic top bar presence/position, INTL absence,
+  AK/CA-vs-INTL profile matrix) + `src/engines/cmu.test.ts`
+  (cmuDowelPositions layout matrix incl. mixed-zone insets) +
+  `src/engines/interpenetration.test.ts` (B18b compose: foundation +
+  blockwork SAT-clean, verticals all lapped, kit-absence pin).
 
 ## M — Mechanical (HVAC)
 

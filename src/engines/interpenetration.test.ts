@@ -3,7 +3,7 @@ import { Euler, Matrix4, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
-import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
+import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuDowelPositions, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
 import { applyDeviceOverrides, layoutElectrical, pointInPolygon } from './electrical'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
@@ -791,6 +791,50 @@ describe('interpenetration gate — structural members never share volume', () =
       wall({ id: 'p_link', start: [7, 11], end: [7, 10], exterior: false }),
     ]
     expect(violations(buildFoundation(plan, [], spec400))).toEqual([])
+  })
+
+  test('CMU foundation interface: dowels lap the wall verticals, bolt kit GONE — composed SAT-clean (B18b)', () => {
+    // Pre-B18b this compose carried 'sole plate anchorage' J-bolts rising
+    // 3" into block cells where no plate exists, and (under seismic specs)
+    // HDU hold-down bodies inside the first block course. The foundation
+    // now swaps the kit for #5 dowels at the wall's OWN cell layout
+    // (cmu.ts cmuDowelPositions) — rebar embeds in grouted masonry and
+    // laps bar-to-bar by detailing intent (existing allow-list pairs:
+    // rebar×block / rebar×rebar / rebar×stemwall / rebar×footing —
+    // NO new pair needed).
+    const seismic400 = { ...spec400, seismicHoldDowns: true }
+    const walls = rectWalls().map((w) => ({
+      ...w,
+      thickness: 0.2032,
+      openings:
+        w.id === 'w_s' ? [door(2), window_(4.2)] : w.id === 'w_n' ? [window_(3)] : [],
+    }))
+    const cmuMap = new Map(walls.map((w) => [w.id, { dowelUs: cmuDowelPositions(w) }]))
+    const foundation = buildFoundation(walls, [slab(rect(6, 4))], seismic400, { cmu: cmuMap })
+    const blockwork = cmuWalls(walls, seismic400)
+    // truth before geometry: no sole-plate hardware anywhere on the compose
+    for (const m of foundation) {
+      expect(['anchor-bolt', 'plate-washer', 'hold-down']).not.toContain(m.role)
+    }
+    const dowels = foundation.filter((m) => m.label?.startsWith('#5 dowel'))
+    expect(dowels.length).toBeGreaterThan(0)
+    // every wall vertical is lapped: a dowel of the same wall within 1" plan
+    const verticals = blockwork.filter((m) => m.label?.startsWith('#5 vertical'))
+    expect(verticals.length).toBeGreaterThan(0)
+    for (const v of verticals) {
+      expect(
+        dowels.some(
+          (d) =>
+            d.sourceId === v.sourceId &&
+            Math.hypot(
+              (d.position[0] ?? 0) - (v.position[0] ?? 0),
+              (d.position[2] ?? 0) - (v.position[2] ?? 0),
+            ) <
+              inches(1) + 1e-6,
+        ),
+      ).toBe(true)
+    }
+    expect(violations([...foundation, ...blockwork])).toEqual([])
   })
 
   test('CMU: oblique corner pairs 45/60/120° (round-14)', () => {

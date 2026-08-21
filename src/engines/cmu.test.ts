@@ -12,8 +12,10 @@ import {
   MORTAR_JOINT,
   REBAR_SIZE,
   VERT_BAR_SPACING,
+  cmuDowelPositions,
   cmuWall,
   cmuWalls,
+  mixedWallInsets,
   courseIntervals,
   snapCmuHeight,
   verticalBarPositions,
@@ -562,5 +564,66 @@ describe('snapCmuHeight', () => {
 
   test('walls shorter than one course snap to 0 (nothing to lay)', () => {
     expect(snapCmuHeight(0.1, 0.15)).toBe(0)
+  })
+})
+
+/**
+ * GATE (LOD-400 B18b — foundation dowels lap the wall verticals):
+ * cmuDowelPositions is the one layout truth the FOUNDATION consumes so its
+ * dowels rise in the same cells as this wall's #5 verticals.
+ */
+describe('cmuDowelPositions — foundation-facing dowel layout (B18b)', () => {
+  test('full-height CMU wall: dowels land exactly on the vertical-bar layout (no skips)', () => {
+    const wall = makeWall()
+    expect(cmuDowelPositions(wall)).toEqual(verticalBarPositions(4, []))
+  })
+
+  test('openings: no dowel inside the RO, jamb cells covered (matches the wall bars)', () => {
+    const wall = makeWall({ openings: [window_(2)] })
+    const ro = { u0: 2 - (1.2 + PAD) / 2, u1: 2 + (1.2 + PAD) / 2 }
+    const us = cmuDowelPositions(wall)
+    expect(us).toEqual(verticalBarPositions(4, [ro]))
+    for (const u of us) expect(u <= ro.u0 + 1e-9 || u >= ro.u1 - 1e-9).toBe(true)
+    expect(us.some((u) => Math.abs(u - (ro.u0 - CELL_CENTER)) < 1e-6)).toBe(true)
+    expect(us.some((u) => Math.abs(u - (ro.u1 + CELL_CENTER)) < 1e-6)).toBe(true)
+  })
+
+  test('every vertical the wall EMITS has a dowel at the same cell (superset by construction)', () => {
+    // Corner skip flags thin the wall's own bars; the dowel layout skips
+    // nothing, so emitted verticals ⊆ dowels.
+    const wall = makeWall({ openings: [window_(2)] })
+    const members = cmuWall(wall, { ...DEFAULT_SPEC, detail: '400' })
+    const vertUs = members
+      .filter((m) => m.label?.startsWith('#5 vertical'))
+      .map((m) => (m.position[0] ?? 0) - (wall.start[0] ?? 0))
+    expect(vertUs.length).toBeGreaterThan(0)
+    const dowels = cmuDowelPositions(wall)
+    for (const u of vertUs) {
+      expect(dowels.some((d) => Math.abs(d - u) < 1e-6)).toBe(true)
+    }
+  })
+
+  test('MIXED wall: dowels stay inside the inset CMU zone run (never in the butt joint)', () => {
+    const wall = makeWall({ id: 'wall_mx', thickness: 0.2032 })
+    const neighbor = makeWall({ id: 'wall_nb', start: [4, 0], end: [4, 3], thickness: 0.2032 })
+    const us = cmuDowelPositions(wall, 1.22, [neighbor])
+    expect(us.length).toBeGreaterThan(0)
+    // the end corner butts: the zone retreats, and so must the dowels
+    const { endInset } = mixedWallInsets(wall, [neighbor])
+    expect(endInset).toBeGreaterThan(0)
+    for (const u of us) {
+      expect(u).toBeGreaterThanOrEqual(CELL_CENTER - 1e-9)
+      expect(u).toBeLessThanOrEqual(4 - endInset - CELL_CENTER + 1e-9)
+    }
+  })
+
+  test('mixed height at/above every fitting course = the full-height layout (regression seam)', () => {
+    const wall = makeWall()
+    expect(cmuDowelPositions(wall, 99, [])).toEqual(cmuDowelPositions(wall))
+  })
+
+  test('guards: curved walls and sub-course walls carry no dowels', () => {
+    expect(cmuDowelPositions(makeWall({ curved: true }))).toEqual([])
+    expect(cmuDowelPositions(makeWall({ height: 0.15 }))).toEqual([])
   })
 })

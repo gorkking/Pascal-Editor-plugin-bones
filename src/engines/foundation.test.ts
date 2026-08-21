@@ -3,8 +3,12 @@ import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
+import { computeLevel } from '../framing/compute'
+import { FramingNode } from '../framing/schema'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
+import { cmuDowelPositions } from './cmu'
 import { anchorBoltPositions, buildFoundation, cornerExtensions } from './foundation'
+import { computeTakeoff } from './takeoff'
 
 const FOOTING_HEIGHT = inches(8)
 
@@ -250,6 +254,197 @@ describe('buildFoundation — anchor bolts split at door ROs (B18a)', () => {
         expect(Math.abs((v.position[0] ?? 0) - b)).toBeGreaterThanOrEqual(inches(3) - 1e-9)
       }
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B18b — the CMU foundation interface (no sole-plate kit, dowels lap)
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — CMU walls swap the bolt kit for lapping dowels (B18b)', () => {
+  const fabSeismic: FramingSpec = { ...DEFAULT_SPEC, detail: '400', seismicHoldDowns: true }
+  const wall = makeWall({ thickness: 0.2032 })
+  const dowelUs = cmuDowelPositions(wall)
+  const cmuOpts = { cmu: new Map([[wall.id, { dowelUs }]]) }
+  const members = buildFoundation([wall], [], fabSeismic, cmuOpts)
+
+  test('NO sole-plate hardware: zero anchor bolts, washers and hold-downs on the CMU wall', () => {
+    // Pre-B18b every 'sole plate anchorage' J-bolt on a CMU wall stuck 3"
+    // up into a block cell where no plate exists.
+    expect(byRole(members, 'anchor-bolt')).toHaveLength(0)
+    expect(byRole(members, 'plate-washer')).toHaveLength(0)
+    expect(byRole(members, 'hold-down')).toHaveLength(0)
+  })
+
+  test('dowels rise beside every wall vertical: footing mat → 48d_b past the top', () => {
+    const dowels = members.filter((m) => m.label?.startsWith('#5 dowel'))
+    expect(dowels.length).toBe(dowelUs.length)
+    expect(dowels.length).toBeGreaterThan(0)
+    for (const d of dowels) {
+      expect(d.material).toBe('steel')
+      expect(d.role).toBe('rebar')
+      expect(d.dims[0]).toBeCloseTo(inches(0.625), 6) // #5, matching the wall bar
+      const bottom = (d.position[1] ?? 0) - d.dims[1] / 2
+      const top = (d.position[1] ?? 0) + d.dims[1] / 2
+      expect(bottom).toBeCloseTo(-DEFAULT_SPEC.footingDepth + inches(3), 6) // hooked in the mat
+      expect(top).toBeCloseTo(inches(30), 6) // 48·(5/8") lap above the foundation top
+      // the wall vertical stands at y ∈ [0, …] in the same cell → the two
+      // bars overlap ≥ 24" — a code lap, not a miss
+      expect(top).toBeGreaterThanOrEqual(inches(24))
+      // BESIDE the vertical: 1" across-wall offset (wall runs +X → world z)
+      expect(d.position[2] ?? 0).toBeCloseTo(inches(1), 6)
+    }
+    // one dowel per wall-vertical cell, at the exact cell positions
+    const us = dowels.map((d) => d.position[0] ?? 0).sort((a, b) => a - b)
+    expect(us.map((u) => Number(u.toFixed(6)))).toEqual(
+      dowelUs.map((u) => Number(u.toFixed(6))),
+    )
+  })
+
+  test('the generic stemwall-vertical grid stays off CMU walls (dowels ARE the verticals)', () => {
+    expect(members.filter((m) => m.label === '#4 stemwall vertical')).toHaveLength(0)
+  })
+
+  test('the seismic top-of-stemwall bar (B18c) still rides a CMU stemwall', () => {
+    expect(
+      members.filter((m) => m.label === '#4 horizontal — top of stemwall (R403.1.3.1)'),
+    ).toHaveLength(1)
+  })
+
+  test('framed walls in the same set keep the full bolt kit (per-wall interface)', () => {
+    const framed = makeWall({ id: 'w_framed', start: [0, 4], end: [4, 4] })
+    const both = buildFoundation([wall, framed], [], fabSeismic, cmuOpts)
+    const bolts = byRole(both, 'anchor-bolt')
+    expect(bolts.length).toBeGreaterThanOrEqual(2)
+    for (const b of bolts) expect(b.sourceId).toBe('w_framed')
+    expect(byRole(both, 'hold-down').every((m) => m.sourceId === 'w_framed')).toBe(true)
+  })
+
+  test('interior CMU bearing wall: dowels rise from its thickened footing', () => {
+    const interior = makeWall({ id: 'w_int', exterior: false, start: [0, 2], end: [4, 2] })
+    const intUs = cmuDowelPositions(interior)
+    const intMembers = buildFoundation([interior], [slab], DEFAULT_SPEC, {
+      cmu: new Map([[interior.id, { dowelUs: intUs }]]),
+    })
+    const dowels = intMembers.filter((m) => m.label?.startsWith('#5 dowel'))
+    expect(dowels.length).toBe(intUs.length)
+    expect(dowels.length).toBeGreaterThan(0)
+    for (const d of dowels) {
+      const bottom = (d.position[1] ?? 0) - d.dims[1] / 2
+      expect(bottom).toBeCloseTo(-inches(12) + inches(3), 6) // the 12" thickened footing's mat
+    }
+  })
+
+  test('shallow spec (no stemwall): dowels still rise from the footing into the cells', () => {
+    const shallow: FramingSpec = { ...DEFAULT_SPEC, footingDepth: inches(8) }
+    const m = buildFoundation([wall], [], shallow, cmuOpts)
+    const dowels = m.filter((d) => d.label?.startsWith('#5 dowel'))
+    expect(dowels.length).toBe(dowelUs.length)
+  })
+})
+
+describe('computeLevel — CMU scene anchor truth end-to-end (B18b)', () => {
+  // FL defaults every exterior wall to CMU; one wall is a mixed knee wall so
+  // the SEAM-SILL bolts (the bond-beam story, cmu.ts) still exist.
+  const scene: Record<string, Record<string, unknown>> = {
+    level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+    slab_1: {
+      id: 'slab_1',
+      type: 'slab',
+      parentId: 'level_1',
+      polygon: [
+        [0, 0],
+        [6, 0],
+        [6, 4],
+        [0, 4],
+      ],
+      holes: [],
+    },
+    ...Object.fromEntries(
+      (
+        [
+          ['w_s', [0, 0], [6, 0]],
+          ['w_e', [6, 0], [6, 4]],
+          ['w_n', [6, 4], [0, 4]],
+          ['w_w', [0, 4], [0, 0]],
+        ] as [string, [number, number], [number, number]][]
+      ).map(([id, start, end]) => [
+        id,
+        {
+          id,
+          type: 'wall',
+          parentId: 'level_1',
+          start,
+          end,
+          thickness: 0.2032,
+          height: 2.5,
+          frontSide: 'exterior',
+          children: [],
+        },
+      ]),
+    ),
+  }
+  const config = FramingNode.parse({
+    id: 'bonesframing_cmu',
+    parentId: 'level_1',
+    jurisdiction: 'FL',
+    detail: '400',
+    showWalls: true,
+    showFoundation: true,
+    showFloor: false,
+    showRoof: false,
+    showElectrical: false,
+    showPlumbing: false,
+    showHvac: false,
+    wallOverrides: { w_w: { construction: 'cmu', cmuHeightM: 1.0 } },
+  })
+  const result = computeLevel(scene, config)
+
+  test('the FOUNDATION books zero anchor bolts under CMU walls; the only bolts are the mixed seam sill’s', () => {
+    const bolts = result.members.filter((m) => m.role === 'anchor-bolt')
+    expect(bolts.length).toBeGreaterThan(0) // the seam sill is anchored
+    for (const b of bolts) {
+      expect(b.system).toBe('wall-framing')
+      expect(b.label).toContain('sill to bond beam')
+      expect(b.sourceId).toBe('w_w')
+    }
+    expect(result.members.filter((m) => m.system === 'foundation' && m.role === 'anchor-bolt')).toHaveLength(0)
+  })
+
+  test('foundation dowels exist for every CMU wall and lap the wall verticals in plan', () => {
+    const dowels = result.members.filter(
+      (m) => m.system === 'foundation' && m.label?.startsWith('#5 dowel'),
+    )
+    expect(new Set(dowels.map((d) => d.sourceId))).toEqual(new Set(['w_s', 'w_e', 'w_n', 'w_w']))
+    const verticals = result.members.filter((m) => m.label?.startsWith('#5 vertical'))
+    expect(verticals.length).toBeGreaterThan(0)
+    // every emitted wall vertical has a dowel within one bar-plus-gap in plan
+    for (const v of verticals) {
+      const near = dowels.some(
+        (d) =>
+          d.sourceId === v.sourceId &&
+          Math.hypot((d.position[0] ?? 0) - (v.position[0] ?? 0), (d.position[2] ?? 0) - (v.position[2] ?? 0)) <
+            inches(1) + 1e-6,
+      )
+      expect(near).toBe(true)
+    }
+  })
+
+  test('takeoff: no ‘sole plate anchorage’ row on a CMU scene — the bolts row is the seam sill’s; dowels join the foundation rebar lf', () => {
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    const boltRows = rows.filter((r) => r.item === 'Anchor bolts')
+    expect(boltRows).toHaveLength(1)
+    expect(boltRows[0]?.section).toBe('Wall framing')
+    expect(boltRows[0]?.detail).toBe('seam sill to bond beam (R403.1.6)')
+    const foundationRebar = rows.find((r) => r.item === 'Rebar' && r.section === 'Foundation')
+    expect(foundationRebar).toBeDefined()
+    // the dowels are real lf on that row: strip them and the row shrinks
+    const withoutDowels = computeTakeoff(
+      result.members.filter((m) => !m.label?.startsWith('#5 dowel')),
+      result.fixtures,
+      result.areas,
+    ).find((r) => r.item === 'Rebar' && r.section === 'Foundation')
+    expect((withoutDowels?.quantity as number) < (foundationRebar?.quantity as number)).toBe(true)
   })
 })
 

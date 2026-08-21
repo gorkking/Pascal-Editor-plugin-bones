@@ -96,6 +96,32 @@ const PLATE_THICKNESS = inches(1.5)
 const PLATE_WASHER_SIDE = inches(3)
 const PLATE_WASHER_THICKNESS = inches(0.229)
 
+/** #5 dowel matching the CMU wall verticals (5/8", drawn square like cmu.ts). */
+const DOWEL_SIDE = inches(0.625)
+/** Lap above the foundation top: 48 bar diameters for a #5 (TMS 402 splice). */
+const DOWEL_LAP = inches(30)
+/**
+ * Across-wall offset so the dowel stands BESIDE the wall vertical it laps
+ * (tie-wired in the same grouted cell): 1" leaves a 3/8" clear gap between
+ * the two 5/8" bars and stays well inside the 7-5/8" block core.
+ */
+const DOWEL_OFFSET = inches(1)
+
+/**
+ * Per-wall foundation interface (LOD-400 B18).
+ *
+ * `cmu`: walls whose BASE is unit masonry (full-CMU and mixed knee walls).
+ * They carry NO sole plate at the foundation top, so the R403.1.6 sole-plate
+ * kit (anchor bolts, plate washers, HDU hold-downs) is fiction there — the
+ * wall anchors through its grouted cells instead: foundation DOWELS rise
+ * beside the wall's own #5 verticals (`dowelUs`, cmu.ts cmuDowelPositions)
+ * and lap them 48d_b; the mixed wall's framed zone keeps its seam-sill
+ * bolts (cmu.ts).
+ */
+export type FoundationOptions = {
+  cmu?: Map<string, { dowelUs: number[] }>
+}
+
 /**
  * Anchor bolt centers along a wall (u from `start`, meters).
  *
@@ -272,6 +298,7 @@ export function buildFoundation(
   walls: WallSlice[],
   slabs: SlabSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
+  options: FoundationOptions = {},
 ): Member[] {
   const members: Member[] = []
   const hasSlab = slabs.length > 0
@@ -364,6 +391,37 @@ export function buildFoundation(
       }
     }
 
+    // CMU-based walls (full-CMU and mixed knee walls, LOD-400 B18b): no
+    // sole plate exists at y = 0 — the block coursing starts there — so the
+    // R403.1.6 sole-plate kit is fiction on them. Their anchorage is the
+    // grouted-cell story: dowels rise beside the wall's own verticals.
+    const cmuInfo = options.cmu?.get(wall.id)
+
+    /**
+     * #5 dowels lapping the CMU wall's grouted-cell verticals (R606.12 /
+     * R403.1.3.2): hooked in the footing mat (3" up from the footing
+     * bottom), rising 48d_b (30") past the foundation top so the wall
+     * vertical standing at the same cell laps it — offset 1" across the
+     * wall so the two bars stand side by side, tie-wired in one cell.
+     */
+    const emitDowels = (dowelUs: number[], footingBottomY: number): void => {
+      const bottom = footingBottomY + REBAR_BOTTOM_COVER
+      const height = DOWEL_LAP - bottom
+      if (height <= EPS) return
+      for (const u of dowelUs) {
+        emit(
+          'rebar',
+          [DOWEL_SIDE, height, DOWEL_SIDE],
+          u,
+          (bottom + DOWEL_LAP) / 2,
+          height,
+          'steel',
+          '#5 dowel — laps CMU wall vertical (R606.12)',
+          DOWEL_OFFSET,
+        )
+      }
+    }
+
     // ---- interior walls ----
     if (!wall.exterior) {
       // Interior thickened footing (LOD 350): R403.1 requires a footing
@@ -423,6 +481,8 @@ export function buildFoundation(
       carveBands.push(bandOf(iCenter, iLen, spec.footingWidth))
       // Rebar rides "every footing run" — including interior thickened ones.
       emitFootingBars(iCenter, iLen, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
+      // Interior CMU bearing walls anchor through their cells too (B18b).
+      if (cmuInfo) emitDowels(cmuInfo.dowelUs, -INTERIOR_FOOTING_DEPTH)
       continue
     }
 
@@ -449,9 +509,10 @@ export function buildFoundation(
     // section, ≤ spacing o.c. within it. The run splits at the RO spans
     // crossing the plate band [0, 1.5"] and every remaining section keeps
     // its own layout — the cmu.ts seam-sill boltSegments convention, ported.
-    // Windows (sill above the plate band) never split the plate.
+    // Windows (sill above the plate band) never split the plate. CMU-based
+    // walls have NO sole plate at all (B18b) — zero sections, zero bolts.
     const plateSections: { a: number; b: number }[] = []
-    {
+    if (!cmuInfo) {
       let cursor = 0
       for (const s of openingSpans(wall, 0, PLATE_THICKNESS)) {
         if (s.lo > cursor + EPS) plateSections.push({ a: cursor, b: Math.min(s.lo, len) })
@@ -525,7 +586,9 @@ export function buildFoundation(
         const barBottom = -spec.footingDepth + REBAR_BOTTOM_COVER
         const barTop = -REBAR_TOP_COVER
         const barHeight = barTop - barBottom
-        if (barHeight > EPS) {
+        // CMU-based walls: the DOWELS below are the verticals — the
+        // generic grid would double the steel beside them (B18b).
+        if (barHeight > EPS && !cmuInfo) {
           // Layout runs over the stemwall's interlocked extent (incl. the
           // through-corner reach), mapped back to wall-local u.
           const stemStartDelta = (sign.start * spec.stemwallThickness) / 2
@@ -578,6 +641,12 @@ export function buildFoundation(
       }
     }
 
+    // ---- CMU wall dowels (LOD 350, B18b) ----
+    // Rise from the perimeter footing mat past y = 0 into the grouted
+    // cells, one beside each wall vertical (also with NO stemwall — the
+    // shallow footing tops out at the block seat).
+    if (fabDetail && cmuInfo) emitDowels(cmuInfo.dowelUs, -spec.footingDepth)
+
     // ---- anchor bolts ----
     // R403.1.6: max spacing (6' o.c. default, tighter in SDC D via the
     // jurisdiction profile), first/last within 12" of the plate SECTION
@@ -621,8 +690,11 @@ export function buildFoundation(
     // foundation. We place one just inside each wall end — past the end stud
     // (1.5") so the body reads against the corner post.
     // ASSUMPTION: every exterior wall end is treated as a braced panel end;
-    // real designs place them only at shear wall boundaries.
-    if (spec.seismicHoldDowns && len > 2 * HOLD_DOWN_SIDE + inches(3)) {
+    // real designs place them only at shear wall boundaries. CMU-based
+    // walls carry none (B18b): the HDU is wood-frame hardware — its body
+    // would sit inside the first block course; reinforced grouted cells
+    // hooked into the bond beam are the masonry tie story (R606.12).
+    if (spec.seismicHoldDowns && !cmuInfo && len > 2 * HOLD_DOWN_SIDE + inches(3)) {
       const inset = inches(1.5) + HOLD_DOWN_SIDE / 2 // end stud + half body
       for (const u of [inset, len - inset]) {
         emit(

@@ -24,7 +24,7 @@ import {
   extractWalls,
   type LevelSlice,
 } from '../core/wall-model'
-import { cmuWalls, courseCount, mixedCmuWall, snapCmuHeight } from '../engines/cmu'
+import { cmuDowelPositions, cmuWalls, courseCount, mixedCmuWall, snapCmuHeight } from '../engines/cmu'
 import {
   type BuildingCharacteristics,
   computeCharacteristics,
@@ -721,7 +721,22 @@ function computeLevelUncached(
   }
 
   if (config.showFoundation && isGroundLevel) {
-    members.push(...buildFoundation(activeWalls, slabs, spec))
+    // B18b: CMU-based walls (full-CMU and mixed knee walls) carry no sole
+    // plate at the foundation top — the foundation swaps their R403.1.6
+    // bolt kit for #5 dowels lapping the wall's own grouted-cell verticals
+    // (one layout truth: cmu.ts cmuDowelPositions). Mixed walls keep their
+    // seam-sill bolts on the bond beam (cmu.ts).
+    const cmuAnchorage = new Map<string, { dowelUs: number[] }>()
+    for (const wall of activeWalls) {
+      if (wall.curved) continue
+      const resolved = resolveWallConstruction(wall, config, profile.exteriorWallDefault)
+      if (resolved.construction !== 'cmu') continue
+      const neighbors = activeWalls.filter((w) => w.id !== wall.id && !w.curved)
+      cmuAnchorage.set(wall.id, {
+        dowelUs: cmuDowelPositions(wall, resolved.cmuHeightM, neighbors),
+      })
+    }
+    members.push(...buildFoundation(activeWalls, slabs, spec, { cmu: cmuAnchorage }))
   }
 
   // bones:service nodes on this level are AUTHORITATIVE — the engines route

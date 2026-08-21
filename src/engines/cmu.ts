@@ -217,6 +217,52 @@ export function verticalBarPositions(
   return accepted.sort((a, b) => a - b)
 }
 
+/**
+ * Wall-local u positions where the FOUNDATION's dowels must rise so they lap
+ * this CMU wall's grouted-cell verticals (LOD-400 B18b: stemwall dowels used
+ * to march on the generic 48"-grid and never lapped the wall's own bars).
+ * One truth with the wall engine: the same `verticalBarPositions` layout —
+ * WITHOUT the corner skip flags, so every emitted vertical (including a
+ * skipped end's neighbor-owned corner core) has a dowel partner; the extra
+ * end-cell dowel is standard corner detailing, never a clash (rebar laps).
+ * MIXED walls (CMU below a course-snapped seam) map the layout onto the
+ * inset CMU zone run — the same insets `mixedCmuWall` courses with — so no
+ * dowel rises outside the blockwork into the framed-zone air.
+ */
+export function cmuDowelPositions(
+  wall: WallSlice,
+  cmuHeightM?: number,
+  neighbors: WallSlice[] = [],
+): number[] {
+  if (wall.curved) return []
+  let startInset = 0
+  let endInset = 0
+  let zoneHeight = wall.height
+  let openings = wall.openings
+  if (cmuHeightM !== undefined) {
+    const seam = snapCmuHeight(cmuHeightM, wall.height)
+    if (seam <= 0) return []
+    if (courseCount(seam) < courseCount(wall.height)) {
+      const insets = mixedWallInsets(wall, neighbors)
+      startInset = insets.startInset
+      endInset = insets.endInset
+      zoneHeight = seam
+      // The CMU zone's openings: fully below the seam or crossing it —
+      // exactly the set mixedCmuWall jamb-cuts the blockwork around.
+      openings = wall.openings.filter(
+        (o) => (o.kind === 'door' ? 0 : o.sillHeight) < seam - EPS,
+      )
+    }
+  }
+  const len = wall.length - startInset - endInset
+  if (len <= EPS || courseCount(zoneHeight) < 1) return []
+  const ro = openings.map((o) => ({
+    u0: o.u - o.roughWidth / 2 - startInset,
+    u1: o.u + o.roughWidth / 2 - startInset,
+  }))
+  return verticalBarPositions(len, ro).map((u) => u + startInset)
+}
+
 // ---------------------------------------------------------------------------
 // Corner interlock hints (computed across walls by cmuWalls)
 // ---------------------------------------------------------------------------
