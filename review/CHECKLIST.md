@@ -371,6 +371,11 @@ AND a gate — a checklist line without a test is a wish.
   indoor … should follow a sensible path").
   Gates: `src/engines/hvac.condensers.test.ts` +
   `src/engines/hvac.lineset.test.ts`
+  CONDENSER-ALWAYS (2026-08-21 user report): the outdoor block ships at
+  EVERY LOD the air handler ships — AH ⇒ condenser ≥ 1 OR a warning
+  names why (placement fallback carries '⚠ verify condenser placement';
+  unmounted disconnect warns per NEC 440.14). Gate: hvac.condensers
+  'condenser-always' describe incl. the 1500-compose invariant matrix.
 - **M3 Return air is modeled, and never taken from a garage.** The air
   handler prefers CONDITIONED service space (laundry/utility > closet-named
   rooms > hallway); the garage is a last resort that fires a loud warning
