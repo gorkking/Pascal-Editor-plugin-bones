@@ -240,7 +240,20 @@ const WallMountMoveTool = ({ node }: { node: MovingNode }) => {
           band,
           snap: snapToHalf,
         })
-        if (target) applyWallPreview(target)
+        if (!target) return
+        // #694 parity for the floor fallback too: never re-anchor onto a
+        // HIDDEN wall that isn't one of the node's own walls — the user
+        // can't see it. The own hidden wall keeps working (X-ray drag).
+        if (
+          shouldIgnoreWallEventForMove({
+            eventWallId: target.wallId,
+            eventWallHidden: isWallMeshHidden(target.wallId),
+            ownWallIds: [grabWallId, lastWallTarget?.wallId],
+          })
+        ) {
+          return
+        }
+        applyWallPreview(target)
         return
       }
       const target = floorMoveTarget(plan, snapToHalf)
