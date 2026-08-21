@@ -4,6 +4,7 @@ import type { Fixture, Member, OpeningSlice, RoomSlice, SlabSlice, WallSlice } f
 import { feet, formatFtIn, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { buildFoundation } from '../engines/foundation'
+import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { frameWalls } from '../engines/wall-framing'
@@ -3123,5 +3124,155 @@ describe('door + window schedule (LOD-400 B21d)', () => {
     for (let i = 1; i <= 45; i++) {
       expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B18 examiner round (paper): honest bolt-spacing legend across door ROs,
+// cut-rebar contrast in the section poché, pad-footing legend row.
+// ---------------------------------------------------------------------------
+
+describe('B18 paper round — anchorage on paper', () => {
+  const garageWall = (): WallSlice => ({
+    id: 'w_garage',
+    start: [0, 0],
+    end: [9, 0],
+    dir: [1, 0],
+    length: 9,
+    thickness: 0.15,
+    height: 2.5,
+    exterior: true,
+    curved: false,
+    openings: [
+      {
+        id: 'gd',
+        kind: 'door',
+        u: 4.5,
+        width: 4.839,
+        roughWidth: 4.877,
+        height: 2.1,
+        roughHeight: 2.15,
+        sillHeight: 0,
+      },
+    ],
+  })
+
+  test('FAIL fix: the garage-CA legend prints the per-SECTION max — never the jamb-to-jamb hop across the RO', () => {
+    const spec = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor('CA'))
+    const wall = garageWall()
+    const members = buildFoundation([wall], [], spec)
+    const bolts = members
+      .filter((m) => m.role === 'anchor-bolt')
+      .map((m) => m.position[0])
+      .sort((a, b) => a - b)
+    expect(bolts.length).toBeGreaterThan(3)
+    // ground truth from the members: the largest gap WITHIN a plate
+    // section vs the hop ACROSS the door RO
+    const roLo = 4.5 - 4.877 / 2
+    const roHi = 4.5 + 4.877 / 2
+    let within = 0
+    let hop = 0
+    for (let i = 1; i < bolts.length; i++) {
+      const a = bolts[i - 1] as number
+      const b = bolts[i] as number
+      if (a <= roLo + 1e-9 && b >= roHi - 1e-9) hop = b - a
+      else within = Math.max(within, b - a)
+    }
+    expect(hop).toBeGreaterThan(spec.anchorBoltSpacing) // the decoy is real
+    expect(within).toBeLessThanOrEqual(spec.anchorBoltSpacing + 1e-9) // R403.1.6 honest
+    const svg =
+      buildPlanSet(members, [], { walls: [wall] }).find((s) => s.title === 'Foundation plan')
+        ?.svg ?? ''
+    const escQ = (s: string): string => s.replaceAll('"', '&quot;')
+    expect(svg).toContain(escQ(`@ ${formatFtIn(within)} o.c. max`))
+    expect(svg).not.toContain(escQ(formatFtIn(hop))) // the RO hop never prints
+  })
+
+  test('the legacy no-walls path keeps the raw neighbor max (openings unknowable)', () => {
+    const spec = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor('CA'))
+    const wall = garageWall()
+    const members = buildFoundation([wall], [], spec)
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title === 'Foundation plan')?.svg ?? ''
+    expect(svg).toContain('anchor bolts @') // row still prints, underived hop and all
+  })
+
+  test('flag 1: cut rebar prints OPEN (white fill, dark stroke) against the concrete poché', () => {
+    // A stemwall + the B18c top bar, both crossing the section plane: the
+    // bar used to print #222-on-#222 — invisible inside the stemwall rect.
+    const members = [
+      member({
+        system: 'foundation',
+        role: 'stemwall',
+        size: undefined,
+        material: 'concrete',
+        dims: [4, 0.6, 0.2],
+        position: [2, -0.3, 1],
+        rotation: [0, 0, 0],
+        label: 'Stemwall 8"',
+      }),
+      member({
+        system: 'foundation',
+        role: 'rebar',
+        size: undefined,
+        material: 'steel',
+        dims: [4, 0.0127, 0.0127],
+        position: [2, -0.063, 1],
+        rotation: [0, 0, 0],
+        label: '#4 horizontal — top of stemwall (R403.1.3.1)',
+      }),
+    ]
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Section A-A'))?.svg ?? ''
+    const open = [
+      ...svg.matchAll(
+        /<rect x="(-?[\d.]+)" y="(-?[\d.]+)" width="([\d.]+)" height="([\d.]+)" fill="#fff" stroke="#222" stroke-width="1.1"\/>/g,
+      ),
+    ]
+    expect(open).toHaveLength(1) // the cut bar — visibly OPEN
+    expect(Number(open[0]?.[3])).toBeGreaterThanOrEqual(2.5)
+    expect(Number(open[0]?.[4])).toBeGreaterThanOrEqual(2.5)
+    // the concrete keeps the dark cut convention beside it
+    expect(svg).toMatch(/<rect [^>]*fill="#222"/)
+    // …and the symbol is keyed on the sheet (P2)
+    expect(svg).toContain('open rects = cut rebar')
+  })
+
+  test('flag 2: pad footings key a derived legend row — size + cite + count', () => {
+    const pad = (x: number): Member =>
+      member({
+        system: 'foundation',
+        role: 'footing',
+        size: undefined,
+        material: 'concrete',
+        dims: [0.6096, 0.3048, 0.6096],
+        length: 0.6096,
+        position: [x, -0.1524, 2],
+        rotation: [0, 0, 0],
+        label: 'Pad footing 24"×24"×12" — girder post (R403.1/R407.3)',
+        sourceId: 'slab_up',
+      })
+    const svg =
+      buildPlanSet([pad(2), pad(4.5)], [], {}).find((s) => s.title === 'Foundation plan')?.svg ??
+      ''
+    expect(svg).toContain('post pad 24&quot;×24&quot;×12&quot; — under girder posts (R403.1/R407.3) — 2 pcs')
+    // a CLIPPED pad (F3) books its own row at its true size
+    const clipped = member({
+      system: 'foundation',
+      role: 'footing',
+      size: undefined,
+      material: 'concrete',
+      dims: [0.5842, 0.3048, 0.5842],
+      length: 0.5842,
+      position: [6, -0.1524, 2],
+      rotation: [0, 0, 0],
+      label: 'Pad footing 23"×23"×12" — girder post (R403.1/R407.3)',
+      sourceId: 'slab_up',
+    })
+    const svg2 =
+      buildPlanSet([pad(2), clipped], [], {}).find((s) => s.title === 'Foundation plan')?.svg ??
+      ''
+    expect(svg2).toContain('post pad 23&quot;×23&quot;×12&quot;')
+    expect(svg2).toContain('post pad 24&quot;×24&quot;×12&quot;')
   })
 })

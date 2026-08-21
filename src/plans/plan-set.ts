@@ -13,6 +13,7 @@
 import type { Fixture, Member, OpeningSlice, WallSlice } from '../core/types'
 import { formatFtIn, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
+import { openingSpans } from '../engines/electrical'
 import { computeTakeoff } from '../engines/takeoff'
 import {
   DUCT_COLORS,
@@ -1356,7 +1357,12 @@ function planSheet(
       // Derived from the MEMBERS, never hardcoded (wave-2 audit: the fixed
       // '1/2" @ 6'-0"' text contradicted the drawn 5/8" shanks AND the 4-ft
       // seismic spacing on the same sheet). Diameter from the bolt label;
-      // spacing = the largest on-center gap between neighbors on a wall.
+      // spacing = the largest on-center gap between neighbors on a wall
+      // WITHIN one plate section: since B18a the bolts split at door ROs,
+      // and the jamb-to-jamb hop ACROSS an RO is a gap where no plate
+      // exists — printing it read '@ 17'-11.25" o.c. max' on a garage plan
+      // (B18 examiner FAIL). Gaps spanning a door RO at the plate band are
+      // skipped when the wall geometry is available.
       const dia = /^([\d/]+″|[\d/]+")/.exec(bolts[0]?.label ?? '')?.[1]
       const byWall = new Map<string, Member[]>()
       for (const b of bolts) {
@@ -1365,13 +1371,28 @@ function planSheet(
         byWall.set(b.sourceId, list)
       }
       let maxGap = 0
-      for (const group of byWall.values()) {
+      for (const [wallId, group] of byWall) {
+        const boltWall = opts.walls?.find((w2) => w2.id === wallId)
+        // door ROs reaching the plate band [0, 1.5"] interrupt the plate
+        const roSpans = boltWall ? openingSpans(boltWall, 0, inches(1.5)) : []
+        const uOf = (m: Member): number =>
+          boltWall
+            ? (m.position[0] - boltWall.start[0]) * boltWall.dir[0] +
+              (m.position[2] - boltWall.start[1]) * boltWall.dir[1]
+            : 0
         const sorted = [...group].sort(
           (a, b) => a.position[0] - b.position[0] || a.position[2] - b.position[2],
         )
         for (let i = 1; i < sorted.length; i++) {
-          const dx = (sorted[i] as Member).position[0] - (sorted[i - 1] as Member).position[0]
-          const dz = (sorted[i] as Member).position[2] - (sorted[i - 1] as Member).position[2]
+          const prev = sorted[i - 1] as Member
+          const next = sorted[i] as Member
+          if (roSpans.length > 0) {
+            const u0 = Math.min(uOf(prev), uOf(next))
+            const u1 = Math.max(uOf(prev), uOf(next))
+            if (roSpans.some((s) => s.hi > u0 + 1e-6 && s.lo < u1 - 1e-6)) continue
+          }
+          const dx = next.position[0] - prev.position[0]
+          const dz = next.position[2] - prev.position[2]
           maxGap = Math.max(maxGap, Math.hypot(dx, dz))
         }
       }
@@ -1391,6 +1412,25 @@ function planSheet(
         `<circle cx="${MARGIN + 7}" cy="${y - 3}" r="2.6" fill="none" stroke="#444" stroke-width="0.9"/>` +
           `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`vertical rebar dowels — ${dowels.length} pcs`)}</text>`,
       )
+    }
+    // Girder-post pad footings (B18d): the R403.1/R407.3 story lived only
+    // on member labels, which never typeset — the pads printed as bare
+    // dashed rects with no key (B18 examiner flag). One derived legend row
+    // per pad size, count included.
+    const pads = mine.filter((m) => m.role === 'footing' && m.label?.startsWith('Pad footing'))
+    if (pads.length > 0) {
+      const bySize = new Map<string, number>()
+      for (const p of pads) {
+        const size = /^Pad footing (.+?) — girder post/.exec(p.label ?? '')?.[1] ?? 'pad'
+        bySize.set(size, (bySize.get(size) ?? 0) + 1)
+      }
+      for (const [size, count] of [...bySize.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+        const y = MARGIN + 14 + legendLines.length * 14
+        legendLines.push(
+          `<rect x="${MARGIN + 3}" y="${y - 10}" width="8" height="8" fill="none" stroke="#444" stroke-width="1" stroke-dasharray="3 2"/>` +
+            `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`post pad ${size} — under girder posts (R403.1/R407.3) — ${count} pcs`)}</text>`,
+        )
+      }
     }
   }
   if (def.key === 'wall' && opts.studSpacingIn) {
@@ -1985,15 +2025,22 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
     const cosPitch = pitchL < 1e-9 ? 1 : Math.abs(dx) / pitchL
     const sliceW = Math.min(hDim / Math.max(ux, 0.35), Math.abs(dz) + hDim)
     const sliceH = Math.min(vDim / Math.max(cosPitch, 0.35), Math.abs(dy) + vDim)
-    const wPx = Math.max(1.5, sliceW * f.scale)
-    const hPx = Math.max(1.5, sliceH * f.scale)
+    // Cut REBAR prints OPEN (white fill, dark stroke — the foundation
+    // plan's open-circle dowel convention carried to the section): a #222
+    // bar square inside a #222 concrete poché rect was invisible (B18
+    // examiner flag — the R403.1.3.1 top bar vanished into the stemwall).
+    const cutBar = m.role === 'rebar' && m.material === 'steel'
+    const wPx = Math.max(cutBar ? 2.5 : 1.5, sliceW * f.scale)
+    const hPx = Math.max(cutBar ? 2.5 : 1.5, sliceH * f.scale)
     const dashed =
       m.system === 'foundation' ||
       (m.system === 'plumbing' && m.position[1] + m.dims[1] / 2 < 0.02)
         ? ' stroke="#222" stroke-width="0.9" stroke-dasharray="5 3"'
         : ''
     poche.push(
-      `<rect x="${(f.sx(cz) - wPx / 2).toFixed(1)}" y="${(f.sy(-cyW) - hPx / 2).toFixed(1)}" width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}" fill="#222"${dashed}/>`,
+      cutBar
+        ? `<rect x="${(f.sx(cz) - wPx / 2).toFixed(1)}" y="${(f.sy(-cyW) - hPx / 2).toFixed(1)}" width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}" fill="#fff" stroke="#222" stroke-width="1.1"/>`
+        : `<rect x="${(f.sx(cz) - wPx / 2).toFixed(1)}" y="${(f.sy(-cyW) - hPx / 2).toFixed(1)}" width="${wPx.toFixed(1)}" height="${hPx.toFixed(1)}" fill="#222"${dashed}/>`,
     )
   }
   const gy = f.sy(0)
@@ -2001,7 +2048,7 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
   const title = 'Section A-A (transverse)'
   return {
     title,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${poche.join('')}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band (plane slid clear of along-plane walls) — dark rects = cut cross-sections the plane slices, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/>${segSvg(beyond, f)}${poche.join('')}${grade}<text x="${MARGIN}" y="${MARGIN + 4}" font-size="11" font-family="Helvetica, Arial, sans-serif" fill="#333">Cut ${BAND.toFixed(1)} m band (plane slid clear of along-plane walls) — dark rects = cut cross-sections the plane slices, open rects = cut rebar, light = beyond</text>${chrome(title, opts, f.scale, strokeLegend(members, inBand, 16), { ratio: f.ratio, northArrow: false })}</svg>`,
   }
 }
 

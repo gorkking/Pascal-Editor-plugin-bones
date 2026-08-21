@@ -425,7 +425,19 @@ AND a gate — a checklist line without a test is a wish.
   y = 0, SAT-clean) + `src/engines/floor-framing.test.ts` (post
   bearing-plane pin) + `src/framing/compute.multistorey.test.ts` (B18d
   describe: end-to-end census, slab carve, takeoff rows,
-  no-upper-storey and upper-storey exclusions).
+  no-upper-storey and upper-storey exclusions). ON PAPER (examiner round
+  1): the foundation legend's derived bolt spacing is the max gap WITHIN
+  a plate section — a jamb-to-jamb hop across a door RO is a gap where no
+  plate exists and never prints (the garage plan read '@ 17'-11.25" o.c.
+  max'); cut REBAR prints OPEN (white fill, dark stroke, keyed 'open
+  rects = cut rebar') so the B18c top bar never vanishes #222-on-#222
+  inside the stemwall poché; pad footings key a derived legend row
+  ('post pad 24"×24"×12" — under girder posts (R403.1/R407.3) — N pcs',
+  one row per size incl. F3-clipped pads). Gates:
+  `src/plans/plan-set.test.ts` ('B18 paper round' describe: per-section
+  legend max on the garage-CA compose + RO-hop exclusion + legacy
+  no-walls fallback, open cut-bar rect + caption key, pad rows per
+  size).
 
 ## M — Mechanical (HVAC)
 
