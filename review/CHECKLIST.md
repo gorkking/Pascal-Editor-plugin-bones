@@ -352,14 +352,27 @@ AND a gate — a checklist line without a test is a wish.
   prints return runs in the darker return duct tone with 'duct — supply
   air' / 'duct — return air' legend rows (thermostat auto-spot targets the
   REAL grille).
+  SOFFIT legs (interior storeys) never hang in a doorway unflagged: a
+  horizontal leg crossing a wall is checked against the wall's rough
+  openings at the leg's own y-band (`legCrossesRo`) — the return path
+  slides its crossing to a solid segment (drop-candidate × elbow search);
+  where no solid crossing exists the leg carries 'return duct crosses a
+  doorway — verify routing (soffit/floor-web coordination)'; the SUPPLY
+  soffit path (axis fixed by the registers, cannot slide) flags the same
+  way. Attic legs ride above wall tops — immune; the head-band raise is
+  not modeled (a standard 2.17 m head under a 2.5 m plate band leaves less
+  than section + margins).
   Origin: LOD-400 wave-2 audit B19 (a)+(c) BLOCKER (2026-08-20): AH + open
   return modeled INSIDE the garage silently; return air arrived by magic.
   Round 2 (2026-08-21): return×supply interpenetration blocker + silent
-  fallbacks + fictitious vertical sections.
+  fallbacks + fictitious vertical sections. Round 3 (2026-08-21): soffit
+  legs crossed doorways unflagged (return leg dead center of a door, half
+  a meter below the head).
   Gates: `src/engines/hvac.return.test.ts` (placement, warning, grille
   exclusion, E2-style return continuity, duct-vs-duct SAT + plane pins,
-  loud-fallback closet plan, transfer labels + Flags row, takeoff mirror +
-  true sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
+  loud-fallback closet plan, doorway compose verbatim + no-solid variant +
+  attic immunity, transfer labels + Flags row, takeoff mirror + true
+  sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
 
 ## P — Plans (the exported document)
 
