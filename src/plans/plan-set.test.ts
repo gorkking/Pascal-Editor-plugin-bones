@@ -4,6 +4,7 @@ import type { Fixture, Member, RoomSlice, SlabSlice, WallSlice } from '../core/t
 import { feet, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { buildFoundation } from '../engines/foundation'
+import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
@@ -1812,6 +1813,215 @@ describe('sleeve crossings + sewer marker on composed scenes (examiner round 3)'
     expect(bubbles.length).toBeGreaterThan(0)
     for (const b of bubbles) {
       expect(Math.hypot(Number(b[1]) - gx, Number(b[2]) - gy)).toBeGreaterThanOrEqual(12)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Post-merge seam round: the glyph layer (sleeve ticks, flow arrows, sewer
+// marker) must de-collide against PIPE RECTS as well as bubbles. Confirmed
+// seams: a sleeve tick printed ACROSS the F1 line-set pair rails (both
+// features share the wall centerline ±2.5 px); the marker's last-resort
+// cite lay ALONG the pipe corridor erasing the main + both rails; ticks
+// struck through cleanout bubbles that sit at the crossing by construction.
+// ---------------------------------------------------------------------------
+
+describe('glyph layer vs pipe rects (post-merge seam round)', () => {
+  const swall = (id: string, s: [number, number], e: [number, number], ext = true): WallSlice => {
+    const dx = e[0] - s[0]
+    const dz = e[1] - s[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start: s,
+      end: e,
+      length,
+      dir: [dx / length, dz / length],
+      thickness: 0.114,
+      height: 2.5,
+      exterior: ext,
+      openings: [],
+      curved: false,
+    }
+  }
+  const sroom = (
+    id: string,
+    category: RoomSlice['category'],
+    polygon: [number, number][],
+    boundaryWallIds: string[],
+  ): RoomSlice => ({ id, name: category, category, polygon, boundaryWallIds, ceilingHeight: 2.5 })
+  const sslab = (polygon: [number, number][]): SlabSlice => ({
+    id: 'slab_seam',
+    polygon,
+    holes: [],
+    elevation: 0.05,
+    thickness: 0.05,
+  })
+  const specFrost = { ...DEFAULT_SPEC, detail: '400' as const, footingDepth: inches(60) }
+  const PIPE_FILLS = ['#8fb0c4', '#4a7dbf', '#c0504d', '#35b8c9', '#d98134']
+  type SvgRect = { w: number; h: number; fill: string; x: number; y: number; rot: number }
+  const svgRects = (svg: string, fills: string[]): SvgRect[] =>
+    [...svg.matchAll(
+      /<rect x="[^"]*" y="[^"]*" width="([\d.]+)" height="([\d.]+)" fill="(#[0-9a-f]{6})"[^/]*translate\((-?[\d.]+) (-?[\d.]+)\) rotate\((-?[\d.]+)\)/g,
+    )]
+      .filter((m) => fills.includes(m[3] as string))
+      .map((m) => ({
+        w: Number(m[1]),
+        h: Number(m[2]),
+        fill: m[3] as string,
+        x: Number(m[4]),
+        y: Number(m[5]),
+        rot: Number(m[6]),
+      }))
+  /** Distance from a point to a drawn rect's boundary (0 inside). */
+  const rectDist = (px: number, py: number, r: SvgRect): number => {
+    const a = (-r.rot * Math.PI) / 180
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const dx = px - r.x
+    const dy = py - r.y
+    const lx = Math.abs(dx * c + dy * s) - r.w / 2
+    const ly = Math.abs(-dx * s + dy * c) - r.h / 2
+    return lx <= 0 && ly <= 0 ? 0 : Math.hypot(Math.max(lx, 0), Math.max(ly, 0))
+  }
+  /** Axis-aligned text rect vs a drawn rect — 2D SAT. */
+  const textHits = (cx: number, cy: number, hw: number, hh: number, r: SvgRect): boolean => {
+    const a = (-r.rot * Math.PI) / 180
+    const c = Math.cos(a)
+    const s = Math.sin(a)
+    const dx = r.x - cx
+    const dy = r.y - cy
+    const rhl = r.w / 2
+    const rhw = r.h / 2
+    if (Math.abs(dx) > hw + Math.abs(c) * rhl + Math.abs(s) * rhw) return false
+    if (Math.abs(dy) > hh + Math.abs(s) * rhl + Math.abs(c) * rhw) return false
+    if (Math.abs(dx * c + dy * s) > rhl + Math.abs(c) * hw + Math.abs(s) * hh) return false
+    if (Math.abs(-dx * s + dy * c) > rhw + Math.abs(s) * hw + Math.abs(c) * hh) return false
+    return true
+  }
+  const parseBubbles = (svg: string): [number, number][] =>
+    [...svg.matchAll(/<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="7"/g)].map(
+      (m) => [Number(m[1]), Number(m[2])],
+    )
+  const parseTicks = (svg: string): [number, number][] =>
+    [...svg.matchAll(
+      /M-2\.5 -6 L-2\.5 6 M2\.5 -6 L2\.5 6" stroke="#41637a"[^/]*translate\((-?[\d.]+) (-?[\d.]+)\)/g,
+    )].map((m) => [Number(m[1]), Number(m[2])])
+
+  // Frost MEP compose: the condenser forced onto the exit wall so the
+  // line-set pair runs the SAME wall the sleeved building drain crosses —
+  // the confirmed tick-across-rails seam (pre-fix: tick center 1.9 px from
+  // BOTH rails, 5.4 px from a bubble).
+  const frostMepSvg = () => {
+    const walls = [
+      swall('w_s', [0, 0], [10, 0]),
+      swall('w_e', [10, 0], [10, 8]),
+      swall('w_n', [10, 8], [0, 8]),
+      swall('w_w', [0, 8], [0, 0]),
+      swall('w_mid', [5, 0], [5, 8], false),
+    ]
+    const rooms = [
+      sroom('r_bath', 'bathroom', [[5, 0], [10, 0], [10, 4], [5, 4]], ['w_s']),
+      sroom('r_kitchen', 'kitchen', [[0, 0], [5, 0], [5, 4], [0, 4]], ['w_s']),
+      sroom('r_laundry', 'laundry', [[0, 4], [5, 4], [5, 8], [0, 8]], ['w_w']),
+    ]
+    const p = layoutPlumbing(walls, rooms, specFrost)
+    const h = layoutHvac(walls, rooms, specFrost, { heatPump: { position: [9.5, 0, -0.5] } })
+    const f = buildFoundation(walls, [sslab([[0, 0], [10, 0], [10, 8], [0, 8]])], specFrost)
+    const mep = buildPlanSet(
+      [...p.members, ...h.members, ...f],
+      [...p.fixtures, ...h.fixtures],
+      {},
+    ).find((s) => s.title.startsWith('Plumbing'))
+    return mep?.svg ?? ''
+  }
+
+  test('sleeve tick clears BOTH line-set rails >= 4px and every bubble >= 12px', () => {
+    const svg = frostMepSvg()
+    const ticks = parseTicks(svg)
+    expect(ticks.length).toBe(1) // one sleeved crossing in this scene
+    const rails = svgRects(svg, ['#35b8c9', '#d98134'])
+    expect(rails.length).toBeGreaterThanOrEqual(4) // the pair is on the sheet
+    const bubbles = parseBubbles(svg)
+    for (const [tx, ty] of ticks) {
+      // tick bars reach 6 px from the center — bar-tip-to-rail gap >= 4
+      for (const r of rails) {
+        expect(rectDist(tx, ty, r) - 6).toBeGreaterThanOrEqual(4)
+      }
+      for (const [bx, by] of bubbles) {
+        expect(Math.hypot(bx - tx, by - ty)).toBeGreaterThanOrEqual(12)
+      }
+    }
+  })
+
+  test('arrows regression: census stable and bubble-clean on the seam compose', () => {
+    const svg = frostMepSvg()
+    const arrows = [...svg.matchAll(
+      /M-3\.5 -3 L4\.5 0 L-3\.5 3 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/g,
+    )].map((m) => [Number(m[1]), Number(m[2])] as [number, number])
+    expect(arrows.length).toBeGreaterThanOrEqual(5) // pre-seam census: 5
+    const bubbles = parseBubbles(svg)
+    for (const [ax, ay] of arrows) {
+      for (const [bx, by] of bubbles) {
+        expect(Math.hypot(bx - ax, by - ay)).toBeGreaterThanOrEqual(12)
+      }
+    }
+  })
+
+  test('courtyard east exit: marker text clears pipes AND bubbles AND the viewBox', () => {
+    const uWalls = [
+      swall('u_s', [0, 0], [12, 0]),
+      swall('u_e', [12, 0], [12, 8]),
+      swall('u_n', [12, 8], [0, 8]),
+      swall('u_w', [0, 8], [0, 0]),
+      swall('u_c1', [5, 2], [5, 6]),
+      swall('u_c2', [7, 2], [7, 6]),
+    ]
+    const uRooms = [
+      sroom('r_ubath', 'bathroom', [[8, 2], [11, 2], [11, 6], [8, 6]], ['u_e']),
+      sroom('r_ukitchen', 'kitchen', [[1, 2], [4, 2], [4, 6], [1, 6]], ['u_w']),
+    ]
+    const p = layoutPlumbing(uWalls, uRooms, specFrost)
+    const h = layoutHvac(uWalls, uRooms, specFrost, { heatPump: { position: [12.5, 0, 5.5] } })
+    const f = buildFoundation(uWalls, [sslab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
+    const svg =
+      buildPlanSet([...p.members, ...h.members, ...f], [...p.fixtures, ...h.fixtures], {}).find(
+        (s) => s.title.startsWith('Plumbing'),
+      )?.svg ?? ''
+    const txt = svg.match(
+      /<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>SEWER\/SEPTIC/,
+    )
+    expect(txt).not.toBeNull()
+    const wTxt = 'SEWER/SEPTIC (P3005.4)'.length * 6
+    const anchor = txt?.[3]
+    const tx = Number(txt?.[1])
+    const ty = Number(txt?.[2]) - 3 // baseline → center
+    const left = anchor === 'start' ? tx : anchor === 'end' ? tx - wTxt : tx - wTxt / 2
+    // in the viewBox with margin
+    expect(left).toBeGreaterThan(48)
+    expect(left + wTxt).toBeLessThan(1056 - 48)
+    // the bold cite never lies on a pipe (the old last resort erased the
+    // main + both rails over ~130 px)
+    const pipes = svgRects(svg, PIPE_FILLS)
+    expect(pipes.length).toBeGreaterThan(4) // non-vacuous
+    const hits = pipes.filter((r) => textHits(left + wTxt / 2, ty, wTxt / 2, 5, r))
+    expect(hits).toEqual([])
+    // and clears the bubbles
+    const bubbles = parseBubbles(svg)
+    const cxT = left + wTxt / 2
+    for (const [bx, by] of bubbles) {
+      const clash = Math.abs(bx - cxT) < wTxt / 2 + 7 && Math.abs(by - ty) < 12
+      expect(clash).toBe(false)
+    }
+    // the glyph keeps its bubble clearance too
+    const glyph = svg.match(
+      /M-5 -4 L6 0 L-5 4 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/,
+    )
+    expect(glyph).not.toBeNull()
+    for (const [bx, by] of bubbles) {
+      expect(
+        Math.hypot(bx - Number(glyph?.[1]), by - Number(glyph?.[2])),
+      ).toBeGreaterThanOrEqual(12)
     }
   })
 })

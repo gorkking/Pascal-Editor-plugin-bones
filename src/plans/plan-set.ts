@@ -441,6 +441,63 @@ function planSheet(
   type FlowRec = { x: number; y: number; ang: number; half: number; sourceId: string }
   const dwvArrows: FlowRec[] = []
   const dwvMainLegs: FlowRec[] = []
+  // The glyph layer's PIPE obstacles (post-merge seam round): ticks, flow
+  // arrows and the sewer marker used to de-collide against bubbles only —
+  // a sleeve tick printed ACROSS the line-set pair rails and the marker's
+  // last-resort cite lay ALONG the pipe corridor. Every drawn pipe rect
+  // (plumbing + hvac, at its DRAWN spot incl. the line-set ±2.5 px nudge)
+  // registers here; each glyph family consults it next to placed[].
+  type PipeObstacle = {
+    x: number
+    y: number
+    /** screen rotation of the rect's long axis, radians */
+    ang: number
+    hl: number
+    hw: number
+    sourceId: string
+  }
+  const pipeRects: PipeObstacle[] = []
+  /** Distance from a point to a pipe rect's boundary (0 inside). */
+  const pipeDist = (px: number, py: number, r: PipeObstacle): number => {
+    const c = Math.cos(r.ang)
+    const s = Math.sin(r.ang)
+    const dx = px - r.x
+    const dy = py - r.y
+    const lx = Math.abs(dx * c + dy * s) - r.hl
+    const ly = Math.abs(-dx * s + dy * c) - r.hw
+    return lx <= 0 && ly <= 0 ? 0 : Math.hypot(Math.max(lx, 0), Math.max(ly, 0))
+  }
+  /** A point glyph of `radius` clears every pipe rect (own run excluded). */
+  const clearOfPipes = (px: number, py: number, radius: number, ignoreSourceId?: string): boolean =>
+    pipeRects.every((r) => r.sourceId === ignoreSourceId || pipeDist(px, py, r) >= radius)
+  /** Axis-aligned text rect vs an oriented pipe rect — 2D SAT, 4 axes. */
+  const textHitsPipe = (
+    cx2: number,
+    cy2: number,
+    hw2: number,
+    hh2: number,
+    r: PipeObstacle,
+    pad: number,
+  ): boolean => {
+    const c = Math.cos(r.ang)
+    const s = Math.sin(r.ang)
+    const dx = r.x - cx2
+    const dy = r.y - cy2
+    const rhl = r.hl + pad
+    const rhw = r.hw + pad
+    if (Math.abs(dx) > hw2 + Math.abs(c) * rhl + Math.abs(s) * rhw) return false
+    if (Math.abs(dy) > hh2 + Math.abs(s) * rhl + Math.abs(c) * rhw) return false
+    if (Math.abs(dx * c + dy * s) > rhl + Math.abs(c) * hw2 + Math.abs(s) * hh2) return false
+    if (Math.abs(-dx * s + dy * c) > rhw + Math.abs(s) * hw2 + Math.abs(c) * hh2) return false
+    return true
+  }
+  const textClearOfPipes = (
+    cx2: number,
+    cy2: number,
+    hw2: number,
+    hh2: number,
+    pad = 2,
+  ): boolean => pipeRects.every((r) => !textHitsPipe(cx2, cy2, hw2, hh2, r, pad))
   for (const m of sorted) {
     if (stroked.has(m)) continue
     // Slab field already printed as the layer-ZERO underlay above; the
@@ -511,6 +568,17 @@ function planSheet(
     shapes.push(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${tx.toFixed(1)} ${tz.toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
+    // every pipe as drawn is a glyph-layer obstacle (seam round)
+    if (def.key === 'mep' && m.role === 'pipe-run' && (m.system === 'plumbing' || m.system === 'hvac')) {
+      pipeRects.push({
+        x: tx,
+        y: tz,
+        ang: Math.atan2(az, ax),
+        hl: w / 2,
+        hw: h / 2,
+        sourceId: m.sourceId,
+      })
+    }
     // DWV flow direction (MEP sheet): under-floor drains print their FALL
     // — member +X points UPHILL (the leg convention), so downstream is −X
     // projected to plan. Candidates are COLLECTED here and drawn after
@@ -597,7 +665,7 @@ function planSheet(
     const concrete = members.filter(
       (m) => m.system === 'foundation' && (m.role === 'footing' || m.role === 'stemwall'),
     )
-    const marks: { x: number; y: number; ang: number }[] = []
+    const marks: { x: number; y: number; ang: number; sourceId: string }[] = []
     for (const s of sleevedLegs) {
       const sp = planSeg(s)
       const d1x = sp.b[0] - sp.a[0]
@@ -615,16 +683,57 @@ function planSheet(
         const my = Z(sp.a[1] + d1z * t)
         // footing + stemwall share the wall line — one mark per crossing
         if (marks.some((k) => Math.hypot(k.x - mx, k.y - my) < 8)) continue
-        marks.push({ x: mx, y: my, ang: Math.atan2(d1z, d1x) })
+        marks.push({ x: mx, y: my, ang: Math.atan2(d1z, d1x), sourceId: s.sourceId })
       }
     }
     const SLEEVE_TXT = 'SLEEVE (P2603.4)'
     const sleeveW = SLEEVE_TXT.length * 6
+    // The tick's bars reach ±6 across the pipe — at a wall that ALSO
+    // carries the line-set pair (rails ±2.5 px off the same centerline)
+    // the bars printed coaxial with both rails, and on fallback scenes the
+    // cleanout bubbles sit AT the crossing by construction (seam round).
+    // Each tick may slide a small budget ALONG ITS OWN LEG — still visually
+    // at the crossing — to clear other pipes and every bubble; when nothing
+    // inside the budget fully clears, the least-crowded spot wins (the
+    // crossing count is pinned by the round-4 gates; never drop a tick).
+    const TICK_R = 10.5 // bar half-span 6 + glyph body ≈ ±4.5 gap to rails
     for (const k of marks) {
+      const axK = Math.cos(k.ang)
+      const ayK = Math.sin(k.ang)
+      let best: { x: number; y: number; score: number } | null = null
+      // 2D search: along the leg (arrows' ±28 budget) × a small
+      // perpendicular escape — rails run ALONG the crossed wall, so pure
+      // along-leg slides can be bracketed by bubbles on tight exits while
+      // one step beside the pipe clears everything (seam round).
+      outer: for (const t of [0, 4, -4, 8, -8, 12, -12, 16, -16, 20, -20, 24, -24, 28, -28]) {
+        for (const n of [0, 5, -5, 10, -10]) {
+          const px = k.x + axK * t - ayK * n
+          const py = k.y + ayK * t + axK * n
+          const pipeGap = pipeRects.reduce(
+            (m2, r) => (r.sourceId === k.sourceId ? m2 : Math.min(m2, pipeDist(px, py, r))),
+            Number.POSITIVE_INFINITY,
+          )
+          const bubbleGap = placed.reduce(
+            (m2, q) => Math.min(m2, Math.hypot(q.x - px, q.y - py)),
+            Number.POSITIVE_INFINITY,
+          )
+          // score: how far past the required clearances this spot sits
+          const score = Math.min(pipeGap - TICK_R, bubbleGap - 13)
+          if (score >= 0) {
+            best = { x: px, y: py, score }
+            break outer
+          }
+          if (!best || score > best.score) best = { x: px, y: py, score }
+        }
+      }
+      const kx = best?.x ?? k.x
+      const ky = best?.y ?? k.y
       shapes.push(
-        `<path d="M-2.5 -6 L-2.5 6 M2.5 -6 L2.5 6" stroke="${DWV_FLOW_ARROW}" stroke-width="1.6" fill="none" transform="translate(${k.x.toFixed(1)} ${k.y.toFixed(1)}) rotate(${deg(k.ang).toFixed(2)})"/>`,
+        `<path d="M-2.5 -6 L-2.5 6 M2.5 -6 L2.5 6" stroke="${DWV_FLOW_ARROW}" stroke-width="1.6" fill="none" transform="translate(${kx.toFixed(1)} ${ky.toFixed(1)}) rotate(${deg(k.ang).toFixed(2)})"/>`,
       )
-      placed.push({ x: k.x, y: k.y })
+      placed.push({ x: kx, y: ky })
+      k.x = kx
+      k.y = ky
       // the cite slides perpendicular/along the pipe until it fits the
       // sheet and clears every bubble — a crowded crossing keeps only its
       // glyph rather than overprinting
@@ -646,7 +755,8 @@ function planSheet(
           tx + sleeveW / 2 < W - MARGIN &&
           ty > MARGIN + 10 &&
           ty < H - MARGIN &&
-          !placed.some((q) => Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12),
+          !placed.some((q) => Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12) &&
+          textClearOfPipes(tx, ty, sleeveW / 2, 5),
       )
       if (!spot) continue
       shapes.push(
@@ -664,15 +774,22 @@ function planSheet(
     const dx = Math.cos(a.ang)
     const dy = Math.sin(a.ang)
     const maxT = Math.max(0, a.half - 6)
+    // Two passes (seam round): prefer spots clear of OTHER pipes too (the
+    // line-set rails run coaxial with pipe walls); when the whole run is
+    // shadowed, fall back to bubble-clearance alone — an arrow ON linework
+    // still reads, and the round-4 arrow census must not regress.
     let spot: { x: number; y: number } | null = null
-    for (const t of [0, 10, -10, 16, -16, 22, -22, 28, -28]) {
-      if (Math.abs(t) > maxT) continue
-      const px = a.x + dx * t
-      const py = a.y + dy * t
-      if (!placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) {
+    for (const needPipes of [true, false]) {
+      for (const t of [0, 10, -10, 16, -16, 22, -22, 28, -28]) {
+        if (Math.abs(t) > maxT) continue
+        const px = a.x + dx * t
+        const py = a.y + dy * t
+        if (placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) continue
+        if (needPipes && !clearOfPipes(px, py, 8.5, a.sourceId)) continue
         spot = { x: px, y: py }
         break
       }
+      if (spot) break
     }
     if (!spot) continue
     placed.push(spot)
@@ -720,14 +837,21 @@ function planSheet(
       [21, -10],
       [37, 0],
     ]
-    for (const [t, n] of glyphSpots) {
-      const px = cx2 + dx * t - dy * n
-      const py = cy2 + dy * t + dx * n
-      if (!placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) {
+    // seam round: the glyph also dodges OTHER pipes' rects (it legitimately
+    // rides its own main); bubbles-only as the fallback pass.
+    let found = false
+    for (const needPipes of [true, false]) {
+      for (const [t, n] of glyphSpots) {
+        const px = cx2 + dx * t - dy * n
+        const py = cy2 + dy * t + dx * n
+        if (placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) continue
+        if (needPipes && !clearOfPipes(px, py, 9, 'dwv-main')) continue
         gx = px
         gy = py
+        found = true
         break
       }
+      if (found) break
     }
     shapes.push(
       `<path d="M-5 -4 L6 0 L-5 4 Z" fill="${DWV_FLOW_ARROW}" transform="translate(${gx.toFixed(1)} ${gy.toFixed(1)}) rotate(${deg(bestLeg.ang).toFixed(2)})"/>`,
@@ -743,21 +867,44 @@ function planSheet(
       { x: cx2 - dx * 14, y: cy2 - dy * 14, anchor: inAnchor }, // inboard of the exit
       { x: gx, y: gy - 14, anchor: 'middle' }, // above the glyph
       { x: gx, y: gy + 16, anchor: 'middle' }, // below the glyph
+      { x: gx, y: gy - 26, anchor: 'middle' }, // wider ring — crowded exits
+      { x: gx, y: gy + 28, anchor: 'middle' },
+      { x: cx2, y: cy2 - 26, anchor: 'middle' },
+      { x: cx2, y: cy2 + 28, anchor: 'middle' },
     ]
-    const fits = (s: TextSpot): boolean => {
-      const left = s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2
-      const right = left + sewerW
-      if (left < MARGIN + 2 || right > W - MARGIN - 2) return false
-      if (s.y < MARGIN + 10 || s.y > H - MARGIN) return false
-      const cx3 = (left + right) / 2
+    const leftOf = (s: TextSpot): number =>
+      s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2
+    // A candidate near the sheet edge SHIFTS inboard instead of dropping —
+    // the round-4 fits() rejected every above/below spot on an east exit
+    // (their centered rects ran past the margin) and the cite fell through
+    // to the corridor-hugging last resort (seam finding 2).
+    const clampToSheet = (s: TextSpot): TextSpot => {
+      const left = leftOf(s)
+      const lo = MARGIN + 3
+      const hi = W - MARGIN - 3
+      const shift = left < lo ? lo - left : left + sewerW > hi ? hi - (left + sewerW) : 0
+      return shift === 0 ? s : { ...s, x: s.x + shift }
+    }
+    const onSheet = (s: TextSpot): boolean => {
+      const left = leftOf(s)
+      return left > MARGIN + 2 && left + sewerW < W - MARGIN - 2 && s.y > MARGIN + 10 && s.y < H - MARGIN
+    }
+    const bubbleClear = (s: TextSpot): boolean => {
+      const cx3 = leftOf(s) + sewerW / 2
       return !placed.some((q) => Math.abs(q.x - cx3) < sewerW / 2 + 9 && Math.abs(q.y - s.y) < 12)
     }
-    const spot2 = textSpots.find(fits) ?? textSpots.find((s) => {
-      // last resort: sheet fit only — an overprinted cite still beats a
-      // clipped one (the bubbles keep their own halo)
-      const left = s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2
-      return left > MARGIN + 2 && left + sewerW < W - MARGIN - 2
-    })
+    const pipeClear = (s: TextSpot): boolean =>
+      textClearOfPipes(leftOf(s) + sewerW / 2, s.y, sewerW / 2, 5)
+    // Tiered (seam round): the bold cite may NEVER lie along a pipe
+    // corridor — the old last-resort erased the main + both line-set rails
+    // over ~130 px. (1) clears everything; (2) clears pipes, tolerates a
+    // bubble halo graze; (3) at minimum the cite's CENTER is off every
+    // pipe; sheet fit is required throughout.
+    const clamped = textSpots.map(clampToSheet)
+    const spot2 =
+      clamped.find((s) => onSheet(s) && bubbleClear(s) && pipeClear(s)) ??
+      clamped.find((s) => onSheet(s) && pipeClear(s)) ??
+      clamped.find((s) => onSheet(s) && clearOfPipes(leftOf(s) + sewerW / 2, s.y, 5))
     if (spot2) {
       shapes.push(
         `<text x="${spot2.x.toFixed(1)}" y="${(spot2.y + 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="${spot2.anchor}" font-family="Helvetica, Arial, sans-serif" fill="${DWV_FLOW_ARROW}" stroke="#fff" stroke-width="2" paint-order="stroke">${SEWER_TXT}</text>`,
