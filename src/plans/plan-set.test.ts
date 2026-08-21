@@ -1197,6 +1197,87 @@ describe('examiner round-5 — floor sheet legibility + legend box geometry', ()
   })
 })
 
+describe('B17 — foundation sheet: slab field is the translucent UNDER-layer', () => {
+  const foundationMembers = () => [
+    member({
+      system: 'foundation',
+      role: 'footing',
+      size: undefined,
+      material: 'concrete',
+      dims: [6, 0.2, 0.4],
+      position: [3, -0.2, 0],
+      label: 'Footing 16"×8"',
+    }),
+    member({
+      system: 'foundation',
+      role: 'stemwall',
+      size: undefined,
+      material: 'concrete',
+      dims: [6, 0.1, 0.2],
+      position: [3, -0.05, 0],
+      label: 'Stemwall 8"',
+    }),
+    member({
+      system: 'foundation',
+      role: 'anchor-bolt',
+      size: undefined,
+      material: 'steel',
+      dims: [0.016, 0.254, 0.016],
+      position: [1, -0.05, 0],
+      label: '5/8" anchor bolt',
+    }),
+    member({
+      system: 'foundation',
+      role: 'slab',
+      size: undefined,
+      material: 'concrete',
+      dims: [5.8, 0.0889, 1.1],
+      position: [3, -0.044, 1],
+      label: 'Slab-on-grade 3-1/2" (R506.1)',
+    }),
+    member({
+      system: 'foundation',
+      role: 'vapor-retarder',
+      size: undefined,
+      material: 'pvc',
+      dims: [5.8, 0.00015, 1.1],
+      position: [3, -0.089, 1],
+      label: '6-mil vapor retarder under slab (R506.2.3)',
+    }),
+  ]
+  const sheet = () =>
+    buildPlanSet(foundationMembers(), [], {
+      projectName: 'p',
+      levelName: 'l',
+      jurisdiction: 'FL',
+      date: 'd',
+    }).find((s) => s.title === 'Foundation plan')?.svg ?? ''
+
+  test('the slab strip prints FIRST and translucent — footing/stemwall linework stays on top', () => {
+    const svg = sheet()
+    const slabIdx = svg.indexOf('fill-opacity="0.35"')
+    // the mitered footing/stemwall runs are stroke paths…
+    const strokeIdx = svg.indexOf('stroke-linejoin="miter"')
+    // …and the bolt prints as a filled hardware dot
+    const boltIdx = svg.indexOf('<circle')
+    expect(slabIdx).toBeGreaterThan(-1)
+    expect(strokeIdx).toBeGreaterThan(-1)
+    expect(boltIdx).toBeGreaterThan(-1)
+    expect(slabIdx).toBeLessThan(strokeIdx) // slab is the UNDER-layer (deck pattern)
+    expect(slabIdx).toBeLessThan(boltIdx)
+  })
+
+  test('the vapor retarder never overprints the slab — it rides the legend instead', () => {
+    const svg = sheet()
+    // exactly ONE translucent field rect (the membrane is coincident under
+    // the slab; drawing both would double the opacity to no information)
+    expect([...svg.matchAll(/fill-opacity="0\.35"/g)]).toHaveLength(1)
+    expect(svg).toContain('slab-on-grade, drawn translucent')
+    expect(svg).toContain('base course')
+    expect(svg).toContain('vapor retarder under slab (R506.2.3)')
+  })
+})
+
 describe('round-6 — flags print VERBATIM (no ellipsis), cross-level lift is a DELTA', () => {
   test('a 297-char composed flag and the S10 span flag print whole; no … anywhere', () => {
     const flags = [

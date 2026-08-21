@@ -61,7 +61,13 @@ const PLAN_SHEETS: {
     key: 'foundation',
     title: 'Foundation plan',
     systems: ['foundation'],
-    fill: { footing: '#c9cdd2', stemwall: '#aab0b7', mudsill: '#d9c39a', default: '#e3e6e9' },
+    fill: {
+      footing: '#c9cdd2',
+      stemwall: '#aab0b7',
+      mudsill: '#d9c39a',
+      slab: '#c3c9cf',
+      default: '#e3e6e9',
+    },
   },
   {
     key: 'floor',
@@ -288,6 +294,23 @@ function planSheet(
   const { scale, X, Z } = t
 
   const shapes: string[] = []
+  // Slab-on-grade field = layer ZERO, translucent (the floor sheet's deck
+  // pattern, examiner round-5 precedent): the field tiles the whole
+  // footprint, so drawn opaque or late it would wash out the footing /
+  // stemwall linework the sheet exists for (B17). Strips are axis-aligned
+  // boxes (rotation 0) — a plain translate suffices. The 6-mil vapor
+  // retarder tiles the SAME extent directly under the slab: printing it
+  // would only double the opacity, so the legend row carries it instead.
+  if (def.key === 'foundation') {
+    for (const m of mine) {
+      if (m.role !== 'slab') continue
+      const w = m.dims[0] * scale
+      const h = Math.max(1.2, m.dims[2] * scale)
+      shapes.push(
+        `<rect x="${(X(m.position[0]) - w / 2).toFixed(1)}" y="${(Z(m.position[2]) - h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${def.fill.slab ?? '#c3c9cf'}" fill-opacity="0.35" stroke="#b7bdc4" stroke-width="0.3"/>`,
+      )
+    }
+  }
   // Foundation runs draw as MITERED PATHS, not independent rectangles:
   // per-member boxes read as crossed bow-ties at oblique corners (user
   // report — fine at 90°, wrong at angles). Chained centerlines with
@@ -411,6 +434,9 @@ function planSheet(
   const sorted = [...mine].sort((a, b2) => layerOf(a) - layerOf(b2) || b2.dims[0] - a.dims[0])
   for (const m of sorted) {
     if (stroked.has(m)) continue
+    // Slab field already printed as the layer-ZERO underlay above; the
+    // vapor retarder is coincident under it (legend row only) — see B17.
+    if (m.role === 'slab' || m.role === 'vapor-retarder') continue
     // Foundation hardware symbols (blueprint round-3): anchor bolts print as
     // FILLED dots, vertical rebar dowels as OPEN circles — identical gray
     // squares made the two anchorage systems indistinguishable on paper.
@@ -570,6 +596,8 @@ function planSheet(
   const SIZELESS_LEGEND: Record<string, string> = {
     subfloor: '3/4" T&G deck (drawn translucent)',
     hanger: 'joist hanger',
+    slab: '3-1/2" slab-on-grade, drawn translucent — on 4" base course (R506.1/R506.2.2)',
+    'vapor-retarder': '6-mil vapor retarder under slab (R506.2.3) — not drawn',
   }
   for (const [role, desc] of Object.entries(SIZELESS_LEGEND)) {
     if (!roleSizes.has(role) && mine.some((m) => m.role === role)) roleSizes.set(role, desc)
