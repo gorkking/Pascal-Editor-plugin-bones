@@ -413,6 +413,80 @@ describe('line-set pair parallelism — non-vacuous over E1 detours', () => {
     }
     expect(pairHits(suction, liquid)).toBe(0)
   })
+
+  test('DOUBLE corner-hug: doors on BOTH junction walls — corner risers cancel, rolls stay per-wall, no dupes', () => {
+    // Attack 3b (round-3 merge gate): with ROs hugging the shared junction
+    // on both orthogonal walls, the geometric roll-axis lookup matched the
+    // WRONG wall's crossing (both walls' crossings sit at one elevation
+    // touching the junction point) and rolled the corner riser ALONG
+    // w_west again (2 SAT hits at 40276ab); the descend/re-ascend riser
+    // pair at the corner was also emitted twice byte-identically
+    // (double-booked lf). A real pipe stays UP around the corner: the
+    // identical opposite risers cancel and the two crossings connect
+    // directly at the detour plane.
+    const doorAt = (id: string): OpeningSlice => ({
+      id,
+      kind: 'door',
+      u: 0.48,
+      width: 0.85,
+      height: 2.03,
+      sillHeight: 0,
+      roughWidth: 0.9,
+      roughHeight: 2.1,
+    })
+    const walls = [
+      wall('w_south', [0, 0], [26, 0], true, [doorAt('d_s')]),
+      wall('w_north', [0, 10], [26, 10], true),
+      wall('w_west', [0, 0], [0, 10], true, [doorAt('d_w')]),
+      wall('w_east', [26, 0], [26, 10], true),
+    ]
+    const rooms = [
+      room('r_laundry', 'Laundry', 'laundry', [[0, 3], [2, 3], [2, 6], [0, 6]]),
+      room('r_living', 'Living', 'other', [[2, 0], [26, 0], [26, 10], [2, 10]]),
+      room('r_bed', 'Bedroom', 'bedroom', [[0, 6], [2, 6], [2, 10], [0, 10]]),
+    ]
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [8, 0, -0.7] } })
+    const { suction, liquid } = expectTwinned(out.members, 1)
+    const vertical = (m: Member) => m.rotation[1] === 0 && m.dims[1] === m.length
+    // per-wall roll axes: a riser on the X-axis wall (w_south, z ≈ 0)
+    // rolls in Z; a riser on the Z-axis wall (w_west, x ≈ 0) rolls in X —
+    // and the corner pair itself is GONE, so every survivor belongs to
+    // exactly one wall and NEVER drops at the junction
+    const risers = [...suction, ...liquid].filter(vertical)
+    expect(risers.length).toBeGreaterThan(0)
+    for (const r of risers) {
+      const xRoll = Math.abs(Math.abs(r.position[0]) - LINESET_PAIR_OFFSET) < 1e-9
+      const zRoll = Math.abs(Math.abs(r.position[2]) - LINESET_PAIR_OFFSET) < 1e-9
+      const onWest = Math.abs(r.position[0]) <= LINESET_PAIR_OFFSET + 1e-9
+      const onSouth = Math.abs(r.position[2]) <= LINESET_PAIR_OFFSET + 1e-9
+      // never at the junction itself (that riser pair must have canceled)
+      expect(onWest && onSouth).toBe(false)
+      if (onWest) expect(xRoll).toBe(true) // Z-wall → X-roll
+      if (onSouth) expect(zRoll).toBe(true) // X-wall → Z-roll
+    }
+    // no byte-identical duplicates within a pipe (unique position|dims)
+    for (const legs of [suction, liquid]) {
+      const seen = new Set<string>()
+      for (const m of legs) {
+        const key = `${m.position.join(',')}|${m.dims.join(',')}`
+        expect(seen.has(key)).toBe(false)
+        seen.add(key)
+      }
+    }
+    // the canceled corner stays CONTINUOUS (crossings meet at the junction)
+    const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    for (const legs of [suction, liquid]) {
+      expect(
+        chainConnects(
+          legs,
+          [unit.position[0], unit.position[2]],
+          [handler.position[0], handler.position[2]],
+        ),
+      ).toBe(true)
+    }
+    expect(pairHits(suction, liquid)).toBe(0)
+  })
 })
 
 // ---------------------------------------------------------------------------

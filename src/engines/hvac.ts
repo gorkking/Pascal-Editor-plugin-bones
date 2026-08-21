@@ -1101,42 +1101,56 @@ export function layoutHvac(
             pipes.some((p) =>
               segmentCrossesRo(walls, [a[0], p.y, a[1]], [b[0], p.y, b[1]]),
             )
-          // A riser's ROLL AXIS comes from the REF ROUTE itself, never from
-          // emission order: a riser and its detour crossing share a wall by
-          // construction (pipeWallLeg emits them as a near-riser / crossing
-          // / far-riser triplet), so the horizontal at the riser's DETOUR
-          // elevation touching its plan point carries the wall's yaw.
-          // Reading the PREVIOUS horizontal went stale at corners — an RO
-          // edge hugging a wall junction drops the <1.5 cm approach leg on
-          // the turned wall, the riser LEADS that wall, and the stale axis
-          // rolled the pair ALONG it: both risers back on the centerline,
-          // one through the other pipe's crossing (skeptic round 2, 9.5 mm
-          // penetration on the corner-hug repro).
           const isVertical = (m: Member): boolean =>
             m.rotation[1] === 0 && m.dims[1] === m.length
-          const rollYawOf = (r: Member): number => {
+          // CORNER CANCEL: ROs hugging BOTH sides of a shared junction make
+          // the reference route drop to the run plane AT the corner and
+          // immediately re-ascend — pipeWallLeg emits two byte-identical
+          // OPPOSITE risers at the junction (attack 3b: the pair collided
+          // with the orthogonal crossings crowding the corner, printed as
+          // duplicate members, and double-booked riser copper). A real pipe
+          // stays UP around the corner: cancel adjacent identical riser
+          // pairs so the two crossings connect directly at the detour plane
+          // (their endpoints coincide at the junction — continuity holds).
+          for (let i = ref.length - 2; i >= 0; i--) {
+            const a = ref[i] as Member
+            const b = ref[i + 1] as Member
+            if (!isVertical(a) || !isVertical(b)) continue
+            if (
+              a.position[0] === b.position[0] &&
+              a.position[1] === b.position[1] &&
+              a.position[2] === b.position[2] &&
+              a.dims[0] === b.dims[0] &&
+              a.dims[1] === b.dims[1] &&
+              a.dims[2] === b.dims[2]
+            ) {
+              ref.splice(i, 2)
+            }
+          }
+          // A riser's ROLL AXIS comes from its OWN triplet in the emission
+          // order — pipeWallLeg deterministically emits near-riser /
+          // crossing / far-riser, so the crossing at the riser's detour
+          // elevation sits right AFTER a near-riser and right BEFORE a far
+          // one. GEOMETRIC lookup (a crossing touching the riser's plan
+          // point) was ambiguous at corners: attack 3b put BOTH walls'
+          // crossings at the same elevation touching the junction point,
+          // matched the WRONG wall first, and rolled the riser ALONG its
+          // own wall again. Round 2's emission-ORDER cursor was equally
+          // wrong the other way (stale axis when the approach leg drops) —
+          // the triplet index is the only unambiguous owner.
+          const rollYawAt = (i: number): number => {
+            const r = ref[i] as Member
             const top = r.position[1] + r.dims[1] / 2
             const bot = r.position[1] - r.dims[1] / 2
             const detourEnd =
               Math.abs(top - LINESET_Y) >= Math.abs(bot - LINESET_Y) ? top : bot
-            for (const h of ref) {
-              if (h === r || isVertical(h)) continue
-              if (Math.abs(h.position[1] - detourEnd) > 1e-6) continue
-              const hx = (h.dims[0] / 2) * Math.cos(h.rotation[1])
-              const hz = -(h.dims[0] / 2) * Math.sin(h.rotation[1])
-              const touches =
-                Math.hypot(
-                  h.position[0] - hx - r.position[0],
-                  h.position[2] - hz - r.position[2],
-                ) < 1e-6 ||
-                Math.hypot(
-                  h.position[0] + hx - r.position[0],
-                  h.position[2] + hz - r.position[2],
-                ) < 1e-6
-              if (touches) return h.rotation[1]
+            for (const j of [i + 1, i - 1]) {
+              const h = ref[j]
+              if (!h || isVertical(h)) continue
+              if (Math.abs(h.position[1] - detourEnd) < 1e-6) return h.rotation[1]
             }
-            // no crossing found (cannot happen for pipeWallLeg risers) —
-            // fall back to the penetration wall's axis
+            // no adjacent crossing (a fully-canceled degenerate) — fall
+            // back to the penetration wall's axis
             return Math.atan2(-penWall.dir[1], penWall.dir[0])
           }
           for (const pipe of pipes) {
@@ -1164,14 +1178,15 @@ export function layoutHvac(
             // way up, so coaxial risers would leave the liquid line inside
             // the suction line (the skeptic's coincident-stack class) —
             // each riser steps ±LINESET_PAIR_OFFSET PERPENDICULAR to its
-            // own wall's axis (rollYawOf — side-by-side across the wall,
+            // own wall's axis (rollYawAt — side-by-side across the wall,
             // exactly like field-bent soft copper).
-            for (const m of ref) {
+            for (let i = 0; i < ref.length; i++) {
+              const m = ref[i] as Member
               const vertical = isVertical(m)
               let px = m.position[0]
               let pz = m.position[2]
               if (vertical) {
-                const rollYaw = rollYawOf(m)
+                const rollYaw = rollYawAt(i)
                 px += shift * Math.sin(rollYaw)
                 pz += shift * Math.cos(rollYaw)
               }
