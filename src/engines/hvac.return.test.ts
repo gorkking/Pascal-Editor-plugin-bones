@@ -197,6 +197,137 @@ function returnReachesAh(members: Member[], fixtures: Fixture[]): boolean {
   return [...grilleComps].some((c) => ahComps.has(c))
 }
 
+// ---- duct-vs-duct SAT (round-1 BLOCKER: return tin inside supply tin) --------
+// All hvac ducts are axis-aligned (Manhattan yaws) — exact AABBs, no sampling.
+
+function ductAabb(m: Member): { min: [number, number, number]; max: [number, number, number] } {
+  const vertical = m.dims[1] > m.dims[0]
+  const yaw = m.rotation[1]
+  const c = Math.abs(Math.cos(yaw))
+  const s = Math.abs(Math.sin(yaw))
+  const ex = vertical ? m.dims[0] / 2 : (c * m.dims[0] + s * m.dims[2]) / 2
+  const ey = m.dims[1] / 2
+  const ez = vertical ? m.dims[2] / 2 : (s * m.dims[0] + c * m.dims[2]) / 2
+  return {
+    min: [m.position[0] - ex, m.position[1] - ey, m.position[2] - ez],
+    max: [m.position[0] + ex, m.position[1] + ey, m.position[2] + ez],
+  }
+}
+
+/** (return, supply) duct pairs whose boxes share volume — empty = gate holds. */
+function returnSupplyOverlaps(members: Member[]): string[] {
+  const ducts = members.filter((m) => m.role === 'duct-run')
+  const ret = ducts.filter((m) => m.label?.startsWith('Return'))
+  const supply = ducts.filter((m) => !m.label?.startsWith('Return'))
+  const EPS = 1e-6
+  const out: string[] = []
+  for (const r of ret) {
+    const a = ductAabb(r)
+    for (const s of supply) {
+      const b = ductAabb(s)
+      const overlaps = [0, 1, 2].every(
+        (i) => (a.min[i] as number) < (b.max[i] as number) - EPS && (b.min[i] as number) < (a.max[i] as number) - EPS,
+      )
+      if (overlaps) out.push(`${r.label} × ${s.label}`)
+    }
+  }
+  return out
+}
+
+describe('B19 round 2 — the return path NEVER shares tin with the supply system', () => {
+  test('zero return×supply OBB overlaps in every scenario, attic AND soffit', () => {
+    for (const middle of ['utility', 'hallway', 'none'] as const) {
+      const { walls, rooms } = plan(middle)
+      for (const ctx of [undefined, { hasLevelAbove: true }]) {
+        const { members, warnings } = layoutHvac(walls, rooms, DEFAULT_SPEC, undefined, ctx)
+        expect(returnSupplyOverlaps(members)).toEqual([])
+        // …and none of these plans needs a routing compromise
+        expect(warnings.some((w) => w.includes('return drop cannot clear'))).toBe(false)
+        expect(warnings.some((w) => w.includes('return grille cannot fully clear'))).toBe(false)
+      }
+    }
+  })
+
+  test('the return plane rides one section height + gap off the supply plane', () => {
+    const { walls, rooms } = plan('hallway')
+    const planeOffset = 0.2032 + 0.05 // TRUNK_H + DUCT_CLEAR_GAP
+    const attic = layoutHvac(walls, rooms)
+    const legs = attic.members.filter(
+      (m) => m.label?.startsWith('Return trunk') && m.dims[0] >= m.dims[1],
+    )
+    expect(legs.length).toBeGreaterThan(0)
+    for (const m of legs) expect(m.position[1]).toBeCloseTo(2.5 + 0.3 + planeOffset, 6)
+    const soffit = layoutHvac(walls, rooms, DEFAULT_SPEC, undefined, { hasLevelAbove: true })
+    const soffitLegs = soffit.members.filter(
+      (m) => m.label?.startsWith('Return trunk') && m.dims[0] >= m.dims[1],
+    )
+    expect(soffitLegs.length).toBeGreaterThan(0)
+    for (const m of soffitLegs) {
+      expect(m.position[1]).toBeCloseTo(2.5 - 0.35 - planeOffset, 6)
+    }
+  })
+})
+
+describe('B19 round 2 — compromised placements are LOUD, never silent', () => {
+  /** 0.8×0.8 mech closet hugged by its own four walls: no drop candidate
+   * and no grille spot can clear — both fallbacks must ⚠ (round-1 findings
+   * 2+3: blind dropCands[0] + the verbatim-base grille landed silently). */
+  function closetPlan() {
+    const walls = [
+      wall('w_s', [0, 0], [10, 0]),
+      wall('w_e', [10, 0], [10, 10]),
+      wall('w_n', [10, 10], [0, 10]),
+      wall('w_w', [0, 10], [0, 0]),
+      wall('c_s', [4, 4], [4.8, 4], false),
+      wall('c_e', [4.8, 4], [4.8, 4.8], false),
+      wall('c_n', [4.8, 4.8], [4, 4.8], false),
+      wall('c_w', [4, 4.8], [4, 4], false),
+    ]
+    const rooms = [
+      room('r_closet', 'Mech closet', 'other', [
+        [4, 4],
+        [4.8, 4],
+        [4.8, 4.8],
+        [4, 4.8],
+      ]),
+      room('r_living', 'Living', 'other', [
+        [0, 0],
+        [10, 0],
+        [10, 4],
+        [0, 4],
+      ]),
+      room('r_bed', 'Bedroom', 'bedroom', [
+        [0, 4.8],
+        [10, 4.8],
+        [10, 10],
+        [0, 10],
+      ]),
+    ]
+    return { walls, rooms }
+  }
+
+  test('tiny equip closet: the return drop flags its wall intrusion, never silent', () => {
+    const { walls, rooms } = closetPlan()
+    expect(equipmentRoomOf(rooms).id).toBe('r_closet')
+    const { warnings } = layoutHvac(walls, rooms)
+    expect(
+      warnings.some((w) => w.startsWith('return drop cannot clear walls in Mech closet')),
+    ).toBe(true)
+  })
+
+  test('tiny grille room: the compromised grille spot reports clear:false + flags', () => {
+    const { walls, rooms } = closetPlan()
+    const spot = placeReturnGrilleSpot(walls, rooms)
+    expect(spot?.clear).toBe(false)
+    const { warnings } = layoutHvac(walls, rooms)
+    expect(
+      warnings.some((w) =>
+        w.startsWith('return grille cannot fully clear the supply ducts in Mech closet'),
+      ),
+    ).toBe(true)
+  })
+})
+
 // ---- (a) equipment placement truth ------------------------------------------
 
 describe('B19a — the air handler prefers conditioned space over the garage', () => {
