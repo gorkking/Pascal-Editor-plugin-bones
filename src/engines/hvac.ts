@@ -172,6 +172,15 @@ const LINESET_LONG_FLAG =
 export const LINESET_LATERAL = COND?.linesetLateralM ?? 0.035
 const LINESET_THIN_WALL_FLAG =
   'line-set clamped in a thin wall — reduced trade clearance; coordinate with plumbing'
+/** Compose honesty flags — the B1 ' | ' convention: APPEND, never
+ * overwrite, never skip, never duplicate. Precedence guards (`!flag`)
+ * MASKED truths: a clamped long run dropped the >15 m advisory, and a
+ * flagged member never gained its crossing class (merge-gate F2 + the
+ * closing-round F1 before it). Every flag writer goes through here. */
+function composeFlag(existing: string | undefined, add: string): string {
+  if (!existing) return add
+  return existing.includes(add) ? existing : `${existing} | ${add}`
+}
 /** Disconnect box center above the unit top, on the wall face (NEC 440.14). */
 const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
 /**
@@ -1250,25 +1259,36 @@ export function layoutHvac(
             const dz = E2[1] - E1[1]
             const t1 = det !== 0 ? (u2[0] * dz - u2[1] * dx) / det : Number.NaN
             const t2 = det !== 0 ? (u1[0] * dz - u1[1] * dx) / det : Number.NaN
-            const trimCap1 = -(h1.dims[0] - 0.02)
-            const trimCap2 = -(h2.dims[0] - 0.02)
+            // COMBINED trim floor (merge-gate F1): a per-junction trim cap
+            // let a short mid-leg mitered at BOTH ends accumulate NEGATIVE
+            // length — a −6 mm member SUBTRACTED lf from the takeoff and
+            // read as separated on every SAT axis (ra+rb−skin < 0), making
+            // the gates vacuously green. The floor is checked against the
+            // member's ALREADY-ACCUMULATED extensions (its other junction
+            // was processed one step earlier in sequence order): if this
+            // miter would leave EITHER member under 2 cm, the junction
+            // BRIDGES instead — lengths stay positive, the chain closes.
+            const g1cur = ext.get(i) ?? { minus: 0, plus: 0 }
+            const g2cur = ext.get(i + 1) ?? { minus: 0, plus: 0 }
+            const len1After = h1.dims[0] + g1cur.minus + g1cur.plus + t1
+            const len2After = h2.dims[0] + g2cur.minus + g2cur.plus + t2
             if (
               !Number.isFinite(t1) ||
               !Number.isFinite(t2) ||
               Math.abs(t1) > MITER_CAP ||
               Math.abs(t2) > MITER_CAP ||
-              t1 < trimCap1 ||
-              t2 < trimCap2
+              len1After < 0.02 ||
+              len2After < 0.02
             ) {
-              // parallel / near-reversal — bridge the shifted endpoints
+              // parallel / near-reversal / over-trimmed — bridge instead
               bridges.push({ a: E1, b: E2 })
               continue
             }
-            const g1 = ext.get(i) ?? { minus: 0, plus: 0 }
+            const g1 = g1cur
             if (best[0] === 1) g1.plus += t1
             else g1.minus += t1
             ext.set(i, g1)
-            const g2 = ext.get(i + 1) ?? { minus: 0, plus: 0 }
+            const g2 = g2cur
             if (best[1] === 1) g2.plus += t2
             else g2.minus += t2
             ext.set(i + 1, g2)
@@ -1327,7 +1347,7 @@ export function layoutHvac(
                 sourceId: pipe.sourceId,
                 label: (m.label ?? REF_LABEL).replace(REF_LABEL, pipe.label),
               }
-              if (lateralClamped && !clone.flag) clone.flag = LINESET_THIN_WALL_FLAG
+              if (lateralClamped) clone.flag = composeFlag(clone.flag, LINESET_THIN_WALL_FLAG)
               runMembers.push(clone)
             }
             // near-reversal corners: a short closing bridge per pipe (the
@@ -1338,7 +1358,7 @@ export function layoutHvac(
                 pipe.label, 'copper', 'pipe-run', 0.005,
               )
               if (seg) {
-                if (lateralClamped && !seg.flag) seg.flag = LINESET_THIN_WALL_FLAG
+                if (lateralClamped) seg.flag = composeFlag(seg.flag, LINESET_THIN_WALL_FLAG)
                 runMembers.push(seg)
               }
             }
@@ -1378,7 +1398,7 @@ export function layoutHvac(
           .reduce((sum, m) => sum + m.length, 0)
         for (const m of runMembers) {
           m.system = 'hvac'
-          if (suctionLen > LINESET_MAX_LEN_ADVISORY && !m.flag) m.flag = LINESET_LONG_FLAG
+          if (suctionLen > LINESET_MAX_LEN_ADVISORY) m.flag = composeFlag(m.flag, LINESET_LONG_FLAG)
           members.push(m)
         }
         // DISCONNECT on the wall face above the unit (NEC 440.14 — within
@@ -1595,8 +1615,8 @@ export function flagLinesetTradeCrossings(members: Member[]): void {
     // (closing round F1); a member crossing BOTH supply and stack kept
     // only the first class. Never overwrite, never skip, never duplicate.
     for (const cls of [STACK_FLAG, PIPE_FLAG]) {
-      if (!classes.has(cls) || ls.flag?.includes(cls)) continue
-      ls.flag = ls.flag ? `${ls.flag} | ${cls}` : cls
+      if (!classes.has(cls)) continue
+      ls.flag = composeFlag(ls.flag, cls)
     }
   }
 }

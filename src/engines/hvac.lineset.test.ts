@@ -10,6 +10,7 @@ import {
   layoutHvac,
 } from './hvac'
 import { layoutPlumbing } from './plumbing'
+import { computeTakeoff } from './takeoff'
 
 /**
  * GATES (line-set round — "piped to the exchanger along a sensible path"):
@@ -928,5 +929,145 @@ describe('closing round — flag composition + acute corners', () => {
       for (const lm of liquid) if (obbHit(sm, lm)) hits++
     }
     expect(hits).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 9. Merge-gate round — F1 combined-trim floor, F2 engine-flag composition
+// ---------------------------------------------------------------------------
+
+/** Double-turn wedge: w1 (10 m) → mid-wall (midLen) at −turnDeg → w3 (5 m)
+ * at another −turnDeg; laundry at w3's far end so the route traverses both
+ * junctions. The merge-gate F1 repro shape: per-junction trim caps let the
+ * short mid-leg accumulate NEGATIVE length (−6.2 mm at 100°/0.08 m) —
+ * subtracting takeoff lf and reading separated on every SAT axis. */
+function doubleTurn(turnDeg: number, midLen: number) {
+  const rot = (d: [number, number], deg: number): [number, number] => {
+    const r = (deg * Math.PI) / 180
+    return [d[0] * Math.cos(r) - d[1] * Math.sin(r), d[0] * Math.sin(r) + d[1] * Math.cos(r)]
+  }
+  const d2 = rot([1, 0], -turnDeg)
+  const d3 = rot(d2, -turnDeg)
+  const p1: [number, number] = [10, 0]
+  const p2: [number, number] = [p1[0] + d2[0] * midLen, p1[1] + d2[1] * midLen]
+  const p3: [number, number] = [p2[0] + d3[0] * 5, p2[1] + d3[1] * 5]
+  const walls = [
+    wall('w1', [0, 0], p1, true),
+    wall('w2', p1, p2, true),
+    wall('w3', p2, p3, true),
+  ]
+  const rooms = [
+    room('r_laundry', 'Laundry', 'laundry', [
+      [p3[0] - 0.8, p3[1] - 0.8],
+      [p3[0] + 0.8, p3[1] - 0.8],
+      [p3[0] + 0.8, p3[1] + 0.8],
+      [p3[0] - 0.8, p3[1] + 0.8],
+    ]),
+    room('r_v', 'V', 'other', [[0, 0], [10, 0], [5, 3]]),
+  ]
+  return { walls, rooms }
+}
+
+describe('merge-gate round — trim floor + flag composition', () => {
+  test('F1: the double-turn repro keeps every member POSITIVE (>2 cm); lf and SAT stay sound', () => {
+    const { walls, rooms } = doubleTurn(100, 0.08)
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [2, 0, -0.7] } })
+    const lineset = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+    expect(lineset.length).toBeGreaterThan(0)
+    // (b) SAT gates are only non-vacuous over positive extents — assert
+    // BEFORE trusting any SAT verdict
+    for (const m of lineset) {
+      expect(m.length).toBeGreaterThan(0.02)
+      for (const d of m.dims) expect(d).toBeGreaterThan(0)
+    }
+    // (a) the takeoff books the POSITIVE sum — a negative member used to
+    // SUBTRACT soft-copper lf
+    const suction = lineset.filter((m) => m.sourceId === 'lineset-suction-1')
+    const lf = suction.reduce((sum, m) => sum + m.length, 0) * 3.28084
+    expect(lf).toBeGreaterThan(0)
+    const row = computeTakeoff(out.members, out.fixtures).find(
+      (r) => r.item === 'Line-set suction ¾"',
+    )
+    expect(row?.quantity).toBeCloseTo(Math.round(lf * 10) / 10, 1)
+    // the over-trimmed junction BRIDGED — the chain still closes end-to-end
+    const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    for (const id of ['lineset-suction-1', 'lineset-liquid-1']) {
+      expect(
+        chainConnects(
+          runOf(out.members, id),
+          [unit.position[0], unit.position[2]],
+          [handler.position[0], handler.position[2]],
+        ),
+      ).toBe(true)
+    }
+    // pair SAT (full 15-axis — the walls are oblique) stays clean
+    const liquid = lineset.filter((m) => m.sourceId === 'lineset-liquid-1')
+    let hits = 0
+    for (const sm of suction) for (const lm of liquid) if (obbHit(sm, lm)) hits++
+    expect(hits).toBe(0)
+  })
+
+  test('F1 sweep: 100–120° × 0.08–0.2 m mid-walls — no sliver ever survives', () => {
+    for (const turn of [100, 110, 120]) {
+      for (const mid of [0.08, 0.12, 0.2]) {
+        const { walls, rooms } = doubleTurn(turn, mid)
+        const out = layoutHvac(walls, rooms, DEFAULT_SPEC, {
+          heatPump: { position: [2, 0, -0.7] },
+        })
+        const lineset = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+        expect(lineset.length).toBeGreaterThan(0)
+        for (const m of lineset) {
+          expect(m.length).toBeGreaterThan(0.02)
+          for (const d of m.dims) expect(d).toBeGreaterThan(0)
+        }
+        const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+        const unit = condensersOf(out.fixtures)[0] as Fixture
+        for (const id of ['lineset-suction-1', 'lineset-liquid-1']) {
+          expect(
+            chainConnects(
+              runOf(out.members, id),
+              [unit.position[0], unit.position[2]],
+              [handler.position[0], handler.position[2]],
+            ),
+          ).toBe(true)
+        }
+      }
+    }
+  })
+
+  test('F2: a THIN-WALL LONG run boring the stack carries ALL THREE classes composed', () => {
+    // 0.114 walls (clamp flag) + >15 m run (advisory) + stack on the path
+    // (crossing class): precedence used to keep only the first truth.
+    const { walls, rooms } = shell(40, 10, [], 0.114)
+    const placed = [pf('wc', 'toilet', [5.2, 0.6]), pf('lav', 'lavatory', [6.0, 0.6])]
+    const plumbing = layoutPlumbing(walls, rooms, LOD400, placed)
+    const hvac = layoutHvac(
+      walls, rooms, LOD400,
+      { heatPump: { position: [39, 0, -0.75] } },
+      { stateCode: 'MN' },
+    )
+    const combined = [...plumbing.members, ...hvac.members]
+    flagLinesetTradeCrossings(combined)
+    const lineset = combined.filter(
+      (m) => m.system === 'hvac' && m.sourceId.startsWith('lineset-'),
+    )
+    const stack = combined.filter(
+      (m) => m.system === 'plumbing' && m.role === 'vent-stack',
+    )
+    expect(stack.length).toBeGreaterThan(0)
+    let bores = 0
+    for (const ls of lineset) {
+      for (const st of stack) {
+        if (!obbHit(ls, st)) continue
+        bores++
+        expect(ls.flag).toContain('clamped in a thin wall')
+        expect(ls.flag).toContain('verify manufacturer max line-set length')
+        expect(ls.flag).toContain('⚠ line-set crosses DWV stack — coordinate trades')
+        // three truths = two joins
+        expect((ls.flag?.match(/ \| /g) ?? []).length).toBeGreaterThanOrEqual(2)
+      }
+    }
+    expect(bores).toBeGreaterThan(0)
   })
 })
