@@ -1903,10 +1903,55 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     [...svg.matchAll(/<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="7"/g)].map(
       (m) => [Number(m[1]), Number(m[2])],
     )
-  const parseTicks = (svg: string): [number, number][] =>
+  const parseTicks = (svg: string): { x: number; y: number; rot: number }[] =>
     [...svg.matchAll(
-      /M-2\.5 -6 L-2\.5 6 M2\.5 -6 L2\.5 6" stroke="#41637a"[^/]*translate\((-?[\d.]+) (-?[\d.]+)\)/g,
-    )].map((m) => [Number(m[1]), Number(m[2])])
+      /M-2\.5 -6 L-2\.5 6 M2\.5 -6 L2\.5 6" stroke="#41637a"[^/]*translate\((-?[\d.]+) (-?[\d.]+)\) rotate\((-?[\d.]+)\)/g,
+    )].map((m) => ({ x: Number(m[1]), y: Number(m[2]), rot: Number(m[3]) }))
+  /** The tick's 4 bar-tip endpoints (bars at ±2.5 along, spanning ±6). */
+  const tickTips = (t: { x: number; y: number; rot: number }): [number, number][] => {
+    const a = (t.rot * Math.PI) / 180
+    const ax = Math.cos(a)
+    const ay = Math.sin(a)
+    const tips: [number, number][] = []
+    for (const s1 of [-1, 1]) {
+      for (const s2 of [-1, 1]) {
+        tips.push([t.x + s1 * 2.5 * ax - s2 * 6 * ay, t.y + s1 * 2.5 * ay + s2 * 6 * ax])
+      }
+    }
+    return tips
+  }
+  /** Round-2 tick invariants on every tick of a compose: bar tips >= 4 px
+   * from foreign-class pipe rects AND the bar span intersects a pipe of
+   * its OWN class (dwv slate) — a sleeve tick must tick ITS pipe. */
+  const assertTickInvariants = (svg: string): void => {
+    const ticks = parseTicks(svg)
+    expect(ticks.length).toBeGreaterThan(0)
+    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d'])
+    const own = svgRects(svg, ['#8fb0c4'])
+    const bubbles = parseBubbles(svg)
+    for (const t of ticks) {
+      for (const r of foreign) {
+        for (const [qx, qy] of tickTips(t)) {
+          expect(rectDist(qx, qy, r)).toBeGreaterThanOrEqual(4)
+        }
+      }
+      for (const [bx, by] of bubbles) {
+        expect(Math.hypot(bx - t.x, by - t.y)).toBeGreaterThanOrEqual(12)
+      }
+      const a = (t.rot * Math.PI) / 180
+      const crossesOwn = own.some((r) => {
+        const a2 = (-r.rot * Math.PI) / 180
+        const c = Math.cos(a2)
+        const s2 = Math.sin(a2)
+        const dx = t.x - r.x
+        const dy = t.y - r.y
+        return (
+          Math.abs(dx * c + dy * s2) <= r.w / 2 && Math.abs(-dx * s2 + dy * c) <= 6 + r.h / 2 - 1
+        )
+      })
+      expect({ at: [t.x, t.y, a], crossesOwn }.crossesOwn).toBe(true)
+    }
+  }
 
   // Frost MEP compose: the condenser forced onto the exit wall so the
   // line-set pair runs the SAME wall the sleeved building drain crosses —
@@ -1936,22 +1981,11 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     return mep?.svg ?? ''
   }
 
-  test('sleeve tick clears BOTH line-set rails >= 4px and every bubble >= 12px', () => {
+  test('ALL ticks: bar tips >= 4px from foreign pipes, >= 12px from bubbles, span crosses OWN pipe', () => {
     const svg = frostMepSvg()
-    const ticks = parseTicks(svg)
-    expect(ticks.length).toBe(1) // one sleeved crossing in this scene
-    const rails = svgRects(svg, ['#35b8c9', '#d98134'])
-    expect(rails.length).toBeGreaterThanOrEqual(4) // the pair is on the sheet
-    const bubbles = parseBubbles(svg)
-    for (const [tx, ty] of ticks) {
-      // tick bars reach 6 px from the center — bar-tip-to-rail gap >= 4
-      for (const r of rails) {
-        expect(rectDist(tx, ty, r) - 6).toBeGreaterThanOrEqual(4)
-      }
-      for (const [bx, by] of bubbles) {
-        expect(Math.hypot(bx - tx, by - ty)).toBeGreaterThanOrEqual(12)
-      }
-    }
+    expect(parseTicks(svg).length).toBe(1) // one sleeved crossing in this scene
+    expect(svgRects(svg, ['#35b8c9', '#d98134']).length).toBeGreaterThanOrEqual(4) // pair present
+    assertTickInvariants(svg)
   })
 
   test('arrows regression: census stable and bubble-clean on the seam compose', () => {
@@ -1961,14 +1995,89 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     )].map((m) => [Number(m[1]), Number(m[2])] as [number, number])
     expect(arrows.length).toBeGreaterThanOrEqual(5) // pre-seam census: 5
     const bubbles = parseBubbles(svg)
+    // FAIL-2 gate: no arrow center within 4 px of any FOREIGN-class pipe
+    // rect (the demo arrow reproduced the pre-fix elbow coordinate ON the
+    // suction riser — arrows now get the ticks' perpendicular escape)
+    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d'])
+    expect(foreign.length).toBeGreaterThan(0)
     for (const [ax, ay] of arrows) {
       for (const [bx, by] of bubbles) {
         expect(Math.hypot(bx - ax, by - ay)).toBeGreaterThanOrEqual(12)
       }
+      for (const r of foreign) {
+        expect(rectDist(ax, ay, r)).toBeGreaterThanOrEqual(4)
+      }
     }
   })
 
-  test('courtyard east exit: marker text clears pipes AND bubbles AND the viewBox', () => {
+  test('coaxial pair: a short arrow run shadowed by the line-set escapes perpendicular (FAIL 2)', () => {
+    // The round-8 demo repro: run half ~14 px, slide budget t in {0, ±10},
+    // the pair riser coaxial with the WHOLE run — every 1D spot sits ON a
+    // rail and the round-1 bubbles-only fallback reprinted the pre-fix
+    // elbow coordinate. One perpendicular step clears it.
+    const mk = (over: Partial<Member>): Member => ({
+      system: 'plumbing',
+      role: 'pipe-run',
+      dims: [0.7, 0.0762, 0.0762],
+      length: 0.7,
+      position: [2, -0.5, 1],
+      rotation: [0, 0, Math.atan(1 / 48)],
+      material: 'pvc',
+      sourceId: 'dwv-branch-x',
+      ...over,
+    })
+    const members = [
+      mk({}),
+      // the pair, coaxial with the drain's whole plan run
+      mk({
+        system: 'hvac',
+        dims: [2.4, 0.019, 0.019],
+        length: 2.4,
+        position: [2, 0.4, 1],
+        rotation: [0, 0, 0],
+        material: 'copper',
+        sourceId: 'lineset-suction-1',
+      }),
+      mk({
+        system: 'hvac',
+        dims: [2.4, 0.0095, 0.0095],
+        length: 2.4,
+        position: [2, 0.4, 1],
+        rotation: [0, 0, 0],
+        material: 'copper',
+        sourceId: 'lineset-liquid-1',
+      }),
+    ]
+    const mep = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    const arrows = [...svg.matchAll(
+      /M-3\.5 -3 L4\.5 0 L-3\.5 3 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/g,
+    )].map((m) => [Number(m[1]), Number(m[2])] as [number, number])
+    expect(arrows.length).toBe(1) // census: the shadowed run still prints
+    const rails = svgRects(svg, ['#35b8c9', '#d98134'])
+    expect(rails.length).toBe(2)
+    for (const r of rails) {
+      expect(rectDist(arrows[0]?.[0] ?? 0, arrows[0]?.[1] ?? 0, r)).toBeGreaterThanOrEqual(4)
+    }
+  })
+
+  test('cite census: every tick keeps its cite (own-tick/own-run exemption, seam round 2)', () => {
+    // Round-1 cites had NO own exemptions: the tick itself (placed[] 14 px
+    // away) and the cite's own pipe run killed the near ring — frost went
+    // 2 crossings → 1 cite. Census must be 1:1 with ticks.
+    const frost = frostMepSvg()
+    expect((frost.match(/SLEEVE \(P2603\.4\)/g) ?? []).length).toBe(parseTicks(frost).length)
+    const court = courtyardSvg()
+    const courtTicks = parseTicks(court).length
+    expect(courtTicks).toBe(3)
+    expect((court.match(/SLEEVE \(P2603\.4\)/g) ?? []).length).toBe(3)
+  })
+
+  test('courtyard ticks hold the round-2 invariants too (fallback-path ticks)', () => {
+    assertTickInvariants(courtyardSvg())
+  })
+
+  const courtyardSvg = () => {
     const uWalls = [
       swall('u_s', [0, 0], [12, 0]),
       swall('u_e', [12, 0], [12, 8]),
@@ -1984,10 +2093,16 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     const p = layoutPlumbing(uWalls, uRooms, specFrost)
     const h = layoutHvac(uWalls, uRooms, specFrost, { heatPump: { position: [12.5, 0, 5.5] } })
     const f = buildFoundation(uWalls, [sslab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
-    const svg =
-      buildPlanSet([...p.members, ...h.members, ...f], [...p.fixtures, ...h.fixtures], {}).find(
-        (s) => s.title.startsWith('Plumbing'),
-      )?.svg ?? ''
+    const mep = buildPlanSet(
+      [...p.members, ...h.members, ...f],
+      [...p.fixtures, ...h.fixtures],
+      {},
+    ).find((s) => s.title.startsWith('Plumbing'))
+    return mep?.svg ?? ''
+  }
+
+  test('courtyard east exit: marker text clears pipes, bubbles, CITES, equipment + the viewBox', () => {
+    const svg = courtyardSvg()
     const txt = svg.match(
       /<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>SEWER\/SEPTIC/,
     )
@@ -2022,6 +2137,26 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
       expect(
         Math.hypot(bx - Number(glyph?.[1]), by - Number(glyph?.[2])),
       ).toBeGreaterThanOrEqual(12)
+    }
+    // FAIL-1 gates: the marker text never overprints a SLEEVE cite (the
+    // round-1 tier 2 laid it 11.6 px from the exit cite) …
+    const cites = [...svg.matchAll(
+      /<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*>SLEEVE \(P2603\.4\)/g,
+    )].map((m) => [Number(m[1]), Number(m[2]) - 3] as [number, number])
+    expect(cites.length).toBeGreaterThan(0)
+    const citeW = 'SLEEVE (P2603.4)'.length * 6
+    for (const [cx, cy] of cites) {
+      expect(Math.hypot(cx - cxT, cy - ty)).toBeGreaterThanOrEqual(12)
+      // and the rects themselves separate (axis test, 4 px pad)
+      const apart =
+        Math.abs(cx - cxT) >= citeW / 2 + wTxt / 2 + 4 || Math.abs(cy - ty) >= 14
+      expect(apart).toBe(true)
+    }
+    // … and never crosses the water-heater equipment box (unregistered in
+    // round 1 — the cite ran straight through it)
+    const whBoxes = svgRects(svg, ['#b5aa97'])
+    for (const r of whBoxes) {
+      expect(textHits(cxT, ty, wTxt / 2, 5, r)).toBe(false)
     }
   })
 })

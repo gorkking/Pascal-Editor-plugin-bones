@@ -497,7 +497,19 @@ function planSheet(
     hw2: number,
     hh2: number,
     pad = 2,
-  ): boolean => pipeRects.every((r) => !textHitsPipe(cx2, cy2, hw2, hh2, r, pad))
+    ignoreSourceId?: string,
+  ): boolean =>
+    pipeRects.every(
+      (r) => r.sourceId === ignoreSourceId || !textHitsPipe(cx2, cy2, hw2, hh2, r, pad),
+    )
+  // Placed TEXT rects are obstacles for every LATER text (seam round 2:
+  // the marker cite overprinted the exit SLEEVE cite — text knew bubbles
+  // and pipes but never other text).
+  const textRects: { x: number; y: number; hw: number; hh: number }[] = []
+  const textClearOfTexts = (cx2: number, cy2: number, hw2: number, hh2: number, pad = 4): boolean =>
+    textRects.every(
+      (r) => Math.abs(r.x - cx2) >= r.hw + hw2 + pad || Math.abs(r.y - cy2) >= r.hh + hh2 + pad,
+    )
   for (const m of sorted) {
     if (stroked.has(m)) continue
     // Slab field already printed as the layer-ZERO underlay above; the
@@ -568,8 +580,14 @@ function planSheet(
     shapes.push(
       `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${tx.toFixed(1)} ${tz.toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
-    // every pipe as drawn is a glyph-layer obstacle (seam round)
-    if (def.key === 'mep' && m.role === 'pipe-run' && (m.system === 'plumbing' || m.system === 'hvac')) {
+    // every pipe as drawn is a glyph-layer obstacle (seam round) — and so
+    // are the equipment bodies (seam round 2: the marker cite crossed the
+    // water-heater box, which was never registered)
+    if (
+      def.key === 'mep' &&
+      (m.role === 'pipe-run' || m.role === 'equipment' || m.role === 'water-heater') &&
+      (m.system === 'plumbing' || m.system === 'hvac')
+    ) {
       pipeRects.push({
         x: tx,
         y: tz,
@@ -692,33 +710,60 @@ function planSheet(
     // carries the line-set pair (rails ±2.5 px off the same centerline)
     // the bars printed coaxial with both rails, and on fallback scenes the
     // cleanout bubbles sit AT the crossing by construction (seam round).
-    // Each tick may slide a small budget ALONG ITS OWN LEG — still visually
-    // at the crossing — to clear other pipes and every bubble; when nothing
-    // inside the budget fully clears, the least-crowded spot wins (the
-    // crossing count is pinned by the round-4 gates; never drop a tick).
-    const TICK_R = 10.5 // bar half-span 6 + glyph body ≈ ±4.5 gap to rails
+    // Each tick may slide a small 2D budget — still visually at the
+    // crossing — under TWO seam-round-2 rules (the round-1 search scored
+    // CENTER distance and once drifted a tick off its own pipe onto the
+    // liquid rail — it read as ticking the LINE-SET):
+    //  - HARD invariant: the bar span must INTERSECT the tick's own pipe
+    //    rect at every candidate (a sleeve tick that doesn't cross its
+    //    pipe is meaningless) — t=0/n=0 always qualifies, so a tick is
+    //    never dropped;
+    //  - the score measures the BAR-TIP endpoints against foreign rects,
+    //    not the center; least-crowded own-crossing spot when nothing
+    //    fully clears.
     for (const k of marks) {
       const axK = Math.cos(k.ang)
       const ayK = Math.sin(k.ang)
+      const own = pipeRects.filter((r) => r.sourceId === k.sourceId)
+      const barsCrossOwn = (px: number, py: number): boolean =>
+        own.some((r) => {
+          const c = Math.cos(r.ang)
+          const s = Math.sin(r.ang)
+          const dx = px - r.x
+          const dy = py - r.y
+          const along = Math.abs(dx * c + dy * s)
+          const lat = Math.abs(-dx * s + dy * c)
+          return along <= r.hl && lat <= 6 + r.hw - 2 // ≥2 px of real overlap
+        })
+      // the glyph's 5 governing points: center + the 4 bar endpoints
+      const tickPoints = (px: number, py: number): [number, number][] => {
+        const pts: [number, number][] = [[px, py]]
+        for (const s1 of [-1, 1]) {
+          for (const s2 of [-1, 1]) {
+            pts.push([px + s1 * 2.5 * axK - s2 * 6 * ayK, py + s1 * 2.5 * ayK + s2 * 6 * axK])
+          }
+        }
+        return pts
+      }
       let best: { x: number; y: number; score: number } | null = null
-      // 2D search: along the leg (arrows' ±28 budget) × a small
-      // perpendicular escape — rails run ALONG the crossed wall, so pure
-      // along-leg slides can be bracketed by bubbles on tight exits while
-      // one step beside the pipe clears everything (seam round).
-      outer: for (const t of [0, 4, -4, 8, -8, 12, -12, 16, -16, 20, -20, 24, -24, 28, -28]) {
-        for (const n of [0, 5, -5, 10, -10]) {
+      outer: for (const t of [0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 12, -12, 14, -14, 16, -16, 20, -20, 24, -24, 28, -28]) {
+        for (const n of [0, 3, -3, 5, -5]) {
           const px = k.x + axK * t - ayK * n
           const py = k.y + ayK * t + axK * n
-          const pipeGap = pipeRects.reduce(
-            (m2, r) => (r.sourceId === k.sourceId ? m2 : Math.min(m2, pipeDist(px, py, r))),
-            Number.POSITIVE_INFINITY,
-          )
+          if (!barsCrossOwn(px, py)) continue
+          const tipGap = pipeRects.reduce((m2, r) => {
+            if (r.sourceId === k.sourceId) return m2
+            return Math.min(
+              m2,
+              tickPoints(px, py).reduce((m3, [qx, qy]) => Math.min(m3, pipeDist(qx, qy, r)), Number.POSITIVE_INFINITY),
+            )
+          }, Number.POSITIVE_INFINITY)
           const bubbleGap = placed.reduce(
             (m2, q) => Math.min(m2, Math.hypot(q.x - px, q.y - py)),
             Number.POSITIVE_INFINITY,
           )
-          // score: how far past the required clearances this spot sits
-          const score = Math.min(pipeGap - TICK_R, bubbleGap - 13)
+          // 5 = the gate's 4 px tip clearance + the 1.6 px bar stroke
+          const score = Math.min(tipGap - 5, bubbleGap - 13)
           if (score >= 0) {
             best = { x: px, y: py, score }
             break outer
@@ -731,7 +776,8 @@ function planSheet(
       shapes.push(
         `<path d="M-2.5 -6 L-2.5 6 M2.5 -6 L2.5 6" stroke="${DWV_FLOW_ARROW}" stroke-width="1.6" fill="none" transform="translate(${kx.toFixed(1)} ${ky.toFixed(1)}) rotate(${deg(k.ang).toFixed(2)})"/>`,
       )
-      placed.push({ x: kx, y: ky })
+      const tickEntry = { x: kx, y: ky }
+      placed.push(tickEntry)
       k.x = kx
       k.y = ky
       // the cite slides perpendicular/along the pipe until it fits the
@@ -741,28 +787,44 @@ function planSheet(
       const ny2 = Math.cos(k.ang)
       const ax2 = Math.cos(k.ang)
       const ay2 = Math.sin(k.ang)
-      // near ring first, then a wider ring (small rooms cluster their
-      // bubbles right on top of the crossing — powder-room compose)
-      const spots: [number, number][] = [14, 26, 38].flatMap((r) => [
-        [k.x + nx2 * r, k.y + ny2 * r] as [number, number],
-        [k.x - nx2 * r, k.y - ny2 * r] as [number, number],
-        [k.x + ax2 * (r + 12), k.y + ay2 * (r + 12)] as [number, number],
-        [k.x - ax2 * (r + 12), k.y - ay2 * (r + 12)] as [number, number],
+      // near ring first, then wider rings (small rooms cluster their
+      // bubbles right on top of the crossing — powder-room compose).
+      // Candidates near the sheet edge CLAMP inboard instead of dropping
+      // (seam round 2: the courtyard EXIT cite died on the sheet test —
+      // every centered spot at x+width/2 ran past the margin).
+      const clampCite = ([sx, sy]: [number, number]): [number, number] => {
+        const lo = MARGIN + 3 + sleeveW / 2
+        const hi = W - MARGIN - 3 - sleeveW / 2
+        return [Math.max(lo, Math.min(hi, sx)), sy]
+      }
+      const spots: [number, number][] = [14, 26, 38, 50].flatMap((r) => [
+        clampCite([k.x + nx2 * r, k.y + ny2 * r]),
+        clampCite([k.x - nx2 * r, k.y - ny2 * r]),
+        clampCite([k.x + ax2 * (r + 12), k.y + ay2 * (r + 12)]),
+        clampCite([k.x - ax2 * (r + 12), k.y - ay2 * (r + 12)]),
       ])
+      // seam round 2 (census FLAG): the cite exempts its OWN tick (it sat
+      // in placed[] 14 px away and killed every near-ring spot) and its
+      // OWN pipe run — it may ride the leg it annotates; other texts are
+      // hard obstacles (text-over-text was FAIL 1).
       const spot = spots.find(
         ([tx, ty]) =>
           tx - sleeveW / 2 > MARGIN &&
           tx + sleeveW / 2 < W - MARGIN &&
           ty > MARGIN + 10 &&
           ty < H - MARGIN &&
-          !placed.some((q) => Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12) &&
-          textClearOfPipes(tx, ty, sleeveW / 2, 5),
+          !placed.some(
+            (q) => q !== tickEntry && Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12,
+          ) &&
+          textClearOfPipes(tx, ty, sleeveW / 2, 5, 2, k.sourceId) &&
+          textClearOfTexts(tx, ty, sleeveW / 2, 5),
       )
       if (!spot) continue
       shapes.push(
         `<text x="${spot[0].toFixed(1)}" y="${(spot[1] + 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${DWV_FLOW_ARROW}" stroke="#fff" stroke-width="2" paint-order="stroke">${SLEEVE_TXT}</text>`,
       )
       placed.push({ x: spot[0], y: spot[1] })
+      textRects.push({ x: spot[0], y: spot[1], hw: sleeveW / 2, hh: 5 })
     }
   }
 
@@ -774,20 +836,25 @@ function planSheet(
     const dx = Math.cos(a.ang)
     const dy = Math.sin(a.ang)
     const maxT = Math.max(0, a.half - 6)
-    // Two passes (seam round): prefer spots clear of OTHER pipes too (the
-    // line-set rails run coaxial with pipe walls); when the whole run is
-    // shadowed, fall back to bubble-clearance alone — an arrow ON linework
-    // still reads, and the round-4 arrow census must not regress.
+    // Three tiers (seam round 2): full pipe clearance, then a relaxed
+    // 4 px margin, then bubbles-only census protection — each over the
+    // SAME 2D grid the ticks got (a short run whose whole length is
+    // coaxial with a line-set riser has no clean 1D spot: the demo arrow
+    // reproduced the pre-fix elbow coordinate exactly; one perpendicular
+    // step clears it).
     let spot: { x: number; y: number } | null = null
-    for (const needPipes of [true, false]) {
+    for (const radius of [8.5, 4, 0]) {
       for (const t of [0, 10, -10, 16, -16, 22, -22, 28, -28]) {
         if (Math.abs(t) > maxT) continue
-        const px = a.x + dx * t
-        const py = a.y + dy * t
-        if (placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) continue
-        if (needPipes && !clearOfPipes(px, py, 8.5, a.sourceId)) continue
-        spot = { x: px, y: py }
-        break
+        for (const n of [0, 5, -5, 10, -10]) {
+          const px = a.x + dx * t - dy * n
+          const py = a.y + dy * t + dx * n
+          if (placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) continue
+          if (radius > 0 && !clearOfPipes(px, py, radius, a.sourceId)) continue
+          spot = { x: px, y: py }
+          break
+        }
+        if (spot) break
       }
       if (spot) break
     }
@@ -871,6 +938,12 @@ function planSheet(
       { x: gx, y: gy + 28, anchor: 'middle' },
       { x: cx2, y: cy2 - 26, anchor: 'middle' },
       { x: cx2, y: cy2 + 28, anchor: 'middle' },
+      // widest ring (seam round 2: the exit SLEEVE cite now occupies the
+      // near zone and the marker must still print somewhere honest)
+      { x: gx, y: gy - 40, anchor: 'middle' },
+      { x: gx, y: gy + 42, anchor: 'middle' },
+      { x: cx2, y: cy2 - 52, anchor: 'middle' },
+      { x: cx2, y: cy2 + 54, anchor: 'middle' },
     ]
     const leftOf = (s: TextSpot): number =>
       s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2
@@ -895,21 +968,28 @@ function planSheet(
     }
     const pipeClear = (s: TextSpot): boolean =>
       textClearOfPipes(leftOf(s) + sewerW / 2, s.y, sewerW / 2, 5)
-    // Tiered (seam round): the bold cite may NEVER lie along a pipe
-    // corridor — the old last-resort erased the main + both line-set rails
-    // over ~130 px. (1) clears everything; (2) clears pipes, tolerates a
-    // bubble halo graze; (3) at minimum the cite's CENTER is off every
-    // pipe; sheet fit is required throughout.
+    // Tiered (seam round 2): the bold cite may NEVER lie along a pipe
+    // corridor NOR on another text — round-1's tier 2 carried no bubble or
+    // text test and overprinted the exit SLEEVE cite 11.6 px away.
+    // (1) clears everything (pipes+equipment as full rects, bubbles,
+    // texts); (2) relaxes the pipe test to center-off-pipe only, keeps
+    // bubbles + texts; (3) relaxes bubbles only — text and pipe-center
+    // clearance hold in EVERY tier; sheet fit throughout.
     const clamped = textSpots.map(clampToSheet)
+    const textsClear = (s: TextSpot): boolean =>
+      textClearOfTexts(leftOf(s) + sewerW / 2, s.y, sewerW / 2, 5)
+    const centerOffPipes = (s: TextSpot): boolean =>
+      clearOfPipes(leftOf(s) + sewerW / 2, s.y, 5)
     const spot2 =
-      clamped.find((s) => onSheet(s) && bubbleClear(s) && pipeClear(s)) ??
-      clamped.find((s) => onSheet(s) && pipeClear(s)) ??
-      clamped.find((s) => onSheet(s) && clearOfPipes(leftOf(s) + sewerW / 2, s.y, 5))
+      clamped.find((s) => onSheet(s) && bubbleClear(s) && textsClear(s) && pipeClear(s)) ??
+      clamped.find((s) => onSheet(s) && bubbleClear(s) && textsClear(s) && centerOffPipes(s)) ??
+      clamped.find((s) => onSheet(s) && textsClear(s) && centerOffPipes(s))
     if (spot2) {
       shapes.push(
         `<text x="${spot2.x.toFixed(1)}" y="${(spot2.y + 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="${spot2.anchor}" font-family="Helvetica, Arial, sans-serif" fill="${DWV_FLOW_ARROW}" stroke="#fff" stroke-width="2" paint-order="stroke">${SEWER_TXT}</text>`,
       )
       placed.push({ x: spot2.x, y: spot2.y })
+      textRects.push({ x: leftOf(spot2) + sewerW / 2, y: spot2.y, hw: sewerW / 2, hh: 5 })
     }
   }
 
