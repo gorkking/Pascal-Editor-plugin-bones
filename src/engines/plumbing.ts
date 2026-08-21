@@ -88,6 +88,7 @@ const rules = mepRules as {
         garageIgnitionElevationIn?: number
         tpDischargeMaxAboveFloorIn?: number
         panMinDepthIn?: number
+        seismicStraps?: { count?: number; lowerAboveControlsIn?: number }
       }
     }
     fixtureRoughIn?: {
@@ -1607,9 +1608,13 @@ function placedPlumbing(
       const halfW = whDims[0] / 2 + 0.02
       const frontOff = whOff + whDims[2] / 2 + 0.02
       const frontC: Pt = [whWallPlan[0] + nx * frontOff, whWallPlan[1] + nz * frontOff]
+      // Lower strap: inside the lower third but never closer than the
+      // data's controls clearance (controls sit ~15 cm up a tank shell).
+      const controlsClearIn = whRules?.seismicStraps?.lowerAboveControlsIn ?? 4
+      const lowerY = Math.max(whBot + whDims[1] / 4, whBot + 0.15 + inches(controlsClearIn))
       const strapYs: [string, number][] = [
         ['upper', whBot + whDims[1] * (5 / 6)],
-        ['lower', whBot + whDims[1] * (1 / 4)],
+        ['lower', lowerY],
       ]
       for (const [zone, strapY] of strapYs) {
         const sSpec: PipeSpec = {
