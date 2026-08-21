@@ -319,6 +319,30 @@ AND a gate — a checklist line without a test is a wish.
   Origin: night-4 user ask 2026-08-17 ("AC block" catalog item — 1/2/3+
   outdoor units by cooled volume + jurisdiction, piped and powered).
   Gate: `src/engines/hvac.condensers.test.ts`
+- **M3 Return air is modeled, and never taken from a garage.** The air
+  handler prefers CONDITIONED service space (laundry/utility > closet-named
+  rooms > hallway); the garage is a last resort that fires a loud warning
+  ('air handler in garage — M1602.2(1) forbids garage return air; provide a
+  sealed return + R302.5.2 duct protection — verify') — never silent. The
+  OPEN central return grille lives in a central conditioned room (hallway
+  first) and NEVER in the garage (IRC M1602.2(1)); a RETURN trunk — full
+  supply-trunk section (schematic mirror; label honesty over invented cfm),
+  labels prefixed 'Return', sourceId `return-trunk` — connects the grille to
+  the air handler as continuous duct (riser → plane legs → drop offset 0.5 m
+  from the supply riser), on the same attic/soffit plane M1 governs. Rooms a
+  DOOR can close off carry the transfer-path assumption on their supply
+  register ('door undercut / jumper duct assumed (M1602.2)' +
+  `meta.transferAirAssumed`) — v1 never invents jumper-duct geometry; the
+  grille room itself stays label-free. The takeoff books return duct on its
+  own `Return duct W×H"` lf/fitting rows equal to the drawn lengths (never
+  blended into supply rows), and the MEP sheet prints return runs in the
+  darker return duct tone with a 'duct — return air' legend row (thermostat
+  auto-spot targets the REAL grille).
+  Origin: LOD-400 wave-2 audit B19 (a)+(c) BLOCKER (2026-08-20): AH + open
+  return modeled INSIDE the garage silently; return air arrived by magic.
+  Gates: `src/engines/hvac.return.test.ts` (placement, warning, grille
+  exclusion, E2-style return continuity, transfer labels, takeoff mirror),
+  `src/plans/plan-set.test.ts` (return tone + legend row).
 
 ## P — Plans (the exported document)
 

@@ -611,8 +611,17 @@ export function computeTakeoff(
       // Trunks are rectangular sheet metal by the hvac naming contract
       // ('Trunk…' label prefix) — a trunk stepped down to the square 8×8
       // minimum is still square duct, not 8" round (round-10 finding).
+      // RETURN-side duct ('Return…' prefix, B19c) books on its OWN rows —
+      // mirroring the supply rows, never merging into them (the return
+      // trunk shares the supply's 14×8 section; one blended row would hide
+      // which air path the tin serves).
       const isTrunk = m.label?.startsWith('Trunk') === true
-      const item = w === h && !isTrunk ? `Duct ${w}" round` : `Duct ${w}×${h}"`
+      const isReturn = m.label?.startsWith('Return') === true
+      const item = isReturn
+        ? `Return duct ${w}×${h}"`
+        : w === h && !isTrunk
+          ? `Duct ${w}" round`
+          : `Duct ${w}×${h}"`
       const key = `${m.system}|${item}`
       const tally = ductTallies.get(key) ?? { section: SECTION_OF[m.system], item, lf: 0 }
       tally.lf += toFeet(m.length)
@@ -676,7 +685,14 @@ export function computeTakeoff(
     } else if (m.role === 'duct-run') {
       const w = Math.round(m.dims[2] / 0.0254)
       const h = Math.round(m.dims[1] / 0.0254)
-      const item = w === h ? `Duct ${w}" fittings` : `Duct ${w}×${h}" fittings`
+      // Return-side bends book under their own item (same mirror as the lf
+      // rows above).
+      const isReturn = m.label?.startsWith('Return') === true
+      const item = isReturn
+        ? `Return duct ${w}×${h}" fittings`
+        : w === h
+          ? `Duct ${w}" fittings`
+          : `Duct ${w}×${h}" fittings`
       const key = `${m.system}|${item}|${m.sourceId}`
       const chain = fittingChains.get(key) ?? { section: SECTION_OF[m.system], item, legs: 0 }
       chain.legs += 1
