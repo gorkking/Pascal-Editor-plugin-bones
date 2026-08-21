@@ -1,7 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { Mesh } from 'three'
 import type { Fixture, Member, MemberMaterial, MemberRole } from '../core/types'
-import { BELOW_GHOST_OPACITY, buildGroup, FAINT_OPACITY, isBelowFloor } from './renderer'
+import {
+  BELOW_GHOST_OPACITY,
+  buildGroup,
+  FAINT_OPACITY,
+  isBelowFloor,
+  SLAB_FIELD_OPACITY,
+  THROUGH_RENDER_ORDER,
+} from './renderer'
 
 /**
  * The rubric's rendering gate: draw calls stay O(color buckets), never
@@ -343,6 +350,72 @@ describe('view modes — per-stratum treatment (round 2026-08-20 tri-state)', ()
     // census: every member + fixture drawn once on the scene layer, plus one
     // overlay copy per below-floor instance
     expect(instanceCount(group)).toBe(4 + 6 + 2)
+  })
+
+  test("'basement': buried runs read THROUGH the slab field — distinct treatments (QA round 3)", () => {
+    // The money-shot composition (51-basement-34-sw.png): a slab-on-grade
+    // field over the under-slab DWV network. With the field's overlay copy
+    // at 0.9 + depth-writing, the pipes only peeked out at the edges — the
+    // core basement promise ("you get to see what's under your house…
+    // the drainage") was only partially met. Contract: the slab/vapor
+    // FIELDS are a translucent depth-silent veil; the buried runs (and
+    // their fixtures) draw AFTER them and read through.
+    const slabField: Member = {
+      system: 'foundation',
+      role: 'slab',
+      dims: [10, 0.1, 8],
+      length: 10,
+      position: [5, -0.05, 4],
+      rotation: [0, 0, 0],
+      material: 'concrete',
+      sourceId: 'slab_1',
+    }
+    const vapor: Member = {
+      ...slabField,
+      role: 'vapor-retarder',
+      material: 'pvc',
+      dims: [10, 0.006, 8],
+      position: [5, -0.11, 4],
+      sourceId: 'vb_1',
+    }
+    const underSlabDwv: Member = {
+      ...buriedDwv, // plumbing pipe-run, top of pipe under the floor line
+    }
+    const cleanout: Fixture = {
+      system: 'plumbing',
+      kind: 'cleanout',
+      position: [1, -0.2, 0],
+      rotationY: 0,
+      sourceId: 'dwv-main',
+    }
+    const group = buildGroup([slabField, vapor, footing, underSlabDwv], [cleanout], 'basement')
+    const ghosts = (group.children as unknown as (MeshLike & { renderOrder: number })[]).filter(
+      (m) => m.layers.mask === OVERLAY_MASK,
+    )
+    // FIELDS: translucent, depth-SILENT, first pass — a veil, never a wall
+    const fields = ghosts.filter((g) => g.material.opacity === SLAB_FIELD_OPACITY)
+    expect(fields).toHaveLength(2) // slab + vapor retarder
+    for (const f of fields) {
+      expect(f.material.depthWrite).toBe(false)
+      expect(f.renderOrder).toBe(0)
+    }
+    // RUNS (pipe + its cleanout riser): strong, self-occluding, drawn AFTER
+    const through = ghosts.filter((g) => g.renderOrder === THROUGH_RENDER_ORDER)
+    expect(through).toHaveLength(2)
+    for (const t of through) {
+      expect(t.material.opacity).toBe(BELOW_GHOST_OPACITY)
+      expect(t.material.depthWrite).toBe(true)
+    }
+    // STRUCTURE (footing): strong, depth-writing, first pass — unchanged
+    const struct = ghosts.filter(
+      (g) => g.renderOrder === 0 && g.material.opacity === BELOW_GHOST_OPACITY,
+    )
+    expect(struct).toHaveLength(1)
+    // every below-floor bucket still ships its opaque scene-layer twin
+    const sceneSolids = (group.children as unknown as MeshLike[]).filter(
+      (m) => m.layers.mask === SCENE_MASK && !m.material.transparent,
+    )
+    expect(sceneSolids).toHaveLength(ghosts.length)
   })
 
   test("'basement': a BURIED fixture joins the ghosted star content, not the shell", () => {

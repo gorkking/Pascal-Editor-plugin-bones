@@ -184,16 +184,35 @@ const SURFACE_FIXTURE_KINDS: ReadonlySet<Fixture['kind']> = new Set([
 /** Basement mode: below-floor overlay strength — near-solid so foundation /
  * drainage / buried pipes read crisply through the floor and the shell. */
 export const BELOW_GHOST_OPACITY = 0.9
+/** Basement mode: the slab/vapor PLANE FIELDS' overlay strength — reduced
+ * (still clearly concrete) and depth-silent, so the under-slab drainage
+ * network reads THROUGH the slab field instead of only peeking out at the
+ * edges (browser QA round 3: 'you get to see what's under your house…
+ * the drainage' was only partially met with the field at 0.9). */
+export const SLAB_FIELD_OPACITY = 0.5
+/** Basement mode: buried MEP runs draw AFTER the slab field in the overlay
+ * pass (renderOrder beats transparent distance-sorting), so with the field
+ * writing no depth the network composites crisply on top of it. */
+export const THROUGH_RENDER_ORDER = 1
 /** Basement mode: the above-floor house shell — barely visible, enough to
  * orient ("super transparent on top" — user round 2026-08-20). */
 export const FAINT_OPACITY = 0.08
 
 /** Per-bucket render treatment (derived from view mode + stratum):
- * 'solid' one opaque depth-tested mesh; 'ghosted' opaque mesh + a strong
- * overlay-layer copy (reads through everything — basement mode's
- * below-floor star content); 'faint' one barely-visible transparent mesh
- * (basement mode's above-floor orientation shell). */
-type BucketTreatment = 'solid' | 'ghosted' | 'faint'
+ * 'solid' one opaque depth-tested mesh; 'faint' one barely-visible
+ * transparent mesh (basement's above-floor orientation shell); and the
+ * three below-floor basement variants, all opaque-solid on the scene layer
+ * plus an overlay copy that differs per class:
+ *  - 'ghosted'         structural stratum (footings, stemwalls, joists…):
+ *                      strong (0.9), depth-writing, renderOrder 0;
+ *  - 'ghosted-field'   the slab / vapor plane fields: reduced opacity,
+ *                      depthWrite OFF, renderOrder 0 — a translucent
+ *                      concrete veil that can never hide what's under it;
+ *  - 'ghosted-through' buried MEP runs + their fixtures (the drainage
+ *                      network, cleanout risers): strong, depth-writing
+ *                      (self-occlusion stays physical), renderOrder 1 —
+ *                      drawn after the field, reading through it. */
+type BucketTreatment = 'solid' | 'ghosted' | 'ghosted-field' | 'ghosted-through' | 'faint'
 
 type Bucket = {
   color: string
@@ -263,10 +282,15 @@ export function buildGroups(
  *    outside/under. This retires the 2026-08-16 'crawl-space at a glance'
  *    ghosts in favor of the dedicated basement mode.
  *  - 'basement' — under the house: below-floor members render fully (solid
- *    scene copy) PLUS a strong overlay copy so foundation/drainage read
- *    through the floor and the shell from any angle; everything above the
- *    floor collapses to a barely-visible transparent shell (FAINT_OPACITY)
- *    for orientation only. No dollhouse cull (the shell is already faint).
+ *    scene copy) PLUS an overlay copy so foundation/drainage read through
+ *    the floor and the shell from any angle; everything above the floor
+ *    collapses to a barely-visible transparent shell (FAINT_OPACITY) for
+ *    orientation only. No dollhouse cull (the shell is already faint).
+ *    Within the stratum (browser QA round 3: the DWV network must read
+ *    THROUGH the slab, not just at its edges): slab/vapor plane FIELDS get
+ *    the translucent depth-silent 'ghosted-field' veil, buried MEP runs +
+ *    fixtures get 'ghosted-through' (drawn after the field), structure
+ *    keeps the strong 'ghosted' copy.
  */
 export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMode): Group {
   const buckets = new Map<string, Bucket>()
@@ -292,10 +316,22 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
     for (const member of members) {
       const color = colorOf(member)
       if (mode === 'basement') {
-        // Stratum split: below-floor is the star (solid + strong overlay
-        // ghost), the house above fades to the faint orientation shell.
+        // Stratum split: below-floor is the star (solid + overlay ghost),
+        // the house above fades to the faint orientation shell. Within the
+        // stratum the slab/vapor FIELDS turn into a translucent veil and
+        // the buried MEP network draws through them (QA round 3).
         if (isBelowFloor(member)) {
-          push(`${color}|below`, color, member.dims, member.position, member.rotation, undefined, 'ghosted')
+          const field = member.role === 'slab' || member.role === 'vapor-retarder'
+          const run =
+            member.system === 'plumbing' ||
+            member.system === 'hvac' ||
+            member.system === 'electrical'
+          const treatment: BucketTreatment = field
+            ? 'ghosted-field'
+            : run
+              ? 'ghosted-through'
+              : 'ghosted'
+          push(`${color}|${treatment}`, color, member.dims, member.position, member.rotation, undefined, treatment)
         } else {
           push(`${color}|faint`, color, member.dims, member.position, member.rotation, undefined, 'faint')
         }
@@ -325,8 +361,10 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
     if (mode === 'off' && !SURFACE_FIXTURE_KINDS.has(fixture.kind)) continue
     const { dims, color } = fixtureBox(fixture)
     const below = fixture.position[1] + dims[1] / 2 < BURIED_TOP_Y
+    // A buried fixture rides the RUN treatment (a cleanout riser belongs to
+    // the drainage network it serves — it must read through the slab too).
     const treatment: BucketTreatment =
-      mode === 'basement' ? (below ? 'ghosted' : 'faint') : 'solid'
+      mode === 'basement' ? (below ? 'ghosted-through' : 'faint') : 'solid'
     push(`${color}|fixture|${treatment}`, color, dims, fixture.position, [0, fixture.rotationY, 0], undefined, treatment)
   }
 
@@ -352,8 +390,9 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
   //    renders that layer into its own freshly cleared depth buffer and
   //    composites it on top by alpha. The ghost therefore shows THROUGH
   //    floors/walls/occluders (near member still hides far member — the
-  //    round-2 requirement). Basement mode runs it STRONG (0.9): the
-  //    under-floor content is the star of that view.
+  //    round-2 requirement). Basement mode runs structure + buried runs
+  //    STRONG (0.9) and the slab/vapor fields as a depth-silent 0.5 veil
+  //    the runs draw through: the under-floor content is the star.
   //
   // Every in-scene depth trick failed on this pipeline and is pinned in
   // tests: renderer.clearDepth() poisoned the WebGPU pass; an inverted
@@ -386,18 +425,30 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
     if (bucket.face) solid.userData.face = bucket.face
     if (bucket.sourceId) solid.userData.sourceId = bucket.sourceId
     const meshes = [solid]
-    if (bucket.treatment === 'ghosted') {
+    if (
+      bucket.treatment === 'ghosted' ||
+      bucket.treatment === 'ghosted-field' ||
+      bucket.treatment === 'ghosted-through'
+    ) {
+      const field = bucket.treatment === 'ghosted-field'
       const ghostMaterial = new MeshStandardMaterial({
         color: bucket.color,
         roughness: 0.82,
         transparent: true,
-        opacity: BELOW_GHOST_OPACITY,
+        // The slab/vapor veil stays clearly concrete but translucent; the
+        // structure and the buried network keep the strong copy.
+        opacity: field ? SLAB_FIELD_OPACITY : BELOW_GHOST_OPACITY,
       })
       // Self-occlusion inside the overlay pass needs the depth write that
-      // transparent materials normally skip.
-      ghostMaterial.depthWrite = true
+      // transparent materials normally skip — EXCEPT the plane fields: a
+      // depth-writing slab hid the whole under-slab drainage run in the
+      // overlay pass (QA round 3, 51-basement-34-sw.png — pipes only
+      // peeked out at the edges). The field writes no depth; the runs
+      // draw after it (renderOrder) and composite through.
+      ghostMaterial.depthWrite = !field
       const ghost = new InstancedMesh(unitBox, ghostMaterial, bucket.entries.length)
       ghost.layers.set(OVERLAY_LAYER)
+      if (bucket.treatment === 'ghosted-through') ghost.renderOrder = THROUGH_RENDER_ORDER
       meshes.push(ghost)
     }
     bucket.entries.forEach((entry, i) => {

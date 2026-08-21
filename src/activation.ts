@@ -26,9 +26,19 @@ import { useBonesStore } from './store'
  * host wall-mode control is entirely the user's. Restore only fires while
  * walls are still 'down' — a manual change since activation is respected.
  * The pre-X-ray mode lives in the Bones session store (useBonesStore), not
- * on the scene. Renderer/undo/MCP deletions of the framing node do NOT
- * touch wall mode (the host control is one click away) — only the explicit
- * UI actions above do.
+ * on the scene.
+ *
+ * UNDO CONTRACT (deliberate — kept through browser QA round 3): undo
+ * restores CONTENT, never viewer state. Undoing the activation entry
+ * removes the framing node + service points but leaves the wall chip on
+ * Low — wall mode is a host viewer preference outside scene history, and
+ * replaying viewer writes on undo/redo would fight the user's own chip
+ * clicks (the exact re-imposition class this module was built to kill).
+ * The restore belongs ONLY to the explicit deactivation actions above
+ * (viewMode → 'off', panel Remove); after an undo the pre-X-ray mode is
+ * one click away on the host control. Same rule for renderer unmounts and
+ * MCP deletions of the framing node: content paths never touch wall mode.
+ * Checklist row A5 carries this contract.
  *
  * Store handles are passed in (never imported): '@pascal-app/viewer' drags
  * browser-only deps that must not evaluate under bun test, and injected

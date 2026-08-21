@@ -536,7 +536,13 @@ AND a gate — a checklist line without a test is a wish.
   wall-mode change after activation is the user's and survives every
   recompute / re-render / remount. "Live" = a bones:framing node whose
   effective view mode isn't 'off' (an X-ray parked in Normal holds
-  nothing).
+  nothing). UNDO CONTRACT (deliberate, confirmed browser QA round 3): undo
+  restores CONTENT, never viewer state — undoing the activation entry
+  leaves the wall chip on Low, because wall mode is a host viewer pref
+  outside scene history and replaying viewer writes on undo/redo would
+  fight the user's own chip clicks; the restore belongs only to the
+  explicit deactivation actions (viewMode → 'off', panel Remove), and the
+  pre-X-ray mode is one click away after an undo.
   Origin: skeptic blocker 2026-08-21 — removing level A's X-ray restored
   the walls while level B's X-ray was still on (the same failure class the
   round-1 fix closed at the renderer, surviving at the remove/off
