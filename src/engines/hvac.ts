@@ -65,6 +65,7 @@ import {
   pointInPolygon,
   polygonCentroid,
   segmentCrossesRo,
+  wallPath,
   wallPlan,
 } from './electrical'
 import { routePipe, type PipeSpec } from './plumbing'
@@ -89,6 +90,7 @@ const rules = mepRules as {
       linesetLiquidDiaM?: number
       linesetHeightM?: number
       linesetMaxLenAdvisoryM?: number
+      linesetLateralM?: number
       disconnectAboveUnitM?: number
     }
   }
@@ -158,6 +160,18 @@ export const LINESET_PAIR_OFFSET = 0.02
 const LINESET_MAX_LEN_ADVISORY = COND?.linesetMaxLenAdvisoryM ?? 15
 const LINESET_LONG_FLAG =
   'line-set over ~15 m — verify manufacturer max line-set length / oil return (mfr specs govern)'
+/** Cross-trade LATERAL: the pair rides this far OFF the wall centerline
+ * (across-wall, v-axis). Plumbing owns the centerline plane — supply
+ * risers and the DWV stack stand exactly on it — and the post-merge seam
+ * round counted 24 OBB hits from the pair sharing it (both pipes boring
+ * through the 3" stack + 22 supply-riser hits). 3.5 cm clears a ½" supply
+ * riser by ~4 mm even for the rolled-down riser (lateral − roll − both
+ * radii − 2 mm skin); night-5 D2 set the trade-skin convention. Thin
+ * walls CLAMP the offset (the suction riser must stay inside the wall
+ * body) and carry a coordination flag — reduced clearance, never silent. */
+export const LINESET_LATERAL = COND?.linesetLateralM ?? 0.035
+const LINESET_THIN_WALL_FLAG =
+  'line-set clamped in a thin wall — reduced trade clearance; coordinate with plumbing'
 /** Disconnect box center above the unit top, on the wall face (NEC 440.14). */
 const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
 /**
@@ -1094,6 +1108,21 @@ export function layoutHvac(
             { wall: row.wall, u: penU }, ahAnchor, LINESET_Y, walls,
             LINESET_PAIR_OFFSET + LINESET_SUCTION_DIA / 2,
           )
+          // Cross-trade LATERAL for this run: plumbing rides the wall
+          // centerline, the pair shifts across the wall. The offset clamps
+          // so the OUTERMOST pipe surface (lateral + roll + suction radius
+          // + 2 mm skin) stays inside the THINNEST wall on the path — a
+          // 0.114 partition can't grant the full 3.5 cm, so the run keeps
+          // what fits and says so (flag below), never silently pokes out.
+          const pathLegs = wallPath(linesetGraph, { wall: penWall, u: penU }, ahAnchor)
+          const minHalfT = (pathLegs ?? []).reduce(
+            (min2, l) => Math.min(min2, l.wall.thickness / 2),
+            penWall.thickness / 2,
+          )
+          const maxLateral =
+            minHalfT - LINESET_PAIR_OFFSET - LINESET_SUCTION_DIA / 2 - 0.002
+          const lateral = Math.min(LINESET_LATERAL, Math.max(0, maxLateral))
+          const lateralClamped = lateral < LINESET_LATERAL - 1e-9
           // Outside stubs cross ROs as a PAIR too: either pipe's height
           // clipping an RO volume flags BOTH (one shared decision, one
           // shared honesty — E1, same contract as the service laterals).
@@ -1171,34 +1200,39 @@ export function layoutHvac(
             }
             // BOTH pipes derive from the one reference route: a uniform Y
             // shift of ±LINESET_PAIR_OFFSET on EVERY member (horizontal
-            // legs and detour crossings — 4 cm vertical separation), Ø
-            // components rewritten per pipe, labels/sourceIds per pipe,
-            // flags copied to both. RISERS additionally ROLL the pair 90°:
-            // a lower pipe's riser must cross the upper pipe's plane on the
-            // way up, so coaxial risers would leave the liquid line inside
-            // the suction line (the skeptic's coincident-stack class) —
-            // each riser steps ±LINESET_PAIR_OFFSET PERPENDICULAR to its
-            // own wall's axis (rollYawAt — side-by-side across the wall,
-            // exactly like field-bent soft copper).
+            // legs and detour crossings — 4 cm vertical separation), the
+            // whole run pushed the cross-trade LATERAL off the wall
+            // centerline (perpendicular to each member's own wall axis —
+            // adjacent legs at a corner mismatch by lateral·√2 ≤ 5 cm,
+            // inside the continuity tolerance), Ø components rewritten per
+            // pipe, labels/sourceIds per pipe, flags copied to both.
+            // RISERS additionally ROLL the pair 90°: a lower pipe's riser
+            // must cross the upper pipe's plane on the way up, so coaxial
+            // risers would leave the liquid line inside the suction line
+            // (the skeptic's coincident-stack class) — each riser steps
+            // ±LINESET_PAIR_OFFSET PERPENDICULAR to its own wall's axis
+            // (rollYawAt) AROUND the lateral plane, side-by-side across
+            // the wall exactly like field-bent soft copper.
             for (let i = 0; i < ref.length; i++) {
               const m = ref[i] as Member
               const vertical = isVertical(m)
-              let px = m.position[0]
-              let pz = m.position[2]
-              if (vertical) {
-                const rollYaw = rollYawAt(i)
-                px += shift * Math.sin(rollYaw)
-                pz += shift * Math.cos(rollYaw)
-              }
-              runMembers.push({
+              const acrossYaw = vertical ? rollYawAt(i) : m.rotation[1]
+              const across = vertical ? lateral + shift : lateral
+              const clone: Member = {
                 ...m,
                 dims: vertical
                   ? [pipe.dia, m.dims[1], pipe.dia]
                   : [m.dims[0], pipe.dia, pipe.dia],
-                position: [px, m.position[1] + shift, pz],
+                position: [
+                  m.position[0] + across * Math.sin(acrossYaw),
+                  m.position[1] + shift,
+                  m.position[2] + across * Math.cos(acrossYaw),
+                ],
                 sourceId: pipe.sourceId,
                 label: (m.label ?? REF_LABEL).replace(REF_LABEL, pipe.label),
-              })
+              }
+              if (lateralClamped && !clone.flag) clone.flag = LINESET_THIN_WALL_FLAG
+              runMembers.push(clone)
             }
             // coil stub: wall anchor → the air handler
             const ap = wallPlan(ahAnchor)
@@ -1341,4 +1375,111 @@ export function layoutHvac(
   }
 
   return { members, fixtures, warnings }
+}
+
+// ---------------------------------------------------------------------------
+// Cross-trade coordination (post-merge seam round)
+// ---------------------------------------------------------------------------
+
+/** Sampled step along a line-set member's axis for the crossing test. */
+const TRADE_SAMPLE_STEP = 0.02
+/** Trade skin — the 2 mm grace every SAT harness in the repo uses. */
+const TRADE_SKIN = 0.002
+
+/** A world point in `m`'s local frame (euler XYZ: world = Rx·Ry·Rz·local,
+ * the repo's member convention — see plan-set's projection notes). */
+function memberLocal(
+  m: Member,
+  p: readonly [number, number, number],
+): [number, number, number] {
+  let x = p[0] - m.position[0]
+  let y = p[1] - m.position[1]
+  let z = p[2] - m.position[2]
+  const [rx, ry, rz] = m.rotation
+  // local = Rz(−rz) · Ry(−ry) · Rx(−rx) · world
+  let c = Math.cos(-rx)
+  let s = Math.sin(-rx)
+  ;[y, z] = [c * y - s * z, s * y + c * z]
+  c = Math.cos(-ry)
+  s = Math.sin(-ry)
+  ;[x, z] = [c * x + s * z, -s * x + c * z]
+  c = Math.cos(-rz)
+  s = Math.sin(-rz)
+  ;[x, y] = [c * x - s * y, s * x + c * y]
+  return [x, y, z]
+}
+
+/**
+ * Cross-trade honesty for the refrigerant line-set (post-merge seam round:
+ * 24 OBB hits on a both-systems-hot compose — the pair bored through the
+ * 3" DWV stack and 22 supply risers standing on the wall centerline).
+ * The LATERAL offset clears the centerline plane in the common case, but
+ * geometry can still be forced to cross: a 3" stack fills the cavity wider
+ * than any lateral dodges (±38 mm), and clamped thin-wall runs share the
+ * plane outright. compute calls this AFTER both engines land members —
+ * every line-set member whose swept volume clips a plumbing pipe or stack
+ * gets a coordinate-trades flag. Never a silent bore (E1's spirit across
+ * trades; night-5 D2 set the trade-skin convention).
+ *
+ * Detection: the line-set member's axis sampled every 2 cm against each
+ * plumbing member's OBB inflated by the line-set radius + the 2 mm skin
+ * (full euler inverse — sloped drain legs included).
+ */
+export function flagLinesetTradeCrossings(members: Member[]): void {
+  const lineset = members.filter(
+    (m) => m.system === 'hvac' && m.role === 'pipe-run' && m.sourceId.startsWith('lineset-'),
+  )
+  if (lineset.length === 0) return
+  const plumbing = members.filter(
+    (m) => m.system === 'plumbing' && (m.role === 'pipe-run' || m.role === 'vent-stack'),
+  )
+  if (plumbing.length === 0) return
+  // loose world-space bound per plumbing member (pre-cull)
+  const bounds = plumbing.map((p) => {
+    const r = (p.dims[0] + p.dims[1] + p.dims[2]) / 2 + 0.05
+    return { p, r }
+  })
+  for (const ls of lineset) {
+    if (ls.flag) continue // already honest (RO / air-run / thin-wall / >15 m)
+    const vertical = ls.rotation[1] === 0 && ls.dims[1] === ls.length
+    const half = ls.length / 2
+    const yaw = ls.rotation[1]
+    const axis: [number, number, number] = vertical
+      ? [0, 1, 0]
+      : [Math.cos(yaw), 0, -Math.sin(yaw)]
+    const radius = Math.max(ls.dims[vertical ? 0 : 1], ls.dims[2]) / 2
+    const steps = Math.max(1, Math.ceil(ls.length / TRADE_SAMPLE_STEP))
+    let hit: Member | null = null
+    for (const { p, r } of bounds) {
+      const dc = Math.hypot(
+        p.position[0] - ls.position[0],
+        p.position[1] - ls.position[1],
+        p.position[2] - ls.position[2],
+      )
+      if (dc > r + half + radius) continue
+      for (let i = 0; i <= steps && !hit; i++) {
+        const t = -half + (ls.length * i) / steps
+        const q: [number, number, number] = [
+          ls.position[0] + axis[0] * t,
+          ls.position[1] + axis[1] * t,
+          ls.position[2] + axis[2] * t,
+        ]
+        const [lx, ly, lz] = memberLocal(p, q)
+        if (
+          Math.abs(lx) <= p.dims[0] / 2 + radius + TRADE_SKIN &&
+          Math.abs(ly) <= p.dims[1] / 2 + radius + TRADE_SKIN &&
+          Math.abs(lz) <= p.dims[2] / 2 + radius + TRADE_SKIN
+        ) {
+          hit = p
+        }
+      }
+      if (hit) break
+    }
+    if (hit) {
+      ls.flag =
+        hit.role === 'vent-stack' || hit.sourceId.startsWith('dwv-')
+          ? '⚠ line-set crosses DWV stack — coordinate trades'
+          : '⚠ line-set crosses plumbing — coordinate trades'
+    }
+  }
 }

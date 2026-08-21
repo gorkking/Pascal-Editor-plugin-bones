@@ -335,7 +335,17 @@ AND a gate — a checklist line without a test is a wish.
   still draws the pair as one line (accepted, queued). Both pipes chain
   endpoint-adjacent condenser → air handler (E2 for refrigerant). Runs over
   ~15 m carry a 'verify manufacturer max line-set length / oil return'
-  advisory (assumption class — mfr line-set charts govern). Colors mirror
+  advisory (assumption class — mfr line-set charts govern). CROSS-TRADE:
+  the pair rides a 3.5 cm LATERAL off the wall centerline — plumbing owns
+  that plane (supply risers + the DWV stack stand on it; post-merge seam
+  round: 24 OBB hits from sharing it) — clamped on thin walls so the
+  suction riser stays inside the wall body (clamped runs carry a
+  'clamped in a thin wall' coordination flag). Residual crossings that
+  geometry cannot dodge (a 3" stack fills the cavity wider than any
+  lateral) get a '⚠ line-set crosses DWV stack — coordinate trades' /
+  '… crosses plumbing …' flag from compute's post-both-engines scan
+  (flagLinesetTradeCrossings) — never a silent bore; night-5 D2 set the
+  trade-skin convention. Colors mirror
   the plumbing convention (E3): suction cold-blue / liquid warm-red in 3D
   AND on the MEP sheet, each with its own legend row. A disconnect mounts
   within sight of each unit (NEC 440.14; ≤ 1 m at an unobstructed
