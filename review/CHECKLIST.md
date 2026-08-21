@@ -96,19 +96,29 @@ AND a gate — a checklist line without a test is a wish.
   (R314.3(3)); a level with an attached garage + bedrooms places a
   `co-alarm` outside the sleeping area (R315.3 — the fuel-appliance
   condition rides the same garage trigger as the plumbing tank-WH
-  assumption). Circuits (R314.4 / NEC 210.12): EVERY smoke/CO alarm rides
-  the single `SD-1` branch (`ALARM_CIRCUIT`), marked `interconnected` —
-  alarms scattered across two breakers cannot be interconnected. Wiring:
-  the SD chain past the panel feed is 14/3-labeled and walkably
-  CONTINUOUS through every alarm box (E2-style union-find scoped to the
-  interconnect members); threeWay switch groups get a 14/3 traveler chain
+  assumption); centroid nudges clamp INTO the host polygon (narrow-
+  corridor hosts, `nudgeInside`). Circuits (R314.4 / NEC 210.12): EVERY
+  smoke/CO alarm rides the single `SD-1` branch (`ALARM_CIRCUIT`), marked
+  `interconnected` — alarms scattered across two breakers cannot be
+  interconnected. Wiring — the PER-STOREY contract: compute routes one
+  LEVEL, so each storey mints its own panel + SD-1 and the modeled chain
+  truthfully claims ONLY its storey — 14/3 legs are labeled 'alarm
+  interconnect (this storey) — IRC R314.4', walkably CONTINUOUS through
+  every alarm box on the level (E2-style union-find scoped to the
+  interconnect members), and any scene whose sibling storeys carry rooms
+  gets the level warning 'alarm interconnect modeled per storey — R314.4
+  requires interconnection across the dwelling; verify the cross-storey
+  chain' (single-storey scenes stay warning-free; room-less roof levels
+  don't count). threeWay switch groups get a 14/3 traveler chain
   box-to-box (NEC 210.70/404.2); the takeoff books 14/3 as its own NM-B
   SKU (it used to book as phantom 14/2 lf).
-  Origin: LOD-400 audit BATCH 13 (2026-08-20), confirmed defects (a)+(b).
+  Origin: LOD-400 audit BATCH 13 (2026-08-20), confirmed defects (a)+(b);
+  cross-storey honesty + nudge clamp = round-2 skeptic driver/advisory.
   Gate: `src/engines/electrical.alarms.test.ts` (proxy census + warning,
   per-story pin on a two-storey scene, CO presence/absence matrix,
   one-circuit pin, 14/3 interconnect walk, traveler continuity, takeoff
-  row split).
+  row split, 3-storey cross-storey warning matrix + scoped labels,
+  corridor nudge-clamp repro).
 
 ## S — Structure
 

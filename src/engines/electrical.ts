@@ -81,6 +81,24 @@ export function pointInPolygon(p: Pt, polygon: Polygon): boolean {
   return inside
 }
 
+/**
+ * Nudge a ceiling-fixture spot off the room centroid WITHOUT leaving the
+ * room (B13 round 2): a narrow host (0.5 m corridor proxy) put the +12"
+ * x-nudge inside the far wall band, 5.5 cm outside the polygon. Tries ±d
+ * on both axes in a deterministic order (callers pass ±d to keep smoke/CO
+ * apart), falls back to the exact centroid when nothing fits.
+ */
+export function nudgeInside(polygon: Polygon, cx: number, cz: number, d: number): Pt {
+  const tries: readonly Pt[] = [
+    [cx + d, cz],
+    [cx - d, cz],
+    [cx, cz + d],
+    [cx, cz - d],
+  ]
+  for (const p of tries) if (pointInPolygon(p, polygon)) return p
+  return [cx, cz]
+}
+
 /** Area centroid of a simple polygon; falls back to the vertex mean when degenerate. */
 export function polygonCentroid(polygon: Polygon): Pt {
   let area = 0
@@ -421,12 +439,15 @@ export function layoutElectrical(
 
     // ---- smoke alarms: one in each sleeping room (IRC R314.3) ----
     if (room.category === 'bedroom') {
+      // ASSUMPTION: nudged 12" off the centroid so it doesn't z-fight the
+      // room light; R314 only requires "in the room", ceiling mount typical.
+      // Clamped INTO the polygon — narrow rooms flipped the nudge outside
+      // (B13 round 2).
+      const [ax, az] = nudgeInside(room.polygon, cx, cz, inches(12))
       fixtures.push({
         system: 'electrical',
         kind: 'smoke-alarm',
-        // ASSUMPTION: nudged 12" off the centroid so it doesn't z-fight the
-        // room light; R314 only requires "in the room", ceiling mount typical.
-        position: [cx + inches(12), room.ceilingHeight, cz],
+        position: [ax, room.ceilingHeight, az],
         rotationY: 0,
         sourceId: room.id,
         label: `Smoke alarm — ${room.name || 'bedroom'}`,
@@ -453,13 +474,15 @@ export function layoutElectrical(
   }
   if (outsideHost) {
     const [hx, hz] = polygonCentroid(outsideHost.polygon)
+    // Proxy rooms already hold their own room light at the centroid —
+    // nudge 12" like the bedroom alarms, clamped into the polygon
+    // (0.5 m corridor hosts, B13 round 2). Hallways keep the legacy exact
+    // centroid: their light shares it but the pre-B13 output pinned it.
+    const [px, pz] = hallway ? [hx, hz] : nudgeInside(outsideHost.polygon, hx, hz, inches(12))
     fixtures.push({
       system: 'electrical',
       kind: 'smoke-alarm',
-      // Proxy rooms already hold their own room light at the centroid —
-      // nudge 12" like the bedroom alarms (hallways keep the legacy exact
-      // centroid: their light shares it but the pre-B13 output pinned it).
-      position: [hallway ? hx : hx + inches(12), outsideHost.ceilingHeight, hz],
+      position: [px, outsideHost.ceilingHeight, pz],
       rotationY: 0,
       sourceId: outsideHost.id,
       label: hallway
@@ -479,10 +502,11 @@ export function layoutElectrical(
       (a, b) => polygonArea(b.polygon) - polygonArea(a.polygon) || a.id.localeCompare(b.id),
     )[0] as RoomSlice
     const [sx, sz] = polygonCentroid(host.polygon)
+    const [ax, az] = nudgeInside(host.polygon, sx, sz, inches(12))
     fixtures.push({
       system: 'electrical',
       kind: 'smoke-alarm',
-      position: [sx + inches(12), host.ceilingHeight, sz],
+      position: [ax, host.ceilingHeight, az],
       rotationY: 0,
       sourceId: host.id,
       label: 'Smoke alarm — one per story (IRC R314.3(3))',
@@ -500,12 +524,14 @@ export function layoutElectrical(
   if (garage && bedrooms.length > 0) {
     if (outsideHost) {
       const [cx2, cz2] = polygonCentroid(outsideHost.polygon)
+      // −12" mirror of the smoke nudge (nudgeInside tries −d first) —
+      // light / smoke / CO all read apart on the same ceiling, and the
+      // spot stays inside narrow hosts (B13 round 2).
+      const [ax, az] = nudgeInside(outsideHost.polygon, cx2, cz2, -inches(12))
       fixtures.push({
         system: 'electrical',
         kind: 'co-alarm',
-        // −12" x mirror of the smoke nudge — light / smoke / CO all read
-        // apart on the same ceiling.
-        position: [cx2 - inches(12), outsideHost.ceilingHeight, cz2],
+        position: [ax, outsideHost.ceilingHeight, az],
         rotationY: 0,
         sourceId: outsideHost.id,
         label: 'CO alarm — outside sleeping area (IRC R315.3: attached garage / fuel-fired appliance)',
@@ -1456,8 +1482,11 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
 const WIRE_RUN_Y = inches(18)
 /** Rendered NM sheath section — oversized so runs read at house scale. */
 const WIRE_SECTION = inches(0.5)
-/** Label note on every 14/3 leg of the smoke/CO interconnect chain (B13b). */
-const INTERCONNECT_NOTE = ' (alarm interconnect — IRC R314.4)'
+/** Label note on every 14/3 leg of the smoke/CO interconnect chain (B13b).
+ * Scoped '(this storey)': the engine routes ONE level, so the chain it can
+ * truthfully claim ends at the storey line — R314.4 wants the whole
+ * dwelling interconnected; compute warns on multi-storey scenes (E6 r2). */
+const INTERCONNECT_NOTE = ' (alarm interconnect (this storey) — IRC R314.4)'
 /** Label note on every 14/3 traveler leg of a 3-way switch group (B13b). */
 const TRAVELER_NOTE = ' (3-way travelers — NEC 210.70/404.2)'
 /** Traveler cables ride the 9th drill plane — above the 8 stapled circuit

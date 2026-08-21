@@ -7,6 +7,7 @@ import {
   ALARM_CIRCUIT,
   circuitSchedule,
   layoutElectrical,
+  pointInPolygon,
   routeWiring,
   sharedBoundaryLength,
 } from './electrical'
@@ -405,14 +406,16 @@ describe('B13b — 14/3 interconnect chain links every alarm', () => {
   const members = routeWiring(fixtures, walls)
   const alarms = alarmsOf(fixtures)
 
-  test('every 14/3 leg is labeled with the R314.4 cite; the SD feed stays 14/2', () => {
+  test('every 14/3 leg carries the STOREY-SCOPED R314.4 cite; the SD feed stays 14/2', () => {
     const sdMembers = members.filter((m) => m.sourceId === ALARM_CIRCUIT)
     expect(sdMembers.length).toBeGreaterThan(0)
     const three = sdMembers.filter((m) => m.label?.includes('14/3'))
     const two = sdMembers.filter((m) => m.label?.includes('14/2'))
     expect(three.length).toBeGreaterThan(0)
     expect(two.length).toBeGreaterThan(0) // the panel feed
-    for (const m of three) expect(m.label).toContain('alarm interconnect — IRC R314.4')
+    // round 2 (E6 honesty): the engine routes ONE level — the label claims
+    // exactly the chain it draws, never the whole dwelling
+    for (const m of three) expect(m.label).toContain('alarm interconnect (this storey) — IRC R314.4')
     // no SD leg carries any other cable spec
     expect(sdMembers.every((m) => m.label?.includes('14/3') || m.label?.includes('14/2'))).toBe(true)
   })
@@ -525,5 +528,180 @@ describe('B13b — takeoff books 14/3 on its own NM-B row', () => {
       .filter((m) => m.role === 'wire-run' && m.label?.includes('14/3'))
       .reduce((s, m) => s + toFeet(m.length), 0)
     expect(three?.quantity).toBeCloseTo(Math.round(threeLf * 10) / 10, 1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round 2 — E6 cross-storey honesty (skeptic driver)
+// ---------------------------------------------------------------------------
+
+describe('B13 r2 — the per-storey interconnect never claims the dwelling', () => {
+  // compute is per-LEVEL: every storey mints its OWN panel + its OWN SD-1.
+  // The 3-storey exhibit had 6 alarms all claiming `interconnected` with NO
+  // cable between storeys and zero caveat — R314.4 requires interconnection
+  // across the DWELLING, so multi-storey scenes must SAY the model stops at
+  // the storey line, and the member labels must scope their claim.
+  const wall = (id: string, level: string, start: [number, number], end: [number, number]) => ({
+    id,
+    type: 'wall',
+    parentId: level,
+    start,
+    end,
+    thickness: 0.114,
+    height: 2.5,
+    frontSide: 'exterior',
+    backSide: 'interior',
+    children: [],
+  })
+  const zone = (id: string, level: string, name: string, polygon: [number, number][]) => ({
+    id,
+    type: 'zone',
+    parentId: level,
+    name,
+    polygon,
+    boundaryWallIds: [],
+  })
+  const storey = (
+    n: number,
+    zones: [string, string, [number, number][]][],
+  ): Record<string, Record<string, unknown>> => {
+    const lvl = `lvl${n}`
+    const out: Record<string, Record<string, unknown>> = {
+      [lvl]: { id: lvl, type: 'level', parentId: 'bldg', level: n, height: 2.7 },
+      [`w${n}a`]: wall(`w${n}a`, lvl, [0, 0], [8, 0]),
+      [`w${n}b`]: wall(`w${n}b`, lvl, [8, 0], [8, 5]),
+      [`w${n}c`]: wall(`w${n}c`, lvl, [8, 5], [0, 5]),
+      [`w${n}d`]: wall(`w${n}d`, lvl, [0, 5], [0, 0]),
+    }
+    for (const [id, name, polygon] of zones) out[id] = zone(id, lvl, name, polygon)
+    return out
+  }
+  const threeStorey = (): Record<string, Record<string, unknown>> => ({
+    bldg: { id: 'bldg', type: 'building', children: ['lvl0', 'lvl1', 'lvl2'] },
+    ...storey(0, [
+      ['z0bed', 'Bedroom', [[0, 0], [4, 0], [4, 5], [0, 5]]],
+      ['z0hall', 'Hallway', [[4, 0], [8, 0], [8, 5], [4, 5]]],
+    ]),
+    ...storey(1, [
+      ['z1bed', 'Bedroom 2', [[0, 0], [4, 0], [4, 5], [0, 5]]],
+      ['z1hall', 'Upper hall', [[4, 0], [8, 0], [8, 5], [4, 5]]],
+    ]),
+    ...storey(2, [['z2study', 'Study', [[0, 0], [8, 0], [8, 5], [0, 5]]]]),
+  })
+  const bones = (levelId: string) =>
+    FramingNode.parse({
+      id: `bonesframing_${levelId}`,
+      parentId: levelId,
+      jurisdiction: 'INTL',
+      detail: '400',
+      showElectrical: true,
+    }) as FramingNode
+  const CROSS_STOREY =
+    'alarm interconnect modeled per storey — R314.4 requires interconnection across the dwelling; verify the cross-storey chain'
+
+  test('3-storey exhibit: EVERY storey with rooms warns about the cross-storey chain', () => {
+    const scene = threeStorey()
+    for (const lvl of ['lvl0', 'lvl1', 'lvl2']) {
+      const result = computeLevel(scene, bones(lvl))
+      // every storey places alarms (bedroom/hallway or the per-story rule)…
+      expect(
+        result.fixtures.some((f) => f.kind === 'smoke-alarm' || f.kind === 'co-alarm'),
+      ).toBe(true)
+      // …and every storey says the modeled chain stops at its own line
+      expect(result.warnings).toContain(CROSS_STOREY)
+    }
+  })
+
+  test('3-storey exhibit: the 14/3 labels scope their claim to the storey', () => {
+    const result = computeLevel(threeStorey(), bones('lvl0'))
+    const sd = result.members.filter(
+      (m) => m.sourceId === ALARM_CIRCUIT && m.label?.includes('14/3'),
+    )
+    expect(sd.length).toBeGreaterThan(0)
+    for (const m of sd) {
+      expect(m.label).toContain('alarm interconnect (this storey) — IRC R314.4')
+    }
+  })
+
+  test('single-storey scene stays warning-free (nothing to interconnect across)', () => {
+    const scene: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl0'] },
+      ...storey(0, [
+        ['z0bed', 'Bedroom', [[0, 0], [4, 0], [4, 5], [0, 5]]],
+        ['z0hall', 'Hallway', [[4, 0], [8, 0], [8, 5], [4, 5]]],
+      ]),
+    }
+    const result = computeLevel(scene, bones('lvl0'))
+    expect(result.fixtures.some((f) => f.kind === 'smoke-alarm')).toBe(true)
+    expect(result.warnings).not.toContain(CROSS_STOREY)
+  })
+
+  test('a roof-only sibling level (no rooms) does not trigger the warning', () => {
+    const scene: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl0', 'lvl1'] },
+      ...storey(0, [
+        ['z0bed', 'Bedroom', [[0, 0], [4, 0], [4, 5], [0, 5]]],
+        ['z0hall', 'Hallway', [[4, 0], [8, 0], [8, 5], [4, 5]]],
+      ]),
+      lvl1: { id: 'lvl1', type: 'level', parentId: 'bldg', level: 1, height: 2.0 },
+      w1g: wall('w1g', 'lvl1', [0, 0], [8, 0]), // bare gable wall, no rooms
+    }
+    const result = computeLevel(scene, bones('lvl0'))
+    expect(result.warnings).not.toContain(CROSS_STOREY)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Round 2 — narrow-host nudge clamp (skeptic advisory)
+// ---------------------------------------------------------------------------
+
+describe('B13 r2 — centroid nudges never leave the host polygon', () => {
+  // The +12" x-nudge put a 0.5 m corridor host's alarm 5.5 cm INSIDE the
+  // far wall band (outside the polygon). nudgeInside clamps: ±d on both
+  // axes, centroid as the last resort.
+  const corridor: [number, number][] = [[4, 0], [4.5, 0], [4.5, 4], [4, 4]]
+
+  test('0.5 m corridor proxy repro: the R314.3(2) alarm stays INSIDE', () => {
+    const rooms = [
+      room('bedroom', [[0, 0], [4, 0], [4, 4], [0, 4]]),
+      room('other', corridor, { id: 'room_corr', name: 'Corridor' }),
+    ]
+    const fixtures = layoutElectrical([], rooms, undefined, [])
+    const proxy = ofKind(fixtures, 'smoke-alarm').find((a) => a.sourceId === 'room_corr') as Fixture
+    expect(proxy).toBeDefined()
+    expect(pointInPolygon([proxy.position[0], proxy.position[2]], corridor)).toBe(true)
+    // still nudged off the light's centroid (z-fight guard intact)
+    expect(Math.hypot(proxy.position[0] - 4.25, proxy.position[2] - 2)).toBeGreaterThan(0.1)
+  })
+
+  test('CO alarm in the same corridor host stays inside AND apart from the smoke alarm', () => {
+    const rooms = [
+      room('bedroom', [[0, 0], [4, 0], [4, 4], [0, 4]]),
+      room('other', corridor, { id: 'room_corr', name: 'Corridor' }),
+      room('garage', [[4.5, 0], [8.5, 0], [8.5, 4], [4.5, 4]], { id: 'room_garage' }),
+    ]
+    const fixtures = layoutElectrical([], rooms, undefined, [])
+    const smoke = ofKind(fixtures, 'smoke-alarm').find((a) => a.sourceId === 'room_corr') as Fixture
+    const co = ofKind(fixtures, 'co-alarm')[0] as Fixture
+    expect(co).toBeDefined()
+    expect(pointInPolygon([co.position[0], co.position[2]], corridor)).toBe(true)
+    expect(
+      Math.hypot(co.position[0] - smoke.position[0], co.position[2] - smoke.position[2]),
+    ).toBeGreaterThan(0.1)
+  })
+
+  test('narrow per-story host: the R314.3(3) alarm stays inside', () => {
+    const strip: [number, number][] = [[0, 0], [0.5, 0], [0.5, 6], [0, 6]]
+    const fixtures = layoutElectrical([], [room('other', strip, { id: 'room_strip' })], undefined, [])
+    const alarm = ofKind(fixtures, 'smoke-alarm')[0] as Fixture
+    expect(alarm.label).toContain('one per story')
+    expect(pointInPolygon([alarm.position[0], alarm.position[2]], strip)).toBe(true)
+  })
+
+  test('wide rooms keep the pre-round-2 +12" x-nudge byte-for-byte', () => {
+    const bedroom = room('bedroom', [[0, 0], [4, 0], [4, 4], [0, 4]])
+    const alarms = ofKind(layoutElectrical([], [bedroom]), 'smoke-alarm')
+    expect(alarms[0]?.position[0]).toBeCloseTo(2 + 12 * 0.0254, 6)
+    expect(alarms[0]?.position[2]).toBeCloseTo(2, 6)
   })
 })
