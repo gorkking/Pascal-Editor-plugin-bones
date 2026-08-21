@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { Mesh } from 'three'
 import type { Fixture, Member, MemberMaterial, MemberRole } from '../core/types'
-import { buildGroup } from './renderer'
+import { BELOW_GHOST_OPACITY, buildGroup, FAINT_OPACITY, isBelowFloor } from './renderer'
 
 /**
  * The rubric's rendering gate: draw calls stay O(color buckets), never
@@ -44,6 +44,10 @@ const FIXTURE_KINDS: Fixture['kind'][] = [
   'cleanout', 'thermostat', 'exhaust-fan',
 ]
 
+/** Kinds a finished house does NOT show (rough-in only) — viewMode 'off'
+ * must hide exactly these from the synthetic mix. */
+const ROUGH_IN_KINDS = new Set<Fixture['kind']>(['stub-out', 'vent-stack', 'cleanout'])
+
 function synthesizeFixtures(count: number): Fixture[] {
   return Array.from({ length: count }, (_, i) => ({
     system: 'electrical' as const,
@@ -54,36 +58,51 @@ function synthesizeFixtures(count: number): Fixture[] {
   }))
 }
 
+type MeshLike = {
+  isInstancedMesh?: boolean
+  count?: number
+  castShadow: boolean
+  layers: { mask: number }
+  material: {
+    depthTest: boolean
+    depthWrite: boolean
+    transparent: boolean
+    opacity: number
+    colorWrite: boolean
+  }
+  renderOrder: number
+  onBeforeRender?: { toString(): string }
+}
+const OVERLAY_MASK = 1 << 1 // host OVERLAY_LAYER = 1
+const SCENE_MASK = 1 << 0 // default layer 0
+
+const instanceCount = (group: { children: unknown[] }) =>
+  group.children.reduce(
+    (sum: number, child) =>
+      sum +
+      ((child as MeshLike).isInstancedMesh ? ((child as MeshLike).count ?? 0) : 0),
+    0,
+  )
+
 describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
   test('10,000 members + 500 fixtures across every role/material stay under 50 draw calls', () => {
-    // X-ray: TWO InstancedMeshes per color bucket (solid scene copy + ghost
-    // overlay copy) — still O(buckets), never O(members).
-    const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), true)
+    const group = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), 'xray')
     expect(group.children.length).toBeLessThanOrEqual(50)
     expect(group.children.length).toBeGreaterThan(8) // sanity: buckets exist
-    // Round 13: ghosts exist ONLY for below-grade systems (foundation,
-    // floor framing) — the dollhouse cut reveals everything else through
-    // the opened near faces. The synthetic mix is wall-framing, so every
-    // instance is a single solid copy.
-    const instances = group.children.reduce(
-      (sum, child) =>
-        sum +
-        ((child as { isInstancedMesh?: boolean; count?: number }).isInstancedMesh
-          ? ((child as { count?: number }).count ?? 0)
-          : 0),
-      0,
-    )
-    expect(instances).toBe(10_500)
-    // Solid mode: identical census for an above-grade population.
-    const solidOnly = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), false)
-    expect(solidOnly.children.length).toBe(group.children.length)
+    // X-ray is single-copy everywhere now (the old below-grade ghosts moved
+    // to basement mode) — every member + fixture is exactly one instance.
+    expect(instanceCount(group)).toBe(10_500)
+    // Basement mode: below-floor buckets emit two copies (solid + overlay
+    // ghost) but the mesh count stays O(buckets).
+    const basement = buildGroup(synthesizeMembers(10_000), synthesizeFixtures(500), 'basement')
+    expect(basement.children.length).toBeLessThanOrEqual(50)
   })
 
   test('bucket count saturates — growing the population adds zero draw calls', () => {
     // 5k already hits every (material, role-color) combination the synthetic
     // mix can produce; doubling the members must not add a single mesh.
-    const saturated = buildGroup(synthesizeMembers(5_000), [], true).children.length
-    const doubled = buildGroup(synthesizeMembers(10_000), [], true).children.length
+    const saturated = buildGroup(synthesizeMembers(5_000), [], 'xray').children.length
+    const doubled = buildGroup(synthesizeMembers(10_000), [], 'xray').children.length
     expect(doubled).toBe(saturated)
   })
 
@@ -105,7 +124,7 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
         })
       }
     }
-    const group = buildGroup(members, [], true)
+    const group = buildGroup(members, [], 'xray')
     // ≤ walls × (colors × faces present) — here 3 colors × 2 faces = 6/wall
     expect(group.children.length).toBeLessThanOrEqual(walls * 6)
     expect(group.children.length).toBeGreaterThanOrEqual(walls) // split per wall is real
@@ -120,54 +139,32 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
     expect(instances).toBe(walls * perWall)
   })
 
-  test('X-ray = solid scene copy + ghost overlay copy — always depth-tested, no render hacks', () => {
+  test('X-ray: everything depth-tested, single scene-layer copy, no render hacks', () => {
     // Round-2 user reports: with depth tricks on the members themselves, a
     // footing painted over nearer studs, then far stud tops read through the
-    // top plate. Members must occlude each other naturally in BOTH modes.
-    //
-    // Round-11 regression: overlay-ONLY members painted over a tree standing
-    // in front of the house (the overlay pass composites over the finished
-    // scene with no scene-depth test). The X-ray is therefore two copies:
-    //  - SOLID on the scene layer (0): occluded by trees like real geometry;
-    //  - GHOST on the host overlay layer (1) at partial opacity: shows
-    //    through walls, blends invisibly where the solid copy already shows.
-    // Everything else was tried against the WebGPU pipeline and failed —
-    // clearDepth() poisoned the pass, an inverted depth-wipe box never
-    // landed its depthWrite, transparent-list membership lost to the MRT
-    // scene pass. No sentinel meshes: layers + opacity only.
-    type MeshLike = {
-      isInstancedMesh?: boolean
-      castShadow: boolean
-      layers: { mask: number }
-      material: {
-        depthTest: boolean
-        depthWrite: boolean
-        transparent: boolean
-        opacity: number
-        colorWrite: boolean
-      }
-      renderOrder: number
-      onBeforeRender?: { toString(): string }
-    }
-    const OVERLAY_MASK = 1 << 1 // host OVERLAY_LAYER = 1
-    const SCENE_MASK = 1 << 0 // default layer 0
-    // Below-grade members ghost; above-grade members are dollhouse-solid.
+    // top plate. Members must occlude each other naturally in EVERY mode.
+    // Round 2026-08-20: the below-floor overlay ghosts are GONE from X-ray —
+    // "I shouldn't be able to see the crawl space at all" — so foundation /
+    // buried runs are plain depth-tested geometry (visible only via real
+    // sightlines); the see-under-the-house job moved to basement mode.
     const belowGrade = synthesizeMembers(100).map((m) => ({
       ...m,
       system: 'foundation' as const,
     }))
-    const xray = buildGroup(belowGrade, [], true)
+    const xray = buildGroup([...belowGrade, ...synthesizeMembers(100)], [], 'xray')
     const meshes = xray.children as unknown as MeshLike[]
-    const solids = meshes.filter((m) => m.layers.mask === SCENE_MASK)
-    const ghosts = meshes.filter((m) => m.layers.mask === OVERLAY_MASK)
-    expect(solids.length).toBeGreaterThan(0)
-    expect(ghosts.length).toBe(solids.length) // one ghost per below-grade bucket
-    // Above-grade (wall framing) buckets never ghost — the near faces OPEN.
-    const aboveGrade = buildGroup(synthesizeMembers(100), [], true)
-    const aboveGhosts = (aboveGrade.children as unknown as MeshLike[]).filter(
-      (m) => m.layers.mask === OVERLAY_MASK,
-    )
-    expect(aboveGhosts).toHaveLength(0)
+    expect(meshes.length).toBeGreaterThan(0)
+    for (const m of meshes) {
+      expect(m.isInstancedMesh).toBe(true) // members only — no sentinels
+      expect(m.layers.mask).toBe(SCENE_MASK) // NO overlay ghosts in X-ray
+      expect(m.material.depthTest).toBe(true) // natural near-hides-far
+      expect(m.material.depthWrite).toBe(true) // member-vs-member occlusion
+      expect(m.material.transparent).toBe(false) // plain opaque draw
+      expect(m.material.colorWrite).toBe(true)
+      expect(m.renderOrder).toBe(0) // gizmos/handles keep drawing above
+      // no custom render hooks — WebGPU-safe
+      expect(m.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
+    }
     // Assembly layers carry their face normal for the dollhouse cut.
     const layered = buildGroup(
       [
@@ -178,7 +175,7 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
         },
       ],
       [],
-      true,
+      'xray',
     )
     const faceMesh = layered.children[0] as unknown as { userData: { face?: readonly [number, number]; sourceId?: string } }
     expect(faceMesh.userData.face).toEqual([0, 1])
@@ -191,54 +188,158 @@ describe('instanced rendering gate (rubric: UI/UX/Performance)', () => {
         { ...synthesizeMembers(1)[0]!, role: 'drywall' as const, face: [0, 1] as const, sourceId: 'wall_b' },
       ],
       [],
-      true,
+      'xray',
     )
     // same color + same face normal but different walls → separate buckets
     expect(twoWalls.children).toHaveLength(2)
     const ids = twoWalls.children.map((c) => (c.userData as { sourceId?: string }).sourceId).sort()
     expect(ids).toEqual(['wall_a', 'wall_b'])
-    for (const m of meshes) {
-      expect(m.isInstancedMesh).toBe(true) // members only — no sentinels
-      expect(m.material.depthTest).toBe(true) // natural near-hides-far
-      expect(m.material.depthWrite).toBe(true) // member-vs-member occlusion
-      expect(m.material.colorWrite).toBe(true)
-      expect(m.renderOrder).toBe(0) // gizmos/handles keep drawing above
-      // no custom render hooks — WebGPU-safe
-      expect(m.onBeforeRender?.toString()).toBe(new Mesh().onBeforeRender.toString())
-    }
-    for (const m of solids) {
-      expect(m.material.transparent).toBe(false) // plain opaque draw
-      expect(m.castShadow).toBe(true)
-    }
-    for (const m of ghosts) {
-      expect(m.material.transparent).toBe(true) // partial-opacity ghost
-      expect(m.material.opacity).toBeGreaterThan(0.2)
-      expect(m.material.opacity).toBeLessThan(0.8)
-      expect(m.castShadow).toBe(false) // one shadow per member, not two
-    }
-    // X-ray off: members are ordinary scene-layer geometry, no ghosts —
-    // and assembly layers DON'T render at all (they z-fight the host's
-    // visible wall skin; the host grey is the drywall look in solid mode).
-    const off = buildGroup(synthesizeMembers(100), [], false)
-    for (const m of off.children as unknown as MeshLike[]) {
-      expect(m.isInstancedMesh).toBe(true)
-      expect(m.layers.mask).toBe(SCENE_MASK)
-      expect(m.material.depthTest).toBe(true)
-      expect(m.material.transparent).toBe(false)
-      expect(m.renderOrder).toBe(0)
-    }
-    const offLayers = buildGroup(
-      [
-        {
-          ...synthesizeMembers(1)[0]!,
-          role: 'drywall' as const,
-          face: [0, 1] as const,
-        },
-      ],
-      [],
-      false,
+  })
+})
+
+describe('below-floor stratum classification (basement mode, round 2026-08-20)', () => {
+  const base = {
+    role: 'pipe-run' as MemberRole,
+    dims: [2, 0.08, 0.08] as const,
+    length: 2,
+    rotation: [0, 0, 0] as const,
+    sourceId: 'x',
+  }
+  test('foundation and floor-framing are below-floor by SYSTEM', () => {
+    // footing (well below grade)
+    expect(
+      isBelowFloor({ ...base, system: 'foundation', role: 'footing', material: 'concrete', position: [0, -0.4, 0] }),
+    ).toBe(true)
+    // slab + vapor retarder ride the foundation system even at y≈0
+    expect(
+      isBelowFloor({ ...base, system: 'foundation', role: 'slab', material: 'concrete', position: [0, -0.05, 0] }),
+    ).toBe(true)
+    expect(
+      isBelowFloor({ ...base, system: 'foundation', role: 'vapor-retarder', material: 'pvc', position: [0, -0.11, 0] }),
+    ).toBe(true)
+    // floor joists — the crawl-space ceiling
+    expect(
+      isBelowFloor({ ...base, system: 'floor-framing', role: 'joist', material: 'lumber', position: [0, -0.12, 0] }),
+    ).toBe(true)
+  })
+  test('buried runs are below-floor by Y-EXTENT; in-wall and at-grade are not', () => {
+    // buried DWV main: top of pipe under the floor line
+    expect(
+      isBelowFloor({ ...base, system: 'plumbing', material: 'pvc', position: [0, -0.25, 0] }),
+    ).toBe(true)
+    // in-wall cold supply at 0.28 m — above
+    expect(
+      isBelowFloor({ ...base, system: 'plumbing', material: 'pvc', position: [0, 0.28, 0] }),
+    ).toBe(false)
+    // wall studs — above
+    expect(
+      isBelowFloor({ ...base, system: 'wall-framing', role: 'stud', material: 'lumber', dims: [0.04, 2.4, 0.09], position: [0, 1.2, 0] }),
+    ).toBe(false)
+    // OUTDOOR condenser pad: hvac, sitting ON grade (box straddles up from
+    // y=0) — outside the house, NOT under it. Pinned per the refinement.
+    expect(
+      isBelowFloor({ ...base, system: 'hvac', role: 'slab', material: 'concrete', dims: [0.9, 0.08, 0.9], position: [5, 0.04, 5] }),
+    ).toBe(false)
+  })
+})
+
+describe('view modes — per-stratum treatment (round 2026-08-20 tri-state)', () => {
+  const footing: Member = {
+    system: 'foundation',
+    role: 'footing',
+    dims: [2, 0.3, 0.4],
+    length: 2,
+    position: [1, -0.45, 0],
+    rotation: [0, 0, 0],
+    material: 'concrete',
+    sourceId: 'fnd',
+  }
+  const buriedDwv: Member = {
+    system: 'plumbing',
+    role: 'pipe-run',
+    dims: [2, 0.08, 0.08],
+    length: 2,
+    position: [1, -0.25, 0],
+    rotation: [0, 0, 0],
+    material: 'pvc',
+    sourceId: 'dwv-main',
+  }
+  const stud: Member = {
+    system: 'wall-framing',
+    role: 'stud',
+    dims: [0.04, 2.4, 0.09],
+    length: 2.4,
+    position: [1, 1.2, 0],
+    rotation: [0, 0, 0],
+    material: 'lumber',
+    sourceId: 'w1',
+  }
+  const drywall: Member = {
+    ...stud,
+    role: 'drywall',
+    face: [0, 1],
+  }
+
+  test("'xray': below-floor members render depth-tested ONLY — zero overlay ghosts", () => {
+    const group = buildGroup([footing, buriedDwv, stud, drywall], synthesizeFixtures(6), 'xray')
+    const overlay = (group.children as unknown as MeshLike[]).filter(
+      (m) => m.layers.mask === OVERLAY_MASK,
     )
-    expect(offLayers.children).toHaveLength(0)
+    expect(overlay).toHaveLength(0)
+    // …and nothing is transparent: no see-through anywhere in X-ray.
+    for (const m of group.children as unknown as MeshLike[]) {
+      expect(m.material.transparent).toBe(false)
+    }
+    expect(instanceCount(group)).toBe(4 + 6)
+  })
+
+  test("'basement': below-floor = solid + STRONG overlay ghost; above-floor = faint shell", () => {
+    const group = buildGroup([footing, buriedDwv, stud, drywall], synthesizeFixtures(6), 'basement')
+    const meshes = group.children as unknown as MeshLike[]
+    const ghosts = meshes.filter((m) => m.layers.mask === OVERLAY_MASK)
+    const sceneSolids = meshes.filter(
+      (m) => m.layers.mask === SCENE_MASK && !m.material.transparent,
+    )
+    const faints = meshes.filter(
+      (m) => m.layers.mask === SCENE_MASK && m.material.transparent,
+    )
+    // two below-floor colors (concrete footing + pvc dwv) → 2 solid+ghost pairs
+    expect(ghosts.length).toBe(2)
+    expect(sceneSolids.length).toBe(2)
+    for (const g of ghosts) {
+      expect(g.material.opacity).toBe(BELOW_GHOST_OPACITY)
+      expect(g.material.opacity).toBeGreaterThanOrEqual(0.8) // the star content
+      expect(g.material.depthWrite).toBe(true) // self-occlusion in the overlay pass
+      expect(g.castShadow).toBe(false)
+    }
+    // stud + drywall + fixtures collapse into the faint orientation shell
+    expect(faints.length).toBeGreaterThanOrEqual(2)
+    for (const f of faints) {
+      expect(f.material.opacity).toBe(FAINT_OPACITY)
+      expect(f.material.opacity).toBeLessThanOrEqual(0.15) // barely visible
+      expect(f.material.depthWrite).toBe(false) // never occludes the star
+      expect(f.castShadow).toBe(false)
+    }
+    // census: every member + fixture drawn once on the scene layer, plus one
+    // overlay copy per below-floor instance
+    expect(instanceCount(group)).toBe(4 + 6 + 2)
+  })
+
+  test("'off': the FINISHED house — zero members, only finished-surface fixtures", () => {
+    const fixtures = synthesizeFixtures(FIXTURE_KINDS.length) // one of each kind
+    const group = buildGroup([footing, buriedDwv, stud, drywall], fixtures, 'off')
+    const meshes = group.children as unknown as MeshLike[]
+    // no framing/MEP/foundation members, no face layers (host skins ARE the
+    // walls — also kills the old drywall z-fight), no ghosts, nothing faint
+    for (const m of meshes) {
+      expect(m.layers.mask).toBe(SCENE_MASK)
+      expect(m.material.transparent).toBe(false)
+    }
+    const surfaceCount = fixtures.filter((f) => !ROUGH_IN_KINDS.has(f.kind)).length
+    expect(instanceCount(group)).toBe(surfaceCount)
+    expect(surfaceCount).toBe(FIXTURE_KINDS.length - 3)
+    // members alone → empty group
+    expect(buildGroup([footing, stud, drywall], [], 'off').children).toHaveLength(0)
   })
 })
 
@@ -256,7 +357,7 @@ describe('buildGroups — cross-level members split into foreign level groups', 
       sourceId: 'w1',
     }
     const rafter = { ...stud, system: 'roof-framing' as const, role: 'rafter' as const, levelId: 'lvlroof' }
-    const { group, foreign } = buildGroups([stud, rafter], [], true)
+    const { group, foreign } = buildGroups([stud, rafter], [], 'xray')
     expect(foreign.size).toBe(1)
     expect(foreign.get('lvlroof')?.name).toBe('bones-foreign-lvlroof')
     // main group holds only the stud's instanced mesh, foreign only the rafter's
@@ -295,7 +396,7 @@ describe('exploded roof stratum (day board A, 2026-08-16 + F1 verify round)', ()
     }
     const main = { ...rafter, levelId: 'lvlroof', strataAbove: true as const }
     const porch = { ...rafter, sourceId: 'porchseg', levelId: 'lvl0' }
-    const { foreign } = buildGroups([main, porch], [], true)
+    const { foreign } = buildGroups([main, porch], [], 'xray')
     expect(foreign.get('lvlroof')?.userData.strataAbove).toBe(true)
     expect(foreign.get('lvl0')?.userData.strataAbove).toBe(false)
   })
@@ -314,29 +415,8 @@ describe('exploded roof stratum (day board A, 2026-08-16 + F1 verify round)', ()
       levelId: 'lvlroof',
       strataAbove: true as const,
     }
-    const { foreign } = buildGroups([rafter], [], true)
+    const { foreign } = buildGroups([rafter], [], 'xray')
     expect(foreign.get('lvlroof')?.position.y).toBe(0)
-  })
-})
-
-describe('under-slab plumbing ghosts through the floor (user ask 2026-08-16)', () => {
-  test('buried DWV buckets are ghosted; above-floor supply stays solid', () => {
-    const { buildGroup } = require('./renderer') as typeof import('./renderer')
-    const buried = {
-      system: 'plumbing' as const,
-      role: 'pipe-run' as const,
-      dims: [2, 0.08, 0.08] as const,
-      length: 2,
-      position: [1, -0.25, 0] as const,
-      rotation: [0, 0, 0] as const,
-      material: 'pvc' as const,
-      sourceId: 'dwv-main',
-    }
-    const supply = { ...buried, position: [1, 0.28, 0] as const, sourceId: 'cold-x' }
-    const group = buildGroup([buried, supply], [], true)
-    // ghosted buckets emit TWO meshes (solid + overlay ghost); solid-only one
-    const meshCounts = group.children.length
-    expect(meshCounts).toBeGreaterThanOrEqual(3)
   })
 })
 
@@ -355,29 +435,31 @@ describe('mountLevelId — render-only mount grouping (F1b closing nit)', () => 
       mountLevelId: 'lvlattic',
       strataAbove: true as const,
     }
-    const { foreign } = buildGroups([rafter], [], true)
+    const { foreign } = buildGroups([rafter], [], 'xray')
     expect(foreign.has('lvlattic')).toBe(true)
     expect(foreign.get('lvlattic')?.userData.strataAbove).toBe(true)
   })
 })
 
 describe('the X-ray never intercepts the event raycast (F2 selection round)', () => {
-  test('every built mesh has a no-op raycast — zero intersections pushed', () => {
+  test('every built mesh has a no-op raycast — zero intersections pushed, in every mode', () => {
     // R3F recurses the level wrapper groups, so framing meshes (even
     // invisible culled buckets) landed in event.intersections at the
     // wall's own depth and starved the hidden-wall selection gate —
     // hovering a stud highlighted the furniture BEHIND the wall.
-    const group = buildGroup(synthesizeMembers(200), synthesizeFixtures(20), true)
-    let meshCount = 0
-    group.traverse((obj) => {
-      if (!(obj instanceof Mesh)) return
-      meshCount++
-      const intersects: unknown[] = []
-      // three's signature: raycast(raycaster, intersects) — a no-op must
-      // leave the array empty and never throw on a bare call
-      ;(obj.raycast as (r: unknown, i: unknown[]) => void)({}, intersects)
-      expect(intersects).toHaveLength(0)
-    })
-    expect(meshCount).toBeGreaterThan(0) // non-vacuous
+    for (const mode of ['xray', 'basement', 'off'] as const) {
+      const group = buildGroup(synthesizeMembers(200), synthesizeFixtures(20), mode)
+      let meshCount = 0
+      group.traverse((obj) => {
+        if (!(obj instanceof Mesh)) return
+        meshCount++
+        const intersects: unknown[] = []
+        // three's signature: raycast(raycaster, intersects) — a no-op must
+        // leave the array empty and never throw on a bare call
+        ;(obj.raycast as (r: unknown, i: unknown[]) => void)({}, intersects)
+        expect(intersects).toHaveLength(0)
+      })
+      expect(meshCount).toBeGreaterThan(0) // non-vacuous
+    }
   })
 })

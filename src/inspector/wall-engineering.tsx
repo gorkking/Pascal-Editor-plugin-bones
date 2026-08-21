@@ -2,10 +2,11 @@
 
 import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
 import { useMemo, useRef, useState } from 'react'
+import { activateXray, type SceneLike, type ViewerLike } from '../activation'
 import { paintWallExterior } from '../framing/cladding-paint'
 import { computeLevel } from '../framing/compute'
 import {
-  FramingNode,
+  type FramingNode,
   type WallCladding,
   type WallConstruction,
   type WallInsulation,
@@ -232,8 +233,20 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
       <button
         className="rounded-md border border-border/60 bg-accent/40 px-3 py-2 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
         onClick={() => {
-          const created = FramingNode.parse({ jurisdiction: 'AUTO' })
-          useScene.getState().createNode(created as unknown as AnyNode, levelId as AnyNodeId)
+          // Same coherent activation as the panel button: framing node +
+          // auto-placed service points in one undo entry, walls to Low
+          // once. The viewer store resolves lazily (browser-only deps —
+          // this chunk must stay importable headless); if it can't load,
+          // activation still happens, just without the wall-mode switch.
+          import('@pascal-app/viewer').then(
+            ({ useViewer }) =>
+              activateXray(
+                useScene as unknown as SceneLike,
+                levelId,
+                useViewer as unknown as ViewerLike,
+              ),
+            () => activateXray(useScene as unknown as SceneLike, levelId),
+          )
         }}
         type="button"
       >

@@ -25,9 +25,10 @@ import { inches } from '../core/units'
 import { reconcileDeviceNodes } from '../device/place'
 import { circuitColor, hvacDuctColor, plumbingPipeColor } from '../plans/circuit-colors'
 import { normalizeServiceAnchors } from '../service/normalize'
+import { planServiceSeeding } from '../service/place'
 import { computeLevel } from './compute'
 import { effectiveNodesFor, throttleTrailing } from './live'
-import type { FramingNode } from './schema'
+import { effectiveViewMode, type FramingNode, type ViewMode } from './schema'
 
 /**
  * The X-ray renderer: derives every member for this node's level and draws
@@ -136,6 +137,64 @@ function fixtureBox(fixture: Fixture): { dims: [number, number, number]; color: 
   return { dims: [inches(3), inches(4.5), inches(2.5)], color }
 }
 
+/**
+ * Below-floor stratum predicate (user round 2026-08-20: "I shouldn't be able
+ * to see the crawl space at all [in X-ray]" + the dedicated basement mode).
+ * System-based for the two systems that live under the floor plane by
+ * definition — foundation (footings, stemwalls, slab, vapor, anchor bolts,
+ * rebar) and floor-framing (joists/girders under the subfloor — the
+ * crawl-space ceiling) — plus a y-extent rule for buried runs of any other
+ * system: top of the box below the floor line (same 0.02 m tolerance the old
+ * buried-DWV ghost used). Everything at or above grade stays 'above': an
+ * outdoor condenser pad (hvac, sitting ON grade) is outside, not under the
+ * house.
+ */
+export const BURIED_TOP_Y = 0.02
+export function isBelowFloor(member: Member): boolean {
+  if (member.system === 'foundation' || member.system === 'floor-framing') return true
+  return member.position[1] + member.dims[1] / 2 < BURIED_TOP_Y
+}
+
+/**
+ * Fixture kinds a FINISHED house shows (viewMode 'off'): the wall/ceiling
+ * surface devices — outlet & switch plates, lights, smoke alarms, the
+ * panel's door face, thermostat, registers/returns, exhaust fans — and the
+ * standing appliances/meters (water heater, air handler, meters, condenser
+ * disconnect). Rough-in-only kinds hide: stub-outs (in-wall), cleanouts and
+ * the vent-stack marker read as construction, not as a finished surface.
+ */
+const SURFACE_FIXTURE_KINDS: ReadonlySet<Fixture['kind']> = new Set([
+  'receptacle',
+  'receptacle-gfci',
+  'switch',
+  'light',
+  'smoke-alarm',
+  'panel',
+  'thermostat',
+  'register',
+  'return',
+  'exhaust-fan',
+  'water-heater',
+  'equipment',
+  'water-meter',
+  'electric-meter',
+  'disconnect',
+] as Fixture['kind'][])
+
+/** Basement mode: below-floor overlay strength — near-solid so foundation /
+ * drainage / buried pipes read crisply through the floor and the shell. */
+export const BELOW_GHOST_OPACITY = 0.9
+/** Basement mode: the above-floor house shell — barely visible, enough to
+ * orient ("super transparent on top" — user round 2026-08-20). */
+export const FAINT_OPACITY = 0.08
+
+/** Per-bucket render treatment (derived from view mode + stratum):
+ * 'solid' one opaque depth-tested mesh; 'ghosted' opaque mesh + a strong
+ * overlay-layer copy (reads through everything — basement mode's
+ * below-floor star content); 'faint' one barely-visible transparent mesh
+ * (basement mode's above-floor orientation shell). */
+type BucketTreatment = 'solid' | 'ghosted' | 'faint'
+
 type Bucket = {
   color: string
   /** Source wall id for face-carrying buckets — the cull exemption key. */
@@ -147,8 +206,7 @@ type Bucket = {
   }[]
   /** Assembly-layer face normal — the dollhouse cut hides camera-facing buckets. */
   face?: readonly [number, number]
-  /** No overlay ghost for this bucket. */
-  ghostless?: boolean
+  treatment: BucketTreatment
 }
 
 /** Main group (the node's own level) + one group per FOREIGN source level
@@ -160,7 +218,7 @@ export type BuiltGroups = { group: Group; foreign: Map<string, Group> }
 export function buildGroups(
   members: Member[],
   fixtures: Fixture[],
-  seeThrough: boolean,
+  mode: ViewMode,
 ): BuiltGroups {
   const foreign = new Map<string, Group>()
   const own: Member[] = []
@@ -175,9 +233,9 @@ export function buildGroups(
       byLevel.set(mount, list)
     } else own.push(m)
   }
-  const group = buildGroup(own, fixtures, seeThrough)
+  const group = buildGroup(own, fixtures, mode)
   for (const [levelId, list] of byLevel) {
-    const g = buildGroup(list, [], seeThrough)
+    const g = buildGroup(list, [], mode)
     g.name = `bones-foreign-${levelId}`
     // Source level strictly ABOVE the owner (compute tags the members) —
     // only these groups take the exploded roof stratum drop below.
@@ -187,7 +245,30 @@ export function buildGroups(
   return { group, foreign }
 }
 
-export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: boolean): Group {
+/**
+ * Per-mode member/fixture treatment (user round 2026-08-20 — the OFF /
+ * X-RAY / BASEMENT tri-state):
+ *
+ *  - 'off' — the FINISHED house. NO members at all: framing, wires, pipes,
+ *    ducts and foundation live inside walls/floors and a finished home
+ *    shows none of them (the host's own skins are the walls — also kills
+ *    the old drywall-face z-fight). Only the finished-SURFACE fixtures
+ *    render: outlet/switch plates, lights, smoke alarms, the panel face…
+ *    (SURFACE_FIXTURE_KINDS), so the level still reads like a real home.
+ *  - 'xray' — the engineering X-ray: assembly layers + the dollhouse cut as
+ *    before, but the BELOW-FLOOR stratum (isBelowFloor) is depth-tested
+ *    only — the old foundation/buried-DWV overlay ghosts are GONE, so the
+ *    crawl space no longer reads through the floor ("I shouldn't be able
+ *    to see it at all"); it is still visible via real sightlines from
+ *    outside/under. This retires the 2026-08-16 'crawl-space at a glance'
+ *    ghosts in favor of the dedicated basement mode.
+ *  - 'basement' — under the house: below-floor members render fully (solid
+ *    scene copy) PLUS a strong overlay copy so foundation/drainage read
+ *    through the floor and the shell from any angle; everything above the
+ *    floor collapses to a barely-visible transparent shell (FAINT_OPACITY)
+ *    for orientation only. No dollhouse cull (the shell is already faint).
+ */
+export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMode): Group {
   const buckets = new Map<string, Bucket>()
   const push = (
     key: string,
@@ -195,53 +276,55 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     dims: readonly [number, number, number],
     position: readonly [number, number, number],
     rotation: readonly [number, number, number],
-    face?: readonly [number, number],
-    ghostless?: boolean,
+    face: readonly [number, number] | undefined,
+    treatment: BucketTreatment,
     sourceId?: string,
   ) => {
     let bucket = buckets.get(key)
     if (!bucket) {
-      bucket = { color, entries: [], face, ghostless, sourceId }
+      bucket = { color, entries: [], face, treatment, sourceId }
       buckets.set(key, bucket)
     }
     bucket.entries.push({ dims, position, rotation })
   }
 
-  for (const member of members) {
-    const color = colorOf(member)
-    if (member.face && !seeThrough) {
-      // Solid mode: the HOST's wall skin is visible and our flush drywall
-      // face z-fights it (random depth-precision squares — user report).
-      // The host grey IS the drywall look there; layers render only in
-      // X-ray, where the host shells are hidden ('down') and our stacks
-      // are the walls. (They still count in the takeoff either way.)
-      continue
+  if (mode !== 'off') {
+    for (const member of members) {
+      const color = colorOf(member)
+      if (mode === 'basement') {
+        // Stratum split: below-floor is the star (solid + strong overlay
+        // ghost), the house above fades to the faint orientation shell.
+        if (isBelowFloor(member)) {
+          push(`${color}|below`, color, member.dims, member.position, member.rotation, undefined, 'ghosted')
+        } else {
+          push(`${color}|faint`, color, member.dims, member.position, member.rotation, undefined, 'faint')
+        }
+        continue
+      }
+      // mode === 'xray'
+      if (member.face) {
+        // Assembly layers: bucket PER FACE NORMAL (quantized) AND per source
+        // wall, so the dollhouse cut can hide camera-facing stacks as whole
+        // meshes while the SELECTED wall's stacks stay visible (night-4:
+        // picking a cladding was invisible from every straight-on view).
+        const key = `${color}|${member.face[0].toFixed(2)},${member.face[1].toFixed(2)}|${member.sourceId}`
+        push(key, color, member.dims, member.position, member.rotation, member.face, 'solid', member.sourceId)
+        continue
+      }
+      // Everything — below-floor included — is depth-tested only: wall/roof/
+      // MEP members read through the OPENED near faces of the dollhouse cut
+      // (ghosting them made every wall look transparent, round-13), and the
+      // under-floor stratum stays hidden behind real geometry by design.
+      push(`${color}|solid`, color, member.dims, member.position, member.rotation, undefined, 'solid')
     }
-    if (member.face) {
-      // Assembly layers: bucket PER FACE NORMAL (quantized) AND per source
-      // wall, so the dollhouse cut can hide camera-facing stacks as whole
-      // meshes while the SELECTED wall's stacks stay visible (night-4:
-      // picking a cladding was invisible from every straight-on view).
-      const key = `${color}|${member.face[0].toFixed(2)},${member.face[1].toFixed(2)}|${member.sourceId}`
-      push(key, color, member.dims, member.position, member.rotation, member.face, true, member.sourceId)
-      continue
-    }
-    // Ghost copies only make sense where no dollhouse opening can reveal
-    // the members: below grade / under the floor. Wall, roof and MEP
-    // members read through the OPENED near faces instead — ghosting them
-    // made every wall look transparent (round-13 user report). UNDER-SLAB
-    // plumbing (buried DWV, top of pipe below the floor line) ghosts like
-    // the foundation so the whole drainage tree reads through the slab to
-    // the sewer exit — 'crawl-space at a glance' (user ask 2026-08-16).
-    const buried =
-      member.system === 'plumbing' && member.position[1] + member.dims[1] / 2 < 0.02
-    const ghostless =
-      member.system !== 'foundation' && member.system !== 'floor-framing' && !buried
-    push(`${color}|${ghostless ? 'solid' : 'ghosted'}`, color, member.dims, member.position, member.rotation, undefined, ghostless)
   }
   for (const fixture of fixtures) {
+    // Finished house: only the surface devices; basement: part of the faint
+    // shell; X-ray: solid as before.
+    if (mode === 'off' && !SURFACE_FIXTURE_KINDS.has(fixture.kind)) continue
+    const treatment: BucketTreatment = mode === 'basement' ? 'faint' : 'solid'
     const { dims, color } = fixtureBox(fixture)
-    push(`${color}|fixture`, color, dims, fixture.position, [0, fixture.rotationY, 0], undefined, true)
+    push(`${color}|fixture|${treatment}`, color, dims, fixture.position, [0, fixture.rotationY, 0], undefined, treatment)
   }
 
   const group = new Group()
@@ -252,23 +335,22 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   const translation = new Vector3()
   const euler = new Euler()
 
-  // X-ray = TWO passes per bucket (round-11 regression: overlay-only
-  // members painted over a TREE standing in front of the house — the
-  // host's overlay pass composites over the finished scene with no
-  // scene-depth test).
+  // 'ghosted' buckets (basement mode's below-floor stratum) = TWO passes
+  // (round-11 regression: overlay-only members painted over a TREE standing
+  // in front of the house — the host's overlay pass composites over the
+  // finished scene with no scene-depth test).
   //
   //  - A SOLID copy on the SCENE layer (0): normal depth against the whole
   //    scene, so anything nearer the camera — a tree, a neighboring house —
-  //    occludes the skeleton exactly like real geometry. Inside walls it is
+  //    occludes it exactly like real geometry. Under the floor it is
   //    hidden, which is fine: that is what the ghost is for.
-  //  - A GHOST copy on the host OVERLAY layer (1) at partial opacity: the
-  //    editor's post-processing pipeline (packages/viewer
-  //    post-processing.tsx) renders that layer into its own freshly cleared
-  //    depth buffer and composites it on top by alpha. The ghost therefore
-  //    shows THROUGH walls/roofs/occluders (near member still hides far
-  //    member — the round-2 requirement), while wherever the solid copy is
-  //    directly visible the ghost blends member-color onto member-color and
-  //    changes nothing.
+  //  - A GHOST copy on the host OVERLAY layer (1): the editor's
+  //    post-processing pipeline (packages/viewer post-processing.tsx)
+  //    renders that layer into its own freshly cleared depth buffer and
+  //    composites it on top by alpha. The ghost therefore shows THROUGH
+  //    floors/walls/occluders (near member still hides far member — the
+  //    round-2 requirement). Basement mode runs it STRONG (0.9): the
+  //    under-floor content is the star of that view.
   //
   // Every in-scene depth trick failed on this pipeline and is pinned in
   // tests: renderer.clearDepth() poisoned the WebGPU pass; an inverted
@@ -280,27 +362,33 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
   // both copies render in the main pass with shared depth — no see-through,
   // but nothing disappears.
   const OVERLAY_LAYER = 1
-  const GHOST_OPACITY = 0.45
 
   for (const bucket of buckets.values()) {
     // Normal depth-tested draws, so members occlude each other correctly —
     // the round-2 user-reported artifacts (footing over nearer studs, far
     // stud tops reading through the top plate) came from bypassing the
-    // depth test.
+    // depth test. 'faint' buckets (basement's above-floor shell) skip the
+    // depth WRITE so the barely-visible shell never occludes the solid
+    // below-floor content behind it.
+    const faint = bucket.treatment === 'faint'
     const solid = new InstancedMesh(
       unitBox,
-      new MeshStandardMaterial({ color: bucket.color, roughness: 0.82 }),
+      new MeshStandardMaterial({
+        color: bucket.color,
+        roughness: 0.82,
+        ...(faint ? { transparent: true, opacity: FAINT_OPACITY, depthWrite: false } : {}),
+      }),
       bucket.entries.length,
     )
     if (bucket.face) solid.userData.face = bucket.face
     if (bucket.sourceId) solid.userData.sourceId = bucket.sourceId
     const meshes = [solid]
-    if (seeThrough && !bucket.ghostless) {
+    if (bucket.treatment === 'ghosted') {
       const ghostMaterial = new MeshStandardMaterial({
         color: bucket.color,
         roughness: 0.82,
         transparent: true,
-        opacity: GHOST_OPACITY,
+        opacity: BELOW_GHOST_OPACITY,
       })
       // Self-occlusion inside the overlay pass needs the depth write that
       // transparent materials normally skip.
@@ -323,8 +411,8 @@ export function buildGroup(members: Member[], fixtures: Fixture[], seeThrough: b
     })
     for (const mesh of meshes) {
       mesh.instanceMatrix.needsUpdate = true
-      mesh.castShadow = mesh === solid
-      mesh.receiveShadow = mesh === solid
+      mesh.castShadow = mesh === solid && !faint
+      mesh.receiveShadow = mesh === solid && !faint
       mesh.frustumCulled = false
       // The X-ray is a pure VISUAL: framing meshes must never intercept
       // the host's event raycast. R3F recurses through the level wrapper
@@ -474,12 +562,26 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     const plan = devicesOn
       ? reconcileDeviceNodes(state.nodes, levelId, result.devices)
       : { create: [], update: [], remove: [] }
-    const update = [...plan.update, ...serviceUpdates]
-    if (plan.create.length + update.length + plan.remove.length === 0) return
+    // Service auto-heal (user round 2026-08-20: automatic service points,
+    // no button): a pre-automation scene — framing node without the
+    // `servicesSeeded` latch — seeds ONCE on the next render, right here in
+    // the derived-maintenance batch (history-paused, like device seeding:
+    // undo never replays it). The latch (written in the SAME batch) plus
+    // the adopt-existing rule in planServiceSeeding guarantee a service
+    // point the user deletes is never resurrected. Read the FRESH framing
+    // node — a paused-batch latch write doesn't bump this effect's deps in
+    // every host, and a stale prop must not double-seed.
+    const freshFraming =
+      (state.nodes[node.id as string] as { id: string; servicesSeeded?: unknown } | undefined) ??
+      (node as { id: string; servicesSeeded?: unknown })
+    const seeding = planServiceSeeding(state.nodes, levelId, freshFraming)
+    const create = [...plan.create, ...seeding.create] as unknown[]
+    const update = [...plan.update, ...serviceUpdates, ...seeding.update]
+    if (create.length + update.length + plan.remove.length === 0) return
     pauseSceneHistory(useScene)
     try {
       state.applyNodeChanges({
-        create: plan.create.map((n) => ({ node: n as unknown, parentId: levelId })),
+        create: create.map((n) => ({ node: n, parentId: levelId })),
         update: update.map((u) => ({ id: u.id, data: u.data })),
         delete: plan.remove,
       })
@@ -488,12 +590,15 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     }
   }, [nodes, node, result])
 
+  // OFF / X-RAY / BASEMENT — one field drives every treatment below
+  // (legacy seeThrough nodes resolve through effectiveViewMode).
+  const mode = effectiveViewMode(node)
   const built = useMemo(
-    () => buildGroups(active.members, active.fixtures, node.seeThrough !== false),
+    () => buildGroups(active.members, active.fixtures, mode),
     // `active` (NOT `result`): during a drag only the override store moves,
     // so a committed-only dep froze the scene graph — the whole feature was
     // visually inert (verify night-6 blocker).
-    [active, node.seeThrough],
+    [active, mode],
   )
   const group = built.group
   useEffect(() => {
@@ -527,48 +632,24 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     }
   }
 
-  // Auto-switch the host to its most revealing wall mode while the X-ray is
-  // on (round-13 user feedback). 'down' — host walls fully hidden — not
-  // 'cutaway': the host's cutaway needs per-face exterior tags the scene
-  // data doesn't carry, so it painted every wall with its dot-stipple film
-  // (quality rounds 1-2). With the host shells gone, Bones' own assembly
-  // layers ARE the walls, and the per-face camera culling below gives the
-  // true dollhouse: near faces open, far drywall is the backdrop.
-  // Restores the previous mode on unmount UNLESS the user changed it since.
+  // Wall-mode note: the auto-switch to 'down' (Low) used to live HERE as
+  // mount-time magic with a restore-on-unmount — unreliable by construction
+  // (it rode the renderer lifecycle behind two async hops, a second X-rayed
+  // level recorded nothing so removing the first snapped walls back to
+  // full/cutaway under a live X-ray, and remounts re-imposed 'down' over a
+  // manual choice). It now lives in src/activation.ts, scoped to the actual
+  // user actions: activate → 'down' once; viewMode off / panel Remove →
+  // restore; everything in between is the user's. This effect only caches
+  // the viewer store HANDLE for the frame loop (exploded roof stratum) —
+  // dynamic import because the viewer package drags browser-only deps that
+  // must never evaluate under bun test (it only runs in the host).
   useEffect(() => {
-    // Dynamic import: the viewer package drags browser-only deps that must
-    // never evaluate under bun test (this effect only runs in the host).
-    let previous: string | undefined
-    let restore: (() => void) | undefined
-    let cancelled = false
     import('@pascal-app/viewer').then(({ useViewer }) => {
-      // Cache the store HANDLE for the frame loop (exploded roof stratum) —
-      // regardless of seeThrough and even past cancellation: attachForeign
-      // polls it every frame and the handle is a module singleton.
       viewerStore.current = useViewer as unknown as {
         getState: () => { levelMode?: string }
       }
-      if (cancelled || node.seeThrough === false) return
-      const viewer = useViewer.getState() as unknown as {
-        wallMode?: string
-        setWallMode?: (mode: string) => void
-      }
-      if (!viewer.setWallMode || viewer.wallMode === 'down') return
-      previous = viewer.wallMode
-      viewer.setWallMode('down')
-      restore = () => {
-        const now = useViewer.getState() as unknown as {
-          wallMode?: string
-          setWallMode?: (m: string) => void
-        }
-        if (now.wallMode === 'down' && previous && now.setWallMode) now.setWallMode(previous)
-      }
     })
-    return () => {
-      cancelled = true
-      restore?.()
-    }
-  }, [node.seeThrough])
+  }, [])
 
   // Dollhouse cut (round 13): assembly-layer buckets carry their face
   // normal — hide the stacks whose face points TOWARD the camera so you
@@ -576,7 +657,9 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // The wall is never transparent; the near face is simply removed.
   useFrame(({ camera }) => {
     attachForeign()
-    if (node.seeThrough === false) return
+    // The dollhouse cut is an X-ray affordance: 'off' has no face buckets
+    // at all, 'basement' keeps its faint shell intact from every angle.
+    if (mode !== 'xray') return
     const dir = camera.getWorldDirection(viewDir.current)
     // The SELECTED wall is exempt from the cut: the user is inspecting it
     // (Engineering card flow), so its full stack — cladding included —
