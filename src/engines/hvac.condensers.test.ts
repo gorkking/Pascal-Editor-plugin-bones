@@ -485,9 +485,14 @@ describe('heat-pump override moves unit #1 and the row follows (A4)', () => {
     expect(units.length).toBe(1)
     expect(units[0]?.position[0]).toBeCloseTo(spot?.[0] ?? Number.NaN, 12)
     expect(units[0]?.position[2]).toBeCloseTo(spot?.[1] ?? Number.NaN, 12)
-    // LOD 300 without an override still emits NO outdoor row (legacy gating)
+    // condenser-always: LOD 300 without an override ships the SAME single
+    // unit at the same auto anchor (the old LOD-400 gate silently dropped
+    // the whole outdoor block while the AH + ducts emitted — user report)
     const at300 = layoutHvac(walls, rooms)
-    expect(condensersOf(at300.fixtures).length).toBe(0)
+    const units300 = condensersOf(at300.fixtures)
+    expect(units300.length).toBe(1)
+    expect(units300[0]?.position[0]).toBeCloseTo(spot?.[0] ?? Number.NaN, 12)
+    expect(units300[0]?.position[2]).toBeCloseTo(spot?.[1] ?? Number.NaN, 12)
   })
 })
 
@@ -649,5 +654,179 @@ describe('M2 distance truth: slid disconnects stay within the stated budget', ()
       disc.position[2] - unit.position[2],
     )
     expect(dist).toBeLessThanOrEqual(1.5)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Condenser-always (user report: 'sometimes the HVAC does not add the
+// outside heat pump'). CONTRACT: whenever layoutHvac emits an air handler,
+// at least ONE outdoor unit (+pad, and disconnect/whip/line-set where a
+// wall exists) emits too — or a warning names exactly why not. Root causes
+// found by the 2700-compose sweep (sizes × mixes × states × LODs × nodes):
+//  (c) CONFIRMED — the `detail === '400' || hpPlan` gate emitted the AH +
+//      the full duct network at LOD 200/300 with NO outdoor unit and NO
+//      warning (900/2700 sweep rows silent);
+//  (b) CONFIRMED — no straight exterior wall → placeHeatPumpSpot null →
+//      the whole block skipped silently even at LOD 400;
+//  (d) CONFIRMED — an unresolvable heat-pump node (foreign/deleted wallId,
+//      default position) degraded to 'no override' and, gated, produced
+//      NOTHING at LOD 200/300 despite the user having placed the node;
+//  (a) REFUTED — condenserPlan never floors to zero (min 1 unit / 1.5 t:
+//      a heat pump HEATS too, so cold zones keep their outdoor unit).
+// ---------------------------------------------------------------------------
+
+describe('condenser-always — AH present ⇒ outdoor unit present (never silent)', () => {
+  /** W×D shell with a room-mix knob (matrix scenes). */
+  function mixScene(W: number, D: number, mix: string, exteriorWalls = true) {
+    const walls = [
+      wall('w_south', [0, 0], [W, 0], exteriorWalls),
+      wall('w_north', [0, D], [W, D], exteriorWalls),
+      wall('w_west', [0, 0], [0, D], exteriorWalls),
+      wall('w_east', [W, 0], [W, D], exteriorWalls),
+    ]
+    const sw = Math.min(3, W / 2)
+    const sd = Math.min(3, D / 2)
+    const mixes: Record<string, RoomSlice[]> = {
+      laundry: [
+        room('r_laundry', 'Laundry', 'laundry', [[0, 0], [sw, 0], [sw, sd], [0, sd]]),
+        room('r_living', 'Living', 'other', [[sw, 0], [W, 0], [W, D], [sw, D]]),
+        room('r_bed', 'Bedroom', 'bedroom', [[0, sd], [sw, sd], [sw, D], [0, D]]),
+      ],
+      hallway: [
+        room('r_hall', 'Hall', 'hallway', [[0, 0], [W, 0], [W, sd], [0, sd]]),
+        room('r_living', 'Living', 'other', [[0, sd], [W, sd], [W, D], [0, D]]),
+      ],
+      // no laundry, no hallway
+      plain: [
+        room('r_living', 'Living', 'other', [[0, 0], [W, 0], [W, sd], [0, sd]]),
+        room('r_bed', 'Bedroom', 'bedroom', [[0, sd], [W, sd], [W, D], [0, D]]),
+      ],
+      garage: [
+        room('r_garage', 'Garage', 'garage', [[0, 0], [W, 0], [W, sd], [0, sd]]),
+        room('r_bed', 'Bedroom', 'bedroom', [[0, sd], [W, sd], [W, D], [0, D]]),
+      ],
+      single: [room('r_living', 'Living', 'other', [[0, 0], [W, 0], [W, D], [0, D]])],
+    }
+    return { walls, rooms: mixes[mix] as RoomSlice[] }
+  }
+
+  const airHandlerOf = (fixtures: Fixture[]): Fixture | undefined =>
+    fixtures.find((f) => f.kind === 'equipment' && f.label?.includes('Air handler'))
+
+  test('repro (c): LOD 200 AND 300 generated path ship the FULL outdoor block with the AH', () => {
+    for (const detail of ['200', '300'] as const) {
+      const { walls, rooms } = mixScene(12, 10, 'laundry')
+      const out = layoutHvac(walls, rooms, { ...DEFAULT_SPEC, detail })
+      expect(airHandlerOf(out.fixtures)).toBeDefined()
+      // the exact silent compose from the sweep: AH=yes ducts=yes cond=0 warn=[]
+      const units = condensersOf(out.fixtures)
+      expect(units.length).toBeGreaterThanOrEqual(1)
+      expect(padsOf(out.members).length).toBe(units.length)
+      expect(cabinetsOf(out.members).length).toBe(units.length)
+      expect(out.fixtures.filter((f) => f.kind === 'disconnect').length).toBe(units.length)
+      expect(out.members.some((m) => m.sourceId.startsWith('ac-whip-'))).toBe(true)
+      expect(out.members.some((m) => m.sourceId.startsWith('lineset-'))).toBe(true)
+      // the row matches the 400 row (one system, one anchor — no LOD drift)
+      const at400 = condensersOf(layoutHvac(walls, rooms, LOD400).fixtures)
+      expect(units.map((u) => u.position)).toEqual(at400.map((u) => u.position))
+      // condensate remains 400-only scope
+      expect(out.members.some((m) => m.label?.includes('Condensate'))).toBe(false)
+    }
+  })
+
+  test('repro (b): no straight exterior wall — unit ships at the least-bad anchor, warned + ⚠ flagged', () => {
+    // hosts marking BOTH wall faces 'interior' (quality round-1 A1) used to
+    // skip the whole outdoor block with zero words at every LOD
+    const { walls, rooms } = mixScene(12, 10, 'laundry', false)
+    const out = layoutHvac(walls, rooms, LOD400)
+    expect(airHandlerOf(out.fixtures)).toBeDefined()
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBeGreaterThanOrEqual(1)
+    // the reason reaches the warnings — never silent
+    expect(out.warnings.some((w) => w.includes('no exterior wall'))).toBe(true)
+    // disconnect/whip cannot mount without a wall face — said out loud
+    expect(out.warnings.some((w) => w.includes('AC disconnect + whip not mounted'))).toBe(true)
+    // pads + cabinets carry the ⚠ verify flag
+    for (const m of [...padsOf(out.members), ...cabinetsOf(out.members)]) {
+      expect(m.flag).toContain('⚠ verify condenser placement')
+    }
+    // line-set legs are flagged AIR RUN (routePipe fallback semantics)
+    const legs = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+    expect(legs.length).toBeGreaterThan(0)
+    expect(legs.every((m) => m.flag?.includes('AIR RUN'))).toBe(true)
+  })
+
+  test('repro (d): an UNRESOLVABLE heat-pump node still yields the auto row at LOD 300', () => {
+    // node references a deleted/foreign wall with the default position —
+    // override resolution correctly treats it as 'no override', but that
+    // must degrade to the AUTO row, not to nothing
+    const { walls, rooms } = mixScene(12, 10, 'laundry')
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, {
+      heatPump: { wallId: 'w_missing', wallT: 0.5 },
+    })
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBeGreaterThanOrEqual(1)
+    const auto = placeHeatPumpSpot(walls, rooms)
+    expect(units[0]?.position[0]).toBeCloseTo(auto?.[0] ?? Number.NaN, 12)
+    expect(units[0]?.position[2]).toBeCloseTo(auto?.[1] ?? Number.NaN, 12)
+  })
+
+  test('(a) pinned: a tiny cold-climate home keeps 1 unit / 1.5 tons (heat pumps HEAT too)', () => {
+    // 4×5 m in AK (zone 7 → 650 sqft/ton): 215 sqft / 650 ≈ 0.33 raw tons —
+    // the plan floors at 1.5 t / 1 unit, never zero
+    const plan = condenserPlan(20, 'AK')
+    expect(plan.count).toBe(1)
+    expect(plan.totalTons).toBe(1.5)
+    const { walls, rooms } = mixScene(4, 5, 'laundry')
+    const units = condensersOf(
+      layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'AK' }).fixtures,
+    )
+    expect(units.length).toBe(1)
+    expect(units[0]?.label).toContain('1.5 tons')
+  })
+
+  test('invariant matrix: AH present ⇒ condenser ≥ 1 OR a warning names the reason', () => {
+    const sizes: [number, number][] = [[4, 5], [8, 6], [12, 10], [20, 12], [30, 15]]
+    const states = [undefined, 'MN', 'AK', 'VT', 'FL', 'TX', 'AZ', 'CA', 'WA', 'INTL']
+    const details = ['200', '300', '400'] as const
+    const mixes = ['laundry', 'hallway', 'plain', 'garage', 'single']
+    let composes = 0
+    for (const [W, D] of sizes) {
+      for (const mix of mixes) {
+        for (const exterior of [true, false]) {
+          for (const st of states) {
+            for (const detail of details) {
+              const { walls, rooms } = mixScene(W, D, mix, exterior)
+              const out = layoutHvac(walls, rooms, { ...DEFAULT_SPEC, detail }, undefined, {
+                stateCode: st,
+              })
+              composes++
+              if (!airHandlerOf(out.fixtures)) continue
+              const units = condensersOf(out.fixtures)
+              const named = /condenser|outdoor|heat.?pump/i.test(out.warnings.join(' '))
+              if (units.length < 1 && !named) {
+                throw new Error(
+                  `silent AH-without-condenser: ${W}x${D} ${mix} exterior=${exterior} st=${st} d=${detail} — warnings=[${out.warnings.join(' ; ')}]`,
+                )
+              }
+              // stronger: with the fix the unit itself is ALWAYS there
+              expect(units.length).toBeGreaterThanOrEqual(1)
+              // and where a wall exists to mount on, so do disconnect+whip
+              if (exterior) {
+                expect(out.fixtures.filter((f) => f.kind === 'disconnect').length).toBe(
+                  units.length,
+                )
+                expect(out.members.some((m) => m.sourceId.startsWith('ac-whip-'))).toBe(true)
+              } else {
+                expect(
+                  out.warnings.some((w) => w.includes('AC disconnect + whip not mounted')),
+                ).toBe(true)
+              }
+            }
+          }
+        }
+      }
+    }
+    expect(composes).toBe(sizes.length * mixes.length * 2 * states.length * details.length)
   })
 })
