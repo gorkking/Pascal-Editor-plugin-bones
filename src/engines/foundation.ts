@@ -33,6 +33,7 @@
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, SlabSlice, WallSlice } from '../core/types'
 import { formatIn, inches } from '../core/units'
+import { openingSpans } from './electrical'
 import { intersectIntervals, polygonSpans, subtractInterval } from './floor-framing'
 
 const EPS = 1e-6
@@ -439,6 +440,31 @@ export function buildFoundation(
     const runLen = footRun.len
     const runCenterU = footRun.center
 
+    // ---- anchor bolt layout (R403.1.6 — per PLATE SECTION) ----
+    // The bolts clamp the SOLE plate, and door ROs interrupt that plate at
+    // the floor line: a J-bolt inside a doorway anchors nothing (LOD-400
+    // B18a — three bolts were booked inside a 16-ft garage door RO), and
+    // R403.1.6's end rule is per plate SECTION — one bolt within 12" of
+    // EACH section end (i.e. at the door jambs), never fewer than two per
+    // section, ≤ spacing o.c. within it. The run splits at the RO spans
+    // crossing the plate band [0, 1.5"] and every remaining section keeps
+    // its own layout — the cmu.ts seam-sill boltSegments convention, ported.
+    // Windows (sill above the plate band) never split the plate.
+    const plateSections: { a: number; b: number }[] = []
+    {
+      let cursor = 0
+      for (const s of openingSpans(wall, 0, PLATE_THICKNESS)) {
+        if (s.lo > cursor + EPS) plateSections.push({ a: cursor, b: Math.min(s.lo, len) })
+        cursor = Math.max(cursor, s.hi)
+      }
+      if (len > cursor + EPS) plateSections.push({ a: cursor, b: len })
+    }
+    const boltUs: number[] = plateSections.flatMap((seg) =>
+      anchorBoltPositions(seg.b - seg.a, spec.anchorBoltSpacing, spec.anchorBoltEndDistance).map(
+        (u) => seg.a + u,
+      ),
+    )
+
     // ---- footing ----
     // R403.1.4.1: bearing must sit below the frost line → footing BOTTOM at
     // -spec.footingDepth (jurisdiction-resolved). Width from spec (Table
@@ -507,8 +533,9 @@ export function buildFoundation(
           // layouts anchor to the run ends — wherever the two spacings
           // share a multiple they landed at the SAME (x,z) with ~5in of
           // coincident volume (round-11/12). Nudge any bar within 3in of a
-          // bolt one hand-width down the run.
-          const boltUs = anchorBoltPositions(len, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)
+          // bolt one hand-width down the run. `boltUs` is the ACTUAL
+          // emitted layout (per plate section, B18a) so the nudge never
+          // drifts from the bolts.
           const clearOfBolts = (u: number): number => {
             const clash = boltUs.find((b) => Math.abs(b - u) < inches(3))
             if (clash === undefined) return u
@@ -527,18 +554,40 @@ export function buildFoundation(
             )
           }
         }
+
+        // ---- R403.1.3.1 top-of-wall horizontal bar (SDC D0–D2) ----
+        // Footings WITH stemwalls in SDC D carry one #4 bar within 12" of
+        // the TOP of the wall in addition to the bottom bar 3-4" off the
+        // footing bottom (the footing mat above covers the bottom half).
+        // LOD-400 B18c: on AK's 34" stemwall the nearest horizontal steel
+        // sat 38.8" below the top. Set just under the vertical bar tops
+        // (2" cover) so the verticals tie to it; the run mirrors the
+        // stemwall's interlocked extent. Non-seismic jurisdictions (INTL)
+        // stay byte-equal — plain-concrete stemwalls carry no mandate.
+        if (spec.seismicHoldDowns) {
+          emit(
+            'rebar',
+            [stemRun.len, REBAR_SIDE, REBAR_SIDE],
+            stemRun.center,
+            -REBAR_TOP_COVER - REBAR_SIDE / 2,
+            stemRun.len,
+            'steel',
+            '#4 horizontal — top of stemwall (R403.1.3.1)',
+          )
+        }
       }
     }
 
     // ---- anchor bolts ----
     // R403.1.6: max spacing (6' o.c. default, tighter in SDC D via the
-    // jurisdiction profile), first/last within 12" of the plate ends, and
-    // never fewer than two per plate section. Modeled as a 5/8" square shank
-    // embedded 7" into the stemwall and sticking up through the plate line
-    // (nut + washer land on the sill). Bolts follow the PLATE (wall length),
-    // not the extended pour.
+    // jurisdiction profile), first/last within 12" of the plate SECTION
+    // ends, and never fewer than two per section (`boltUs`, split at door
+    // ROs above). Modeled as a 5/8" square shank embedded 7" into the
+    // stemwall and sticking up through the plate line (nut + washer land
+    // on the sill). Bolts follow the PLATE (wall length), not the
+    // extended pour.
     const boltCenterY = -BOLT_EMBEDMENT + BOLT_HEIGHT / 2
-    for (const u of anchorBoltPositions(len, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
+    for (const u of boltUs) {
       emit(
         'anchor-bolt',
         [BOLT_SIDE, BOLT_HEIGHT, BOLT_SIDE],

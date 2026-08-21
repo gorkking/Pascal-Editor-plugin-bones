@@ -3,6 +3,7 @@ import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
+import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { anchorBoltPositions, buildFoundation, cornerExtensions } from './foundation'
 
 const FOOTING_HEIGHT = inches(8)
@@ -160,6 +161,159 @@ describe('buildFoundation — anchor bolt layout on a 6m wall', () => {
         DEFAULT_SPEC.anchorBoltSpacing + 1e-9,
       )
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B18a — anchor bolts vs door ROs (R403.1.6 per plate SECTION)
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — anchor bolts split at door ROs (B18a)', () => {
+  const spacing = DEFAULT_SPEC.anchorBoltSpacing
+  const endDist = DEFAULT_SPEC.anchorBoltEndDistance
+  // 9 m garage wall with a 16-ft door: RO ≈ [2.0615, 6.9385]
+  const garageDoor = {
+    id: 'gd',
+    kind: 'door' as const,
+    u: 4.5,
+    width: 4.839,
+    roughWidth: 4.877,
+    height: 2.1,
+    roughHeight: 2.15,
+    sillHeight: 0,
+  }
+  const wall = makeWall({ id: 'w_garage', end: [9, 0], openings: [garageDoor] })
+  const bolts = byRole(buildFoundation([wall], []), 'anchor-bolt')
+  const us = bolts.map((b) => b.position[0] ?? 0).sort((a, b) => a - b)
+  const roLo = garageDoor.u - garageDoor.roughWidth / 2
+  const roHi = garageDoor.u + garageDoor.roughWidth / 2
+
+  test('ZERO bolts inside the door RO — a J-bolt in a doorway anchors nothing', () => {
+    expect(bolts.length).toBeGreaterThan(0)
+    for (const u of us) {
+      expect(u <= roLo + 1e-9 || u >= roHi - 1e-9).toBe(true)
+    }
+  })
+
+  test('each plate SECTION keeps its own R403.1.6 layout: ≥2 bolts, jamb end bolts, gaps ≤ spacing', () => {
+    const sections: [number, number][] = [
+      [0, roLo],
+      [roHi, 9],
+    ]
+    for (const [a, b] of sections) {
+      const inSection = us.filter((u) => u >= a - 1e-9 && u <= b + 1e-9)
+      expect(inSection.length).toBeGreaterThanOrEqual(2)
+      // one bolt within 12" of EACH section end — including the door jambs
+      expect((inSection[0] ?? 0) - a).toBeLessThanOrEqual(endDist + 1e-9)
+      expect(b - (inSection[inSection.length - 1] ?? 0)).toBeLessThanOrEqual(endDist + 1e-9)
+      for (let i = 1; i < inSection.length; i++) {
+        expect((inSection[i] ?? 0) - (inSection[i - 1] ?? 0)).toBeLessThanOrEqual(spacing + 1e-9)
+      }
+    }
+  })
+
+  test('windows never split the plate — sill above the plate band, layout byte-equal', () => {
+    const win = {
+      id: 'win',
+      kind: 'window' as const,
+      u: 4.5,
+      width: 1.2,
+      roughWidth: 1.25,
+      height: 1.2,
+      roughHeight: 1.25,
+      sillHeight: 0.9,
+    }
+    const withWindow = byRole(buildFoundation([makeWall({ id: 'w_garage', end: [9, 0], openings: [win] })], []), 'anchor-bolt')
+    const plain = byRole(buildFoundation([makeWall({ id: 'w_garage', end: [9, 0] })], []), 'anchor-bolt')
+    expect(JSON.stringify(withWindow)).toBe(JSON.stringify(plain))
+  })
+
+  test('plate washers follow the SECTION bolts one-for-one (seismic LOD 400)', () => {
+    const fabSeismic: FramingSpec = { ...DEFAULT_SPEC, detail: '400', seismicHoldDowns: true }
+    const members = buildFoundation([wall], [], fabSeismic)
+    const sBolts = byRole(members, 'anchor-bolt')
+    const washers = byRole(members, 'plate-washer')
+    expect(washers).toHaveLength(sBolts.length)
+    for (const w of washers) {
+      const u = w.position[0] ?? 0
+      expect(u <= roLo + 1e-9 || u >= roHi - 1e-9).toBe(true)
+    }
+  })
+
+  test('stemwall verticals still nudge clear of the SECTION bolt layout', () => {
+    const members = buildFoundation([wall], [])
+    const boltPos = byRole(members, 'anchor-bolt').map((b) => b.position[0] ?? 0)
+    const verts = members.filter((m) => m.label === '#4 stemwall vertical')
+    expect(verts.length).toBeGreaterThan(0)
+    for (const v of verts) {
+      for (const b of boltPos) {
+        expect(Math.abs((v.position[0] ?? 0) - b)).toBeGreaterThanOrEqual(inches(3) - 1e-9)
+      }
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B18c — R403.1.3.1 top-of-stemwall horizontal bar (SDC D)
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — SDC-D top-of-stemwall bar (B18c, R403.1.3.1)', () => {
+  const TOP_BAR = '#4 horizontal — top of stemwall (R403.1.3.1)'
+
+  test('seismic spec: one #4 bar within 12" of the stemwall top, full interlocked run', () => {
+    // AK-flavored frost depth: 42" → 34" stemwall. Pre-B18c the nearest
+    // horizontal steel sat at the footing mat, 38.8" below the top.
+    const seismicFrost: FramingSpec = {
+      ...DEFAULT_SPEC,
+      seismicHoldDowns: true,
+      footingDepth: inches(42),
+    }
+    const members = buildFoundation([makeWall()], [], seismicFrost)
+    const bars = members.filter((m) => m.label === TOP_BAR)
+    expect(bars).toHaveLength(1)
+    const bar = bars[0] as Member
+    expect(bar.material).toBe('steel')
+    expect(bar.role).toBe('rebar')
+    // within 12" of the top of the wall (stemwall top = y 0)
+    expect(Math.abs(bar.position[1] ?? 0)).toBeLessThanOrEqual(inches(12))
+    // horizontal: runs the stemwall's extent
+    expect(bar.dims[0]).toBeCloseTo(4, 6)
+    expect(bar.dims[1]).toBeCloseTo(inches(0.5), 6)
+    // sits INSIDE the stemwall band, just under the vertical bar tops
+    expect((bar.position[1] ?? 0) + bar.dims[1] / 2).toBeCloseTo(-inches(2), 6)
+    // the bottom bar mandate is already covered by the footing mat at 3" up
+    expect(
+      members.some(
+        (m) =>
+          m.label === '#4 continuous footing bar' &&
+          (m.position[1] ?? 0) - m.dims[1] / 2 - -inches(42) < inches(4),
+      ),
+    ).toBe(true)
+  })
+
+  test('non-seismic spec (INTL) emits NO top bar — byte-equal stays byte-equal', () => {
+    const members = buildFoundation([makeWall()], [])
+    expect(members.filter((m) => m.label === TOP_BAR)).toHaveLength(0)
+  })
+
+  test('shallow spec without a stemwall carries no top bar even under seismic', () => {
+    const seismicShallow: FramingSpec = {
+      ...DEFAULT_SPEC,
+      seismicHoldDowns: true,
+      footingDepth: inches(8),
+    }
+    const members = buildFoundation([makeWall()], [], seismicShallow)
+    expect(members.filter((m) => m.label === TOP_BAR)).toHaveLength(0)
+  })
+
+  test('the AK/CA profiles trigger the bar; INTL does not (jurisdiction-driven)', () => {
+    for (const code of ['AK', 'CA'] as const) {
+      const spec = applyJurisdiction({ ...DEFAULT_SPEC }, profileFor(code))
+      const bars = buildFoundation([makeWall()], [], spec).filter((m) => m.label === TOP_BAR)
+      expect({ code, bars: bars.length }).toEqual({ code, bars: 1 })
+    }
+    const intl = applyJurisdiction({ ...DEFAULT_SPEC }, profileFor('INTL'))
+    expect(buildFoundation([makeWall()], [], intl).filter((m) => m.label === TOP_BAR)).toHaveLength(0)
   })
 })
 

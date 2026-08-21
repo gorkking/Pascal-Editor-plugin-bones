@@ -330,6 +330,27 @@ AND a gate — a checklist line without a test is a wish.
   `src/framing/compute.multistorey.test.ts` (storey-0 vs storey-1 split),
   `src/engines/interpenetration.test.ts` (slab-on-grade compose).
 
+- **S12 Anchorage is real: bolts clamp a plate that exists, and seismic
+  stemwalls carry their top bar.** The foundation's R403.1.6 anchor-bolt
+  layout runs per PLATE SECTION: the run splits at every door RO crossing
+  the plate band [0, 1.5"] (the sole plate is interrupted there — a J-bolt
+  inside a doorway anchors nothing) and every remaining section keeps its
+  own layout — one bolt within 12" of EACH section end (the door jambs),
+  never fewer than two per section, ≤ spacing o.c. Windows (sill above the
+  plate band) never split the plate; plate washers (R602.11.1) follow the
+  section bolts one-for-one; stemwall verticals nudge clear of the ACTUAL
+  emitted bolt layout. SDC D0–D2 stemwalls carry the R403.1.3.1 horizontal
+  #4 within 12" of the TOP of the wall (2" cover, run mirrors the
+  interlocked stemwall extent) in addition to the footing-bottom mat —
+  AK's 34" stemwall used to have its nearest horizontal steel 38.8" below
+  the top; non-seismic jurisdictions stay byte-equal.
+  Origin: LOD-400 wave-2 audit B18 (a)+(c), 2026-08-20 (3 bolts booked
+  installable inside a 16-ft garage door RO; dead per-section end rule).
+  Gates: `src/engines/foundation.test.ts` (B18a describe: RO exclusion,
+  per-section layout, window byte-equality, washer parity, vertical nudge;
+  B18c describe: seismic top bar presence/position, INTL absence,
+  AK/CA-vs-INTL profile matrix).
+
 ## M — Mechanical (HVAC)
 
 - **M1 Ducts never cross plate bands; interior storeys route in soffits.**
