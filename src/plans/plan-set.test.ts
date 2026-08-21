@@ -1926,7 +1926,7 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
   const assertTickInvariants = (svg: string): void => {
     const ticks = parseTicks(svg)
     expect(ticks.length).toBeGreaterThan(0)
-    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d'])
+    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d', '#b5aa97'])
     const own = svgRects(svg, ['#8fb0c4'])
     const bubbles = parseBubbles(svg)
     for (const t of ticks) {
@@ -1957,7 +1957,7 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
   // line-set pair runs the SAME wall the sleeved building drain crosses —
   // the confirmed tick-across-rails seam (pre-fix: tick center 1.9 px from
   // BOTH rails, 5.4 px from a bubble).
-  const frostMepSvg = () => {
+  const frostMep = () => {
     const walls = [
       swall('w_s', [0, 0], [10, 0]),
       swall('w_e', [10, 0], [10, 8]),
@@ -1973,13 +1973,31 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     const p = layoutPlumbing(walls, rooms, specFrost)
     const h = layoutHvac(walls, rooms, specFrost, { heatPump: { position: [9.5, 0, -0.5] } })
     const f = buildFoundation(walls, [sslab([[0, 0], [10, 0], [10, 8], [0, 8]])], specFrost)
-    const mep = buildPlanSet(
-      [...p.members, ...h.members, ...f],
-      [...p.fixtures, ...h.fixtures],
-      {},
-    ).find((s) => s.title.startsWith('Plumbing'))
-    return mep?.svg ?? ''
+    const members = [...p.members, ...h.members, ...f]
+    const mep = buildPlanSet(members, [...p.fixtures, ...h.fixtures], {}).find((s) =>
+      s.title.startsWith('Plumbing'),
+    )
+    return { svg: mep?.svg ?? '', members }
   }
+  const frostMepSvg = () => frostMep().svg
+  /** Eligible flow-arrow runs, recomputed from the members + sheet scale. */
+  const eligibleArrows = (members: Member[], svg: string): number => {
+    const ratio = Number(svg.match(/scale 1:(\d+)/)?.[1] ?? 0)
+    expect(ratio).toBeGreaterThan(0)
+    const scale = 96 / 0.0254 / ratio
+    return members.filter((m) => {
+      if (m.system !== 'plumbing' || m.role !== 'pipe-run') return false
+      if (!m.sourceId.startsWith('dwv-') || m.sourceId.startsWith('dwv-vent')) return false
+      if (Math.abs(m.rotation[2]) <= 1e-6) return false
+      const [rx, ry, rz] = m.rotation
+      const ax = Math.cos(ry) * Math.cos(rz)
+      const az = Math.sin(rx) * Math.sin(rz) - Math.cos(rx) * Math.sin(ry) * Math.cos(rz)
+      const pf = Math.hypot(ax, az)
+      return pf > 0.5 && Math.max(0.02, m.dims[0] * pf) * scale > 18
+    }).length
+  }
+  const arrowDrops = (svg: string): number =>
+    (svg.match(/<!-- dwv-arrow dropped \(crowded\): [^>]+ -->/g) ?? []).length
 
   test('ALL ticks: bar tips >= 4px from foreign pipes, >= 12px from bubbles, span crosses OWN pipe', () => {
     const svg = frostMepSvg()
@@ -1998,7 +2016,7 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     // FAIL-2 gate: no arrow center within 4 px of any FOREIGN-class pipe
     // rect (the demo arrow reproduced the pre-fix elbow coordinate ON the
     // suction riser — arrows now get the ticks' perpendicular escape)
-    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d'])
+    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d', '#b5aa97'])
     expect(foreign.length).toBeGreaterThan(0)
     for (const [ax, ay] of arrows) {
       for (const [bx, by] of bubbles) {
@@ -2075,6 +2093,235 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
 
   test('courtyard ticks hold the round-2 invariants too (fallback-path ticks)', () => {
     assertTickInvariants(courtyardSvg())
+  })
+
+  test('R1: two-sided shadow — the demo elbow class DROPS its arrow instead of lying', () => {
+    // Third round on this exhibit: run half 14 px kills the along budget,
+    // the pair shadows one perpendicular side (n=-5 between the rails,
+    // n=-10 by the liquid) and the elbow's other leg (equipment here)
+    // shadows n=+5/+10 — the old bubbles-only tier reprinted the pre-fix
+    // coordinate every round. Now: no honest spot -> NO arrow, recorded.
+    const mk = (over: Partial<Member>): Member => ({
+      system: 'plumbing',
+      role: 'pipe-run',
+      dims: [0.7, 0.0762, 0.0762],
+      length: 0.7,
+      position: [2, -0.5, 1],
+      rotation: [0, 0, Math.atan(1 / 48)],
+      material: 'pvc',
+      sourceId: 'dwv-branch-x',
+      ...over,
+    })
+    const scale = 96 / 0.0254 / 20 // ratio pinned by the assertion below
+    const members = [
+      mk({}),
+      mk({
+        system: 'hvac',
+        dims: [2.4, 0.019, 0.019],
+        length: 2.4,
+        position: [2, 0.4, 1 + 5 / scale],
+        rotation: [0, 0, 0],
+        material: 'copper',
+        sourceId: 'lineset-suction-1',
+      }),
+      mk({
+        system: 'hvac',
+        dims: [2.4, 0.0095, 0.0095],
+        length: 2.4,
+        position: [2, 0.4, 1 + 5 / scale],
+        rotation: [0, 0, 0],
+        material: 'copper',
+        sourceId: 'lineset-liquid-1',
+      }),
+      mk({
+        system: 'hvac',
+        role: 'equipment',
+        dims: [2.4, 0.6, 22 / scale],
+        length: 2.4,
+        position: [2, 0.3, 1 - 14 / scale],
+        rotation: [0, 0, 0],
+        material: 'steel',
+        sourceId: 'ahu-x',
+      }),
+    ]
+    const svg = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Plumbing'))?.svg ?? ''
+    expect(svg).toContain('scale 1:20') // offsets above assume this ratio
+    // the elbow coordinate is DEAD: zero arrows anywhere near a foreign rect
+    const arrows = [...svg.matchAll(
+      /M-3\.5 -3 L4\.5 0 L-3\.5 3 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/g,
+    )]
+    expect(arrows.length).toBe(0)
+    expect(arrowDrops(svg)).toBe(1)
+    expect(svg).toContain('dwv-arrow dropped (crowded): dwv-branch-x')
+    // census accounting: eligible = printed + explicitly-crowded
+    expect(eligibleArrows(members, svg)).toBe(1)
+  })
+
+  test('R1: frost census accounts drops explicitly (eligible = printed + crowded)', () => {
+    const { svg, members } = frostMep()
+    const printed = (svg.match(/M-3\.5 -3 L4\.5 0 L-3\.5 3 Z/g) ?? []).length
+    expect(printed + arrowDrops(svg)).toBe(eligibleArrows(members, svg))
+    // and every PRINTED arrow honors the 4 px foreign margin (no tier-3 lies)
+    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d', '#b5aa97'])
+    const pts = [...svg.matchAll(
+      /M-3\.5 -3 L4\.5 0 L-3\.5 3 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/g,
+    )].map((m) => [Number(m[1]), Number(m[2])] as [number, number])
+    for (const [ax, ay] of pts) {
+      for (const r of foreign) expect(rectDist(ax, ay, r)).toBeGreaterThanOrEqual(4)
+    }
+  })
+
+  test('R2: cites never overlap their own tick bars (rect separation >= 2px)', () => {
+    // minimal VERTICAL-leg scene: with empty surroundings the ring-14
+    // perpendicular candidate is FIRST and (pre-fix) CONTAINED the tick
+    // (|dx|=14 < width/2, dy=0 — ghost notches under both frost cites in
+    // the examiner's round-8 exhibit); horizontal legs were immune.
+    const vertical: Member[] = [
+      {
+        system: 'plumbing',
+        role: 'pipe-run',
+        dims: [1.5, 0.0762, 0.0762],
+        length: 1.5,
+        position: [2, -0.6, 1],
+        rotation: [0, -Math.PI / 2, Math.atan(1 / 48)],
+        material: 'pvc',
+        sourceId: 'dwv-main',
+        label: '3" building drain — sleeved through foundation (P2603.4)',
+      },
+      {
+        system: 'foundation',
+        role: 'stemwall',
+        dims: [3, 1.3, 0.2],
+        length: 3,
+        position: [2, -0.65, 1],
+        rotation: [0, 0, 0],
+        material: 'concrete',
+        sourceId: 'w_x',
+      },
+    ]
+    const verticalSvg =
+      buildPlanSet(vertical, [], {}).find((s) => s.title.startsWith('Plumbing'))?.svg ?? ''
+    for (const svg of [verticalSvg, frostMepSvg(), courtyardSvg()]) {
+      const ticks = parseTicks(svg)
+      const cites = [...svg.matchAll(/<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*>SLEEVE/g)].map(
+        (m) => [Number(m[1]), Number(m[2]) - 3] as [number, number],
+      )
+      expect(cites.length).toBe(ticks.length) // census intact
+      const cw = ('SLEEVE (P2603.4)'.length * 6) / 2
+      for (const [cx, cy] of cites) {
+        const t = ticks.reduce((b, k) =>
+          Math.hypot(k.x - cx, k.y - cy) < Math.hypot(b.x - cx, b.y - cy) ? k : b,
+        )
+        // the tick as a drawn rect (bars ±2.5 along, span ±6) + 2 px pad
+        const tickRect = { w: 7, h: 13.6, fill: '', x: t.x, y: t.y, rot: t.rot }
+        expect(textHits(cx, cy, cw + 2, 5 + 2, tickRect)).toBe(false)
+      }
+    }
+  })
+
+  const squeezedCourtyardSvg = () => {
+    const uWalls = [
+      swall('u_s', [0, 0], [12, 0]),
+      swall('u_e', [12, 0], [12, 8]),
+      swall('u_n', [12, 8], [0, 8]),
+      swall('u_w', [0, 8], [0, 0]),
+      swall('u_c1', [5, 2], [5, 6]),
+      swall('u_c2', [7, 2], [7, 6]),
+    ]
+    const uRooms = [
+      sroom('r_ubath', 'bathroom', [[8, 2], [11, 2], [11, 6], [8, 6]], ['u_e']),
+      sroom('r_ukitchen', 'kitchen', [[1, 2], [4, 2], [4, 6], [1, 6]], ['u_w']),
+    ]
+    const p = layoutPlumbing(uWalls, uRooms, specFrost)
+    // the condenser parked ON the exit: rails + CU bubble crowd the
+    // crossing — the examiner's under-clearing exhibit (tips 2.9/bubble 8)
+    const h = layoutHvac(uWalls, uRooms, specFrost, { heatPump: { position: [12.5, 0, 4.2] } })
+    const f = buildFoundation(uWalls, [sslab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
+    const mep = buildPlanSet(
+      [...p.members, ...h.members, ...f],
+      [...p.fixtures, ...h.fixtures],
+      {},
+    ).find((s) => s.title.startsWith('Plumbing'))
+    return mep?.svg ?? ''
+  }
+
+  test('R3: squeezed exit — every tick meets 4/12 OR is provably score-max over the widened budget', () => {
+    const svg = squeezedCourtyardSvg()
+    const ticks = parseTicks(svg)
+    expect(ticks.length).toBe(3)
+    const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d', '#b5aa97'])
+    const own = svgRects(svg, ['#8fb0c4'])
+    const bubbles = parseBubbles(svg)
+    // crowded provenance comments sit immediately before their tick path
+    const crowded = [...svg.matchAll(
+      /<!-- sleeve-tick crowded: (\S+) t=(-?\d+) n=(-?\d+) score=(-?[\d.]+) -->\s*<path d="M-2\.5 -6 L-2\.5 6 M2\.5 -6 L2\.5 6" stroke="#41637a"[^/]*translate\((-?[\d.]+) (-?[\d.]+)\) rotate\((-?[\d.]+)\)/g,
+    )].map((m) => ({
+      t: Number(m[2]),
+      n: Number(m[3]),
+      x: Number(m[5]),
+      y: Number(m[6]),
+      rot: Number(m[7]),
+    }))
+    const T_GRID = [0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 12, -12, 14, -14, 16, -16, 20, -20, 24, -24, 28, -28, 32, -32, 36, -36, 40, -40, 44, -44]
+    const N_GRID = [0, 3, -3, 5, -5, 8, -8]
+    let sawCrowded = 0
+    for (const t of ticks) {
+      const tipOk = foreign.every((r) => tickTips(t).every(([qx, qy]) => rectDist(qx, qy, r) >= 4))
+      const bubOk = bubbles.every(([bx, by]) => Math.hypot(bx - t.x, by - t.y) >= 12)
+      if (tipOk && bubOk) continue
+      // under-clearing is only legal with recorded exhaustion…
+      const c = crowded.find((k) => Math.abs(k.x - t.x) < 0.2 && Math.abs(k.y - t.y) < 0.2)
+      expect(c).toBeDefined()
+      if (!c) continue
+      sawCrowded++
+      // …AND the chosen spot must be score-max over the widened budget
+      // (re-scored from outside under one consistent metric: foreign-fill
+      // rects for tips, bubbles + other ticks for the 12 px radius).
+      const a = (c.rot * Math.PI) / 180
+      const ax = Math.cos(a)
+      const ay = Math.sin(a)
+      const ox = c.x - (ax * c.t - ay * c.n)
+      const oy = c.y - (ay * c.t + ax * c.n)
+      const obstacles: [number, number][] = [
+        ...bubbles,
+        ...ticks.filter((o) => o !== t).map((o) => [o.x, o.y] as [number, number]),
+      ]
+      const scoreAt = (px: number, py: number): number => {
+        const probe = { x: px, y: py, rot: c.rot }
+        const tip = foreign.reduce(
+          (m2, r) => Math.min(m2, ...tickTips(probe).map(([qx, qy]) => rectDist(qx, qy, r))),
+          Number.POSITIVE_INFINITY,
+        )
+        const bub = obstacles.reduce(
+          (m2, [bx, by]) => Math.min(m2, Math.hypot(bx - px, by - py)),
+          Number.POSITIVE_INFINITY,
+        )
+        return Math.min(tip - 5, bub - 13)
+      }
+      const crossesOwn = (px: number, py: number): boolean =>
+        own.some((r) => {
+          const a2 = (-r.rot * Math.PI) / 180
+          const cc = Math.cos(a2)
+          const ss = Math.sin(a2)
+          const dx = px - r.x
+          const dy = py - r.y
+          return Math.abs(dx * cc + dy * ss) <= r.w / 2 && Math.abs(-dx * ss + dy * cc) <= 6 + r.h / 2 - 2
+        })
+      const chosen = scoreAt(t.x, t.y)
+      let bestAlt = Number.NEGATIVE_INFINITY
+      for (const tt of T_GRID) {
+        for (const nn of N_GRID) {
+          const px = ox + ax * tt - ay * nn
+          const py = oy + ay * tt + ax * nn
+          if (!crossesOwn(px, py)) continue
+          bestAlt = Math.max(bestAlt, scoreAt(px, py))
+        }
+      }
+      // slack: the engine also sees equipment boxes + same-color dwv legs
+      // the fill-based re-score cannot attribute
+      expect(bestAlt).toBeLessThanOrEqual(chosen + 3)
+    }
+    expect(sawCrowded).toBeGreaterThanOrEqual(1) // the exhibit really is squeezed
   })
 
   const courtyardSvg = () => {

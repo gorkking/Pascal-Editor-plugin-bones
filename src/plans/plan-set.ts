@@ -102,6 +102,10 @@ const PLAN_SHEETS: {
       'vent-stack': '#6e8fa0',
       'pipe-run': '#8fb0c4',
       'water-heater': '#b5aa97',
+      // equipment BODIES (AHU / condenser) share the water-heater buff —
+      // they printed in pipe slate, which hid them from the fill-based
+      // re-score gates and read as pipe on paper (seam round 3)
+      equipment: '#b5aa97',
       default: '#8fb0c4',
     },
   },
@@ -745,9 +749,12 @@ function planSheet(
         }
         return pts
       }
-      let best: { x: number; y: number; score: number } | null = null
-      outer: for (const t of [0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 12, -12, 14, -14, 16, -16, 20, -20, 24, -24, 28, -28]) {
-        for (const n of [0, 3, -3, 5, -5]) {
+      let best: { x: number; y: number; score: number; t: number; n: number } | null = null
+      // t reaches ±44 (association at ~0.56 m still read fine in round 1)
+      // and n adds ±8 — the bars-cross-own invariant below keeps wide n
+      // candidates honest on thin pipes (seam round 3, R3).
+      outer: for (const t of [0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 12, -12, 14, -14, 16, -16, 20, -20, 24, -24, 28, -28, 32, -32, 36, -36, 40, -40, 44, -44]) {
+        for (const n of [0, 3, -3, 5, -5, 8, -8]) {
           const px = k.x + axK * t - ayK * n
           const py = k.y + ayK * t + axK * n
           if (!barsCrossOwn(px, py)) continue
@@ -765,14 +772,24 @@ function planSheet(
           // 5 = the gate's 4 px tip clearance + the 1.6 px bar stroke
           const score = Math.min(tipGap - 5, bubbleGap - 13)
           if (score >= 0) {
-            best = { x: px, y: py, score }
+            best = { x: px, y: py, score, t, n }
             break outer
           }
-          if (!best || score > best.score) best = { x: px, y: py, score }
+          if (!best || score > best.score) best = { x: px, y: py, score, t, n }
         }
       }
       const kx = best?.x ?? k.x
       const ky = best?.y ?? k.y
+      // R3 (seam round 3): a tick that settles below the full clearances
+      // records its provenance — the chosen grid offset and score — so a
+      // gate can recover the crossing origin, re-score the WIDENED budget
+      // from outside and prove the spot is score-max (the skeptic's
+      // re-score pattern) instead of trusting the fallback blindly.
+      if (best && best.score < 0) {
+        shapes.push(
+          `<!-- sleeve-tick crowded: ${k.sourceId} t=${best.t} n=${best.n} score=${best.score.toFixed(1)} -->`,
+        )
+      }
       shapes.push(
         `<path d="M-2.5 -6 L-2.5 6 M2.5 -6 L2.5 6" stroke="${DWV_FLOW_ARROW}" stroke-width="1.6" fill="none" transform="translate(${kx.toFixed(1)} ${ky.toFixed(1)}) rotate(${deg(k.ang).toFixed(2)})"/>`,
       )
@@ -807,6 +824,19 @@ function planSheet(
       // in placed[] 14 px away and killed every near-ring spot) and its
       // OWN pipe run — it may ride the leg it annotates; other texts are
       // hard obstacles (text-over-text was FAIL 1).
+      // seam round 3 (R2): the exemption relaxes DISTANCE only — the cite
+      // rect must never OVERLAP the tick's bars (on vertical legs the
+      // ring-14 perpendicular spot CONTAINED the tick: |dx|=14 < width/2,
+      // dy=0 — ghost notches under both frost cites). Adjacency stays
+      // legal; containment does not.
+      const ownTickRect: PipeObstacle = {
+        x: kx,
+        y: ky,
+        ang: k.ang,
+        hl: 3.5, // bar pair at ±2.5 along + stroke
+        hw: 6.8, // bar half-span 6 + stroke
+        sourceId: '__own-tick',
+      }
       const spot = spots.find(
         ([tx, ty]) =>
           tx - sleeveW / 2 > MARGIN &&
@@ -816,6 +846,7 @@ function planSheet(
           !placed.some(
             (q) => q !== tickEntry && Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12,
           ) &&
+          !textHitsPipe(tx, ty, sleeveW / 2, 5, ownTickRect, 2) &&
           textClearOfPipes(tx, ty, sleeveW / 2, 5, 2, k.sourceId) &&
           textClearOfTexts(tx, ty, sleeveW / 2, 5),
       )
@@ -836,21 +867,25 @@ function planSheet(
     const dx = Math.cos(a.ang)
     const dy = Math.sin(a.ang)
     const maxT = Math.max(0, a.half - 6)
-    // Three tiers (seam round 2): full pipe clearance, then a relaxed
-    // 4 px margin, then bubbles-only census protection — each over the
-    // SAME 2D grid the ticks got (a short run whose whole length is
-    // coaxial with a line-set riser has no clean 1D spot: the demo arrow
-    // reproduced the pre-fix elbow coordinate exactly; one perpendicular
-    // step clears it).
+    // Two tiers (seam round 3): full pipe clearance, then a relaxed 4 px
+    // margin — each over the SAME 2D grid the ticks got (a short run
+    // coaxial with a line-set riser has no clean 1D spot; one
+    // perpendicular step usually clears it). A run shadowed on BOTH sides
+    // (the pair one way, the elbow's other leg the other) has NO honest
+    // spot even at the relaxed margin: draw NOTHING rather than an arrow
+    // ON a foreign pipe (round-4's crowded-drop convention — the old
+    // bubbles-only tier reprinted the pre-fix elbow coordinate three
+    // rounds running). The drop is recorded as an SVG comment so the
+    // census gates account for it explicitly instead of pinning blind 1:1.
     let spot: { x: number; y: number } | null = null
-    for (const radius of [8.5, 4, 0]) {
+    for (const radius of [8.5, 4]) {
       for (const t of [0, 10, -10, 16, -16, 22, -22, 28, -28]) {
         if (Math.abs(t) > maxT) continue
         for (const n of [0, 5, -5, 10, -10]) {
           const px = a.x + dx * t - dy * n
           const py = a.y + dy * t + dx * n
           if (placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) continue
-          if (radius > 0 && !clearOfPipes(px, py, radius, a.sourceId)) continue
+          if (!clearOfPipes(px, py, radius, a.sourceId)) continue
           spot = { x: px, y: py }
           break
         }
@@ -858,7 +893,10 @@ function planSheet(
       }
       if (spot) break
     }
-    if (!spot) continue
+    if (!spot) {
+      shapes.push(`<!-- dwv-arrow dropped (crowded): ${a.sourceId} -->`)
+      continue
+    }
     placed.push(spot)
     shapes.push(
       `<path d="M-3.5 -3 L4.5 0 L-3.5 3 Z" fill="${DWV_FLOW_ARROW}" transform="translate(${spot.x.toFixed(1)} ${spot.y.toFixed(1)}) rotate(${deg(a.ang).toFixed(2)})"/>`,
