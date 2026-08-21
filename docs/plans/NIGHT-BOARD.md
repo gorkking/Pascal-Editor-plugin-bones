@@ -1,4 +1,30 @@
-# Bones night board — night-6 SHIPPED TO PROD 2026-08-20 (+ day feedbacks in flight)
+# Bones night board — NIGHT-7 (2026-08-20 → 21) — all-nighter, loop as usual
+
+## NIGHT-7 PLAN (user directive ~19:00: "all nighter again, adversarial loop as usual")
+PHASE 1 — close + ship the day-feedback batch:
+- F1 line-set @ 40276ab: closing skeptic gate resumed (wf_9d7dc388).
+- F2 selection: pilot finishing hover affordance + re-verifying its 2
+  post-restart commits (fb86f233 ownership rule, ffc98cb1 degenerate
+  self-heal); then full browser QA vs plugin master (d8bcc5d raycast
+  fix), then PR.
+- F3 DWV: pilot round 3 (R1 stack DISCONNECT regression, R2 sleeve
+  per-CROSSING not per-terminal-leg, R3 courtyard branch crossings,
+  R4a stub clamp to room polygon / R4b flush trap riser).
+- MERGE ORDER: F3 → F1 (both touch plumbing.ts; F1's plumbing diff is
+  small — export + bandHalf) → combined examiner round (arrows × line-
+  set interaction, both flagged) → visual round → ship (plugin batch +
+  editor PR w/ F2 + private-editor chain).
+PHASE 2 — wave-2 blockers (pilots tonight): B17 slab-on-grade member +
+R506 vapor retarder + concrete yd³ (foundation.ts+compute — biggest
+pour unbooked); B19 HVAC equipment placement truth (garage AH,
+M1602.2) + return path + duct sizing. B18 anchorage AFTER B17 lands
+(same file). B20 plumbing safety AFTER F3 merges (same file).
+PHASE 3 (as capacity allows): B6 roof sheathing (NEEDS the B4 system-
+filter advisory), B8 roof closures, B21d door/window schedule sheet.
+Rules unchanged: loop rounds per batch, gates in same commits, byte-
+equality manifests where defaults move, board updated as things land.
+
+# night-6 SHIPPED TO PROD 2026-08-20 (+ day feedbacks in flight)
 
 ## SHIP RECORD (~15:30): private-editor #386 → b836203e
 Chain: plugin 85238a8e (950 tests, examiner ship-stamp) → editor #695
