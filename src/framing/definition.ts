@@ -18,6 +18,16 @@ const framingParametrics: ParametricDescriptor<FramingNode> = {
     },
     {
       label: 'View',
+      // CONFIG-KNOB semantics, accepted deliberately (skeptic advisory
+      // 2026-08-21): parametric descriptors are declarative, so this field
+      // surfaces the RAW stored value — a legacy (pre-viewMode) node shows
+      // no selection here until first written, and an inspector/MCP write
+      // sets the mode WITHOUT the wall-mode side effect (walls stay where
+      // they are). That's the same contract as every other raw knob on this
+      // node; the Bones panel's Normal/X-ray/Basement control is the UX
+      // path and owns the wall-mode contract (src/activation.ts, checklist
+      // A5). The renderer resolves legacy nodes via effectiveViewMode
+      // regardless of what this row displays.
       fields: [
         { key: 'viewMode', kind: 'enum', options: ['off', 'xray', 'basement'], display: 'segmented' },
       ],

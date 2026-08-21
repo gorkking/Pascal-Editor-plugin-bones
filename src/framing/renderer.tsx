@@ -319,11 +319,14 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
     }
   }
   for (const fixture of fixtures) {
-    // Finished house: only the surface devices; basement: part of the faint
-    // shell; X-ray: solid as before.
+    // Finished house: only the surface devices; basement: stratum-split
+    // like members (advisory 2026-08-21 — a buried cleanout riser joins the
+    // ghosted star content instead of fading into the shell); X-ray: solid.
     if (mode === 'off' && !SURFACE_FIXTURE_KINDS.has(fixture.kind)) continue
-    const treatment: BucketTreatment = mode === 'basement' ? 'faint' : 'solid'
     const { dims, color } = fixtureBox(fixture)
+    const below = fixture.position[1] + dims[1] / 2 < BURIED_TOP_Y
+    const treatment: BucketTreatment =
+      mode === 'basement' ? (below ? 'ghosted' : 'faint') : 'solid'
     push(`${color}|fixture|${treatment}`, color, dims, fixture.position, [0, fixture.rotationY, 0], undefined, treatment)
   }
 

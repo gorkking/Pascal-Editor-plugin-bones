@@ -73,6 +73,27 @@ export function releaseLowWalls(viewer: ViewerLike): void {
 }
 
 /**
+ * INVARIANT W1 (skeptic blocker, round 2026-08-21): the wall-mode restore
+ * NEVER fires while any OTHER X-ray is live. Wall mode is one global host
+ * pref but X-rays are per-level — with levels A and B both active, removing
+ * A (or switching A to Normal) must leave walls 'down' for B; the restore
+ * belongs to whichever off/remove action deactivates the LAST live X-ray.
+ * "Live" = a bones:framing node whose effective view mode isn't 'off' — an
+ * X-ray parked in Normal imposes nothing, so it doesn't hold the walls.
+ */
+function otherXrayLive(
+  nodes: Record<string, Record<string, unknown>>,
+  excludeId: string,
+): boolean {
+  return Object.values(nodes).some(
+    (n) =>
+      n.type === 'bones:framing' &&
+      String(n.id) !== excludeId &&
+      effectiveViewMode(n as { viewMode?: unknown; seeThrough?: unknown }) !== 'off',
+  )
+}
+
+/**
  * "X-Ray this level": create the framing node AND every service point at the
  * engines' auto spots in ONE applyNodeChanges — one store transaction, one
  * undo entry (undo removes the X-ray and its service points together).
@@ -115,10 +136,16 @@ export function setXrayViewMode(
 ): void {
   const prev = effectiveViewMode(framingNode)
   if (prev === next) return
-  scene.getState().updateNode(framingNode.id as never, { viewMode: next } as never)
+  const state = scene.getState()
+  state.updateNode(framingNode.id as never, { viewMode: next } as never)
   if (!viewer) return
   if (prev === 'off') imposeLowWalls(viewer)
-  else if (next === 'off') releaseLowWalls(viewer)
+  // Invariant W1: another live X-ray still needs the walls down — the
+  // restore rides the action that turns off the LAST one. (Self excluded by
+  // id: this node just went 'off' either way.)
+  else if (next === 'off' && !otherXrayLive(state.nodes, framingNode.id)) {
+    releaseLowWalls(viewer)
+  }
 }
 
 /**
@@ -143,5 +170,8 @@ export function removeXray(
     )
     .map((n) => n.id)
   state.applyNodeChanges({ delete: [framingNodeId, ...companions] })
-  if (viewer) releaseLowWalls(viewer)
+  // Invariant W1: only the removal of the LAST live X-ray releases the
+  // walls (the deleted node is excluded by id whether or not the store has
+  // already dropped it).
+  if (viewer && !otherXrayLive(state.nodes, framingNodeId)) releaseLowWalls(viewer)
 }

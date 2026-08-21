@@ -512,15 +512,38 @@ AND a gate — a checklist line without a test is a wish.
   moving the heat pump re-anchors pad + cabinet + lineset. Every verbatim
   wall mount forced into a door/window RO warns (panel / WH / water entry /
   thermostat / electric meter — parity, no silent RO squatters).
-  Auto-placement applies ONLY when no node exists; the panel's "Place
-  service points" action is idempotent per level and seeds the nodes at the
-  engines' current auto spots so creation alone never moves anything.
+  Auto-placement applies ONLY when no node exists; seeding is AUTOMATIC and
+  idempotent per level (no button since 2026-08-20) — the activation click
+  creates all types at the engines' current auto spots in the SAME undo
+  entry as the framing node, pre-automation scenes heal once through the
+  reconcile batch, and the `servicesSeeded` latch guarantees a service
+  point the user deletes is never resurrected. Creation alone never moves
+  anything.
   Origin: service-nodes plan 2026-08-16 ("drag the panel like a door — the
   wires follow").
   Gates: `src/engines/service-overrides.test.ts` (override → re-route,
   continuity + downhill re-proofs) + `src/service/place.test.ts`
-  (idempotent placement at engine auto spots) +
+  (idempotent placement at engine auto spots + the seeding latch) +
+  `src/activation.test.ts` (one-entry creation, position parity) +
   `src/framing/compute.test.ts` (RO-warning parity)
+
+- **A5 The wall-mode restore never fires while ANY other X-ray is live.**
+  Wall mode is one global host pref; X-rays are per-level. Activation
+  imposes 'down' ONCE, click-scoped (src/activation.ts — never renderer
+  mount magic), remembering the user's previous mode; the restore rides
+  ONLY the action that deactivates the LAST live X-ray (viewMode → 'off'
+  or the panel Remove), and only while walls are still 'down' — a manual
+  wall-mode change after activation is the user's and survives every
+  recompute / re-render / remount. "Live" = a bones:framing node whose
+  effective view mode isn't 'off' (an X-ray parked in Normal holds
+  nothing).
+  Origin: skeptic blocker 2026-08-21 — removing level A's X-ray restored
+  the walls while level B's X-ray was still on (the same failure class the
+  round-1 fix closed at the renderer, surviving at the remove/off
+  boundary).
+  Gate: `src/activation.test.ts` ("INVARIANT W1" describe — the A+B
+  remove repro, the viewMode-off variant, parked-in-Normal holds nothing)
+  plus the one-shot / manual-survival rows in the activation describe
 
 ## Process
 

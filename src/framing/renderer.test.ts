@@ -38,11 +38,31 @@ function synthesizeMembers(count: number): Member[] {
   return members
 }
 
-const FIXTURE_KINDS: Fixture['kind'][] = [
-  'receptacle', 'receptacle-gfci', 'switch', 'light', 'smoke-alarm', 'panel',
-  'stub-out', 'vent-stack', 'register', 'return', 'equipment', 'water-heater',
-  'cleanout', 'thermostat', 'exhaust-fan',
-]
+/** The FULL FixtureKind union — `satisfies` makes this COMPILE-TIME
+ * exhaustive (skeptic advisory 2026-08-21: the gate ran 15/18 kinds and
+ * missed water-meter / electric-meter / disconnect; a kind added to
+ * core/types now breaks this line, never silently the census). */
+const ALL_FIXTURE_KINDS = {
+  receptacle: 1,
+  'receptacle-gfci': 1,
+  switch: 1,
+  light: 1,
+  'smoke-alarm': 1,
+  panel: 1,
+  'stub-out': 1,
+  'vent-stack': 1,
+  register: 1,
+  return: 1,
+  equipment: 1,
+  'water-heater': 1,
+  'water-meter': 1,
+  cleanout: 1,
+  thermostat: 1,
+  'exhaust-fan': 1,
+  'electric-meter': 1,
+  disconnect: 1,
+} satisfies Record<Fixture['kind'], 1>
+const FIXTURE_KINDS = Object.keys(ALL_FIXTURE_KINDS) as Fixture['kind'][]
 
 /** Kinds a finished house does NOT show (rough-in only) — viewMode 'off'
  * must hide exactly these from the synthetic mix. */
@@ -323,6 +343,37 @@ describe('view modes — per-stratum treatment (round 2026-08-20 tri-state)', ()
     // census: every member + fixture drawn once on the scene layer, plus one
     // overlay copy per below-floor instance
     expect(instanceCount(group)).toBe(4 + 6 + 2)
+  })
+
+  test("'basement': a BURIED fixture joins the ghosted star content, not the shell", () => {
+    // A cleanout riser on the under-slab DWV sits below the floor line —
+    // stratum-split like members (advisory 2026-08-21).
+    const buriedCleanout: Fixture = {
+      system: 'plumbing',
+      kind: 'cleanout',
+      position: [1, -0.2, 0],
+      rotationY: 0,
+      sourceId: 'dwv-main',
+    }
+    const receptacle: Fixture = {
+      system: 'electrical',
+      kind: 'receptacle',
+      position: [1, 0.38, 0],
+      rotationY: 0,
+      sourceId: 'w1',
+    }
+    const group = buildGroup([], [buriedCleanout, receptacle], 'basement')
+    const meshes = group.children as unknown as MeshLike[]
+    const ghosts = meshes.filter((m) => m.layers.mask === OVERLAY_MASK)
+    expect(ghosts).toHaveLength(1) // the cleanout's overlay copy
+    expect(ghosts[0]?.material.opacity).toBe(BELOW_GHOST_OPACITY)
+    const faints = meshes.filter(
+      (m) => m.layers.mask === SCENE_MASK && m.material.transparent,
+    )
+    expect(faints).toHaveLength(1) // the receptacle fades into the shell
+    expect(faints[0]?.material.opacity).toBe(FAINT_OPACITY)
+    // census: both fixtures on the scene layer + one overlay copy
+    expect(instanceCount(group)).toBe(2 + 1)
   })
 
   test("'off': the FINISHED house — zero members, only finished-surface fixtures", () => {

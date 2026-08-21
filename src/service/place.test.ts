@@ -5,6 +5,7 @@ import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
 import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
 import { buildServicePointNodes, placedServiceTypes, planServiceSeeding } from './place'
+import { levelViewMode, PHYSICAL_SERVICE_TYPES, servicePresentation } from './placement'
 import { ServiceNode } from './schema'
 
 /**
@@ -337,5 +338,88 @@ describe('planServiceSeeding', () => {
     const plan = planServiceSeeding(bare, 'level_1', framing())
     expect(plan.create).toHaveLength(0)
     expect(plan.update).toHaveLength(0)
+  })
+})
+
+/**
+ * Sign plates respect the view mode (skeptic advisory 2026-08-21: eight
+ * hazard-yellow signs on a "finished" house, auto-seeded with no click).
+ * The call, stated in placement.ts: 'off' hides ALL signs and keeps only
+ * physical equipment bodies; conceptual markers (sewer exit, power entry)
+ * step aside entirely; xray/basement — and levels without an X-ray node —
+ * show box + sign as before.
+ */
+describe('servicePresentation — signs respect the view mode', () => {
+  const withFraming = (extra: Record<string, unknown>) => ({
+    ...scene(),
+    bonesframing_1: {
+      id: 'bonesframing_1',
+      type: 'bones:framing',
+      parentId: 'level_1',
+      ...extra,
+    },
+  })
+  const svc = (serviceType: string) => ({
+    serviceType: serviceType as never,
+    parentId: 'level_1',
+  })
+  const ALL_TYPES = [
+    'panel',
+    'water-heater',
+    'water-entry',
+    'sewer-exit',
+    'power-entry',
+    'thermostat',
+    'heat-pump',
+    'electric-meter',
+  ] as const
+
+  test('xray and basement: box + sign for every type', () => {
+    for (const viewMode of ['xray', 'basement']) {
+      const nodes = withFraming({ viewMode })
+      for (const t of ALL_TYPES) {
+        expect(servicePresentation(nodes, svc(t))).toEqual({ body: true, sign: true })
+      }
+    }
+  })
+
+  test("'off': all signs hide; only PHYSICAL equipment keeps its body", () => {
+    const nodes = withFraming({ viewMode: 'off' })
+    for (const t of ALL_TYPES) {
+      const p = servicePresentation(nodes, svc(t))
+      expect(p.sign).toBe(false)
+      expect(p.body).toBe(PHYSICAL_SERVICE_TYPES.has(t))
+    }
+    // the conceptual markers step aside entirely
+    expect(servicePresentation(nodes, svc('sewer-exit')).body).toBe(false)
+    expect(servicePresentation(nodes, svc('power-entry')).body).toBe(false)
+    // the physically-visible equipment stays
+    expect(servicePresentation(nodes, svc('panel')).body).toBe(true)
+    expect(servicePresentation(nodes, svc('heat-pump')).body).toBe(true)
+  })
+
+  test('legacy framing node (seeThrough false, no viewMode) reads as off', () => {
+    const nodes = withFraming({ seeThrough: false })
+    expect(servicePresentation(nodes, svc('panel'))).toEqual({ body: true, sign: false })
+    expect(servicePresentation(nodes, svc('sewer-exit'))).toEqual({ body: false, sign: false })
+    expect(levelViewMode(nodes, 'level_1')).toBe('off')
+  })
+
+  test('no framing node on the level → pre-automation presentation (box + sign)', () => {
+    expect(levelViewMode(scene(), 'level_1')).toBeNull()
+    expect(servicePresentation(scene(), svc('sewer-exit'))).toEqual({ body: true, sign: true })
+  })
+
+  test('a FOREIGN level’s framing node never gates this level', () => {
+    const nodes = {
+      ...scene(),
+      bonesframing_2: {
+        id: 'bonesframing_2',
+        type: 'bones:framing',
+        parentId: 'level_2',
+        viewMode: 'off',
+      },
+    }
+    expect(servicePresentation(nodes, svc('sewer-exit'))).toEqual({ body: true, sign: true })
   })
 })

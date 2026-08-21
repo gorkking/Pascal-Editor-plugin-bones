@@ -295,6 +295,74 @@ describe('removeXray — deactivation mirror', () => {
   })
 })
 
+/**
+ * CHECKLIST A5 / INVARIANT W1 (skeptic blocker, 2026-08-21): wall mode is
+ * ONE global host pref, X-rays are per-level — the restore rides only the
+ * action that deactivates the LAST live X-ray. Repro'd verbatim: with A and
+ * B both live, removing A used to restore the pre-X-ray mode under B.
+ */
+describe('INVARIANT W1 — restore never fires while any other X-ray is live', () => {
+  const twoLevels = () => ({
+    ...scene(),
+    level_2: { id: 'level_2', type: 'level', level: 1, height: 2.5 },
+  })
+
+  test('remove A → walls stay down for B; remove B → restore fires once', () => {
+    const { store, state } = fakeScene(twoLevels())
+    const viewer = fakeViewer('up')
+    const a = activateXray(store, 'level_1', viewer.store) // up → down, remembered
+    const b = activateXray(store, 'level_2', viewer.store) // already down: no-op
+    expect(viewer.writes).toEqual(['down'])
+
+    removeXray(store, a.id, 'level_1', viewer.store)
+    expect(viewer.state.wallMode).toBe('down') // B is still live
+    expect(state.nodes[b.id]).toBeDefined()
+
+    removeXray(store, b.id, 'level_2', viewer.store)
+    expect(viewer.state.wallMode).toBe('up') // LAST one out restores
+    expect(viewer.writes).toEqual(['down', 'up']) // exactly once
+  })
+
+  test('viewMode-off variant: A → Normal keeps walls down for B; B → Normal restores', () => {
+    const { store, state } = fakeScene(twoLevels())
+    const viewer = fakeViewer('cutaway')
+    const a = activateXray(store, 'level_1', viewer.store)
+    const b = activateXray(store, 'level_2', viewer.store)
+
+    setXrayViewMode(store, state.nodes[a.id] as { id: string }, 'off', viewer.store)
+    expect(viewer.state.wallMode).toBe('down') // B still live
+
+    setXrayViewMode(store, state.nodes[b.id] as { id: string }, 'off', viewer.store)
+    expect(viewer.state.wallMode).toBe('cutaway') // last live X-ray went off
+  })
+
+  test('an X-ray parked in Normal holds nothing — removing the live one restores', () => {
+    const { store, state } = fakeScene(twoLevels())
+    const viewer = fakeViewer('up')
+    const a = activateXray(store, 'level_1', viewer.store)
+    const b = activateXray(store, 'level_2', viewer.store)
+    setXrayViewMode(store, state.nodes[b.id] as { id: string }, 'off', viewer.store)
+    expect(viewer.state.wallMode).toBe('down') // A still live
+
+    removeXray(store, a.id, 'level_1', viewer.store)
+    expect(viewer.state.wallMode).toBe('up') // B is parked off — no hold
+  })
+
+  test('legacy holder: a pre-viewMode node (absent keys ⇒ xray) counts as live', () => {
+    const nodes = twoLevels() as Record<string, Record<string, unknown>>
+    nodes.bonesframing_legacy = {
+      id: 'bonesframing_legacy',
+      type: 'bones:framing',
+      parentId: 'level_2',
+    }
+    const { store } = fakeScene(nodes)
+    const viewer = fakeViewer('up')
+    const a = activateXray(store, 'level_1', viewer.store)
+    removeXray(store, a.id, 'level_1', viewer.store)
+    expect(viewer.state.wallMode).toBe('down') // the legacy X-ray still needs it
+  })
+})
+
 describe('creation defaults (schema pins)', () => {
   test('new framing node: viewMode xray, MEP systems on, seeding unlatched', () => {
     const node = FramingNode.parse({})
