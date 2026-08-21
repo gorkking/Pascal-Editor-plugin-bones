@@ -303,22 +303,46 @@ AND a gate — a checklist line without a test is a wish.
   the pad slab's inner edge clears the worst-case exterior assembly
   (face + 0.13 m — brick veneer, R703.8), and nothing fronts a door/window
   RO (the row slides along the wall to clear). Each unit's refrigerant
-  line-set (Ø22 suction + Ø10 liquid) runs Manhattan-only (plan-axis-aligned
-  legs) through a ~0.4 m wall penetration to the air handler — a leg that
-  would cross an RO takes the alternate elbow, and a path that cannot clear
-  is ⚠-flagged, never silent (E1 applied to pipe). A disconnect mounts
+  LINE-SET — suction ¾" (insulated, the COLD line) + liquid ⅜" (warm) as a
+  PARALLEL pair — runs from the cabinet through ONE exterior-wall
+  penetration at ~0.4 m SNAPPED clear of any RO crossing the pipe band (a
+  verbatim heat-pump node can front glazing the row never slid for), then
+  FOLLOWS THE WALL GRAPH to the air handler coil on the plumbing engine's
+  routePipe rails — the same E1 RO detours (over the header / under the
+  sill), junction jumpers, and flagged air-run fallback the supply/vent
+  pipes use; a full-height opening that cannot detour is ⚠-marked in the
+  label, never silent. The route is solved ONCE at the pair's center plane
+  with the band set to the pair ENVELOPE (one shared detour decision — an
+  RO sill landing between per-pipe bands used to make the pipes CROSS);
+  both pipes derive from that reference: ±2 cm vertical on every horizontal
+  member, and risers ROLL the pair 90° (±2 cm perpendicular to the arriving
+  leg) so the lower pipe's riser never bores through the upper pipe —
+  zero suction×liquid volume hits at a 2 mm skin, gated over a genuine
+  detour scene. On the MEP sheet the pair prints with a ±2.5 px SCHEMATIC
+  perpendicular nudge (drawing convention — the truthful projection
+  overprinted the pair and the suction color never showed); the cover axon
+  still draws the pair as one line (accepted, queued). Both pipes chain
+  endpoint-adjacent condenser → air handler (E2 for refrigerant). Runs over
+  ~15 m carry a 'verify manufacturer max line-set length / oil return'
+  advisory (assumption class — mfr line-set charts govern). Colors mirror
+  the plumbing convention (E3): suction cold-blue / liquid warm-red in 3D
+  AND on the MEP sheet, each with its own legend row. A disconnect mounts
   within sight of each unit (NEC 440.14; ≤ 1 m at an unobstructed
   anchor, ≤ 1.5 m when the box slides clear of a fronting RO — the slide
-  budget is ±1.2 m along-wall) with a whip; the dedicated
-  branch circuit is NOT routed yet (deferred — electrical track owns
-  panel integration; the label says 'dedicated AC-n circuit, panel-homerun by compute').
+  budget is ±1.2 m along-wall) with an endpoint-adjacent whip; the
+  dedicated AC-n branch circuit (30A/10 or 40A/8, 2-pole) is panel-homerun
+  by compute's post-HVAC pass (gated in compute.devices.test.ts).
   The heat-pump service node stays authoritative for unit #1 (A4 verbatim;
   the row re-anchors to it), and the takeoff books exactly the rendered row
-  (S4): condensers/pads/disconnects/whips by count, line-set by pair-lf on
-  its own row — never phantom copper lf, elbow fittings or NM-B.
+  (S4): condensers/pads/disconnects/whips by count, line-set by SIZE
+  (suction ¾" lf + liquid ⅜" lf) plus the suction insulation-sleeve lf —
+  never phantom copper lf, elbow fittings or NM-B.
   Origin: night-4 user ask 2026-08-17 ("AC block" catalog item — 1/2/3+
-  outdoor units by cooled volume + jurisdiction, piped and powered).
-  Gate: `src/engines/hvac.condensers.test.ts`
+  outdoor units by cooled volume + jurisdiction, piped and powered) +
+  line-set round 2026-08-20 ("pipes hot cold that go to the exchanger
+  indoor … should follow a sensible path").
+  Gates: `src/engines/hvac.condensers.test.ts` +
+  `src/engines/hvac.lineset.test.ts`
 
 ## P — Plans (the exported document)
 

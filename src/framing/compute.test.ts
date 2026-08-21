@@ -581,7 +581,7 @@ describe('computeLevel — thermostat / heat-pump / electric-meter nodes', () =>
     const condenser = result.fixtures.find((f) => f.label?.includes('Condenser'))
     expect(condenser?.position[0]).toBeCloseTo(10, 6)
     expect(condenser?.position[2]).toBeCloseTo(3, 6)
-    expect(result.members.some((m) => m.label?.includes('lineset'))).toBe(true)
+    expect(result.members.some((m) => m.sourceId.startsWith('lineset-'))).toBe(true)
     expect(
       result.members.some((m) => m.role === 'equipment' && m.material === 'concrete'),
     ).toBe(true)

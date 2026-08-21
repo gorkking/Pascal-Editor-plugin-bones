@@ -330,7 +330,7 @@ export function wetWallFor(
 // Pipe emitters
 // ---------------------------------------------------------------------------
 
-type PipeSpec = {
+export type PipeSpec = {
   side: number
   material: Member['material']
   role: Member['role']
@@ -698,11 +698,17 @@ function pipeWallLeg(
   u0: number,
   u1: number,
   runY: number,
+  /** Half-height of the vertical band the run occupies around `runY` —
+   * 0.02 for a single pipe (the historical default, byte-pure for every
+   * plumbing caller); a pipe PAIR routed once passes its envelope so an RO
+   * sill landing between the two pipes still triggers ONE shared detour
+   * decision (line-set skeptic round: split bands made the pair CROSS). */
+  bandHalf = 0.02,
 ): void {
   const dir = Math.sign(u1 - u0) || 1
   const legLo = Math.min(u0, u1)
   const legHi = Math.max(u0, u1)
-  const crossed = openingSpans(wall, runY - 0.02, runY + 0.02)
+  const crossed = openingSpans(wall, runY - bandHalf, runY + bandHalf)
     .filter((s) => s.lo < legHi && s.hi > legLo)
     .sort((a, b) => (a.lo - b.lo) * dir)
   const at = (u: number): Pt => [wall.start[0] + wall.dir[0] * u, wall.start[1] + wall.dir[1] * u]
@@ -743,7 +749,7 @@ function pipeWallLeg(
         ? undefined
         : 'OPENING: pipe riser has no clear stud bay beside the opening — crosses the RO; review routing'
     const blockedAt = (yy: number) =>
-      openingSpans(wall, yy - 0.02, yy + 0.02).some((o) => o.lo < s.hi && o.hi > s.lo)
+      openingSpans(wall, yy - bandHalf, yy + bandHalf).some((o) => o.lo < s.hi && o.hi > s.lo)
     let detourY: number | null = null
     // start 7in over the header (electrical crosses at +4in — verify round
     // D2: coincident 0.95m pipe/wire segments over the same door)
@@ -807,7 +813,10 @@ function pointInAnyRO(walls: WallSlice[], pt: Pt, y: number): boolean {
   return false
 }
 
-function routePipe(
+/** Exported for the HVAC engine: the refrigerant line-set follows the SAME
+ * wall rails as supply/vent pipe (E1 detours, junction jumpers, flagged
+ * air-run fallback) — one routing machinery, not two (M2 line-set round). */
+export function routePipe(
   members: Member[],
   spec: PipeSpec,
   graph: ReturnType<typeof buildWallGraph>,
@@ -815,6 +824,8 @@ function routePipe(
   to: WallPoint,
   runY: number,
   allWalls: WallSlice[] = [],
+  /** See pipeWallLeg — a pair routed once passes its band envelope here. */
+  bandHalf = 0.02,
 ): void {
   const legs = wallPath(graph, from, to)
   if (legs) {
@@ -829,7 +840,7 @@ function routePipe(
       const legSpec = endIn
         ? { ...spec, flag: spec.flag ?? 'OPENING: run ends inside a rough opening at a wall junction — reroute or move the opening' }
         : spec
-      pipeWallLeg(members, legSpec, l.wall, l.u0, l.u1, runY)
+      pipeWallLeg(members, legSpec, l.wall, l.u0, l.u1, runY, bandHalf)
       const next = legs[i + 1]
       if (next) {
         const a = wallPlan({ wall: l.wall, u: l.u1 })

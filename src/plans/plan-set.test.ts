@@ -176,7 +176,14 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     })
 
   test('cold/hot/DWV runs carry their prefix colors; legend + slope note print', () => {
-    const members = [pipe('cold-lav'), pipe('hot-lav'), pipe('dwv-main')]
+    const members = [
+      pipe('cold-lav'),
+      pipe('hot-lav'),
+      pipe('dwv-main'),
+      // hvac line-set pair — the M2 line-set round: same sheet, own colors
+      { ...pipe('lineset-suction-1'), system: 'hvac' as const },
+      { ...pipe('lineset-liquid-1'), system: 'hvac' as const },
+    ]
     const fixtures = [
       fixture({
         system: 'plumbing',
@@ -197,9 +204,46 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
     // two short rows — the one-liner overflowed the legend box (E1)
     expect(svg).toContain('DWV SLOPE 1/4 IN/FT (1/8 AT 3 IN+)')
     expect(svg).toContain('ARROWS POINT TO SEWER (P3005.3)')
+    // refrigerant line-set legend rows (examiner round-5 carried minor)
+    expect(svg).toContain('line-set — suction ¾&quot; (insulated)')
+    expect(svg).toContain('line-set — liquid ⅜&quot;')
     // the meter tags with M and the tag is named in the legend
     expect(svg).toContain('>M</text>')
     expect(svg).toContain('water meter')
+  })
+
+  test('line-set pair prints BOTH colors at DISTINCT plan positions (examiner blocker)', () => {
+    // The real pair shares one plan path (the 4 cm offset is VERTICAL) — a
+    // truthful projection overprints the two rects and the last-drawn pipe
+    // wins: the suction line never rendered a visible pixel. The schematic
+    // perpendicular nudge must split them on paper.
+    const twinPipe = (sourceId: string, y: number): Member =>
+      member({
+        system: 'hvac',
+        role: 'pipe-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.019, 0.019],
+        length: 2,
+        position: [2, y, 4],
+        sourceId,
+      })
+    const members = [twinPipe('lineset-suction-1', 0.42), twinPipe('lineset-liquid-1', 0.38)]
+    const mep = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const svg = mep?.svg ?? ''
+    const rectsOf = (color: string): [number, number][] =>
+      [...svg.matchAll(
+        new RegExp(`<rect[^>]*fill="${color}"[^>]*transform="translate\\(([-\\d.]+) ([-\\d.]+)\\)`, 'g'),
+      )].map((m) => [Number(m[1]), Number(m[2])])
+    const suctionRects = rectsOf('#35b8c9')
+    const liquidRects = rectsOf('#d98134')
+    // both pipes DRAW (transform-bearing rects — legend swatches don't count)
+    expect(suctionRects.length).toBe(1)
+    expect(liquidRects.length).toBe(1)
+    // … at distinct plan positions: the nudge splits the pair ~5 px apart
+    const [sx, sz] = suctionRects[0] as [number, number]
+    const [lx, lz] = liquidRects[0] as [number, number]
+    expect(Math.hypot(sx - lx, sz - lz)).toBeGreaterThanOrEqual(4)
   })
 
   test('room-category fallback keeps the single pipe tint (no phantom legend rows)', () => {

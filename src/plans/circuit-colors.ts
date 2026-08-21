@@ -18,6 +18,12 @@ export const PLUMBING_COLORS = {
   cold: '#4a7dbf',
   hot: '#c0504d',
   dwv: '#8fb0c4',
+  /** Refrigerant line-set pair (hvac, M2): the suction line runs COLD →
+   * cold-blue (cyan-shifted off supply cold), the liquid line runs warm →
+   * warm-red (orange-shifted off supply hot) — the plumbing hot/cold
+   * convention mirrored onto refrigerant, distinct enough to tell apart. */
+  linesetSuction: '#35b8c9',
+  linesetLiquid: '#d98134',
 } as const
 
 export function plumbingPipeColor(sourceId: string): string | null {
@@ -28,6 +34,8 @@ export function plumbingPipeColor(sourceId: string): string | null {
     return PLUMBING_COLORS.hot
   }
   if (sourceId.startsWith('dwv-')) return PLUMBING_COLORS.dwv
+  if (sourceId.startsWith('lineset-suction-')) return PLUMBING_COLORS.linesetSuction
+  if (sourceId.startsWith('lineset-liquid-')) return PLUMBING_COLORS.linesetLiquid
   return null
 }
 

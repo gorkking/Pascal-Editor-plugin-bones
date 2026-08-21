@@ -570,7 +570,7 @@ describe('hvac — Manhattan trunk, cfm, step-down, exhaust (round-1 gaps)', () 
     const at400 = layoutHvac(xwalls, rooms, { ...DEFAULT_SPEC, detail: '400' })
     const pipeRuns = byRole(at400.members, 'pipe-run')
     expect(pipeRuns.some((p) => p.label?.includes('Condensate'))).toBe(true)
-    expect(pipeRuns.some((p) => p.label?.includes('lineset'))).toBe(true)
+    expect(pipeRuns.some((p) => p.sourceId.startsWith('lineset-'))).toBe(true)
     const condenser = at400.fixtures.find((f) => f.label?.includes('Condenser'))
     expect(condenser).toBeDefined()
     // pad sits OUTSIDE the footprint (10×8 shell)
@@ -578,7 +578,7 @@ describe('hvac — Manhattan trunk, cfm, step-down, exhaust (round-1 gaps)', () 
     const inside = px > 0 && px < 10 && pz > 0 && pz < 8
     expect(inside).toBe(false)
     // none of that at 300
-    expect(byRole(members, 'pipe-run').some((p) => p.label?.includes('lineset'))).toBe(false)
+    expect(byRole(members, 'pipe-run').some((p) => p.sourceId.startsWith('lineset-'))).toBe(false)
   })
 
   test('garages are excluded from conditioned tonnage', () => {

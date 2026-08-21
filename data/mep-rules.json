@@ -253,10 +253,11 @@
       "unitClearM": 0.6,
       "wallClearM": 0.3,
       "clearanceNote": "≥0.6 m clear between units, ≥0.3 m off the wall face — per mfr clearance + IRC M1403.",
-      "linesetSuctionDiaM": 0.022,
-      "linesetLiquidDiaM": 0.01,
+      "linesetSuctionDiaM": 0.019,
+      "linesetLiquidDiaM": 0.0095,
       "linesetHeightM": 0.4,
-      "linesetNote": "Refrigerant line-set per unit: Ø22 mm insulated suction + Ø10 mm liquid, through-wall penetration at ~0.4 m to the indoor air handler (M1411).",
+      "linesetMaxLenAdvisoryM": 15,
+      "linesetNote": "Refrigerant line-set per unit: suction 3/4 in (19 mm, insulated — the COLD line) + liquid 3/8 in (9.5 mm, warm) as a parallel pair, through ONE exterior-wall penetration at ~0.4 m (clear of ROs), then wall-following to the indoor air handler coil (M1411). Runs over ~15 m carry a 'verify manufacturer max line-set length / oil return' advisory — typical residential mfr charts top out 15-30 m; the manufacturer's line-set table governs.",
       "disconnectAboveUnitM": 0.3,
       "disconnectNote": "NEC 440.14: disconnecting means within sight of the unit — wall-mounted beside each condenser; the dedicated branch circuit is routed separately."
     }

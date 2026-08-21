@@ -382,7 +382,7 @@ describe('A4 gate — thermostat + heat-pump service nodes drive the hvac engine
   test('heat-pump override re-anchors pad, cabinet AND lineset at ANY LOD', () => {
     // default LOD (300): no override → no outdoor unit
     const auto = layoutHvac(walls, rooms)
-    expect(auto.members.some((m) => m.label?.includes('lineset'))).toBe(false)
+    expect(auto.members.some((m) => m.sourceId.startsWith('lineset-'))).toBe(false)
     // override present → the whole outdoor block appears AT the node
     const moved = layoutHvac(walls, rooms, DEFAULT_SPEC, {
       heatPump: { position: [11, 0, 2] },
@@ -395,7 +395,7 @@ describe('A4 gate — thermostat + heat-pump service nodes drive the hvac engine
     expect(pad?.position[0]).toBeCloseTo(11, 6)
     expect(unit?.position[0]).toBeCloseTo(11, 6)
     // the lineset's far end lands at the pad (re-anchored, not the auto spot)
-    const lineset = moved.members.filter((m) => m.label?.includes('lineset'))
+    const lineset = moved.members.filter((m) => m.sourceId.startsWith('lineset-'))
     expect(lineset.length).toBeGreaterThan(0)
     const reaches = lineset.some((m) =>
       endpointsOf(m).some((e) => Math.hypot(e.x - 11, e.z - 2) < 0.05),

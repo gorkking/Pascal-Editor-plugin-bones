@@ -45,8 +45,13 @@ export function colorOf(member: Member): string {
   }
   // Plumbing runs color by SYSTEM (sourceId prefix): cold blue, hot red,
   // DWV slate — identical to the exported MEP sheet. The room-category
-  // fallback's room-sourced runs keep their material colors below.
-  if (member.system === 'plumbing' && member.role === 'pipe-run') {
+  // fallback's room-sourced runs keep their material colors below. HVAC
+  // refrigerant line-sets join the same convention (suction cold-blue,
+  // liquid warm-red); hvac condensate keeps its material color (null).
+  if (
+    (member.system === 'plumbing' || member.system === 'hvac') &&
+    member.role === 'pipe-run'
+  ) {
     const pipe = plumbingPipeColor(member.sourceId)
     if (pipe) return pipe
   }

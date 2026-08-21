@@ -458,18 +458,32 @@ function planSheet(
     const h = Math.max(1.2, m.dims[2] * scale)
     // Per-member colors: wires by circuit; plumbing runs by system —
     // cold blue / hot red / DWV slate via the sourceId prefix (identical
-    // to the 3D X-ray, invariant E3's spirit).
+    // to the 3D X-ray, invariant E3's spirit). HVAC line-set pipes join
+    // the convention: suction cold-blue / liquid warm-red (M2 round).
     const fill =
       m.system === 'electrical' && m.role === 'wire-run'
         ? circuitColor(m.sourceId)
-        : (m.system === 'plumbing' && m.role === 'pipe-run'
+        : ((m.system === 'plumbing' || m.system === 'hvac') && m.role === 'pipe-run'
             ? plumbingPipeColor(m.sourceId)
             : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
     // Deck strips print translucent with a hairline seam — same hue as the
     // legend swatch, but the framing linework stays legible through them.
     const isDeck = m.role === 'subfloor'
+    // Line-set pair: the two pipes share one plan path (the 4 cm offset is
+    // VERTICAL), so a truthful plan projection overprints them and the
+    // last-drawn color wins — the suction line never showed a pixel
+    // (examiner blocker). Drawing convention: nudge each pipe ~2.5 px
+    // perpendicular to its plan yaw, suction one side / liquid the other,
+    // so both colors print side by side. Geometry stays truthful.
+    let tx = X(m.position[0])
+    let tz = Z(m.position[2])
+    if (m.system === 'hvac' && m.role === 'pipe-run' && m.sourceId.startsWith('lineset-')) {
+      const nudge = m.sourceId.startsWith('lineset-suction-') ? 2.5 : -2.5
+      tx += nudge * Math.sin(yaw)
+      tz += nudge * Math.cos(yaw)
+    }
     shapes.push(
-      `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${X(m.position[0]).toFixed(1)} ${Z(m.position[2]).toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
+      `<rect x="${(-w / 2).toFixed(1)}" y="${(-h / 2).toFixed(1)}" width="${w.toFixed(1)}" height="${h.toFixed(1)}" fill="${fill}"${isDeck ? ' fill-opacity="0.35"' : ''} stroke="${isDeck ? '#cfc4a6' : '#444'}" stroke-width="${isDeck ? '0.3' : '0.6'}" transform="translate(${tx.toFixed(1)} ${tz.toFixed(1)}) rotate(${(-deg(yaw)).toFixed(2)})"/>`,
     )
     // DWV flow direction (MEP sheet): under-floor drains print their FALL
     // — member +X points UPHILL (the leg convention), so downstream is −X
@@ -836,6 +850,17 @@ function planSheet(
     }
     if (pipes.some((m) => plumbingPipeColor(m.sourceId) === null)) {
       entries.push(['supply / DWV pipe', def.fill['pipe-run'] ?? '#8fb0c4'])
+    }
+    // Refrigerant line-set (hvac pipe-runs): one legend row per drawn pipe
+    // color — the examiner round-5 'MEP line-set legend row' carried minor.
+    const lineset = mine.filter(
+      (m) => m.system === 'hvac' && m.role === 'pipe-run' && m.sourceId.startsWith('lineset-'),
+    )
+    if (lineset.some((m) => m.sourceId.startsWith('lineset-suction-'))) {
+      entries.push(['line-set — suction ¾" (insulated)', PLUMBING_COLORS.linesetSuction])
+    }
+    if (lineset.some((m) => m.sourceId.startsWith('lineset-liquid-'))) {
+      entries.push(['line-set — liquid ⅜"', PLUMBING_COLORS.linesetLiquid])
     }
     const NAMES: Record<string, string> = {
       'vent-stack': 'vent stack',
