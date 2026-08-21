@@ -447,14 +447,23 @@ describe('lights and smoke alarms', () => {
     expect(hall.position[2]).toBeCloseTo(2, 6)
   })
 
-  test('no bedrooms, no hallway → no alarms', () => {
+  test('no bedrooms, no hallway → the per-story alarm still lands (IRC R314.3(3))', () => {
+    // Pre-B13 this level computed ZERO alarms — R314.3(3) requires one on
+    // every story. The largest room hosts it.
     const living = room('other', [
       [0, 0],
       [4, 0],
       [4, 4],
       [0, 4],
     ])
-    expect(ofKind(layoutElectrical([], [living]), 'smoke-alarm')).toHaveLength(0)
+    const alarms = ofKind(layoutElectrical([], [living]), 'smoke-alarm')
+    expect(alarms).toHaveLength(1)
+    expect(alarms[0]?.label).toContain('one per story (IRC R314.3(3))')
+    expect(alarms[0]?.sourceId).toBe(living.id)
+  })
+
+  test('no rooms at all → no alarms (nothing to serve)', () => {
+    expect(ofKind(layoutElectrical([], []), 'smoke-alarm')).toHaveLength(0)
   })
 })
 
@@ -535,11 +544,13 @@ describe('count sanity — two-room plan (living + kitchen)', () => {
     // switches: entry door 1 face + interior door 2 faces
     expect(ofKind(fixtures, 'switch')).toHaveLength(3)
     expect(ofKind(fixtures, 'light')).toHaveLength(2)
-    expect(ofKind(fixtures, 'smoke-alarm')).toHaveLength(0)
+    // B13a: the per-story alarm (IRC R314.3(3)) — bedroom-less levels used
+    // to compute zero alarms; the larger room (kitchen, 18 m²) hosts it
+    expect(ofKind(fixtures, 'smoke-alarm')).toHaveLength(1)
     expect(ofKind(fixtures, 'panel')).toHaveLength(1)
     // street→meter→panel chain: one meter on the exterior face by the panel
     expect(ofKind(fixtures, 'electric-meter')).toHaveLength(1)
-    expect(fixtures).toHaveLength(21)
+    expect(fixtures).toHaveLength(22)
   })
 
   test('exterior walls emit on the interior face only', () => {

@@ -211,6 +211,7 @@ const FIXTURE_ROWS: Record<FixtureKind, { item: string; detail: string }> = {
   switch: { item: 'Switches', detail: 'wall controls' },
   light: { item: 'Lights', detail: 'ceiling/wall luminaires' },
   'smoke-alarm': { item: 'Smoke alarms', detail: 'IRC R314' },
+  'co-alarm': { item: 'CO alarms', detail: 'IRC R315.3 — garage / fuel appliance' },
   panel: { item: 'Electrical panels', detail: 'load center' },
   'stub-out': { item: 'Plumbing stub-outs', detail: 'supply/drain' },
   'vent-stack': { item: 'Vent stacks', detail: 'DWV through-roof' },
@@ -233,6 +234,7 @@ const FIXTURE_ORDER: readonly FixtureKind[] = [
   'switch',
   'light',
   'smoke-alarm',
+  'co-alarm',
   'panel',
   'stub-out',
   'vent-stack',
@@ -613,8 +615,12 @@ export function computeTakeoff(
     } else if (m.role === 'wire-run' && m.sourceId.startsWith('ac-whip-')) {
       acWhips.add(m.sourceId)
     } else if (m.role === 'wire-run') {
-      const gauge = m.label?.match(/(\d+)\/2/)?.[1] ?? '14'
-      wireTallies.set(gauge, (wireTallies.get(gauge) ?? 0) + toFeet(m.length))
+      // NM-B keys on gauge AND conductor count: 14/3 (alarm interconnect +
+      // 3-way travelers, B13b) is a different SKU than 14/2 — the old
+      // gauge-only key would have booked 14/3 lf as phantom 14/2.
+      const cable = m.label?.match(/(\d+)\/([23])\s+w\/G/)
+      const key = cable ? `${cable[1]}/${cable[2]}` : '14/2'
+      wireTallies.set(key, (wireTallies.get(key) ?? 0) + toFeet(m.length))
     } else if (m.role === 'pipe-run' && m.sourceId.startsWith('conn-')) {
       connectorHoses.add(m.sourceId)
     } else if (m.role === 'pipe-run' && m.sourceId.startsWith('lineset-')) {
@@ -709,8 +715,16 @@ export function computeTakeoff(
   for (const tally of ductTallies.values()) {
     push(tally.section, tally.item, 'linear feet', round1(tally.lf), 'lf')
   }
-  for (const [gauge, lf] of wireTallies) {
-    push('Electrical', `NM-B ${gauge}/2 w/G`, 'homeruns + branch chains', round1(lf), 'lf')
+  for (const [cableKey, lf] of wireTallies) {
+    push(
+      'Electrical',
+      `NM-B ${cableKey} w/G`,
+      cableKey.endsWith('/3')
+        ? 'alarm interconnect + 3-way travelers (IRC R314.4 / NEC 404.2)'
+        : 'homeruns + branch chains',
+      round1(lf),
+      'lf',
+    )
   }
   if (seCableLf > 0) {
     push('Electrical', 'SE cable 2 AWG Cu', 'street → meter → panel (NEC 230)', round1(seCableLf), 'lf')
@@ -810,11 +824,13 @@ export function computeTakeoff(
     (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
   ).length
   const ceilingBoxes = fixtures.filter(
-    (f) => f.kind === 'light' || f.kind === 'smoke-alarm',
+    // B13 examiner flag 2: 'co-alarm' is a ceiling device too — its box was
+    // unbooked (8 boxes for 9 ceiling devices on the compose scene).
+    (f) => f.kind === 'light' || f.kind === 'smoke-alarm' || f.kind === 'co-alarm',
   ).length
   const panelCans = fixtures.filter((f) => f.kind === 'panel').length
   if (gangBoxes > 0) push('Electrical', 'Device boxes (1-gang)', 'receptacles + switches', gangBoxes, 'pcs')
-  if (ceilingBoxes > 0) push('Electrical', 'Ceiling boxes', 'lights + smoke alarms', ceilingBoxes, 'pcs')
+  if (ceilingBoxes > 0) push('Electrical', 'Ceiling boxes', 'lights + smoke/CO alarms', ceilingBoxes, 'pcs')
   if (panelCans > 0) push('Electrical', 'Panel cans', 'load center enclosures', panelCans, 'pcs')
 
   // ---- Electrical circuits (panel schedule) ----

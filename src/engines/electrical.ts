@@ -81,6 +81,24 @@ export function pointInPolygon(p: Pt, polygon: Polygon): boolean {
   return inside
 }
 
+/**
+ * Nudge a ceiling-fixture spot off the room centroid WITHOUT leaving the
+ * room (B13 round 2): a narrow host (0.5 m corridor proxy) put the +12"
+ * x-nudge inside the far wall band, 5.5 cm outside the polygon. Tries ±d
+ * on both axes in a deterministic order (callers pass ±d to keep smoke/CO
+ * apart), falls back to the exact centroid when nothing fits.
+ */
+export function nudgeInside(polygon: Polygon, cx: number, cz: number, d: number): Pt {
+  const tries: readonly Pt[] = [
+    [cx + d, cz],
+    [cx - d, cz],
+    [cx, cz + d],
+    [cx, cz - d],
+  ]
+  for (const p of tries) if (pointInPolygon(p, polygon)) return p
+  return [cx, cz]
+}
+
 /** Area centroid of a simple polygon; falls back to the vertex mean when degenerate. */
 export function polygonCentroid(polygon: Polygon): Pt {
   let area = 0
@@ -105,6 +123,74 @@ export function polygonCentroid(polygon: Polygon): Pt {
     return [mx / n, mz / n]
   }
   return [cx / (3 * area), cz / (3 * area)]
+}
+
+// ---- room adjacency (B13a: hallway proxy for the R314.3(2) alarm) ----------
+
+/**
+ * Shared boundary length between two room polygons: edge pairs that run
+ * nearly parallel within a wall-thickness tolerance (0.35 m — zones are
+ * drawn to centerlines OR faces) contribute their projected overlap.
+ */
+export function sharedBoundaryLength(a: Polygon, b: Polygon): number {
+  let total = 0
+  for (let i = 0; i < a.length; i++) {
+    const [ax0, az0] = a[i] ?? [0, 0]
+    const [ax1, az1] = a[(i + 1) % a.length] ?? [0, 0]
+    const alen = Math.hypot(ax1 - ax0, az1 - az0)
+    if (alen < 1e-6) continue
+    const dir: Pt = [(ax1 - ax0) / alen, (az1 - az0) / alen]
+    for (let j = 0; j < b.length; j++) {
+      const [bx0, bz0] = b[j] ?? [0, 0]
+      const [bx1, bz1] = b[(j + 1) % b.length] ?? [0, 0]
+      const blen = Math.hypot(bx1 - bx0, bz1 - bz0)
+      if (blen < 1e-6) continue
+      // parallel test: b's direction within ~5° of ±a's
+      const cross = Math.abs(dir[0] * ((bz1 - bz0) / blen) - dir[1] * ((bx1 - bx0) / blen))
+      if (cross > 0.09) continue
+      // lateral separation of b's endpoints off a's line
+      const off0 = Math.abs((bx0 - ax0) * -dir[1] + (bz0 - az0) * dir[0])
+      const off1 = Math.abs((bx1 - ax0) * -dir[1] + (bz1 - az0) * dir[0])
+      if (Math.max(off0, off1) > 0.35) continue
+      // overlap of the projections onto a's axis
+      const t0 = (bx0 - ax0) * dir[0] + (bz0 - az0) * dir[1]
+      const t1 = (bx1 - ax0) * dir[0] + (bz1 - az0) * dir[1]
+      const lo = Math.max(0, Math.min(t0, t1))
+      const hi = Math.min(alen, Math.max(t0, t1))
+      if (hi > lo) total += hi - lo
+    }
+  }
+  return total
+}
+
+/**
+ * The room that stands in for a missing hallway: the non-bedroom room
+ * sharing the most boundary (≥ 0.5 m — at least a doorway of shared wall)
+ * with any bedroom. Garages/bathrooms rank last (R314.3.3 humidity /
+ * nuisance sources — hosts of last resort only). Deterministic: shared
+ * length desc, ties by id.
+ */
+function bedroomAdjacentProxy(
+  bedrooms: RoomSlice[],
+  rooms: RoomSlice[],
+): RoomSlice | undefined {
+  const AVOID = new Set<RoomSlice['category']>(['garage', 'bathroom'])
+  let best: { room: RoomSlice; shared: number; avoided: boolean } | undefined
+  for (const room of rooms) {
+    if (room.category === 'bedroom') continue
+    let shared = 0
+    for (const bed of bedrooms) shared += sharedBoundaryLength(room.polygon, bed.polygon)
+    if (shared < 0.5) continue
+    const avoided = AVOID.has(room.category)
+    const wins =
+      !best ||
+      (best.avoided && !avoided) ||
+      (best.avoided === avoided &&
+        (shared > best.shared + 1e-9 ||
+          (Math.abs(shared - best.shared) <= 1e-9 && room.id.localeCompare(best.room.id) < 0)))
+    if (wins) best = { room, shared, avoided }
+  }
+  return best?.room
 }
 
 // ---- wall faces ------------------------------------------------------------
@@ -246,14 +332,20 @@ export function receptaclePositions(segment: Segment): number[] {
  *  - GFCI marking per 210.8(A) room zones
  *  - a switch at each door's latch side (210.70(A)(1) + universal practice)
  *  - a ceiling light per room (210.70(A)(1))
- *  - smoke alarms per IRC R314 (each bedroom + hallway outside sleeping areas)
+ *  - smoke alarms per IRC R314.3: each bedroom, outside the sleeping area
+ *    (hallway, else a bedroom-ADJACENT proxy room), one per story
+ *  - CO alarm per IRC R315.3 when the level carries an attached garage
+ *    (the repo's fuel-appliance assumption rides the same trigger)
  *  - one service panel (a `bones:service` panel override, when present, is
  *    the authoritative spot — homeruns re-anchor there; checklist A4)
+ * `warnings`, when passed, collects level warnings (B13a: an alarm that
+ * cannot be placed must never DROP silently).
  */
 export function layoutElectrical(
   walls: WallSlice[],
   rooms: RoomSlice[],
   overrides?: ServiceOverrides,
+  warnings?: string[],
 ): Fixture[] {
   const fixtures: Fixture[] = []
   const wetRooms = rooms.filter((r) => GFCI_CATEGORIES.has(r.category))
@@ -347,12 +439,15 @@ export function layoutElectrical(
 
     // ---- smoke alarms: one in each sleeping room (IRC R314.3) ----
     if (room.category === 'bedroom') {
+      // ASSUMPTION: nudged 12" off the centroid so it doesn't z-fight the
+      // room light; R314 only requires "in the room", ceiling mount typical.
+      // Clamped INTO the polygon — narrow rooms flipped the nudge outside
+      // (B13 round 2).
+      const [ax, az] = nudgeInside(room.polygon, cx, cz, inches(12))
       fixtures.push({
         system: 'electrical',
         kind: 'smoke-alarm',
-        // ASSUMPTION: nudged 12" off the centroid so it doesn't z-fight the
-        // room light; R314 only requires "in the room", ceiling mount typical.
-        position: [cx + inches(12), room.ceilingHeight, cz],
+        position: [ax, room.ceilingHeight, az],
         rotationY: 0,
         sourceId: room.id,
         label: `Smoke alarm — ${room.name || 'bedroom'}`,
@@ -360,20 +455,92 @@ export function layoutElectrical(
     }
   }
 
-  // ---- smoke alarm outside the sleeping area (IRC R314.3): hallway proxy ----
+  // ---- smoke alarm outside the sleeping area (IRC R314.3(2)) ----
+  // A drawn hallway is the natural host. Without one the alarm used to
+  // silently DROP (LOD-400 audit B13a) — the fallback is any bedroom-
+  // ADJACENT room via polygon adjacency (the space a bedroom door opens
+  // into IS "outside the sleeping area"); when even the proxy fails, the
+  // level warns loudly instead of leaving a code hole.
+  const bedrooms = rooms.filter((r) => r.category === 'bedroom')
   const hallway = rooms.find((r) => r.category === 'hallway')
-  if (hallway) {
-    const [hx, hz] = polygonCentroid(hallway.polygon)
+  let outsideHost: RoomSlice | undefined = hallway
+  if (!outsideHost && bedrooms.length > 0) {
+    outsideHost = bedroomAdjacentProxy(bedrooms, rooms)
+    if (!outsideHost) {
+      warnings?.push(
+        'No hallway and no room adjoins a bedroom — smoke alarm outside the sleeping area (IRC R314.3(2)) not placed; verify layout',
+      )
+    }
+  }
+  if (outsideHost) {
+    const [hx, hz] = polygonCentroid(outsideHost.polygon)
+    // Proxy rooms already hold their own room light at the centroid —
+    // nudge 12" like the bedroom alarms, clamped into the polygon
+    // (0.5 m corridor hosts, B13 round 2). Hallways keep the legacy exact
+    // centroid: their light shares it but the pre-B13 output pinned it.
+    const [px, pz] = hallway ? [hx, hz] : nudgeInside(outsideHost.polygon, hx, hz, inches(12))
     fixtures.push({
       system: 'electrical',
       kind: 'smoke-alarm',
-      position: [hx, hallway.ceilingHeight, hz],
+      position: [px, outsideHost.ceilingHeight, pz],
       rotationY: 0,
-      sourceId: hallway.id,
-      label: 'Smoke alarm — outside sleeping area (R314)',
+      sourceId: outsideHost.id,
+      label: hallway
+        ? 'Smoke alarm — outside sleeping area (R314)'
+        : `Smoke alarm — outside sleeping area (IRC R314.3(2), hallway proxy: ${outsideHost.name || outsideHost.category})`,
     })
     // LOD 400: R314.3.3 cooking-appliance clearances (20 ft ionization / 6 ft
-    // photoelectric) + one alarm per story; CO alarm per R315 near bedrooms.
+    // photoelectric) once appliance positions are extracted.
+  }
+
+  // ---- one smoke alarm per story (IRC R314.3(3)) ----
+  // A storey with rooms but neither bedrooms nor a hallway used to compute
+  // ZERO alarms (B13a: the upper den floor of a two-storey). Largest room
+  // hosts it, deterministically (area, ties by id).
+  if (rooms.length > 0 && !fixtures.some((f) => f.kind === 'smoke-alarm')) {
+    const host = [...rooms].sort(
+      (a, b) => polygonArea(b.polygon) - polygonArea(a.polygon) || a.id.localeCompare(b.id),
+    )[0] as RoomSlice
+    const [sx, sz] = polygonCentroid(host.polygon)
+    const [ax, az] = nudgeInside(host.polygon, sx, sz, inches(12))
+    fixtures.push({
+      system: 'electrical',
+      kind: 'smoke-alarm',
+      position: [ax, host.ceilingHeight, az],
+      rotationY: 0,
+      sourceId: host.id,
+      label: 'Smoke alarm — one per story (IRC R314.3(3))',
+    })
+  }
+
+  // ---- CO alarm outside the sleeping area (IRC R315.3) ----
+  // R315.3 requires CO alarms outside each sleeping area when the dwelling
+  // has fuel-fired appliances OR an attached garage. The trigger the scene
+  // carries is the garage room category — and the repo's fuel assumption
+  // rides the SAME trigger (plumbing places the fuel-fired 50-gal tank WH
+  // at M1307.3's 18" ignition height exactly when a garage bounds a wall).
+  // Bedroom-less levels have no sleeping area to serve → no CO alarm.
+  const garage = rooms.find((r) => r.category === 'garage')
+  if (garage && bedrooms.length > 0) {
+    if (outsideHost) {
+      const [cx2, cz2] = polygonCentroid(outsideHost.polygon)
+      // −12" mirror of the smoke nudge (nudgeInside tries −d first) —
+      // light / smoke / CO all read apart on the same ceiling, and the
+      // spot stays inside narrow hosts (B13 round 2).
+      const [ax, az] = nudgeInside(outsideHost.polygon, cx2, cz2, -inches(12))
+      fixtures.push({
+        system: 'electrical',
+        kind: 'co-alarm',
+        position: [ax, outsideHost.ceilingHeight, az],
+        rotationY: 0,
+        sourceId: outsideHost.id,
+        label: 'CO alarm — outside sleeping area (IRC R315.3: attached garage / fuel-fired appliance)',
+      })
+    } else {
+      warnings?.push(
+        'Attached garage with bedrooms but no room to host it — CO alarm (IRC R315.3) not placed; verify layout',
+      )
+    }
   }
 
   // ---- door-less hallways still need a switched light (210.70(A)(2)) ----
@@ -1123,6 +1290,10 @@ const SQFT_PER_M2 = 10.7639
 const MAX_GENERAL_DEVICES = 8
 /** Lighting circuits sized to ~1200 VA of 220.12 floor load. */
 const MAX_LIGHTING_VA = 1200
+/** The ONE life-safety branch every smoke/CO alarm rides (IRC R314.4 — a
+ * hardwired interconnect is a single 14/3 daisy chain, impossible across
+ * two breakers). Exported for the routing + gates. */
+export const ALARM_CIRCUIT = 'SD-1'
 
 /** Unsigned area of a simple polygon (m²). */
 export function polygonArea(polygon: Polygon): number {
@@ -1143,8 +1314,10 @@ export function polygonArea(polygon: Polygon): number {
  *  - bathroom (C)(3), laundry (C)(2) and garage (210.52(G)(1), 2023) get
  *    their dedicated 20A circuits;
  *  - remaining receptacles fill 15A general circuits 8 straps at a time;
- *  - lights/smoke alarms ride room lighting circuits packed to ~1200 VA of
- *    the 3 VA/ft² load, switches join the room they stand in;
+ *  - lights ride room lighting circuits packed to ~1200 VA of the
+ *    3 VA/ft² load, switches join the room they stand in;
+ *  - EVERY smoke/CO alarm lands on the single `SD-1` circuit (IRC R314.4
+ *    interconnect — see ALARM_CIRCUIT) and is marked `interconnected`;
  *  - AFCI marks follow 210.12(A) (kitchens/laundry/living areas — not
  *    bathrooms or garages, which carry the GFCI mark instead).
  * Then rooms holding 2+ switches get them relabeled as a 3-way group
@@ -1217,10 +1390,18 @@ export function assignCircuits(fixtures: Fixture[], rooms: RoomSlice[]): void {
           tag(fixture, `GEN-${generalIndex}`, 15, 14, RECEPTACLE_VA, { afci: true })
         }
       }
-    } else if (fixture.kind === 'light' || fixture.kind === 'smoke-alarm') {
+    } else if (fixture.kind === 'smoke-alarm' || fixture.kind === 'co-alarm') {
+      // IRC R314.4: hardwired alarms are INTERCONNECTED — one 14/3 daisy
+      // chain, which physically requires every smoke/CO alarm on ONE branch
+      // circuit. They used to ride their rooms' lighting circuits and could
+      // scatter across LTG-3/LTG-4 — an interconnect that cannot be pulled
+      // (B13b). AFCI per NEC 210.12(A) (bedrooms/hallways are 210.12 areas).
+      tag(fixture, ALARM_CIRCUIT, 15, 14, 5, { afci: true })
+      fixture.meta = { ...fixture.meta, interconnected: true }
+    } else if (fixture.kind === 'light') {
       const home = rooms.find((r) => r.id === fixture.sourceId)
       const lighting = (home && lightingOf.get(home.id)) ?? (room && lightingOf.get(room.id)) ?? lightingFallback
-      tag(fixture, lighting.circuit, 15, 14, fixture.kind === 'light' ? lighting.va : 5, { afci: true })
+      tag(fixture, lighting.circuit, 15, 14, lighting.va, { afci: true })
     } else if (fixture.kind === 'switch') {
       const lighting = (room && lightingOf.get(room.id)) ?? lightingFallback
       tag(fixture, lighting.circuit, 15, 14, 0, { afci: true })
@@ -1235,7 +1416,10 @@ export function assignCircuits(fixtures: Fixture[], rooms: RoomSlice[]): void {
     )
     if (entries.length < 2) continue
     for (const s of entries) {
-      s.meta = { ...s.meta, threeWay: true }
+      // threeWayRoom keys the TRAVELER group (B13b): routeWiring links the
+      // group's switches with a 14/3 — grouping by circuit would wrongly
+      // chain switches of different rooms sharing one LTG circuit.
+      s.meta = { ...s.meta, threeWay: true, threeWayRoom: room.id }
       s.label = `Switch (3-way — ${room.name || room.category}, ${entries.length} entries)`
     }
   }
@@ -1281,7 +1465,7 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
     row.gfci = row.gfci || f.meta?.gfci === true || f.kind === 'receptacle-gfci'
     rows.set(circuit, row)
   }
-  const order = ['SA', 'BA', 'LA', 'GA', 'GEN', 'LTG', 'AC']
+  const order = ['SA', 'BA', 'LA', 'GA', 'SD', 'GEN', 'LTG', 'AC']
   return [...rows.values()].sort((a, b) => {
     const pa = order.indexOf(a.circuit.split('-')[0] ?? '')
     const pb = order.indexOf(b.circuit.split('-')[0] ?? '')
@@ -1298,6 +1482,16 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
 const WIRE_RUN_Y = inches(18)
 /** Rendered NM sheath section — oversized so runs read at house scale. */
 const WIRE_SECTION = inches(0.5)
+/** Label note on every 14/3 leg of the smoke/CO interconnect chain (B13b).
+ * Scoped '(this storey)': the engine routes ONE level, so the chain it can
+ * truthfully claim ends at the storey line — R314.4 wants the whole
+ * dwelling interconnected; compute warns on multi-storey scenes (E6 r2). */
+const INTERCONNECT_NOTE = ' (alarm interconnect (this storey) — IRC R314.4)'
+/** Label note on every 14/3 traveler leg of a 3-way switch group (B13b). */
+const TRAVELER_NOTE = ' (3-way travelers — NEC 210.70/404.2)'
+/** Traveler cables ride the 9th drill plane — above the 8 stapled circuit
+ * planes (circuitIndex % 8), below the service feed's 10th. */
+const TRAVELER_RUN_Y = WIRE_RUN_Y + 8 * 0.012
 /** Two wall ends within this distance share a junction (corner/tee). */
 const JUNCTION_TOL = 0.25
 
@@ -1545,6 +1739,9 @@ function emitWallPathWith(
  * their nearest wall and cross the CEILING in two Manhattan legs (through
  * the joist bays). Disconnected islands fall back to Manhattan air legs,
  * flagged in the label. Lengths by gauge feed the takeoff's NM lines.
+ * B13b: the SD (smoke/CO) circuit's chain is the hardwired INTERCONNECT —
+ * every leg past the panel feed is 14/3-labeled (IRC R314.4) — and every
+ * threeWay switch group gets a 14/3 traveler chain (NEC 210.70/404.2).
  */
 export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Member[] {
   const members: Member[] = []
@@ -1568,6 +1765,9 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     from: readonly [number, number, number],
     to: readonly [number, number, number],
     note = '',
+    /** Insulated-conductor count: 2 = the default NM-B hot/neutral; 3 =
+     * alarm interconnect + 3-way traveler cable (B13b). */
+    conductors: 2 | 3 = 2,
   ): void => {
     const dx = to[0] - from[0]
     const dy = to[1] - from[1]
@@ -1584,7 +1784,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       rotation: [0, vertical ? 0 : Math.atan2(-dz, dx), 0],
       material: 'copper',
       sourceId: circuit,
-      label: `NM-B ${gauge}/2 w/G — ${circuit}${note}`,
+      label: `NM-B ${gauge}/${conductors} w/G — ${circuit}${note}`,
     })
   }
 
@@ -1596,8 +1796,11 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     from: WallPoint,
     to: WallPoint,
     runY: number = WIRE_RUN_Y,
+    conductors: 2 | 3 = 2,
+    extraNote = '',
   ): void => {
-    const emit: SegmentEmitter = (a, b, note = '') => emitWire(circuit, gauge, a, b, note)
+    const emit: SegmentEmitter = (a, b, note = '') =>
+      emitWire(circuit, gauge, a, b, `${extraNote}${note}`, conductors)
     if (emitWallPathWith(emit, graph, from, to, runY)) return
     // Disconnected wall islands: a bed-height run through open room air is
     // a physically impossible cable path (checklist E4) — a real pull
@@ -1614,7 +1817,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
     const note = ' (ceiling crossing — no wall path)'
     const seg = (p: readonly [number, number, number], q: readonly [number, number, number]) => {
       if (Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]) < 0.01) return
-      emitWire(circuit, gauge, p, q, note)
+      emitWire(circuit, gauge, p, q, `${extraNote}${note}`, conductors)
     }
     seg([a[0], runY, a[1]], [a[0], yCross, a[1]])
     seg([a[0], yCross, a[1]], [b[0], yCross, a[1]])
@@ -1649,6 +1852,13 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       )
       emitWire(circuit, gauge, [sp[0], panel.position[1], sp[1]], [sp[0], runY, sp[1]])
     }
+    // The SD circuit IS the hardwired interconnect (IRC R314.4): the panel
+    // feed arrives as 14/2, but from the FIRST alarm's stud bay onward the
+    // cable carries the third (signal) conductor — every rise/ceiling/stub
+    // leg serving an alarm and every alarm→alarm hop is 14/3-labeled, so
+    // the interconnect is a continuous, walkable 14/3 chain (B13b gate).
+    const isAlarmChain = circuit === ALARM_CIRCUIT
+    let chained = false
     const remaining = [...devices]
     let cursor: WallPoint | null = start
     let cursorPlan: Pt = start ? wallPlan(start) : panelPlan
@@ -1666,7 +1876,15 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
       }
       const device = remaining.splice(best, 1)[0] as Fixture
       const [x, y, z] = device.position
-      const ceilingDevice = device.kind === 'light' || device.kind === 'smoke-alarm'
+      const ceilingDevice =
+        device.kind === 'light' || device.kind === 'smoke-alarm' || device.kind === 'co-alarm'
+      // Alarm-chain conductor plan: hops after the first alarm carry the
+      // interconnect; the legs INTO any alarm box are 14/3 too (the feed
+      // transitions at the first alarm's bay).
+      const hopCond: 2 | 3 = isAlarmChain && chained ? 3 : 2
+      const hopNote = isAlarmChain && chained ? INTERCONNECT_NOTE : ''
+      const legCond: 2 | 3 = isAlarmChain ? 3 : 2
+      const legNote = isAlarmChain ? INTERCONNECT_NOTE : ''
       // Ceiling devices rise the full wall height inside a stud bay; wall
       // devices rise to their box — either way the bay must be RO-free for
       // the whole vertical leg (prod report: risers through windows).
@@ -1676,19 +1894,19 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
         ceilingDevice ? Number.POSITIVE_INFINITY : Math.max(RUN_ZONE_TOP, y + inches(6)),
       )
       if (anchor && cursor) {
-        routeHop(circuit, gauge, cursor, anchor, runY)
+        routeHop(circuit, gauge, cursor, anchor, runY, hopCond, hopNote)
         const ap = wallPlan(anchor)
         if (ceilingDevice) {
           // rise inside the wall, then cross the ceiling through joist bays
-          emitWire(circuit, gauge, [ap[0], runY, ap[1]], [ap[0], y, ap[1]])
-          emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, ap[1]])
-          emitWire(circuit, gauge, [x, y, ap[1]], [x, y, z])
+          emitWire(circuit, gauge, [ap[0], runY, ap[1]], [ap[0], y, ap[1]], legNote, legCond)
+          emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, ap[1]], legNote, legCond)
+          emitWire(circuit, gauge, [x, y, ap[1]], [x, y, z], legNote, legCond)
         } else {
           // drop/rise at the device's stud bay…
-          emitWire(circuit, gauge, [ap[0], runY, ap[1]], [ap[0], y, ap[1]])
+          emitWire(circuit, gauge, [ap[0], runY, ap[1]], [ap[0], y, ap[1]], legNote, legCond)
           // …then the box stub: centerline → the face-mounted box (round-12
           // M8 — no wire ever reached a box; the ~2.7in jog was implied).
-          emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, z])
+          emitWire(circuit, gauge, [ap[0], y, ap[1]], [x, y, z], legNote, legCond)
         }
         cursor = anchor
         cursorPlan = ap
@@ -1697,12 +1915,67 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
         // (E4): cross at a nominal ceiling height, drop at the device.
         const yC = 2.4
         const note = ' (ceiling crossing — no walls)'
-        emitWire(circuit, gauge, [cursorPlan[0], runY, cursorPlan[1]], [cursorPlan[0], yC, cursorPlan[1]], note)
-        emitWire(circuit, gauge, [cursorPlan[0], yC, cursorPlan[1]], [x, yC, cursorPlan[1]], note)
-        emitWire(circuit, gauge, [x, yC, cursorPlan[1]], [x, yC, z], note)
-        emitWire(circuit, gauge, [x, yC, z], [x, y, z])
+        emitWire(circuit, gauge, [cursorPlan[0], runY, cursorPlan[1]], [cursorPlan[0], yC, cursorPlan[1]], `${legNote}${note}`, legCond)
+        emitWire(circuit, gauge, [cursorPlan[0], yC, cursorPlan[1]], [x, yC, cursorPlan[1]], `${legNote}${note}`, legCond)
+        emitWire(circuit, gauge, [x, yC, cursorPlan[1]], [x, yC, z], `${legNote}${note}`, legCond)
+        emitWire(circuit, gauge, [x, yC, z], [x, y, z], legNote, legCond)
         cursorPlan = [x, z]
       }
+      chained = true
+    }
+  }
+
+  // ---- 3-way traveler legs (NEC 210.70(A)(2)(3) / 404.2) ----
+  // A threeWay group's switches control ONE light from multiple entries —
+  // that takes a 14/3 traveler cable BETWEEN the switch boxes in addition
+  // to the switch legs above. threeWay-flagged pairs used to get no
+  // traveler at all (B13b). The chain runs box → own stud bay → traveler
+  // plane along the walls → partner's bay → partner box, deterministically
+  // ordered by deviceId.
+  // TRAVELER PREDICATE (B13 round 3, examiner flag 3): a chain links
+  // switches that (1) share the threeWay room (meta.threeWayRoom),
+  // (2) share the BRANCH CIRCUIT — a real 3-way pair shares its circuit by
+  // definition; a duplicate overlapping zone used to weld one door's
+  // opposite-face switches (LTG-1 × LTG-2) into a cross-circuit 'traveler'
+  // boring 0.07 m through the wall — and (3) mount at DISTINCT openings:
+  // the -p/-m face twins of one door are two different rooms' controls,
+  // never a pair (one switch per wall+opening deviceId key survives).
+  const travelerGroups = new Map<string, Fixture[]>()
+  for (const f of fixtures) {
+    if (f.kind !== 'switch' || f.meta?.threeWay !== true) continue
+    if (typeof f.meta?.circuit !== 'string') continue
+    const key = `${String(f.meta?.threeWayRoom ?? f.sourceId)}|${f.meta.circuit}`
+    const list = travelerGroups.get(key) ?? []
+    list.push(f)
+    travelerGroups.set(key, list)
+  }
+  for (const [, group] of [...travelerGroups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    // predicate (3): one switch per opening — the face twins dedupe
+    // (lowest deviceId wins, keeping the chain order deterministic)
+    const byOpening = new Map<string, Fixture>()
+    for (const s of [...group].sort((a, b) =>
+      String(a.meta?.deviceId ?? '').localeCompare(String(b.meta?.deviceId ?? '')),
+    )) {
+      const openingKey = String(s.meta?.deviceId ?? s.sourceId).replace(/-(p|m)$/, '')
+      if (!byOpening.has(openingKey)) byOpening.set(openingKey, s)
+    }
+    const chain = [...byOpening.values()]
+    if (chain.length < 2) continue
+    const circuit = String(chain[0]?.meta?.circuit ?? 'LTG-1')
+    const gauge = Number(chain[0]?.meta?.gaugeAwg ?? 14)
+    for (let i = 0; i + 1 < chain.length; i++) {
+      const a = chain[i] as Fixture
+      const b = chain[i + 1] as Fixture
+      const aAnchor = nearestWallPoint(walls, [a.position[0], a.position[2]], Math.max(RUN_ZONE_TOP, a.position[1] + inches(6)))
+      const bAnchor = nearestWallPoint(walls, [b.position[0], b.position[2]], Math.max(RUN_ZONE_TOP, b.position[1] + inches(6)))
+      if (!aAnchor || !bAnchor) continue
+      const pa = wallPlan(aAnchor)
+      const pb = wallPlan(bAnchor)
+      emitWire(circuit, gauge, a.position, [pa[0], a.position[1], pa[1]], TRAVELER_NOTE, 3)
+      emitWire(circuit, gauge, [pa[0], a.position[1], pa[1]], [pa[0], TRAVELER_RUN_Y, pa[1]], TRAVELER_NOTE, 3)
+      routeHop(circuit, gauge, aAnchor, bAnchor, TRAVELER_RUN_Y, 3, TRAVELER_NOTE)
+      emitWire(circuit, gauge, [pb[0], TRAVELER_RUN_Y, pb[1]], [pb[0], b.position[1], pb[1]], TRAVELER_NOTE, 3)
+      emitWire(circuit, gauge, [pb[0], b.position[1], pb[1]], b.position, TRAVELER_NOTE, 3)
     }
   }
 

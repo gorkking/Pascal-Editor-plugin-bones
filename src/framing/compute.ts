@@ -729,7 +729,9 @@ function computeLevelUncached(
 
   let devices: DerivedDevice[] = []
   if (config.showElectrical) {
-    const derived = layoutElectrical(activeWalls, activeRooms, services)
+    // B13a: layout-level warnings (un-placeable R314.3(2)/R315.3 alarms)
+    // surface with the level warnings — never a silent drop.
+    const derived = layoutElectrical(activeWalls, activeRooms, services, warnings)
     // Movable outlets (Q7): moved `bones:device` nodes override the derived
     // receptacle/switch spots — code-aware (RO snap-out, stud rule +
     // blocking, height clamps, spacing advisory). Unmoved nodes are ignored
@@ -753,6 +755,21 @@ function computeLevelUncached(
     members.push(...applied.members)
     warnings.push(...applied.warnings)
     fixtures.push(...electrical)
+    // B13 round-2 (E6 honesty): compute is per-LEVEL, so every storey mints
+    // its OWN panel + its OWN SD-1 — the modeled interconnect stops at the
+    // storey line, while IRC R314.4 requires interconnection across the
+    // DWELLING. When sibling storeys of this building carry rooms (they
+    // place their own alarms), say so — six alarms must never claim one
+    // chain with zero cable between floors. Member labels carry the same
+    // scope: 'alarm interconnect (this storey)'.
+    if (
+      electrical.some((f) => f.kind === 'smoke-alarm' || f.kind === 'co-alarm') &&
+      levels.some((l, i) => i !== levelIndex && extractRooms(nodes, l.id).length > 0)
+    ) {
+      warnings.push(
+        'alarm interconnect modeled per storey — R314.4 requires interconnection across the dwelling; verify the cross-storey chain',
+      )
+    }
     // The device manifest the bones:device reconciler mirrors into nodes —
     // built from the same walls + final fixtures the engines used.
     devices = deriveWallDevices(electrical, activeWalls)
