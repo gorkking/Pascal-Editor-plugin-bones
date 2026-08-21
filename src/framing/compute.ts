@@ -736,7 +736,24 @@ function computeLevelUncached(
         dowelUs: cmuDowelPositions(wall, resolved.cmuHeightM, neighbors),
       })
     }
-    members.push(...buildFoundation(activeWalls, slabs, spec, { cmu: cmuAnchorage }))
+    // B18d: the storey ABOVE's girder 4x4 posts land on this level's floor
+    // plane — derive their plan spots from the same floor-framing pass the
+    // upper storey renders (walls only sister joists, so [] reproduces the
+    // girder/post layout exactly) and pour an R403.1/R407.3 pad under each
+    // (buildFoundation carves the slab field around them).
+    const girderPosts: { plan: readonly [number, number]; sourceId: string }[] = []
+    const above = levels[levelIndex + 1]
+    if (above) {
+      const aboveSlabs = extractSlabs(nodes, above.id)
+      if (aboveSlabs.length > 0) {
+        const storeyHeight = above.baseY - (levels[levelIndex]?.baseY ?? 0)
+        for (const m of frameFloor(aboveSlabs, [], spec, storeyHeight)) {
+          if (m.role !== 'post') continue
+          girderPosts.push({ plan: [m.position[0], m.position[2]], sourceId: m.sourceId })
+        }
+      }
+    }
+    members.push(...buildFoundation(activeWalls, slabs, spec, { cmu: cmuAnchorage, girderPosts }))
   }
 
   // bones:service nodes on this level are AUTHORITATIVE — the engines route

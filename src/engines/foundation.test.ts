@@ -1011,6 +1011,119 @@ describe('buildFoundation — short interior link walls (blueprint round-1 p_lin
   })
 })
 
+// ---------------------------------------------------------------------------
+// LOD-400 B18d — pad footings under upper-storey girder posts (R403.1/R407.3)
+// ---------------------------------------------------------------------------
+
+describe('buildFoundation — girder-post pad footings (B18d)', () => {
+  const perimeter = [
+    makeWall({ id: 'w_s', start: [0, 0], end: [8, 0] }),
+    makeWall({ id: 'w_e', start: [8, 0], end: [8, 6] }),
+    makeWall({ id: 'w_n', start: [8, 6], end: [0, 6] }),
+    makeWall({ id: 'w_w', start: [0, 6], end: [0, 0] }),
+  ]
+  const bigSlab = {
+    id: 'slab_big',
+    polygon: [
+      [0, 0],
+      [8, 0],
+      [8, 6],
+      [0, 6],
+    ],
+    holes: [],
+    elevation: 0.05,
+    thickness: 0.1,
+  } as const
+  const posts = [
+    { plan: [2.5, 3] as const, sourceId: 'slab_up' },
+    { plan: [5.5, 3] as const, sourceId: 'slab_up' },
+  ]
+  const members = buildFoundation(perimeter, [bigSlab as never], DEFAULT_SPEC, {
+    girderPosts: posts,
+  })
+  const pads = members.filter((m) => m.label?.startsWith('Pad footing'))
+
+  test('one 24"×24"×12" pad per post, top at y = 0 (the post bearing seat), booked concrete', () => {
+    expect(pads).toHaveLength(2)
+    for (const [i, p] of pads.entries()) {
+      expect(p.role).toBe('footing')
+      expect(p.system).toBe('foundation')
+      expect(p.material).toBe('concrete')
+      expect(p.dims[0]).toBeCloseTo(inches(24), 6)
+      expect(p.dims[1]).toBeCloseTo(inches(12), 6)
+      expect(p.dims[2]).toBeCloseTo(inches(24), 6)
+      expect((p.position[1] ?? 0) + p.dims[1] / 2).toBeCloseTo(0, 6) // monolithic top
+      expect(p.position[0] ?? 0).toBeCloseTo(posts[i]?.plan[0] ?? 0, 6)
+      expect(p.position[2] ?? 0).toBeCloseTo(posts[i]?.plan[1] ?? 0, 6)
+      expect(p.sourceId).toBe('slab_up')
+      expect(p.label).toContain('R403.1')
+      expect(p.label).toContain('R407.3')
+      expect(p.advisory).toContain('verify')
+    }
+  })
+
+  test('the slab field carves around every pad — no strip pours through a pad', () => {
+    const strips = members.filter((m) => m.role === 'slab' || m.role === 'vapor-retarder')
+    expect(strips.length).toBeGreaterThan(0)
+    for (const pad of pads) {
+      const [phx, phz] = [pad.dims[0] / 2, pad.dims[2] / 2]
+      for (const s of strips) {
+        const [shx, shz] = [s.dims[0] / 2, s.dims[2] / 2]
+        const ox =
+          Math.min((s.position[0] ?? 0) + shx, (pad.position[0] ?? 0) + phx) -
+          Math.max((s.position[0] ?? 0) - shx, (pad.position[0] ?? 0) - phx)
+        const oz =
+          Math.min((s.position[2] ?? 0) + shz, (pad.position[2] ?? 0) + phz) -
+          Math.max((s.position[2] ?? 0) - shz, (pad.position[2] ?? 0) - phz)
+        expect(Math.min(ox, oz)).toBeLessThanOrEqual(1e-6)
+      }
+    }
+  })
+
+  test('a post landing on an existing pour bears there — NO doubled pad', () => {
+    // dead-center on an interior bearing wall's thickened footing…
+    const bearing = makeWall({ id: 'w_bear', exterior: false, start: [0, 3], end: [8, 3] })
+    const onFooting = buildFoundation([...perimeter, bearing], [bigSlab as never], DEFAULT_SPEC, {
+      girderPosts: [{ plan: [4, 3], sourceId: 'slab_up' }],
+    })
+    expect(onFooting.filter((m) => m.label?.startsWith('Pad footing'))).toHaveLength(0)
+    // …and flush against the perimeter stemwall band
+    const onPerimeter = buildFoundation(perimeter, [bigSlab as never], DEFAULT_SPEC, {
+      girderPosts: [{ plan: [4, 0.1], sourceId: 'slab_up' }],
+    })
+    expect(onPerimeter.filter((m) => m.label?.startsWith('Pad footing'))).toHaveLength(0)
+  })
+
+  test('coincident posts pour ONE pad (two girder lines meeting)', () => {
+    const doubled = buildFoundation(perimeter, [bigSlab as never], DEFAULT_SPEC, {
+      girderPosts: [
+        { plan: [4, 3], sourceId: 'slab_up' },
+        { plan: [4.1, 3], sourceId: 'slab_up' },
+      ],
+    })
+    expect(doubled.filter((m) => m.label?.startsWith('Pad footing'))).toHaveLength(1)
+  })
+
+  test('LOD 200 pours no pads (350 gate, like the interior thickened footings)', () => {
+    const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
+    const m = buildFoundation(perimeter, [bigSlab as never], lod200, { girderPosts: posts })
+    expect(m.filter((x) => x.label?.startsWith('Pad footing'))).toHaveLength(0)
+  })
+
+  test('pads book into the foundation footings pour (S4: rendered == booked)', () => {
+    const rows = computeTakeoff(members, [], {})
+    const withoutPads = computeTakeoff(
+      members.filter((m) => !m.label?.startsWith('Pad footing')),
+      [],
+      {},
+    )
+    const footings = (r: { section: string; item: string; detail: string; quantity: number | string }[]) =>
+      r.find((x) => x.section === 'Foundation' && x.item === 'Concrete' && x.detail === 'footings')
+    expect(footings(rows)).toBeDefined()
+    expect(Number(footings(rows)?.quantity)).toBeGreaterThan(Number(footings(withoutPads)?.quantity))
+  })
+})
+
 describe('buildFoundation — slab-on-grade field + vapor retarder (LOD-400 B17)', () => {
   // 6×4 closed shell + a bearing partition — the baseline foundation shape.
   const perimeter = [

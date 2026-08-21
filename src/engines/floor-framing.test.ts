@@ -138,11 +138,19 @@ describe('frameFloor — wide slab needs a girder', () => {
     expect(girder.advisory).toContain('verify') // schematic note is advisory, not a flag
   })
 
-  test('posts descend the storey below (parameterized height)', () => {
+  test('posts bear at the storey-below floor plane (parameterized height, B18d)', () => {
+    // Post spans girder UNDERSIDE → level-local −storeyBelowHeight (the
+    // pad-footing seat). The old fixed-length post overshot the bearing
+    // plane by the girder depth.
     const tall = frameFloor([slab(rect(6, 9))], [], DEFAULT_SPEC, 3.1)
     const post = byRole(tall, 'post')[0] as Member
-    expect(post.dims[1]).toBeCloseTo(3.1, 5)
-    expect(post.length).toBeCloseTo(3.1, 5)
+    const topY = 0.05 - 0.2 // slab elevation − thickness (test slab)
+    const gd = 9.25 * 0.0254 // 4x10 girder depth
+    expect(post.dims[1]).toBeCloseTo(3.1 + topY - gd, 5)
+    expect(post.length).toBeCloseTo(3.1 + topY - gd, 5)
+    // top meets the girder underside; bottom lands exactly on the plane
+    expect((post.position[1] as number) + post.dims[1] / 2).toBeCloseTo(topY - gd, 5)
+    expect((post.position[1] as number) - post.dims[1] / 2).toBeCloseTo(-3.1, 5)
   })
 })
 

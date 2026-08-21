@@ -923,3 +923,126 @@ describe('LOD-400 B17: slab-on-grade booked == built, ground storeys only', () =
     for (const m of field) expect(m.sourceId).toBe('slab_gnd_b17')
   })
 })
+
+describe('LOD-400 B18d: upper-storey girder posts bear on ground pads end-to-end', () => {
+  // 8×6 plan: the 6 m clear span forces a girder + 4x4 posts on the upper
+  // floor. The GROUND storey's foundation must pour a pad under every one
+  // of them and carve the slab field around each.
+  function girderScene() {
+    const nodes: Record<string, Record<string, unknown>> = {
+      bldg: { id: 'bldg', type: 'building', children: ['lvl0', 'lvl1'] },
+      lvl0: { id: 'lvl0', type: 'level', parentId: 'bldg', level: 0, height: 2.7 },
+      lvl1: { id: 'lvl1', type: 'level', parentId: 'bldg', level: 1, height: 2.7 },
+      g0a: wall('g0a', 'lvl0', [0, 0], [8, 0]),
+      g0b: wall('g0b', 'lvl0', [8, 0], [8, 6]),
+      g0c: wall('g0c', 'lvl0', [8, 6], [0, 6]),
+      g0d: wall('g0d', 'lvl0', [0, 6], [0, 0]),
+      slab_gnd: {
+        id: 'slab_gnd',
+        type: 'slab',
+        parentId: 'lvl0',
+        polygon: [
+          [0, 0],
+          [8, 0],
+          [8, 6],
+          [0, 6],
+        ],
+        holes: [],
+        elevation: 0.05,
+        thickness: 0.1,
+      },
+      slab_up: {
+        id: 'slab_up',
+        type: 'slab',
+        parentId: 'lvl1',
+        polygon: [
+          [0, 0],
+          [8, 0],
+          [8, 6],
+          [0, 6],
+        ],
+        holes: [],
+        elevation: 0.05,
+        thickness: 0.1,
+      },
+    }
+    return nodes
+  }
+  const cfg = (id: string, levelId: string) =>
+    FramingNode.parse({
+      id,
+      parentId: levelId,
+      jurisdiction: 'TX',
+      detail: '400',
+      showWalls: true,
+      showFloor: true,
+      showFoundation: true,
+    }) as FramingNode
+
+  const nodes = girderScene()
+  const upper = computeLevel(nodes, cfg('bonesframing_b18up', 'lvl1'))
+  const posts = upper.members.filter((m) => m.role === 'post')
+  const ground = computeLevel(nodes, cfg('bonesframing_b18gnd', 'lvl0'))
+  const pads = ground.members.filter((m) => m.label?.startsWith('Pad footing'))
+
+  test('census: one ground pad per upper post, at the exact plan spot (non-vacuous)', () => {
+    expect(posts.length).toBeGreaterThan(0)
+    expect(pads.length).toBe(posts.length)
+    for (const p of posts) {
+      expect(
+        pads.some(
+          (d) =>
+            Math.abs((d.position[0] ?? 0) - p.position[0]) < 1e-6 &&
+            Math.abs((d.position[2] ?? 0) - p.position[2]) < 1e-6,
+        ),
+      ).toBe(true)
+    }
+    // the bearing plane: post bottom (upper-local −storeyHeight) == pad top (ground y 0)
+    for (const p of posts) {
+      expect(p.position[1] - p.dims[1] / 2).toBeCloseTo(-2.7, 5)
+    }
+    for (const d of pads) {
+      expect((d.position[1] ?? 0) + d.dims[1] / 2).toBeCloseTo(0, 5)
+    }
+  })
+
+  test('the ground slab field carves around every pad', () => {
+    const strips = ground.members.filter((m) => m.role === 'slab')
+    expect(strips.length).toBeGreaterThan(0)
+    for (const pad of pads) {
+      const [phx, phz] = [pad.dims[0] / 2, pad.dims[2] / 2]
+      for (const s of strips) {
+        const ox =
+          Math.min((s.position[0] ?? 0) + s.dims[0] / 2, (pad.position[0] ?? 0) + phx) -
+          Math.max((s.position[0] ?? 0) - s.dims[0] / 2, (pad.position[0] ?? 0) - phx)
+        const oz =
+          Math.min((s.position[2] ?? 0) + s.dims[2] / 2, (pad.position[2] ?? 0) + phz) -
+          Math.max((s.position[2] ?? 0) - s.dims[2] / 2, (pad.position[2] ?? 0) - phz)
+        expect(Math.min(ox, oz)).toBeLessThanOrEqual(1e-6)
+      }
+    }
+  })
+
+  test('pads join the foundation footings pour; a storey with no floor above pours none', () => {
+    const rows = computeTakeoff(ground.members, ground.fixtures, ground.areas)
+    const footings = rows.find(
+      (r) => r.section === 'Foundation' && r.item === 'Concrete' && r.detail === 'footings',
+    )
+    expect(footings).toBeDefined()
+    const single = girderScene()
+    delete single.slab_up
+    ;(single.bldg as { children?: string[] }).children = ['lvl0']
+    delete single.lvl1
+    const noUpper = computeLevel(single, cfg('bonesframing_b18solo', 'lvl0'))
+    expect(noUpper.members.filter((m) => m.label?.startsWith('Pad footing'))).toHaveLength(0)
+    const soloRows = computeTakeoff(noUpper.members, noUpper.fixtures, noUpper.areas)
+    const soloFootings = soloRows.find(
+      (r) => r.section === 'Foundation' && r.item === 'Concrete' && r.detail === 'footings',
+    )
+    expect(Number(footings?.quantity)).toBeGreaterThan(Number(soloFootings?.quantity))
+  })
+
+  test('the upper storey itself pours nothing (foundation stays a ground concern)', () => {
+    expect(upper.members.filter((m) => m.system === 'foundation')).toHaveLength(0)
+  })
+})

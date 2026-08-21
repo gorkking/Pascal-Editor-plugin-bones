@@ -358,20 +358,41 @@ AND a gate — a checklist line without a test is a wish.
   'Anchor bolts' takeoff row is the seam sill's, and the dowels book on
   the Foundation rebar lf row. No new S1 allow-list pair: rebar×block /
   rebar×rebar / rebar×stemwall / rebar×footing already cover embedment
-  and bar-to-bar laps.
-  Origin: LOD-400 wave-2 audit B18 (a)+(b)+(c), 2026-08-20 (3 bolts
+  and bar-to-bar laps. INTERIOR GIRDER POSTS BEAR ON PADS: the storey
+  above's girder 4x4 posts land on the ground floor plane — compute
+  derives their plan spots from the same floor-framing pass the upper
+  storey renders (walls only sister joists, so the girder/post layout
+  reproduces exactly) and the foundation pours a 24"×24"×12" pad footing
+  (R403.1 sizing assumption labeled / R407.3 restraint advisory) under
+  each, monolithic with the slab (top at y = 0 = the post's bearing
+  seat, the interior-thickened-footing convention). A post landing on an
+  already-poured band (perimeter/interior footing, stemwall, an earlier
+  pad) bears on THAT concrete — never two pours in one volume. Pads
+  register as B17 carve bands so the slab field pours AROUND them, and
+  they join the Foundation 'footings' yd³ row (S4). The POST itself now
+  spans girder underside → the storey-below floor plane exactly (the old
+  fixed storeyBelowHeight length over-ran the bearing plane by the
+  girder depth — a 4x4 tail punched ~0.23 m through the slab).
+  Origin: LOD-400 wave-2 audit B18 (a)+(b)+(c)+(d), 2026-08-20 (3 bolts
   booked installable inside a 16-ft garage door RO; dead per-section end
   rule; 'sole plate anchorage' J-bolts up into block cells; dowels never
-  lapping the wall verticals).
+  lapping the wall verticals; girder posts bearing on nothing).
   Gates: `src/engines/foundation.test.ts` (B18a describe: RO exclusion,
   per-section layout, window byte-equality, washer parity, vertical
   nudge; B18b describes: kit absence, dowel geometry/lap, per-wall
   interface, interior-CMU dowels, computeLevel FL scene truth + takeoff
   rows; B18c describe: seismic top bar presence/position, INTL absence,
-  AK/CA-vs-INTL profile matrix) + `src/engines/cmu.test.ts`
-  (cmuDowelPositions layout matrix incl. mixed-zone insets) +
+  AK/CA-vs-INTL profile matrix; B18d describe: pad geometry/label, slab
+  carve, poured-band skip, coincident-post dedupe, LOD-350 gate, footings
+  row growth) + `src/engines/cmu.test.ts` (cmuDowelPositions layout
+  matrix incl. mixed-zone insets) +
   `src/engines/interpenetration.test.ts` (B18b compose: foundation +
-  blockwork SAT-clean, verticals all lapped, kit-absence pin).
+  blockwork SAT-clean, verticals all lapped, kit-absence pin; B18d
+  two-storey compose: post-on-pad census, bearing plane y = 0,
+  SAT-clean) + `src/engines/floor-framing.test.ts` (post bearing-plane
+  pin) + `src/framing/compute.multistorey.test.ts` (B18d describe:
+  end-to-end census, slab carve, takeoff rows, no-upper-storey and
+  upper-storey exclusions).
 
 ## M — Mechanical (HVAC)
 

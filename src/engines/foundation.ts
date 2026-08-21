@@ -117,10 +117,23 @@ const DOWEL_OFFSET = inches(1)
  * beside the wall's own #5 verticals (`dowelUs`, cmu.ts cmuDowelPositions)
  * and lap them 48d_b; the mixed wall's framed zone keeps its seam-sill
  * bolts (cmu.ts).
+ *
+ * `girderPosts`: plan spots where the storey ABOVE's girder 4x4 posts land
+ * (level-above floor framing, B18d). Each gets a pad footing (R403.1 /
+ * R407.3) poured monolithically with the slab — top at y = 0, the post's
+ * bearing seat — unless the spot already sits on a poured run (perimeter /
+ * interior footing band), where the post bears on THAT concrete. The slab
+ * field carves around every pad like any other foundation element.
  */
 export type FoundationOptions = {
   cmu?: Map<string, { dowelUs: number[] }>
+  girderPosts?: { plan: readonly [number, number]; sourceId: string }[]
 }
+
+/** Pad footing under an interior girder post: 24" square (R403.1 sizing
+ * ASSUMPTION — Table R403.1(1) loads govern), 12" deep like the interior
+ * thickened footings it pours with. */
+const PAD_FOOTING_SIDE = inches(24)
 
 /**
  * Anchor bolt centers along a wall (u from `start`, meters).
@@ -310,6 +323,9 @@ export function buildFoundation(
   // perimeter footing only on shallow specs). Collected from the ACTUAL
   // emitted runs (incl. corner extensions) so the carve matches the pour.
   const carveBands: CarveBand[] = []
+  // EVERY poured plan band regardless of depth — the pad-footing skip test
+  // (B18d): a girder post landing on a poured run bears on THAT concrete.
+  const pourBands: CarveBand[] = []
 
   // Corner continuity only pairs EXTERIOR straight walls — the ones that
   // actually own perimeter runs below.
@@ -479,6 +495,7 @@ export function buildFoundation(
       // The thickened section IS slab concrete poured monolithically — the
       // field strips stop at its faces (booked once, drawn once).
       carveBands.push(bandOf(iCenter, iLen, spec.footingWidth))
+      pourBands.push(bandOf(iCenter, iLen, spec.footingWidth))
       // Rebar rides "every footing run" — including interior thickened ones.
       emitFootingBars(iCenter, iLen, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
       // Interior CMU bearing walls anchor through their cells too (B18b).
@@ -546,6 +563,7 @@ export function buildFoundation(
     if (-spec.footingDepth + FOOTING_HEIGHT > -SLAB_THICKNESS + EPS) {
       carveBands.push(bandOf(runCenterU, runLen, spec.footingWidth))
     }
+    pourBands.push(bandOf(runCenterU, runLen, spec.footingWidth))
 
     // ---- footing rebar (LOD 350) ----
     if (fabDetail) {
@@ -575,6 +593,7 @@ export function buildFoundation(
       // The slab pours AGAINST the stemwall (R403.1) — the field strips
       // stop at its faces; anchor bolts/hold-downs live inside this band.
       carveBands.push(bandOf(stemRun.center, stemRun.len, spec.stemwallThickness))
+      pourBands.push(bandOf(stemRun.center, stemRun.len, spec.stemwallThickness))
 
       // ---- stemwall vertical rebar (LOD 350) ----
       // R403.1.3.2 / SDC practice: #4 verticals tying footing to stemwall,
@@ -716,6 +735,43 @@ export function buildFoundation(
     // (round-10 interpenetration gate).
   }
 
+  // ---- girder-post pad footings (LOD 350, B18d) ----
+  // The storey above's girder 4x4 posts land on THIS level's floor plane
+  // (y = 0) — before B18d they bore on the unmodeled slab with no R403.1 /
+  // R407.3 footing under them. Each post gets a 24"×24"×12" pad poured
+  // monolithically with the slab (top at y = 0 = the post's bearing seat,
+  // the interior-thickened-footing convention). A post whose pad would
+  // overlap an already-poured run (perimeter/interior footing, stemwall,
+  // an earlier pad) bears on that concrete instead — never two pours in
+  // one volume. Registered as carve bands so the slab field pours AROUND
+  // every pad (B17 machinery).
+  if (fabDetail) {
+    for (const post of options.girderPosts ?? []) {
+      const [px, pz] = post.plan
+      const band: CarveBand = {
+        a: [px - PAD_FOOTING_SIDE / 2, pz],
+        b: [px + PAD_FOOTING_SIDE / 2, pz],
+        w: PAD_FOOTING_SIDE,
+      }
+      if (pourBands.some((o) => plansOverlap(band, o))) continue
+      members.push({
+        system: 'foundation',
+        role: 'footing',
+        dims: [PAD_FOOTING_SIDE, INTERIOR_FOOTING_DEPTH, PAD_FOOTING_SIDE],
+        length: PAD_FOOTING_SIDE,
+        position: [px, -INTERIOR_FOOTING_DEPTH / 2, pz],
+        rotation: [0, 0, 0],
+        material: 'concrete',
+        sourceId: post.sourceId,
+        label: `Pad footing ${formatIn(PAD_FOOTING_SIDE)}×${formatIn(PAD_FOOTING_SIDE)}×${formatIn(INTERIOR_FOOTING_DEPTH)} — girder post (R403.1/R407.3)`,
+        advisory:
+          'pad sized prescriptively — verify per R403.1(1) loads; lateral restraint at the post base per R407.3',
+      })
+      pourBands.push(band)
+      carveBands.push(band)
+    }
+  }
+
   // ---- slab-on-grade field + vapor retarder (LOD-400 B17) ----
   // The ground slab is REAL geometry now: an R506.1 3-1/2" concrete field
   // over a 6-mil vapor retarder (R506.2.3), tiled as strips (the subfloor
@@ -746,6 +802,58 @@ type CarveBand = {
   a: readonly [number, number]
   b: readonly [number, number]
   w: number
+}
+
+/** Corner points of a band's plan rectangle (centerline a→b, width w). */
+function bandPolygon(band: CarveBand): [number, number][] {
+  const [ax, az] = band.a
+  const [bx, bz] = band.b
+  const dx = bx - ax
+  const dz = bz - az
+  const len = Math.hypot(dx, dz)
+  if (len < EPS) return []
+  const nx = (-dz / len) * (band.w / 2)
+  const nz = (dx / len) * (band.w / 2)
+  return [
+    [ax + nx, az + nz],
+    [bx + nx, bz + nz],
+    [bx - nx, bz - nz],
+    [ax - nx, az - nz],
+  ]
+}
+
+/** 2D SAT overlap of two band rectangles (edge/corner CONTACT ≠ overlap). */
+function plansOverlap(a: CarveBand, b: CarveBand): boolean {
+  const pa = bandPolygon(a)
+  const pb = bandPolygon(b)
+  if (pa.length === 0 || pb.length === 0) return false
+  const axes: [number, number][] = []
+  for (const poly of [pa, pb]) {
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i] as [number, number]
+      const q = poly[(i + 1) % poly.length] as [number, number]
+      const ex = q[0] - p[0]
+      const ez = q[1] - p[1]
+      const l = Math.hypot(ex, ez)
+      if (l > EPS) axes.push([-ez / l, ex / l])
+    }
+  }
+  for (const [nx, nz] of axes) {
+    const proj = (poly: [number, number][]): [number, number] => {
+      let lo = Number.POSITIVE_INFINITY
+      let hi = Number.NEGATIVE_INFINITY
+      for (const [x, z] of poly) {
+        const v = x * nx + z * nz
+        lo = Math.min(lo, v)
+        hi = Math.max(hi, v)
+      }
+      return [lo, hi]
+    }
+    const [alo, ahi] = proj(pa)
+    const [blo, bhi] = proj(pb)
+    if (ahi <= blo + EPS || bhi <= alo + EPS) return false
+  }
+  return true
 }
 
 /** Axis-aligned bounds of a plan polygon. */

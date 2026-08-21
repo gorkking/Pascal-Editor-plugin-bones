@@ -719,6 +719,58 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(v.every((s) => s.includes('anchor-bolt') && s.includes('stud'))).toBe(true)
   })
 
+  test('two-storey compose: every girder post bears on its pad, slab carved, SAT-clean (B18d)', () => {
+    // The upper storey's floor framing (posts included) composed INTO the
+    // ground level's frame (ground_y = upper_local_y + storeyHeight): each
+    // 4x4 lands EXACTLY on a pad top at y = 0 — contact, never overlap —
+    // and the slab field pours around the pads. Pre-B18d the posts bore on
+    // nothing (and over-ran the bearing plane by the girder depth).
+    const storeyHeight = 2.5
+    const walls = [
+      wall({ id: 'w_s', start: [0, 0], end: [8, 0] }),
+      wall({ id: 'w_e', start: [8, 0], end: [8, 6] }),
+      wall({ id: 'w_n', start: [8, 6], end: [0, 6] }),
+      wall({ id: 'w_w', start: [0, 6], end: [0, 0] }),
+    ]
+    // 6 m clear span forces a girder + posts on the upper floor
+    const upperFloor = frameFloor(
+      [slab(rect(8, 6), { elevation: 0.05, thickness: 0.05 })],
+      [],
+      spec400,
+      storeyHeight,
+    )
+    const posts = upperFloor.filter((m) => m.role === 'post')
+    expect(posts.length).toBeGreaterThan(0)
+    const foundation = buildFoundation(walls, [slab(rect(8, 6))], spec400, {
+      girderPosts: posts.map((p) => ({
+        plan: [p.position[0], p.position[2]] as const,
+        sourceId: p.sourceId,
+      })),
+    })
+    const pads = foundation.filter((m) => m.label?.startsWith('Pad footing'))
+    // census: every post has a pad directly under it (or a poured band —
+    // none here, the girder runs mid-plan), bearing plane exactly y = 0
+    expect(pads.length).toBe(posts.length)
+    const composed = [
+      ...foundation,
+      ...upperFloor.map((m) => ({
+        ...m,
+        position: [m.position[0], m.position[1] + storeyHeight, m.position[2]] as const,
+      })),
+    ]
+    for (const p of posts) {
+      const bottom = p.position[1] + storeyHeight - p.dims[1] / 2
+      expect(bottom).toBeCloseTo(0, 6)
+      const pad = pads.find(
+        (d) =>
+          Math.abs((d.position[0] ?? 0) - p.position[0]) < 1e-6 &&
+          Math.abs((d.position[2] ?? 0) - p.position[2]) < 1e-6,
+      )
+      expect(pad).toBeDefined()
+    }
+    expect(violations(composed)).toEqual([])
+  })
+
   test('foundation: oblique 45° chamfer corner (round-10)', () => {
     const c = 2 * Math.SQRT1_2
     const chamfered = [

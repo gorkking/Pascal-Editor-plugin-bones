@@ -636,14 +636,21 @@ function frameSlab(
         'Girder sized schematically — verify with span/load design',
       )
       const [pt, pw] = LUMBER_CROSS_SECTIONS['4x4']
+      // The post spans girder UNDERSIDE → the storey below's floor plane
+      // (level-local −storeyBelowHeight), where it bears on the ground
+      // storey's pad footing (B18d) or the framed floor below. The old
+      // fixed storeyBelowHeight length overshot by the girder depth —
+      // the post tail punched ~0.23 m through the bearing plane.
+      const postTop = topY - gd
+      const postHeight = Math.max(0.1, postTop + storeyBelowHeight)
       for (let p = s + POST_SPACING / 2; p < e; p += POST_SPACING) {
         emit(
           'post',
           '4x4',
-          [pt, storeyBelowHeight, pw],
-          placeRun(girder.cross, p, girderCenterY - gd / 2 - storeyBelowHeight / 2),
+          [pt, postHeight, pw],
+          placeRun(girder.cross, p, postTop - postHeight / 2),
           0,
-          storeyBelowHeight,
+          postHeight,
           'lumber',
           'Post 4x4 (to storey below)',
         )
