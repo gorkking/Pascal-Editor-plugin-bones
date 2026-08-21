@@ -728,6 +728,30 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(buildFoundation(chamfered, [], spec400))).toEqual([])
   })
 
+  test('foundation: 45° chamfered plan WITH the slab field — axis-aligned strips clear the oblique stemwall (B17)', () => {
+    // The slab strips are axis-aligned boxes; the chamfer stemwall is a 45°
+    // band. The carve is a conservative box per strip — the composed SAT
+    // proves no strip reaches into the oblique pour.
+    const c = 2 * Math.SQRT1_2
+    const plan = [
+      wall({ id: 'w_a', start: [0, 0], end: [4, 0] }),
+      wall({ id: 'w_c', start: [4, 0], end: [4 + c, c] }),
+      wall({ id: 'w_b', start: [4 + c, c], end: [4 + c, 5] }),
+      wall({ id: 'w_n', start: [4 + c, 5], end: [0, 5] }),
+      wall({ id: 'w_w', start: [0, 5], end: [0, 0] }),
+    ]
+    const poly: [number, number][] = [
+      [0, 0],
+      [4, 0],
+      [4 + c, c],
+      [4 + c, 5],
+      [0, 5],
+    ]
+    const members = buildFoundation(plan, [slab(poly)], spec400)
+    expect(members.some((m) => m.role === 'slab')).toBe(true)
+    expect(violations(members)).toEqual([])
+  })
+
   test('foundation: Y-junction — three runs sharing one endpoint (round-12)', () => {
     // The crossed-boxes artifact on exported plans: pairwise corner marks
     // let several walls extend through the same point. One through wall,
