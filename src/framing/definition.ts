@@ -17,6 +17,22 @@ const framingParametrics: ParametricDescriptor<FramingNode> = {
       ],
     },
     {
+      label: 'View',
+      // CONFIG-KNOB semantics, accepted deliberately (skeptic advisory
+      // 2026-08-21): parametric descriptors are declarative, so this field
+      // surfaces the RAW stored value — a legacy (pre-viewMode) node shows
+      // no selection here until first written, and an inspector/MCP write
+      // sets the mode WITHOUT the wall-mode side effect (walls stay where
+      // they are). That's the same contract as every other raw knob on this
+      // node; the Bones panel's Normal/X-ray/Basement control is the UX
+      // path and owns the wall-mode contract (src/activation.ts, checklist
+      // A5). The renderer resolves legacy nodes via effectiveViewMode
+      // regardless of what this row displays.
+      fields: [
+        { key: 'viewMode', kind: 'enum', options: ['off', 'xray', 'basement'], display: 'segmented' },
+      ],
+    },
+    {
       label: 'Systems',
       fields: [
         { key: 'showWalls', kind: 'boolean' },
@@ -24,6 +40,8 @@ const framingParametrics: ParametricDescriptor<FramingNode> = {
         { key: 'showRoof', kind: 'boolean' },
         { key: 'showFoundation', kind: 'boolean' },
         { key: 'showElectrical', kind: 'boolean' },
+        { key: 'showPlumbing', kind: 'boolean' },
+        { key: 'showHvac', kind: 'boolean' },
       ],
     },
   ],
@@ -55,12 +73,14 @@ export const framingDefinition: FramingDefinition = {
     showFloor: true,
     showRoof: true,
     showFoundation: true,
-    showElectrical: false,
-    showPlumbing: false,
-    showHvac: false,
+    showElectrical: true,
+    showPlumbing: true,
+    showHvac: true,
     movableOutlets: true,
     xray: 1,
     seeThrough: true,
+    viewMode: 'xray',
+    servicesSeeded: false,
     wallOverrides: {},
   }),
 
@@ -83,6 +103,6 @@ export const framingDefinition: FramingDefinition = {
 
   mcp: {
     description:
-      'Bones X-ray config node (one per level). Derives the construction skeleton — wall framing (studs/plates/headers), floor joists, roof rafters, foundation, electrical layout — from the level architecture and renders it in 3D. Settings: jurisdiction (US state code/INTL/AUTO), detail (200 generic / 300 code-sized), studSpacingIn (16/24), per-system show* booleans, per-wall construction overrides (framed/cmu/skip).',
+      'Bones X-ray config node (one per level). Derives the construction skeleton — wall framing (studs/plates/headers), floor joists, roof rafters, foundation, electrical layout — from the level architecture and renders it in 3D. Settings: jurisdiction (US state code/INTL/AUTO), detail (200 generic / 300 code-sized), studSpacingIn (16/24), viewMode (off = finished house / xray = engineering X-ray / basement = under-the-house view), per-system show* booleans (all default on), per-wall construction overrides (framed/cmu/skip).',
   },
 }

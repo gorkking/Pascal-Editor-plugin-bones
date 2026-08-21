@@ -4,36 +4,22 @@ import { type AnyNode, type AnyNodeId, useScene } from '@pascal-app/core'
 import { SegmentedControl, SliderControl, useEditor } from '@pascal-app/editor'
 import { useViewer } from '@pascal-app/viewer'
 import { useEffect, useMemo, useState } from 'react'
-import { paintWallExterior } from './framing/cladding-paint'
+import {
+  activateXray,
+  removeXray,
+  type SceneLike,
+  setXrayViewMode,
+  type ViewerLike,
+} from './activation'
 import { computeLevel } from './framing/compute'
 import { extractLevels } from './core/wall-model'
-import {
-  FramingNode,
-  type WallCladding,
-  type WallConstruction,
-  type WallInsulation,
-  type WallOverride,
-} from './framing/schema'
-import {
-  CLADDING_OPTIONS,
-  CMU_INSULATION_NOTE,
-  CMU_SEAM_NOTE,
-  cmuHeightControl,
-  cmuHeightWrite,
-  constructionOverride,
-  engineeringOverride,
-  INSULATION_OPTIONS,
-  selectedWallInfo,
-  wallOverridePatch,
-} from './panel-selection'
+import { effectiveViewMode, type FramingNode, type ViewMode } from './framing/schema'
 import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plans/plan-set'
 import { characteristicsCsv, characteristicsRows } from './engines/characteristics'
 import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeoff'
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
 import { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, type LumberSize } from './lumber'
-import { buildServicePointNodes, placedServiceTypes } from './service/place'
-import { SERVICE_TYPES } from './service/schema'
 import { useBonesStore } from './store'
 
 const LUMBER_KIND: string = 'bones:lumber'
@@ -85,13 +71,12 @@ export default function BonesPanel() {
         </p>
       </header>
 
-      {framingNode && result && (
-        <SelectedWallCard framingNode={framingNode} nodes={nodes} result={result} />
-      )}
-
+      {/* Per-wall engineering lives ONLY on the floating inspector card
+          (the plugin's wall Engineering extension) — the sidebar mirror
+          cluttered the rail (user round 2026-08-20). Service points place
+          themselves at activation; no button (same round). */}
       <XraySection activeLevelId={activeLevelId ?? null} framingNode={framingNode} result={result} />
 
-      {framingNode && activeLevelId && <ServicePointsSection activeLevelId={activeLevelId} />}
       {framingNode && result && <TakeoffSection result={result} />}
       {framingNode && result && <CharacteristicsSection result={result} />}
 
@@ -144,10 +129,16 @@ function XraySection({
     return (
       <button
         className="rounded-md border border-sidebar-ring bg-sidebar-accent px-3 py-2 text-left font-medium text-sm transition-colors hover:bg-sidebar-accent/70"
-        onClick={() => {
-          const node = FramingNode.parse({ jurisdiction: 'AUTO' })
-          useScene.getState().createNode(node as unknown as AnyNode, activeLevelId as AnyNodeId)
-        }}
+        onClick={() =>
+          // One coherent activation (user round 2026-08-20): the framing
+          // node + every service point in ONE undo entry, walls to Low
+          // once, viewMode 'xray' by default — all scoped to this click.
+          activateXray(
+            useScene as unknown as SceneLike,
+            activeLevelId,
+            useViewer as unknown as ViewerLike,
+          )
+        }
         type="button"
       >
         ⚡ X-Ray this level
@@ -167,12 +158,42 @@ function XraySection({
         <span className="font-medium text-sm">X-Ray</span>
         <button
           className="rounded-md border border-sidebar-border/60 px-2 py-1 text-sidebar-foreground/70 text-xs transition-colors hover:bg-sidebar-accent"
-          onClick={() => useScene.getState().deleteNode(framingNode.id as AnyNodeId)}
+          onClick={() =>
+            // Deactivation mirror of the create click: framing node + the
+            // level's auto-managed service/device nodes in one undo entry,
+            // walls restored to the pre-X-ray mode.
+            removeXray(
+              useScene as unknown as SceneLike,
+              framingNode.id as string,
+              activeLevelId,
+              useViewer as unknown as ViewerLike,
+            )
+          }
           type="button"
         >
           Remove
         </button>
       </div>
+
+      {/* OFF / X-RAY / BASEMENT — the control IS the switch: off↔on flips
+          also drive the host wall mode (Low on, restore off); between the
+          two active modes walls stay where the user put them. */}
+      <SegmentedControl
+        onChange={(v: string) =>
+          setXrayViewMode(
+            useScene as unknown as SceneLike,
+            framingNode,
+            v as ViewMode,
+            useViewer as unknown as ViewerLike,
+          )
+        }
+        options={[
+          { label: 'Normal', value: 'off' },
+          { label: 'X-ray', value: 'xray' },
+          { label: 'Basement', value: 'basement' },
+        ]}
+        value={effectiveViewMode(framingNode)}
+      />
 
       <JurisdictionPicker
         framingNodeId={framingNode.id as AnyNodeId}
@@ -226,7 +247,6 @@ function XraySection({
             ['showElectrical', 'Electrical'],
             ['showPlumbing', 'Plumbing'],
             ['showHvac', 'HVAC'],
-            ['seeThrough', 'X-ray vision'],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -254,241 +274,6 @@ function XraySection({
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-/**
- * Service points — the draggable building/utility interfaces (electric
- * panel + meter, water heater, thermostat, heat pump, water/sewer/power
- * entries). One idempotent action creates them at the engines' current auto
- * positions; from then on THEY are the truth and wires/pipes/ducts re-route
- * to wherever they're moved.
- */
-function ServicePointsSection({ activeLevelId }: { activeLevelId: string }) {
-  // DISTINCT types present (visible nodes only) — a raw node count would let
-  // duplicates of one type disable the button while others are missing.
-  const count = useScene((s) =>
-    placedServiceTypes(s.nodes as Record<string, Record<string, unknown>>, activeLevelId).size,
-  )
-  const allPlaced = count >= SERVICE_TYPES.length
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-xs">Service points</span>
-        {count > 0 && (
-          <span className="rounded-full bg-sidebar-accent px-2 py-0.5 text-[10px] text-sidebar-foreground/60">
-            {count}/{SERVICE_TYPES.length}
-          </span>
-        )}
-      </div>
-      <button
-        className="rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-left text-xs transition-colors hover:bg-sidebar-accent disabled:cursor-default disabled:opacity-50"
-        disabled={allPlaced}
-        onClick={() => {
-          const scene = useScene.getState()
-          const created = buildServicePointNodes(
-            scene.nodes as Record<string, Record<string, unknown>>,
-            activeLevelId,
-          )
-          for (const node of created) {
-            scene.createNode(node as unknown as AnyNode, activeLevelId as AnyNodeId)
-          }
-        }}
-        type="button"
-      >
-        {allPlaced ? 'All service points placed' : '⚡ Place service points'}
-        <span className="block font-normal text-[10px] text-sidebar-foreground/50">
-          Panel, electric meter, water heater, thermostat, heat pump,
-          water/sewer/power entries — move one and the wires, pipes &amp;
-          ducts follow.
-        </span>
-      </button>
-    </div>
-  )
-}
-
-/**
- * Per-element drawer, stage 1 — select a wall in the scene and its
- * engineering surfaces at the top of the panel: what it is (exterior/
- * interior), how it's built (framed/CMU/skip — writes the per-wall
- * override), and what the code gives it (stud recipe, cavity insulation
- * for the climate zone). Replaces the old WallOverrideSection (same
- * override write, richer readout). Hidden unless the host selection is a
- * wall on the active level.
- */
-function SelectedWallCard({
-  framingNode,
-  nodes,
-  result,
-}: {
-  framingNode: FramingNode & { id: string }
-  nodes: Record<string, unknown>
-  result: NonNullable<ReturnType<typeof computeLevel>>
-}) {
-  const levelId = useViewer((s) => s.selection.levelId)
-  const selectedIds = useViewer((s) => s.selection.selectedIds)
-  const info = useMemo(
-    () =>
-      selectedWallInfo(
-        nodes as Record<string, Record<string, unknown>>,
-        { levelId, selectedIds },
-        framingNode,
-        result,
-      ),
-    [nodes, levelId, selectedIds, framingNode, result],
-  )
-
-  if (!info) return null
-  const writeOverride = (value: WallOverride) =>
-    useScene
-      .getState()
-      .updateNode(
-        framingNode.id as AnyNodeId,
-        wallOverridePatch(framingNode, info.wallId, value) as Partial<AnyNode> as never,
-      )
-  const writeField = (patch: Parameters<typeof engineeringOverride>[2]) =>
-    writeOverride(engineeringOverride(info.override, info.construction, patch))
-  // CMU walls grow a height control: full height (100%) by default, drag
-  // down to block only the bottom courses (knee/stem wall) — framed above.
-  const cmuHeight = info.construction === 'cmu' ? cmuHeightControl(info.wallHeightM, info.override) : null
-  const eng = info.engineering
-  return (
-    <div className="flex flex-col gap-2 rounded-md border border-sidebar-ring/60 bg-sidebar-accent/30 p-2.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate font-medium text-xs" title={info.wallId}>
-          {info.label}
-        </span>
-        <span className="shrink-0 rounded-full bg-sidebar-accent px-2 py-0.5 text-[10px] text-sidebar-foreground/60">
-          {info.exterior ? 'Exterior' : 'Interior'}
-        </span>
-      </div>
-      <SegmentedControl
-        onChange={(v: WallConstruction) => writeOverride(constructionOverride(info.override, v))}
-        options={[
-          { label: 'Framed', value: 'framed' },
-          { label: 'CMU', value: 'cmu' },
-          { label: 'Skip', value: 'skip' },
-        ]}
-        value={info.construction}
-      />
-      {cmuHeight && (
-        <div className="flex flex-col gap-0.5">
-          <SliderControl
-            label="Block height"
-            max={cmuHeight.maxM}
-            min={cmuHeight.minM}
-            onChange={(v: number) => writeOverride(cmuHeightWrite(info.override, info.wallHeightM, v))}
-            precision={2}
-            step={cmuHeight.stepM}
-            unit="m"
-            value={cmuHeight.valueM}
-          />
-          <span className="px-2 text-[10px] text-sidebar-foreground/60 tabular-nums">
-            {cmuHeight.readout}
-          </span>
-          {cmuHeight.partial && (
-            <span className="px-2 text-[10px] text-sidebar-foreground/50">{CMU_SEAM_NOTE}</span>
-          )}
-        </div>
-      )}
-      {eng && (
-        <div className="flex flex-col gap-1">
-          <span className="text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
-            Studs
-          </span>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <SegmentedControl
-                onChange={(v: string) => writeField({ studSize: v as '2x4' | '2x6' })}
-                options={[
-                  { label: '2x4', value: '2x4' },
-                  { label: '2x6', value: '2x6' },
-                ]}
-                value={eng.studSize}
-              />
-            </div>
-            <div className="w-24">
-              <SegmentedControl
-                onChange={(v: string) => writeField({ spacingIn: Number(v) as 16 | 24 })}
-                options={[
-                  { label: '16"', value: '16' },
-                  { label: '24"', value: '24' },
-                ]}
-                value={String(eng.spacingIn)}
-              />
-            </div>
-          </div>
-          {eng.studsDefault && (
-            <span className="text-[10px] text-sidebar-foreground/40">per state code</span>
-          )}
-          {eng.studsNote && (
-            <span className="text-[10px] text-amber-500/80">{eng.studsNote}</span>
-          )}
-          <span className="mt-1 text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
-            Insulation
-          </span>
-          <SegmentedControl
-            onChange={(v: WallInsulation) => writeField({ insulation: v })}
-            options={INSULATION_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
-            value={eng.insulation}
-          />
-          <span className="text-[10px] text-sidebar-foreground/50 tabular-nums">
-            {eng.insulation === 'none' ? eng.codeMinHint : `R-${eng.insulationR} · ${eng.codeMinHint}`}
-          </span>
-          {info.exterior && (
-            <>
-              <span className="mt-1 text-[10px] text-sidebar-foreground/50 uppercase tracking-wider">
-                Exterior finish
-              </span>
-              <select
-                className="w-full rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-sidebar-foreground text-xs outline-none"
-                onChange={(e) => {
-                  const next = e.target.value as WallCladding
-                  // Bones members only exist in X-ray — repaint the
-                  // host-drawn skin so the finish reads in solid mode too.
-                  // ONE commit with the override write: a single undo
-                  // reverts the pick and the repaint together.
-                  paintWallExterior(info.paintIds, next, {
-                    nodeId: framingNode.id,
-                    patch: wallOverridePatch(
-                      framingNode,
-                      info.wallId,
-                      engineeringOverride(info.override, info.construction, { cladding: next }),
-                    ) as Record<string, unknown>,
-                  })
-                }}
-                value={eng.cladding}
-              >
-                {CLADDING_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              {eng.claddingDefault && (
-                <span className="text-[10px] text-sidebar-foreground/40">per state code</span>
-              )}
-            </>
-          )}
-        </div>
-      )}
-      <div className="text-[11px] text-sidebar-foreground/60 leading-relaxed">
-        <span className="block">{info.assembly}</span>
-        {info.insulation && <span className="block">{info.insulation}</span>}
-        {info.construction === 'cmu' && (
-          <span className="block">{CMU_INSULATION_NOTE}</span>
-        )}
-        <span className="block tabular-nums">{info.dimensions}</span>
-        {info.garageNote && <span className="block text-amber-500/80">{info.garageNote}</span>}
-        {info.duplicateNote && (
-          <span className="block text-amber-500/80">{info.duplicateNote}</span>
-        )}
-        {info.curved && (
-          <span className="block text-amber-500/80">Curved — framing lands later</span>
-        )}
-      </div>
     </div>
   )
 }

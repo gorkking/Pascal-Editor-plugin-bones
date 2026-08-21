@@ -76,6 +76,36 @@ export type WallOverride = z.infer<typeof WallOverride>
  * 400 fabrication (connections, routing, cut/fastener data). */
 export const BonesDetail = z.enum(['200', '300', '400'])
 
+/**
+ * The X-ray's view mode — ONE field so the three states are structurally
+ * exclusive (user round 2026-08-20):
+ * - 'off'      — the FINISHED house: host walls closed and normal, only the
+ *                finished-surface fixtures (outlets, switches, lights…) show.
+ * - 'xray'     — the engineering X-ray (default at creation): assembly layers
+ *                + dollhouse cut, host walls low; BELOW-FLOOR members render
+ *                depth-tested only (real sightlines — never through floors).
+ * - 'basement' — the under-the-house view: foundation, drainage and buried
+ *                pipes read through everything; the house above fades to a
+ *                barely-visible orientation shell.
+ */
+export const ViewMode = z.enum(['off', 'xray', 'basement'])
+export type ViewMode = z.infer<typeof ViewMode>
+
+/**
+ * Resolve a framing node's view mode, tolerating legacy nodes: stored scenes
+ * never re-parse through the schema on load, so pre-viewMode nodes carry only
+ * the old `seeThrough` boolean (false = the old "solid" mode → 'off';
+ * anything else → 'xray', the historical default).
+ */
+export function effectiveViewMode(node: {
+  viewMode?: unknown
+  seeThrough?: unknown
+}): ViewMode {
+  const v = node.viewMode
+  if (v === 'off' || v === 'xray' || v === 'basement') return v
+  return node.seeThrough === false ? 'off' : 'xray'
+}
+
 export const FramingNode = BaseNode.extend({
   id: objectId('bonesframing'),
   type: nodeType('bones:framing'),
@@ -92,9 +122,12 @@ export const FramingNode = BaseNode.extend({
   showFloor: z.boolean().default(true),
   showRoof: z.boolean().default(true),
   showFoundation: z.boolean().default(true),
-  showElectrical: z.boolean().default(false),
-  showPlumbing: z.boolean().default(false),
-  showHvac: z.boolean().default(false),
+  // MEP defaults ON (user round 2026-08-20: "electrical, plumbing, and HVAC
+  // should also be on by default when we X-ray a house"). Legacy nodes
+  // (absent keys) keep their old behavior — stored scenes never re-parse.
+  showElectrical: z.boolean().default(true),
+  showPlumbing: z.boolean().default(true),
+  showHvac: z.boolean().default(true),
   /** Movable outlets (Q7) — default ON since night-5: the bones:device
    * reconciler seeds draggable nodes for every derived receptacle/switch.
    * The night-4 live-drag defects are closed: D2/D3 (commit count drift +
@@ -106,8 +139,18 @@ export const FramingNode = BaseNode.extend({
   movableOutlets: z.boolean().default(true),
   /** Fade the architectural shell: 0 = skeleton only (future host affordance). */
   xray: z.number().min(0).max(1).default(1),
-  /** X-ray vision: draw the skeleton through walls/finishes (depth-test off). */
+  /** DEPRECATED (pre-viewMode X-ray vision boolean) — still parsed so legacy
+   * nodes round-trip; new code reads `effectiveViewMode` instead. */
   seeThrough: z.boolean().default(true),
+  /** View mode: 'off' finished house / 'xray' engineering X-ray (default) /
+   * 'basement' under-the-house view. See `ViewMode`. */
+  viewMode: ViewMode.default('xray'),
+  /** One-shot service-point seeding latch: set when the level's
+   * `bones:service` points were auto-created (activation click or the
+   * renderer's auto-heal for pre-existing scenes). Once true they are NEVER
+   * auto-created again — deleting a service point is a respected user
+   * choice, not something the reconciler fights. */
+  servicesSeeded: z.boolean().default(false),
   /** Per-wall construction overrides, keyed by wall id. */
   wallOverrides: z.record(z.string(), WallOverride).default({}),
 }).describe(
@@ -115,7 +158,8 @@ export const FramingNode = BaseNode.extend({
   - jurisdiction: US state code ('CA'), 'INTL', or 'AUTO' (guessed from the browser locale/timezone)
   - detail: '200' generic members, '300' jurisdiction/code-sized, '400' fabrication (connections, routing, fastener data)
   - studSpacingIn: stud spacing on-center in inches (16 or 24)
-  - show*: per-system visibility (walls, floor, roof, foundation, electrical, plumbing, hvac)
+  - show*: per-system visibility (walls, floor, roof, foundation, electrical, plumbing, hvac — all default on)
+  - viewMode: 'off' (finished house — walls closed, only surface fixtures show) | 'xray' (engineering X-ray, default) | 'basement' (under-the-house view: foundation/buried pipes read through a faint house shell)
   - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'skip', or the object form { construction, cmuHeightM?, studSize?, spacingIn?, insulation?, insulationR?, cladding? }: cmuHeightM makes a mixed wall (CMU up to a course-snapped height, framed above); studSize ('2x4'|'2x6') + spacingIn (16|24) re-size the framing; insulation ('none'|'batt'|'blown'|'spray-foam') + insulationR fill the stud bays with labeled batts; cladding picks the exterior finish (vinyl|fiberCement|stucco|brickVeneer|wood|eifs)
   All framing members are derived live from the level's walls/openings/slabs/roofs; deleting this node removes the X-ray without touching the model.`,
 )

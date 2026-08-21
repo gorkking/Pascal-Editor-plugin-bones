@@ -15,6 +15,14 @@ type BonesStore = {
   setSize: (size: LumberSize) => void
   setLength: (length: number) => void
   setOrientation: (orientation: LumberOrientation) => void
+  /**
+   * The host wall mode the user had BEFORE Bones imposed 'down' (Low) at
+   * X-ray activation — restored when the view mode goes 'off' or the X-ray
+   * is removed (activation.ts owns the contract). Session-scoped UI memory,
+   * deliberately NOT persisted on the scene.
+   */
+  wallModeBeforeXray: string | null
+  setWallModeBeforeXray: (mode: string | null) => void
 }
 
 export const useBonesStore = create<BonesStore>((set) => ({
@@ -24,4 +32,6 @@ export const useBonesStore = create<BonesStore>((set) => ({
   setSize: (size) => set({ size }),
   setLength: (length) => set({ length }),
   setOrientation: (orientation) => set({ orientation }),
+  wallModeBeforeXray: null,
+  setWallModeBeforeXray: (mode) => set({ wallModeBeforeXray: mode }),
 }))

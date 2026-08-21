@@ -1,4 +1,5 @@
 import { inches } from '../core/units'
+import { effectiveViewMode, type ViewMode } from '../framing/schema'
 import type { ServiceNode, ServiceType } from './schema'
 
 /**
@@ -235,4 +236,55 @@ export function resolveServicePlacement(
   }
 
   return null
+}
+
+/**
+ * View-mode presentation of a `bones:service` node (skeptic advisory,
+ * 2026-08-21: hazard-yellow sign plates were mode-blind — eight signs on a
+ * "finished" house, auto-seeded with no click on legacy scenes).
+ *
+ * The call, aligned with the framing renderer's SURFACE_FIXTURE philosophy:
+ *  - 'xray' / 'basement': equipment box + sign plate (the engineering read).
+ *  - 'off' (finished house): sign plates ALWAYS hide; only the PHYSICAL
+ *    equipment a real home shows keeps its body — panel enclosure, water
+ *    heater tank, thermostat, heat-pump cabinet, meter socket, water entry
+ *    (the shut-off/meter box). Conceptual markers hide entirely: the sewer
+ *    exit (underground stub) and the power entry (the drop itself isn't
+ *    modeled — a floating box mid-wall reads as debris).
+ *  - No framing node on the level → 'xray' presentation: the point was
+ *    placed deliberately and there is no view mode to respect
+ *    (pre-automation behavior, unchanged).
+ */
+export type ServicePresentation = { body: boolean; sign: boolean }
+
+export const PHYSICAL_SERVICE_TYPES: ReadonlySet<ServiceType> = new Set<ServiceType>([
+  'panel',
+  'water-heater',
+  'water-entry',
+  'thermostat',
+  'heat-pump',
+  'electric-meter',
+])
+
+/** The level's view mode, resolved from its bones:framing node (lowest id
+ * wins on duplicates — extraction parity); null = no X-ray on this level. */
+export function levelViewMode(
+  nodes: Record<string, Record<string, unknown>>,
+  levelId: string | null | undefined,
+): ViewMode | null {
+  let best: Record<string, unknown> | null = null
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'bones:framing' || node.parentId !== levelId) continue
+    if (!best || String(node.id ?? '') < String(best.id ?? '')) best = node
+  }
+  return best ? effectiveViewMode(best as { viewMode?: unknown; seeThrough?: unknown }) : null
+}
+
+export function servicePresentation(
+  nodes: Record<string, Record<string, unknown>>,
+  node: Pick<ServicePlacementNode, 'serviceType' | 'parentId'>,
+): ServicePresentation {
+  const mode = levelViewMode(nodes, node.parentId) ?? 'xray'
+  if (mode !== 'off') return { body: true, sign: true }
+  return { body: PHYSICAL_SERVICE_TYPES.has(node.serviceType), sign: false }
 }
