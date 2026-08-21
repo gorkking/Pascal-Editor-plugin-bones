@@ -366,9 +366,11 @@ describe('plumbing — sizes, rough-in heights, slope (round-1 gaps)', () => {
 import { Vector3 } from 'three'
 import { endpointsOf } from './electrical.test-helpers'
 import {
+  ATTACH_TOL,
   buildingDrainExit,
   drainFailures,
   levelDrains,
+  stackToTreeGap,
 } from './plumbing.test-helpers'
 import { computeTakeoff } from './takeoff'
 
@@ -400,6 +402,10 @@ describe('fallback DWV — under-floor evacuation (crawl-space feedback)', () =>
     expectDrop('dwv-trap-r_laundry-0', 2, 'standpipe')
   })
 
+  test('R1: the fallback stack physically ties into the drainage tree (P3104)', () => {
+    expect(stackToTreeGap(members)).toBeLessThanOrEqual(ATTACH_TOL)
+  })
+
   test('continuity: every trap reaches the building-drain exit strictly downhill', () => {
     expect(
       drainFailures(members, ['r_bath-0', 'r_bath-1', 'r_bath-2', 'r_kitchen-0', 'r_laundry-0']),
@@ -408,7 +414,11 @@ describe('fallback DWV — under-floor evacuation (crawl-space feedback)', () =>
   })
 
   test('every horizontal drain hangs FULLY below the floor plane', () => {
-    const horizontals = drains.filter((m) => m.dims[0] > m.dims[1])
+    // The one above-floor horizontal is the stack's floor-line jog (R1 —
+    // it bridges the wall-line stack to the inboard sleeved drop).
+    const horizontals = drains.filter(
+      (m) => m.dims[0] > m.dims[1] && !m.label?.includes('floor-line jog'),
+    )
     expect(horizontals.length).toBeGreaterThan(0)
     for (const m of horizontals) {
       expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)
@@ -457,6 +467,7 @@ describe('fallback DWV — under-floor evacuation (crawl-space feedback)', () =>
     expect(buried.some((m) => m.sourceId === 'dwv-main')).toBe(true)
     for (const m of buried) {
       if (m.dims[1] > m.dims[0]) continue
+      if (m.label?.includes('floor-line jog')) continue // the R1 stack bridge
       expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)
     }
   })
@@ -476,7 +487,8 @@ describe('fallback DWV — under-floor evacuation (crawl-space feedback)', () =>
         m.role === 'pipe-run' &&
         m.sourceId.startsWith('dwv-') &&
         !m.sourceId.startsWith('dwv-vent') &&
-        m.dims[0] > m.dims[1],
+        m.dims[0] > m.dims[1] &&
+        !m.label?.includes('floor-line jog'), // the R1 stack bridge
     )
     expect(horizontals.length).toBeGreaterThan(0)
     for (const m of horizontals) expect(m.position[1] + m.dims[1] / 2).toBeLessThan(0)

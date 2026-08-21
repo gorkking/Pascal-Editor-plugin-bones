@@ -4,7 +4,7 @@ import { DEFAULT_SPEC } from '../core/spec'
 import type { Member, OpeningSlice, SlabSlice, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { COURSE_HEIGHT, MIXED_CORNER_FLAG, cmuWall, cmuWalls, mixedCmuWall } from './cmu'
-import { applyDeviceOverrides, layoutElectrical } from './electrical'
+import { applyDeviceOverrides, layoutElectrical, pointInPolygon } from './electrical'
 import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { layoutPlumbing } from './plumbing'
@@ -1143,21 +1143,149 @@ describe('under-floor DWV vs footings + floor platform (drainage gate)', () => {
     expect(drainClashes(members, structureFor(specFrost))).toEqual([])
   })
 
-  test('S1b: FROST spec + placed fixtures on the exterior wall — arms/branches/stack all clear', () => {
-    const { members } = layoutPlumbing(shell, wetRoomsExterior, specFrost, placedSet)
+  test('S1b+R4b: FROST + placed fixtures incl. a FLUSH lav — arms/branches/stack/riser all clear', () => {
+    // R4b: a fixture flush against the frost wall used to keep its trap
+    // riser at f.plan — a bare vertical through the stemwall.
+    const flushLav: PlacedFixtureSlice = {
+      id: 'lav2',
+      kind: 'lavatory',
+      plan: [8.4, 0.06],
+      yaw: 0,
+      hot: true,
+      dfu: 1,
+      drainIn: 1.25,
+    }
+    const { members } = layoutPlumbing(shell, wetRoomsExterior, specFrost, [
+      ...placedSet,
+      flushLav,
+    ])
     expect(drainClashes(members, structureFor(specFrost))).toEqual([])
-    // and the crossing that remains (terminal exit leg through the frost
-    // stemwall) is the LABELED sleeve, scoped to that leg alone
-    const mains = members.filter((m) => m.sourceId === 'dwv-main')
-    const sleeved = mains.filter((m) => m.label?.includes('sleeved through foundation (P2603.4)'))
-    expect(sleeved.length).toBeLessThanOrEqual(1)
+    // the flush lav's drop is pulled to the inboard junction
+    const trap = members.find((m) => m.sourceId === 'dwv-trap-lav2' && m.dims[1] > m.dims[0])
+    expect(trap).toBeDefined()
+    expect(Math.abs(trap?.position[2] ?? 0)).toBeGreaterThanOrEqual(0.25)
+    // the exit leg CROSSES the frost south stemwall → it MUST carry the
+    // sleeve (the old `≤ 1` phrasing passed with zero sleeves — advisory)
+    const sleeved = members.filter(
+      (m) => m.sourceId === 'dwv-main' && m.label?.includes('sleeved through foundation (P2603.4)'),
+    )
+    expect(sleeved.length).toBeGreaterThanOrEqual(1)
+  })
+
+  test('R2+R4a: corner powder room at frost — per-crossing sleeves + clamped drops', () => {
+    // 1.0 m wide bath in the SW corner on the exterior south wall; the
+    // sewer exit forced WEST so the main's X-leg crosses the west
+    // stemwall mid-run (the old terminal-leg heuristic left it bare).
+    const powder: RoomSlice[] = [
+      {
+        id: 'r_pow',
+        name: 'Powder',
+        category: 'bathroom',
+        polygon: [
+          [0, 0],
+          [1, 0],
+          [1, 2],
+          [0, 2],
+        ],
+        boundaryWallIds: ['w_s'],
+        ceilingHeight: 2.5,
+      },
+    ]
+    const { members } = layoutPlumbing(shell, powder, specFrost, [], {
+      sewerExit: { position: [-0.8, 0, 0.9] },
+    })
+    expect(drainClashes(members, structureFor(specFrost))).toEqual([])
+    const sleevedMains = members.filter(
+      (m) => m.sourceId === 'dwv-main' && m.label?.includes('P2603.4'),
+    )
+    expect(sleevedMains.length).toBeGreaterThanOrEqual(1)
+    // R4a: every through-floor drop stays INSIDE the 1 m room — the
+    // unclamped ±0.4 offsets put the toilet drop inside the west stemwall
+    const drops = members.filter(
+      (m) => m.sourceId.startsWith('dwv-trap-') && m.dims[1] > m.dims[0],
+    )
+    expect(drops.length).toBeGreaterThan(0)
+    for (const d of drops) {
+      expect(pointInPolygon([d.position[0], d.position[2]], powder[0]?.polygon ?? [])).toBe(true)
+    }
+  })
+
+  test('R3: courtyard plan at frost — branch legs sleeve through BOTH courtyard stemwalls', () => {
+    const uWalls: WallSlice[] = [
+      shellWall('u_s', [0, 0], [12, 0]),
+      shellWall('u_e', [12, 0], [12, 8]),
+      shellWall('u_n', [12, 8], [0, 8]),
+      shellWall('u_w', [0, 8], [0, 0]),
+      // the courtyard's own exterior stemwalls, mid-plan
+      shellWall('u_c1', [5, 2], [5, 6]),
+      shellWall('u_c2', [7, 2], [7, 6]),
+    ]
+    const uRooms: RoomSlice[] = [
+      {
+        id: 'r_ubath',
+        name: 'Bathroom',
+        category: 'bathroom',
+        polygon: [
+          [8, 2],
+          [11, 2],
+          [11, 6],
+          [8, 6],
+        ],
+        boundaryWallIds: ['u_e'],
+        ceilingHeight: 2.5,
+      },
+      {
+        id: 'r_ukitchen',
+        name: 'Kitchen',
+        category: 'kitchen',
+        polygon: [
+          [1, 2],
+          [4, 2],
+          [4, 6],
+          [1, 6],
+        ],
+        boundaryWallIds: ['u_w'],
+        ceilingHeight: 2.5,
+      },
+    ]
+    const uSlabs: SlabSlice[] = [
+      {
+        id: 'slab_u',
+        polygon: [
+          [0, 0],
+          [12, 0],
+          [12, 8],
+          [0, 8],
+        ],
+        holes: [],
+        elevation: 0.05,
+        thickness: 0.05,
+      },
+    ]
+    const uStructure = [
+      ...buildFoundation(uWalls, uSlabs, specFrost),
+      ...frameFloor(uSlabs, uWalls, specFrost, 2.4),
+    ].filter((m) =>
+      ['footing', 'stemwall', 'slab-edge', 'joist', 'rim-joist', 'girder', 'blocking', 'subfloor'].includes(
+        m.role,
+      ),
+    )
+    const { members } = layoutPlumbing(uWalls, uRooms, specFrost)
+    expect(drainClashes(members, uStructure)).toEqual([])
+    // the west-wing branch crossed both courtyard stemwalls bare (2
+    // clashes pre-fix) — its crossing leg now carries the sleeve
+    const sleevedBranch = members.filter(
+      (m) => m.sourceId === 'dwv-branch-r_ukitchen' && m.label?.includes('P2603.4'),
+    )
+    expect(sleevedBranch.length).toBeGreaterThanOrEqual(1)
   })
 
   test('the concrete crossings that DO exist are labeled sleeves (P2603.4), never silent', () => {
     const { members } = layoutPlumbing(shell, wetRooms, spec400)
-    const stackBase = members.find((m) => m.sourceId === 'dwv-stack-base')
+    const stackBase = members.find(
+      (m) => m.sourceId === 'dwv-stack-base' && m.label?.includes('sleeved'),
+    )
     expect(stackBase).toBeDefined()
-    expect(stackBase?.label).toContain('sleeved')
     expect(stackBase?.label).toContain('P2603.4')
   })
 })
