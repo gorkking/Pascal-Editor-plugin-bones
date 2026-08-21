@@ -390,6 +390,47 @@ describe('MEP sheet — plumbing system colors + slope note (plumbing rebuild)',
   })
 })
 
+describe('MEP sheet — return duct prints in its own tone + legend row (B19c / M3)', () => {
+  const duct = (sourceId: string, label: string, z: number): Member =>
+    member({
+      system: 'hvac',
+      role: 'duct-run',
+      size: undefined,
+      material: 'duct',
+      dims: [3, 0.203, 0.356],
+      position: [3, 2.8, z],
+      sourceId,
+      label,
+    })
+  const supply = duct('r_hall', 'Trunk 14"×8" — 800 cfm', 1)
+  const ret = duct('return-trunk', 'Return trunk 14"×8" — 800 cfm (M1602)', 2)
+
+  test('return runs carry the darker tone; supply keeps the base duct fill; both legend rows print', () => {
+    const { DUCT_COLORS } = require('./circuit-colors') as typeof import('./circuit-colors')
+    const mep = buildPlanSet([supply, ret], [], {}).find((s) => s.title.startsWith('Plumbing'))
+    expect(mep).toBeDefined()
+    const svg = mep?.svg ?? ''
+    // both tones drawn…
+    expect(svg).toContain(`fill="${DUCT_COLORS.return}"`)
+    expect(svg).toContain(`fill="${DUCT_COLORS.supply}"`)
+    // …and both named in the legend (P2) — the base row says which air path
+    expect(svg).toContain('duct — return air')
+    expect(svg).toContain('>duct — supply air</text>')
+  })
+
+  test('supply-only sheet shows no return legend row (and vice versa)', () => {
+    const { DUCT_COLORS } = require('./circuit-colors') as typeof import('./circuit-colors')
+    const supplyOnly = buildPlanSet([supply], [], {}).find((s) => s.title.startsWith('Plumbing'))
+    expect(supplyOnly?.svg ?? '').not.toContain('duct — return air')
+    const returnOnly = buildPlanSet([ret], [], {}).find((s) => s.title.startsWith('Plumbing'))
+    const rsvg = returnOnly?.svg ?? ''
+    expect(rsvg).toContain('duct — return air')
+    // the base supply swatch never prints for tin the sheet doesn't draw
+    expect(rsvg).not.toContain('>duct — supply air</text>')
+    expect(rsvg).not.toContain(`fill="${DUCT_COLORS.supply}"`)
+  })
+})
+
 describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
   const characteristics: BuildingCharacteristics = {
     floorAreaM2: 40,

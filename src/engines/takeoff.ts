@@ -635,13 +635,30 @@ export function computeTakeoff(
       tally.lf += toFeet(m.length)
       pipeTallies.set(key, tally)
     } else if (m.role === 'duct-run') {
-      const w = Math.round(m.dims[2] / 0.0254)
-      const h = Math.round(m.dims[1] / 0.0254)
+      // TRUE section sides: VERTICAL runs (risers/boots/drops — ductDrop
+      // dims [w, length, h]) carry their LENGTH in dims[1]; reading dims[1]
+      // as a side booked FICTITIOUS tin ('Duct 8×71"', 'Return duct 14×79"'
+      // — round-2 finding 4 / examiner C5; the supply analog is fixed here
+      // as a rider). Horizontals keep their W×H (max×min) exactly as before.
+      const vertical = m.dims[1] > m.dims[0]
+      const sA = Math.round((vertical ? m.dims[0] : m.dims[2]) / 0.0254)
+      const sB = Math.round((vertical ? m.dims[2] : m.dims[1]) / 0.0254)
+      const w = Math.max(sA, sB)
+      const h = Math.min(sA, sB)
       // Trunks are rectangular sheet metal by the hvac naming contract
       // ('Trunk…' label prefix) — a trunk stepped down to the square 8×8
       // minimum is still square duct, not 8" round (round-10 finding).
+      // RETURN-side duct ('Return…' prefix, B19c) books on its OWN rows —
+      // mirroring the supply rows, never merging into them (the return
+      // trunk shares the supply's 14×8 section; one blended row would hide
+      // which air path the tin serves).
       const isTrunk = m.label?.startsWith('Trunk') === true
-      const item = w === h && !isTrunk ? `Duct ${w}" round` : `Duct ${w}×${h}"`
+      const isReturn = m.label?.startsWith('Return') === true
+      const item = isReturn
+        ? `Return duct ${w}×${h}"`
+        : w === h && !isTrunk
+          ? `Duct ${w}" round`
+          : `Duct ${w}×${h}"`
       const key = `${m.system}|${item}`
       const tally = ductTallies.get(key) ?? { section: SECTION_OF[m.system], item, lf: 0 }
       tally.lf += toFeet(m.length)
@@ -720,9 +737,23 @@ export function computeTakeoff(
       chain.legs += 1
       fittingChains.set(key, chain)
     } else if (m.role === 'duct-run') {
-      const w = Math.round(m.dims[2] / 0.0254)
-      const h = Math.round(m.dims[1] / 0.0254)
-      const item = w === h ? `Duct ${w}" fittings` : `Duct ${w}×${h}" fittings`
+      // Same true-section derivation as the lf rows (verticals carry their
+      // length in dims[1]); riser/boot chains merge with their horizontal
+      // runs now — the riser-to-feed and branch-to-boot elbows are real
+      // fittings the old fictitious-section keys kept apart.
+      const vertical = m.dims[1] > m.dims[0]
+      const sA = Math.round((vertical ? m.dims[0] : m.dims[2]) / 0.0254)
+      const sB = Math.round((vertical ? m.dims[2] : m.dims[1]) / 0.0254)
+      const w = Math.max(sA, sB)
+      const h = Math.min(sA, sB)
+      // Return-side bends book under their own item (same mirror as the lf
+      // rows above).
+      const isReturn = m.label?.startsWith('Return') === true
+      const item = isReturn
+        ? `Return duct ${w}×${h}" fittings`
+        : w === h
+          ? `Duct ${w}" fittings`
+          : `Duct ${w}×${h}" fittings`
       const key = `${m.system}|${item}|${m.sourceId}`
       const chain = fittingChains.get(key) ?? { section: SECTION_OF[m.system], item, legs: 0 }
       chain.legs += 1

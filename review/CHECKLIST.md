@@ -354,6 +354,60 @@ AND a gate — a checklist line without a test is a wish.
   indoor … should follow a sensible path").
   Gates: `src/engines/hvac.condensers.test.ts` +
   `src/engines/hvac.lineset.test.ts`
+- **M3 Return air is modeled, and never taken from a garage.** The air
+  handler prefers CONDITIONED service space (laundry/utility > closet-named
+  rooms > hallway); the garage is a last resort that fires a loud warning
+  ('air handler in garage — M1602.2(1) forbids garage return air; provide a
+  sealed return + R302.5.2 duct protection — verify') — never silent. The
+  OPEN central return grille lives in a central conditioned room (hallway
+  first) and NEVER in the garage (IRC M1602.2(1)); a RETURN trunk — full
+  supply-trunk section (schematic mirror; label honesty over invented cfm),
+  labels prefixed 'Return', sourceId `return-trunk` — connects the grille to
+  the air handler as continuous duct (riser → plane legs → drop offset 0.5 m
+  from the supply riser). The return path NEVER shares tin with the supply
+  system (round-2 blocker): horizontal legs ride their own plane one section
+  height + gap off the supply plane (up in the attic, down in a soffit) and
+  every return vertical clears the whole supply plan footprint
+  (`supplySpineOf` — the one axis/register computation both the trunk
+  emission and the keep-out model consume). Compromised placements are LOUD,
+  never silent: a drop ring with no clear candidate takes the
+  least-intrusion spot + 'return drop cannot clear walls in <room> — verify
+  routing'; a compromised grille (`clear: false`, register ≥ 0.5 m floor
+  holds on every fallback pass) warns 'return grille cannot fully clear the
+  supply ducts in <room>'. Rooms a DOOR can close off carry the
+  transfer-path assumption on their supply register ('door undercut /
+  jumper duct assumed (M1602.2)' + `meta.transferAirAssumed`) AND on paper —
+  the room's supply boot carries the member flag 'door undercut / jumper
+  duct assumed — M1602.2', aggregated to one Flags row — v1 never invents
+  jumper-duct geometry; the grille room itself stays label-free. The takeoff
+  books return duct on its own `Return duct W×H"` lf/fitting rows equal to
+  the drawn lengths (never blended into supply rows) and every duct row
+  prints its TRUE section — verticals never book their length as a side
+  (the supply `Duct 8×NN"` analog died with the same fix). The MEP sheet
+  prints return runs in the darker return duct tone with 'duct — supply
+  air' / 'duct — return air' legend rows (thermostat auto-spot targets the
+  REAL grille).
+  SOFFIT legs (interior storeys) never hang in a doorway unflagged: a
+  horizontal leg crossing a wall is checked against the wall's rough
+  openings at the leg's own y-band (`legCrossesRo`) — the return path
+  slides its crossing to a solid segment (drop-candidate × elbow search);
+  where no solid crossing exists the leg carries 'return duct crosses a
+  doorway — verify routing (soffit/floor-web coordination)'; the SUPPLY
+  soffit path (axis fixed by the registers, cannot slide) flags the same
+  way. Attic legs ride above wall tops — immune; the head-band raise is
+  not modeled (a standard 2.17 m head under a 2.5 m plate band leaves less
+  than section + margins).
+  Origin: LOD-400 wave-2 audit B19 (a)+(c) BLOCKER (2026-08-20): AH + open
+  return modeled INSIDE the garage silently; return air arrived by magic.
+  Round 2 (2026-08-21): return×supply interpenetration blocker + silent
+  fallbacks + fictitious vertical sections. Round 3 (2026-08-21): soffit
+  legs crossed doorways unflagged (return leg dead center of a door, half
+  a meter below the head).
+  Gates: `src/engines/hvac.return.test.ts` (placement, warning, grille
+  exclusion, E2-style return continuity, duct-vs-duct SAT + plane pins,
+  loud-fallback closet plan, doorway compose verbatim + no-solid variant +
+  attic immunity, transfer labels + Flags row, takeoff mirror + true
+  sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
 
 ## P — Plans (the exported document)
 

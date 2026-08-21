@@ -6,8 +6,12 @@
  * docs/research/mep.md (Manual J/S/D are the real methods — labeled as such):
  *  - tonnage from conditioned area (sqft per ton, climate-typical 500),
  *    garages excluded;
- *  - the air handler lives in a service space (laundry > garage > hallway >
- *    largest room);
+ *  - the air handler lives in a CONDITIONED service space (laundry/utility >
+ *    closet > hallway > largest conditioned room); the GARAGE is kept only
+ *    when no conditioned service space exists — with a loud M1602.2(1)
+ *    warning, and the open return grille NEVER goes there (IRC M1602.2(1)
+ *    forbids taking return air from a garage; R302.5.2 restricts garage
+ *    duct penetrations);
  *  - the trunk runs MANHATTAN along the hallway/corridor axis (else along
  *    the dominant register-spread axis), fed by a perpendicular leg from the
  *    equipment; branches leave the trunk at right angles to each register;
@@ -15,7 +19,14 @@
  *    area (400 cfm/ton split proportionally) and the trunk cross-section
  *    STEPS DOWN after each takeoff to match the remaining cfm;
  *  - one central return sized ~200 in² of grille per ton (≈2 cfm/in² face
- *    velocity), flagged when it can't carry the supply cfm;
+ *    velocity), flagged when it can't carry the supply cfm; the grille lives
+ *    in a CENTRAL conditioned room (hallway when there is one, never the
+ *    garage) and a RETURN trunk — sized by the same schematic rule as the
+ *    supply trunk — carries the air back to the air handler (M1602: supply
+ *    without a modeled return path was air arriving by magic); closable
+ *    rooms (a door on their boundary) get a transfer-path ASSUMPTION label
+ *    on their supply register ('door undercut / jumper duct assumed',
+ *    M1602.2) — v1 does not invent jumper-duct geometry;
  *  - DUCTS NEVER CROSS TOP PLATES: trunk + branches route at ATTIC elevation
  *    (above every wall's plate band) and supply registers are CEILING boots
  *    dropping through the ceiling plane like recessed lights. IRC R602.6/
@@ -180,6 +191,28 @@ export const RETURN_IN2_PER_TON = 200
  * calls out (a flag that can never fire is no flag — round-3 finding).
  */
 export const RETURN_GRILLE_CATALOG_IN2 = [100, 144, 216, 288, 400, 600, 800] as const
+/**
+ * Clearance a RETURN vertical (trunk-section riser/drop) keeps off every
+ * wall's plan band: the 14×8 section's half-diagonal (~0.20 m) exceeds the
+ * 6" boot margin the register search uses — a grille cleared at 0.12 m put
+ * the riser's corner samples inside the plate band (M1 harness).
+ */
+const RETURN_WALL_MARGIN = 0.25
+/** The return drop meets the air handler this far (plan) from the supply
+ * riser at the equipment centroid — the two trunk verticals must never
+ * occupy the same space. */
+const RETURN_DROP_OFFSET = 0.5
+/** Clear gap between any return duct face and a supply duct face. */
+const DUCT_CLEAR_GAP = 0.05
+/**
+ * The RETURN plane rides one trunk-section height + gap off the SUPPLY
+ * plane, so horizontal return legs can cross the supply corridor in plan
+ * without sharing tin (skeptic round 1 BLOCKER: both trunks were emitted at
+ * the identical trunkY — the return leg ran co-axially INSIDE the supply
+ * trunk). Attic mode steps UP (headroom above the supply plane); soffit
+ * mode steps DOWN (up would break the interior-storey ceiling cap).
+ */
+const RETURN_PLANE_OFFSET = TRUNK_H + DUCT_CLEAR_GAP
 
 /** Shoelace polygon area (m²). */
 export function polygonArea(polygon: readonly Pt[]): number {
@@ -471,14 +504,240 @@ function bounds(polygon: readonly Pt[]): { minX: number; maxX: number; minZ: num
   return { minX, maxX, minZ, maxZ }
 }
 
-/** Equipment room preference: laundry > garage > hallway > largest room. */
+/** Closet-ish 'other' rooms read as conditioned service space — the room
+ * categories carry no 'closet', so match the NAME (same trick classifyRoom
+ * plays for utility → laundry). */
+const CLOSET_RE = /closet|mech|furnace|placard/i
+
+/**
+ * Equipment room preference — CONDITIONED service space first (B19a):
+ * laundry/utility > closet > hallway > garage > largest conditioned room.
+ * The garage stays a candidate ABOVE the generic largest-room fallback (an
+ * air handler doesn't live in the middle of a bedroom), but every
+ * conditioned service space now outranks it — IRC M1602.2(1) forbids garage
+ * return air and R302.5.2 restricts garage duct penetrations, so a
+ * garage-mounted AH is a last resort that `layoutHvac` warns LOUDLY about
+ * (and the open return grille never follows it there). The old order
+ * (laundry > garage > hallway) parked the AH + open return in the garage
+ * silently whenever the scene had no laundry.
+ */
 export function equipmentRoomOf(rooms: RoomSlice[]): RoomSlice {
-  const byArea = [...rooms].sort((a, b) => polygonArea(b.polygon) - polygonArea(a.polygon))
+  const conditioned = rooms.filter((r) => r.category !== 'garage')
+  const byArea = [...conditioned].sort((a, b) => polygonArea(b.polygon) - polygonArea(a.polygon))
   return (
     rooms.find((r) => r.category === 'laundry') ??
-    rooms.find((r) => r.category === 'garage') ??
+    conditioned.find((r) => r.category === 'other' && CLOSET_RE.test(r.name)) ??
     rooms.find((r) => r.category === 'hallway') ??
+    rooms.find((r) => r.category === 'garage') ??
     (byArea[0] as RoomSlice)
+  )
+}
+
+// ---- supply keep-out model (B19 round-1 BLOCKER) -----------------------------
+
+/** A supply duct's plan footprint: segment a→b with half-width `half`
+ * (a === b for verticals — riser/boots). */
+type PlanSeg = { a: Pt; b: Pt; half: number }
+
+/** Plan distance from point q to the segment a→b. */
+function planSegDist(seg: PlanSeg, q: Pt): number {
+  const p = projectOnto(seg.a, seg.b, q)
+  return Math.hypot(q[0] - p[0], q[1] - p[1])
+}
+
+/** True when a return piece of plan half-width `half` at `q` clears every
+ * supply footprint by the duct gap. */
+function clearOfSegs(segs: PlanSeg[], q: Pt, half: number): boolean {
+  return segs.every((s) => planSegDist(s, q) >= s.half + half + DUCT_CLEAR_GAP)
+}
+
+/** Plan intersection point of segments a→b and c→d (null when disjoint). */
+function segSegHit(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
+  const d1: Pt = [b[0] - a[0], b[1] - a[1]]
+  const d2: Pt = [d[0] - c[0], d[1] - c[1]]
+  const den = d1[0] * d2[1] - d1[1] * d2[0]
+  if (Math.abs(den) < 1e-9) return null
+  const t = ((c[0] - a[0]) * d2[1] - (c[1] - a[1]) * d2[0]) / den
+  const s = ((c[0] - a[0]) * d1[1] - (c[1] - a[1]) * d1[0]) / den
+  if (t < 0 || t > 1 || s < 0 || s > 1) return null
+  return [a[0] + d1[0] * t, a[1] + d1[1] * t]
+}
+
+/**
+ * True when the horizontal duct leg a→b (occupying [yLo, yHi], half-width
+ * `halfW` along the crossed wall) passes through a ROUGH OPENING of any
+ * wall it crosses — a duct through an open doorway is physically impossible
+ * (round-3 finding: the soffit return leg crossed dead center of a door,
+ * half a meter below the head). Attic legs ride above wall tops, so only
+ * soffit paths consult this.
+ */
+function legCrossesRo(
+  walls: WallSlice[],
+  a: Pt,
+  b: Pt,
+  yLo: number,
+  yHi: number,
+  halfW: number,
+): boolean {
+  for (const w of walls) {
+    if (w.curved || w.length < 0.1 || w.openings.length === 0) continue
+    const hit = segSegHit(a, b, [w.start[0], w.start[1]], [w.end[0], w.end[1]])
+    if (!hit) continue
+    const u = (hit[0] - w.start[0]) * w.dir[0] + (hit[1] - w.start[1]) * w.dir[1]
+    const spans = openingSpans(w, yLo, yHi)
+    if (spans.some((s) => u > s.lo - halfW && u < s.hi + halfW)) return true
+  }
+  return false
+}
+
+/** Half the RETURN section's widest plan face (verticals present 14" × 8"). */
+const RETURN_VERT_HALF = Math.max(TRUNK_W, TRUNK_H) / 2
+
+/**
+ * The supply-side plan geometry the RETURN path must keep out of (skeptic
+ * round 1: the return trunk ran co-axially INSIDE the supply trunk, the
+ * riser stood in it, the drop punched through it — placeReturnGrilleSpot
+ * cleared wall bands but never the supply network). Derived from the SAME
+ * inputs the trunk emission uses, so the model always CONTAINS the emitted
+ * network: the trunk spine books its full 14" width (conservative vs the
+ * stepped-down segments), branches/boots their 6" round. `layoutHvac`'s
+ * trunk block consumes this spine too — one axis computation, no drift.
+ */
+function supplySpineOf(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+): {
+  alongX: boolean
+  axisCross: number
+  equipAt: Pt
+  registerAts: { room: RoomSlice; at: Pt }[]
+  obstacles: PlanSeg[]
+} | null {
+  const conditioned = rooms.filter((r) => r.category !== 'garage')
+  const habitable = conditioned.filter((r) => r.category !== 'hallway')
+  if (habitable.length === 0) return null
+  const equipAt = centroid(equipmentRoomOf(rooms).polygon)
+  const registerAts = habitable.map((room) => ({
+    room,
+    at: roomInteriorPoint(room.polygon, walls),
+  }))
+  const hallway = rooms.find((r) => r.category === 'hallway')
+  const axisSource = hallway ? bounds(hallway.polygon) : bounds(registerAts.map((r) => r.at))
+  const alongX = axisSource.maxX - axisSource.minX >= axisSource.maxZ - axisSource.minZ
+  const axisCross = hallway
+    ? alongX
+      ? (axisSource.minZ + axisSource.maxZ) / 2
+      : (axisSource.minX + axisSource.maxX) / 2
+    : alongX
+      ? equipAt[1]
+      : equipAt[0]
+  const u = (p: Pt): number => (alongX ? p[0] : p[1])
+  const onAxis = (uu: number): Pt => (alongX ? [uu, axisCross] : [axisCross, uu])
+  const uEq = u(equipAt)
+  const obstacles: PlanSeg[] = []
+  // supply riser (vertical at the AH) + the feed leg to the axis
+  obstacles.push({ a: equipAt, b: equipAt, half: RETURN_VERT_HALF })
+  obstacles.push({ a: equipAt, b: onAxis(uEq), half: TRUNK_W / 2 })
+  // the trunk spine between its extreme takeoffs — full width, conservative
+  const us = [uEq, ...registerAts.map((r) => u(r.at))]
+  obstacles.push({
+    a: onAxis(Math.min(...us)),
+    b: onAxis(Math.max(...us)),
+    half: TRUNK_W / 2,
+  })
+  // branches to each register + the boot at its drop point
+  for (const { at } of registerAts) {
+    obstacles.push({ a: onAxis(u(at)), b: at, half: BRANCH_SIDE / 2 })
+    obstacles.push({ a: at, b: at, half: BRANCH_SIDE / 2 })
+  }
+  return { alongX, axisCross, equipAt, registerAts, obstacles }
+}
+
+/**
+ * Where the central RETURN GRILLE lives (B19a+c): a CENTRAL conditioned room
+ * — the hallway when there is one, else the equipment room itself (when
+ * conditioned), else the largest conditioned room — NEVER the garage
+ * (M1602.2(1)). The point starts at the room's interior point and slides to
+ * clear (1) every wall band by the return section's own margin, (2) the
+ * whole SUPPLY network's plan footprint (trunk/feed/branches/boots/riser —
+ * round-1 blocker: the riser stood inside the supply trunk), and (3) the
+ * room's own supply register. `clear: false` marks a compromised placement
+ * (relaxed passes) — callers must ⚠-flag it, never accept it silently
+ * (round-1 findings 2/3). Exported so the thermostat auto-spot can target
+ * the REAL return.
+ */
+export function placeReturnGrilleSpot(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+): { room: RoomSlice; at: Pt; clear: boolean } | null {
+  const conditioned = rooms.filter((r) => r.category !== 'garage')
+  if (conditioned.length === 0) return null
+  const equip = equipmentRoomOf(rooms)
+  const equipAt = centroid(equip.polygon)
+  const spine = supplySpineOf(walls, rooms)
+  const room =
+    rooms.find((r) => r.category === 'hallway') ??
+    (equip.category !== 'garage'
+      ? equip
+      : ([...conditioned].sort(
+          (a, b) => polygonArea(b.polygon) - polygonArea(a.polygon),
+        )[0] as RoomSlice))
+  const base = roomInteriorPoint(room.polygon, walls)
+  // Habitable rooms carry a supply register exactly at `base` — the open
+  // return can't share the drop point with a supply boot. This floor holds
+  // on EVERY pass (round-1 finding 3: the verbatim-base fallback parked the
+  // grille ON the register).
+  const hasRegister = room.category !== 'hallway'
+  const registerClear = (q: Pt): boolean =>
+    !hasRegister || Math.hypot(q[0] - base[0], q[1] - base[1]) >= 0.5
+  const clearAt = (q: Pt, minEquip: number, checkSupply: boolean): boolean =>
+    pointInPolygon(q, room.polygon) &&
+    wallBandAt(q, walls, RETURN_WALL_MARGIN) === null &&
+    Math.hypot(q[0] - equipAt[0], q[1] - equipAt[1]) >= minEquip &&
+    (!checkSupply || spine === null || clearOfSegs(spine.obstacles, q, RETURN_VERT_HALF)) &&
+    registerClear(q)
+  const search = (minEquip: number, checkSupply: boolean): Pt | null => {
+    if (clearAt(base, minEquip, checkSupply)) return base
+    for (let step = 0.15; step <= 1.66; step += 0.15) {
+      for (let k = 0; k < 8; k++) {
+        const ang = (k * Math.PI) / 4
+        const q: Pt = [base[0] + Math.cos(ang) * step, base[1] + Math.sin(ang) * step]
+        if (clearAt(q, minEquip, checkSupply)) return q
+      }
+    }
+    return null
+  }
+  // Pass 1 keeps the grille beyond the return drop (the trunk leg stays a
+  // real member); pass 2 settles for supply clearance alone; pass 3 keeps
+  // only the hard floors (wall bands + register) and reports the compromise.
+  const at = search(RETURN_DROP_OFFSET + 0.55, true) ?? search(0.6, true)
+  if (at) return { room, at, clear: true }
+  const relaxed = search(0, false)
+  if (relaxed) return { room, at: relaxed, clear: false }
+  return { room, at: base, clear: false }
+}
+
+/**
+ * True when a DOOR opening sits on the room's boundary (sampled just inside
+ * both faces of the door's wall) — the room can be closed off from the
+ * central return, so its supply register carries the transfer-path
+ * assumption label (M1602.2). Rooms reached only through cased openings /
+ * open plan carry no door and stay label-free.
+ */
+function doorTouchesRoom(walls: WallSlice[], room: RoomSlice): boolean {
+  return walls.some(
+    (w) =>
+      !w.curved &&
+      w.openings.some((o) => {
+        if (o.kind !== 'door') return false
+        const at = wallPointAt(w, o.u)
+        const reach = w.thickness / 2 + 0.15
+        const sides: Pt[] = [
+          [at[0] - w.dir[1] * reach, at[1] + w.dir[0] * reach],
+          [at[0] + w.dir[1] * reach, at[1] - w.dir[0] * reach],
+        ]
+        return sides.some((p) => pointInPolygon(p, room.polygon))
+      }),
   )
 }
 
@@ -495,9 +754,13 @@ export function placeThermostatSpot(
 ): { wall: WallSlice; u: number; heightAff: number } | null {
   if (rooms.length === 0) return null
   const equipAt = centroid(equipmentRoomOf(rooms).polygon)
-  // The central return hangs just off the air handler (same offset the
-  // layout uses for the return grille).
-  const target: Pt = [equipAt[0] + 0.5, equipAt[1] + 0.5]
+  // The tstat reads MIXED return air — target the actual central return
+  // grille (B19: no longer glued to the air handler; it may sit in the
+  // hallway while the AH lives in the laundry or, worst case, the garage).
+  const target: Pt = placeReturnGrilleSpot(walls, rooms)?.at ?? [
+    equipAt[0] + 0.5,
+    equipAt[1] + 0.5,
+  ]
   const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
   const pick = (candidates: WallSlice[]): { wall: WallSlice; u: number } | null => {
     let best: { wall: WallSlice; u: number } | null = null
@@ -727,6 +990,16 @@ export function layoutHvac(
 
   const equipRoom = equipmentRoomOf(rooms)
   const equipAt = centroid(equipRoom.polygon)
+  // GARAGE AIR HANDLER (B19a BLOCKER): only reachable when the scene has NO
+  // conditioned service space (laundry/utility, closet, hallway) — keep it,
+  // but LOUDLY: M1602.2(1) forbids garage return air (the open grille moves
+  // to a conditioned room below) and R302.5.2 restricts garage duct
+  // penetrations. Never silent.
+  if (equipRoom.category === 'garage') {
+    warnings.push(
+      'air handler in garage — M1602.2(1) forbids garage return air; provide a sealed return + R302.5.2 duct protection — verify',
+    )
+  }
 
   fixtures.push({
     system: 'hvac',
@@ -738,15 +1011,34 @@ export function layoutHvac(
     meta: { tons, conditionedSqft: Math.round(areaM2 * 10.7639), cfm: totalCfm },
   })
 
+  // The supply spine (axis + register drop points + keep-out footprints) —
+  // ONE computation feeds the trunk emission below AND the return path's
+  // keep-out checks (round-1 blocker: return tin inside supply tin).
+  const spine = supplySpineOf(walls, rooms)
+  if (!spine) return { members, fixtures, warnings } // habitable ≠ 0 ⇒ unreachable
+
   // Central return sized to the tonnage; flag when it can't carry the supply.
+  // The GRILLE lives in a central conditioned room (hallway first, NEVER the
+  // garage — M1602.2(1)); the return trunk back to the air handler is
+  // emitted with the supply network below (B19c).
   const grilleIn2 = returnGrilleIn2(tons)
   const returnCapacityCfm = grilleIn2 * 2 // ≈2 cfm/in² face velocity
+  const grilleSpot = placeReturnGrilleSpot(walls, rooms)
+  const grilleRoom = grilleSpot?.room ?? equipRoom
+  const grilleAt: Pt = grilleSpot?.at ?? [equipAt[0] + 0.5, equipAt[1] + 0.5]
+  // A compromised grille spot (relaxed search pass) is never silent —
+  // round-1 finding 3: the verbatim fallback interpenetrated boots/branches.
+  if (grilleSpot && !grilleSpot.clear) {
+    warnings.push(
+      `return grille cannot fully clear the supply ducts in ${grilleRoom.name || grilleRoom.id} — verify placement`,
+    )
+  }
   fixtures.push({
     system: 'hvac',
     kind: 'return',
-    position: [equipAt[0] + 0.5, ceiling - 0.05, equipAt[1] + 0.5],
+    position: [grilleAt[0], grilleRoom.ceilingHeight - REGISTER_BELOW_CEILING, grilleAt[1]],
     rotationY: 0,
-    sourceId: equipRoom.id,
+    sourceId: grilleRoom.id,
     label:
       `Central return — ${grilleIn2} in² grille` +
       (returnCapacityCfm < totalCfm
@@ -755,40 +1047,73 @@ export function layoutHvac(
     meta: { grilleIn2, capacityCfm: returnCapacityCfm },
   })
 
-  // CEILING registers at habitable room AREA centroids (nudged off wall
-  // bands — roomInteriorPoint), cfm from the room's area share — each one is
-  // a boot dropping through the ceiling plane; the grille hangs just BELOW
-  // the plane (like a recessed light) so it's visible from inside the room.
-  const registers: { room: RoomSlice; at: Pt; cfm: number }[] = habitable.map((room) => {
-    const at = roomInteriorPoint(room.polygon, walls)
-    const cfm = Math.round((totalCfm * polygonArea(room.polygon)) / Math.max(1e-6, habitableArea))
-    fixtures.push({
-      system: 'hvac',
-      kind: 'register',
-      position: [at[0], room.ceilingHeight - REGISTER_BELOW_CEILING, at[1]],
-      rotationY: 0,
-      sourceId: room.id,
-      label: `Supply register — ${cfm} cfm (ceiling)`,
-      meta: { cfm, ceiling: true },
+  // CEILING registers at habitable room AREA centroids (drop points from
+  // the shared supply spine — nudged off wall bands by roomInteriorPoint),
+  // cfm from the room's area share — each one is a boot dropping through
+  // the ceiling plane; the grille hangs just BELOW the plane (like a
+  // recessed light) so it's visible from inside the room.
+  const registers: { room: RoomSlice; at: Pt; cfm: number; transferAssumed: boolean }[] =
+    spine.registerAts.map(({ room, at }) => {
+      const cfm = Math.round(
+        (totalCfm * polygonArea(room.polygon)) / Math.max(1e-6, habitableArea),
+      )
+      // TRANSFER-AIR honesty (M1602.2): a room whose door can close cuts its
+      // supply cfm off from the central return — v1 doesn't invent jumper-duct
+      // geometry, it LABELS the assumption on the room's register. The grille
+      // room itself feeds the return directly.
+      const transferAssumed = room.id !== grilleRoom.id && doorTouchesRoom(walls, room)
+      fixtures.push({
+        system: 'hvac',
+        kind: 'register',
+        position: [at[0], room.ceilingHeight - REGISTER_BELOW_CEILING, at[1]],
+        rotationY: 0,
+        sourceId: room.id,
+        label:
+          `Supply register — ${cfm} cfm (ceiling)` +
+          (transferAssumed ? ' — door undercut / jumper duct assumed (M1602.2)' : ''),
+        meta: transferAssumed
+          ? { cfm, ceiling: true, transferAirAssumed: true }
+          : { cfm, ceiling: true },
+      })
+      return { room, at, cfm, transferAssumed }
     })
-    return { room, at, cfm }
-  })
 
   // ---- Manhattan trunk along the hallway axis, stepping down per takeoff ----
   // Axis: the hallway's long bbox axis (corridors are where trunks live);
-  // without a hallway, the dominant spread axis of the registers.
-  const hallway = rooms.find((r) => r.category === 'hallway')
-  const axisSource = hallway ? bounds(hallway.polygon) : bounds(registers.map((r) => r.at))
-  const alongX = axisSource.maxX - axisSource.minX >= axisSource.maxZ - axisSource.minZ
-  const axisCross = hallway
-    ? alongX
-      ? (axisSource.minZ + axisSource.maxZ) / 2
-      : (axisSource.minX + axisSource.maxX) / 2
-    : alongX
-      ? equipAt[1]
-      : equipAt[0]
+  // without a hallway, the dominant spread axis of the registers — both
+  // computed once in supplySpineOf (shared with the return keep-out model).
+  const { alongX, axisCross } = spine
   const u = (p: Pt): number => (alongX ? p[0] : p[1])
   const onAxis = (uu: number): Pt => (alongX ? [uu, axisCross] : [axisCross, uu])
+
+  // SOFFIT legs run inside the storey — a leg crossing a wall through a
+  // rough opening hangs in the doorway (round-3 finding; the 2.0–2.2 m
+  // supply band grazes a standard 2.17 m head). The supply axis is fixed by
+  // the registers, so supply legs FLAG the crossing — never silent; the
+  // return path (below) actively routes around ROs first. Attic legs ride
+  // above every wall top — immune.
+  const doorwayCheck = (
+    m: Member | null,
+    a: Pt,
+    b: Pt,
+    kind: 'supply' | 'return',
+  ): Member | null => {
+    if (
+      m &&
+      interiorStorey &&
+      legCrossesRo(
+        walls,
+        a,
+        b,
+        m.position[1] - m.dims[1] / 2,
+        m.position[1] + m.dims[1] / 2,
+        m.dims[2] / 2,
+      )
+    ) {
+      m.flag = `${kind} duct crosses a doorway — verify routing (soffit/floor-web coordination)`
+    }
+    return m
+  }
 
   // Feed: the air handler rises into the attic at its own plan point, then a
   // perpendicular leg reaches the trunk axis — every trunk/branch run lives
@@ -804,14 +1129,19 @@ export function layoutHvac(
     `Trunk riser ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${interiorStorey ? 'to soffit (M1601)' : 'to attic (M1601)'}`,
   )
   if (riser) members.push(riser)
-  const feed = duct(
+  const feed = doorwayCheck(
+    duct(
+      equipAt,
+      onAxis(uEq),
+      trunkY,
+      TRUNK_W,
+      TRUNK_H,
+      equipRoom.id,
+      `Trunk feed ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}"`,
+    ),
     equipAt,
     onAxis(uEq),
-    trunkY,
-    TRUNK_W,
-    TRUNK_H,
-    equipRoom.id,
-    `Trunk feed ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}"`,
+    'supply',
   )
   if (feed) members.push(feed)
 
@@ -827,14 +1157,19 @@ export function layoutHvac(
     for (const takeoff of takeoffs) {
       const next = u(takeoff.at)
       const w = Math.max(TRUNK_MIN_W, TRUNK_W * (remaining / Math.max(1, totalCfm)))
-      const segment = duct(
+      const segment = doorwayCheck(
+        duct(
+          onAxis(cursor),
+          onAxis(next),
+          trunkY,
+          w,
+          TRUNK_H,
+          equipRoom.id,
+          `Trunk ${Math.round(toFeet(w) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${remaining} cfm`,
+        ),
         onAxis(cursor),
         onAxis(next),
-        trunkY,
-        w,
-        TRUNK_H,
-        equipRoom.id,
-        `Trunk ${Math.round(toFeet(w) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${remaining} cfm`,
+        'supply',
       )
       if (segment) members.push(segment)
       cursor = next
@@ -843,15 +1178,20 @@ export function layoutHvac(
   }
   // Branches leave the trunk at right angles to each register (still in the
   // attic), then a drop boot carries the air through the CEILING plane.
-  for (const { room, at, cfm } of registers) {
-    const branch = duct(
+  for (const { room, at, cfm, transferAssumed } of registers) {
+    const branch = doorwayCheck(
+      duct(
+        onAxis(u(at)),
+        at,
+        trunkY,
+        BRANCH_SIDE,
+        BRANCH_SIDE,
+        room.id,
+        `6" branch — ${cfm} cfm`,
+      ),
       onAxis(u(at)),
       at,
-      trunkY,
-      BRANCH_SIDE,
-      BRANCH_SIDE,
-      room.id,
-      `6" branch — ${cfm} cfm`,
+      'supply',
     )
     if (branch) members.push(branch)
     const boot = ductDrop(
@@ -863,7 +1203,172 @@ export function layoutHvac(
       room.id,
       'Supply boot 6" — ceiling drop (M1601)',
     )
-    if (boot) members.push(boot)
+    if (boot) {
+      // The transfer-path assumption must reach PAPER (examiner round 2:
+      // register labels never typeset) — the boot carries it as a member
+      // flag, which the takeoff aggregates into ONE Flags row ('N ea') and
+      // the schedules flag block prints (P4).
+      if (transferAssumed) boot.flag = 'door undercut / jumper duct assumed — M1602.2'
+      members.push(boot)
+    }
+  }
+
+  // ---- RETURN trunk: central grille → return plane → air handler ----
+  // Mirrors the supply schematic (B19c — the return-air path used to be
+  // MAGIC): full trunk section end to end (the return carries the whole
+  // system cfm — same sizing rule the supply trunk starts from; label
+  // honesty over invented per-leg cfm). KEEP-OUT discipline (round-1
+  // BLOCKER — return tin inside supply tin at the identical trunkY):
+  //  - horizontal legs ride their OWN plane, one section height + gap off
+  //    the supply plane (up in the attic, down in a soffit), so plan
+  //    crossings never share tin;
+  //  - the verticals (riser at the grille, drop at the AH) clear the whole
+  //    supply footprint in plan — the grille via placeReturnGrilleSpot, the
+  //    drop via a candidate ring around the AH that prefers full clearance
+  //    and otherwise takes the LEAST-intrusion spot with a ⚠ warning
+  //    (round-1 finding 2: the blind dropCands[0] fallback punched through
+  //    two closet walls silently);
+  //  - in a soffit the legs cross the supply riser's vertical span: the
+  //    Manhattan elbow that clears it is chosen (E1's alternate-elbow
+  //    pattern), else ⚠. Labels start with 'Return' — the takeoff books
+  //    them on their own rows, the MEP sheet prints the return tone.
+  {
+    const returnY = interiorStorey ? trunkY - RETURN_PLANE_OFFSET : trunkY + RETURN_PLANE_OFFSET
+    const gdx = grilleAt[0] - equipAt[0]
+    const gdz = grilleAt[1] - equipAt[1]
+    const gd = Math.hypot(gdx, gdz)
+    const grilleBearing = gd > 1e-6 ? Math.atan2(gdz, gdx) : 0
+    // Candidate ring around the AH, ordered by closeness to the grille
+    // bearing (the drop wants to face the trunk leg it terminates).
+    const dropCands: Pt[] = [0, 1, -1, 2, -2, 3, -3, 4]
+      .map((k) => grilleBearing + (k * Math.PI) / 4)
+      .map((ang): Pt => [
+        equipAt[0] + Math.cos(ang) * RETURN_DROP_OFFSET,
+        equipAt[1] + Math.sin(ang) * RETURN_DROP_OFFSET,
+      ])
+    // Intrusion metric: how deep a vertical at q sinks into wall bands +
+    // supply footprints (0 = fully clear).
+    const intrusion = (q: Pt): number => {
+      let depth = 0
+      for (const w of walls) {
+        if (w.curved || w.length < 0.1) continue
+        const dx = q[0] - w.start[0]
+        const dz = q[1] - w.start[1]
+        const along = dx * w.dir[0] + dz * w.dir[1]
+        if (along < -RETURN_WALL_MARGIN || along > w.length + RETURN_WALL_MARGIN) continue
+        const off = Math.abs(-dx * w.dir[1] + dz * w.dir[0])
+        depth += Math.max(0, w.thickness / 2 + RETURN_WALL_MARGIN - off)
+      }
+      for (const s of spine.obstacles) {
+        depth += Math.max(0, s.half + RETURN_VERT_HALF + DUCT_CLEAR_GAP - planSegDist(s, q))
+      }
+      return depth
+    }
+    const clearDrops = dropCands.filter((q) => intrusion(q) === 0)
+    let ahReturnAt: Pt
+    if (clearDrops.length > 0) ahReturnAt = clearDrops[0] as Pt
+    else {
+      ahReturnAt = dropCands.reduce((best, q) => (intrusion(q) < intrusion(best) ? q : best))
+      warnings.push(
+        `return drop cannot clear walls in ${equipRoom.name || equipRoom.id} — verify routing`,
+      )
+    }
+    const sizeTag = `${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}"`
+    // Verticals pass W = the NARROW side: a grille-to-attic riser is only
+    // ~0.35 m long — with the 14" side in dims[0] it reads as a horizontal
+    // run to every dims[1]>dims[0] verticality check (plates harness, plan
+    // projection). The section is the same 14×8 either way.
+    const rise = ductDrop(
+      grilleAt,
+      grilleRoom.ceilingHeight - BOOT_BELOW_CEILING,
+      returnY,
+      TRUNK_H,
+      TRUNK_W,
+      'return-trunk',
+      `Return riser ${sizeTag} — grille to ${interiorStorey ? 'soffit' : 'attic'} (M1602)`,
+    )
+    if (rise) members.push(rise)
+    // Manhattan legs: in a SOFFIT the return plane sits below the supply
+    // plane, inside the supply riser's vertical span, AND inside the storey
+    // — so soffit legs must (i) clear the supply riser in plan and (ii)
+    // cross walls only at SOLID segments: a 14×8 duct through an open
+    // doorway is physically impossible (round-3 finding — the leg crossed
+    // dead center of a door, half a meter below its head). The search walks
+    // every clear drop candidate × both elbows for a path clearing BOTH;
+    // the head-band raise (crossing above the door) is NOT modeled — over a
+    // standard 2.17 m head a 2.5 m wall leaves ~0.24 m to the plate band,
+    // under the section + margins — so a path that cannot clear keeps the
+    // preferred route and FLAGS its crossing legs (never silent). Attic
+    // legs ride above every wall top, either elbow is safe there.
+    const legLabel = `Return trunk ${sizeTag} — ${totalCfm} cfm (M1602)`
+    const legYLo = returnY - TRUNK_H / 2
+    const legYHi = returnY + TRUNK_H / 2
+    const roClear = (a: Pt, b: Pt): boolean =>
+      !legCrossesRo(walls, a, b, legYLo, legYHi, TRUNK_W / 2)
+    const legsClearRiser = (via: Pt, drop: Pt): boolean => {
+      const need = RETURN_VERT_HALF + TRUNK_W / 2 + DUCT_CLEAR_GAP
+      for (const [a, b] of [
+        [grilleAt, via],
+        [via, drop],
+      ] as const) {
+        const p = projectOnto(a, b, equipAt)
+        if (Math.hypot(p[0] - equipAt[0], p[1] - equipAt[1]) < need) return false
+      }
+      return true
+    }
+    let elbow: Pt = [ahReturnAt[0], grilleAt[1]]
+    if (interiorStorey) {
+      let found: { drop: Pt; via: Pt } | null = null
+      for (const drop of clearDrops.length > 0 ? clearDrops : [ahReturnAt]) {
+        for (const via of [
+          [drop[0], grilleAt[1]],
+          [grilleAt[0], drop[1]],
+        ] as Pt[]) {
+          if (legsClearRiser(via, drop) && roClear(grilleAt, via) && roClear(via, drop)) {
+            found = { drop, via }
+            break
+          }
+        }
+        if (found) break
+      }
+      if (found) {
+        ahReturnAt = found.drop
+        elbow = found.via
+      } else {
+        // No combination clears everything: keep the preferred drop, take
+        // the riser-clear elbow when one exists, and let doorwayCheck flag
+        // any leg still crossing an RO.
+        if (!legsClearRiser(elbow, ahReturnAt)) {
+          const alt: Pt = [grilleAt[0], ahReturnAt[1]]
+          if (legsClearRiser(alt, ahReturnAt)) elbow = alt
+          else warnings.push('return trunk cannot clear the supply riser — verify routing')
+        }
+      }
+    }
+    const legA = doorwayCheck(
+      duct(grilleAt, elbow, returnY, TRUNK_W, TRUNK_H, 'return-trunk', legLabel),
+      grilleAt,
+      elbow,
+      'return',
+    )
+    if (legA) members.push(legA)
+    const legB = doorwayCheck(
+      duct(elbow, ahReturnAt, returnY, TRUNK_W, TRUNK_H, 'return-trunk', legLabel),
+      elbow,
+      ahReturnAt,
+      'return',
+    )
+    if (legB) members.push(legB)
+    const drop = ductDrop(
+      ahReturnAt,
+      1.0,
+      returnY,
+      TRUNK_H,
+      TRUNK_W,
+      'return-trunk',
+      `Return drop ${sizeTag} — to air handler (M1602)`,
+    )
+    if (drop) members.push(drop)
   }
 
   // ---- exhaust: bath fans + laundry dryer vent to exterior terminations ----

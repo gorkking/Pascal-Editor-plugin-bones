@@ -39,6 +39,21 @@ export function plumbingPipeColor(sourceId: string): string | null {
   return null
 }
 
+/**
+ * HVAC duct tones (B19c): the RETURN trunk prints DARKER than the supply
+ * gray so the two air paths read apart in 3D and on the MEP sheet — the
+ * same contract as circuit/plumbing colors. Keyed by the hvac engine's
+ * sourceId ('return-trunk' chain); null keeps the base duct fill.
+ */
+export const DUCT_COLORS = {
+  supply: '#9aa7b0',
+  return: '#5f7282',
+} as const
+
+export function hvacDuctColor(sourceId: string): string | null {
+  return sourceId.startsWith('return-') ? DUCT_COLORS.return : null
+}
+
 const FAMILY: Record<string, { hint: string; hue: number }> = {
   SA: { hint: 'kitchen small-appliance', hue: 21 },
   BA: { hint: 'bathroom', hue: 210 },

@@ -23,7 +23,7 @@ import {
 import type { Fixture, Member } from '../core/types'
 import { inches } from '../core/units'
 import { reconcileDeviceNodes } from '../device/place'
-import { circuitColor, plumbingPipeColor } from '../plans/circuit-colors'
+import { circuitColor, hvacDuctColor, plumbingPipeColor } from '../plans/circuit-colors'
 import { normalizeServiceAnchors } from '../service/normalize'
 import { computeLevel } from './compute'
 import { effectiveNodesFor, throttleTrailing } from './live'
@@ -54,6 +54,12 @@ export function colorOf(member: Member): string {
   ) {
     const pipe = plumbingPipeColor(member.sourceId)
     if (pipe) return pipe
+  }
+  // RETURN-air duct reads darker than supply tin (B19c) — same 3D/paper
+  // contract as the circuit and plumbing colors.
+  if (member.system === 'hvac' && member.role === 'duct-run') {
+    const tone = hvacDuctColor(member.sourceId)
+    if (tone) return tone
   }
   switch (member.role) {
     case 'drywall':
