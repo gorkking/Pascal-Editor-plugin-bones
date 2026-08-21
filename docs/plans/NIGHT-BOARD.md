@@ -1,5 +1,21 @@
 # Bones night board — NIGHT-7 (2026-08-20 → 21) — all-nighter, loop as usual
 
+## ~06:30 state — ALL night-7 work merged (ecadea5, 1054 tests)
+MERGED tonight: F3 DWV (4 rounds) + F1 line-set (4) + B17 slab (2) +
+B19 return-air (3) + cross-trade lateral (3) + MEP glyph de-collision
+(4) + F2 selection HOST-side (#697, browser 7/7). Tests 950 → 1054.
+INCIDENT (recovered): verify agents twice checked out shas in the
+MAIN checkout; a detached-HEAD window swallowed three merges' pushes
+(silent no-op against a stale master ref) and rode glyph rounds 1-3
+into the merge line. Recovered by repointing master at the verified
+HEAD + re-landing the stranded cross-trade merge. Rule reinforced in
+every brief; still worth a mechanical guard (queued).
+PENDING: pre-ship 3D visual round (running @ fc31b7f — glyph merge is
+paper-only, verdict carries to ecadea5) → ship chain → morning review.
+QUEUED for next cycle: glyph frost-recipe divergence (2-crossing
+exhibit), B19 vertical-duct heuristic advisory, equipment-legend
+split by meta, B18/B20/B21d/B6-B16, F3 trap-drop residuals.
+
 ## ~03:30 state — three merges on master (d64bfc5, 1013 tests)
 MERGED: F3 under-floor DWV (4 rounds — buried sloped tree, per-crossing
 sleeves, floor-line jog, upper-storey truth, arrows/marker/ticks with
