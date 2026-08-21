@@ -861,7 +861,7 @@ describe('interpenetration gate — structural members never share volume', () =
       openings:
         w.id === 'w_s' ? [door(2), window_(4.2)] : w.id === 'w_n' ? [window_(3)] : [],
     }))
-    const cmuMap = new Map(walls.map((w) => [w.id, { dowelUs: cmuDowelPositions(w) }]))
+    const cmuMap = new Map(walls.map((w) => [w.id, cmuDowelPositions(w)]))
     const foundation = buildFoundation(walls, [slab(rect(6, 4))], seismic400, { cmu: cmuMap })
     const blockwork = cmuWalls(walls, seismic400)
     // truth before geometry: no sole-plate hardware anywhere on the compose
@@ -887,6 +887,82 @@ describe('interpenetration gate — structural members never share volume', () =
       ).toBe(true)
     }
     expect(violations([...foundation, ...blockwork])).toEqual([])
+  })
+
+  test('SLIVER plate sections crowd no steel: corner-sliver + twin-door scenes SAT-clean on washers/HDU (skeptic F2)', () => {
+    // Pre-F2 a 150 mm section (door RO ending at the corner) took TWO
+    // bolts 50 mm apart under the >=2 rule: 3" plate washers overlapped
+    // each other AND the corner hold-down. Sliver sections now take one
+    // legal bolt or none (+ the strap flag) — the composed seismic-400
+    // foundation carries zero washer x washer / washer x hold-down pairs.
+    const seismic400 = { ...spec400, seismicHoldDowns: true }
+    const gd = (u: number, roughWidth: number): OpeningSlice => ({
+      id: `gd_${u}`,
+      kind: 'door',
+      u,
+      width: roughWidth - 0.038,
+      roughWidth,
+      height: 2.1,
+      roughHeight: 2.15,
+      sillHeight: 0,
+    })
+    const scenes: WallSlice[][] = [
+      // corner sliver: RO ends 150 mm from the wall start
+      [wall({ id: 'w_g', start: [0, 0], end: [9, 0], openings: [gd(0.15 + 4.877 / 2, 4.877)] })],
+      // twin doors leaving a 200 mm middle sliver
+      [wall({ id: 'w_g', start: [0, 0], end: [9, 0], openings: [gd(2, 2), gd(4.2, 2)] })],
+    ]
+    for (const walls of scenes) {
+      const members = buildFoundation(walls, [], seismic400)
+      // non-vacuous: the seismic kit exists on the normal sections
+      expect(members.some((m) => m.role === 'plate-washer')).toBe(true)
+      expect(members.some((m) => m.role === 'hold-down')).toBe(true)
+      expect(members.some((m) => m.flag?.includes('plate section too short'))).toBe(true)
+      const v = violations(members)
+      expect(v.filter((s) => s.includes('plate-washer'))).toEqual([])
+      expect(v.filter((s) => s.includes('hold-down'))).toEqual([])
+    }
+  })
+
+  test('KNEE-wall dowels cap at the seam story — never through the PT sill / framed zone (skeptic F1)', () => {
+    // Verbatim skeptic repro shape: 6×4 box, w_s a 0.61 m CMU knee wall
+    // (3 courses), the rest framed. Fixed 30" dowels used to punch 14-76 mm
+    // into the PT seam sill, the framed zone's bottom plate and its studs
+    // (13 SAT pairs). The dowel now tops at the ZONE's bar top (bond-beam
+    // mid-height) with the short-lap flag + true-overlap label.
+    const knee = wall({ id: 'w_s', start: [0, 0], end: [6, 0], thickness: 0.15 })
+    const others = [
+      wall({ id: 'w_e', start: [6, 0], end: [6, 4], thickness: 0.15 }),
+      wall({ id: 'w_n', start: [6, 4], end: [0, 4], thickness: 0.15 }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0], thickness: 0.15 }),
+    ]
+    for (const seamReq of [0.61, 0.2]) {
+      const layout = cmuDowelPositions(knee, seamReq, others)
+      const foundation = buildFoundation([knee, ...others], [slab(rect(6, 4))], spec400, {
+        cmu: new Map([['w_s', layout]]),
+      })
+      const dowels = foundation.filter((m) => m.label?.startsWith('#5 dowel'))
+      expect(dowels.length).toBeGreaterThan(0)
+      for (const d of dowels) {
+        // capped at the zone bar top — 20" real lap at 0.61 m, 4" at 1 course
+        expect((d.position[1] ?? 0) + d.dims[1] / 2).toBeCloseTo(layout.barTop, 6)
+        expect(d.label).toContain(`laps CMU wall vertical ${seamReq === 0.61 ? '20"' : '4"'}`)
+        expect(d.flag).toBe(
+          '#5 dowel lap short of 48d_b — hook into bond beam per detail, verify',
+        )
+      }
+      const composed = [
+        ...foundation,
+        ...mixedCmuWall(knee, spec400, seamReq, others).members,
+        ...frameWalls(others, spec400),
+      ]
+      const v = violations(composed)
+      // the F1 class is DEAD: no dowel touches anything wooden
+      expect(v.filter((s) => s.includes('#5 dowel'))).toEqual([])
+      // only the KNOWN pre-existing residual survives (anchor-bolt × stud
+      // shank class, S1 row — B5 compose pins the same)
+      expect(v.every((s) => s.includes('anchor-bolt') && s.includes('stud'))).toBe(true)
+    }
   })
 
   test('CMU: oblique corner pairs 45/60/120° (round-14)', () => {

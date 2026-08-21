@@ -24,7 +24,14 @@ import {
   extractWalls,
   type LevelSlice,
 } from '../core/wall-model'
-import { cmuDowelPositions, cmuWalls, courseCount, mixedCmuWall, snapCmuHeight } from '../engines/cmu'
+import {
+  type CmuDowelLayout,
+  cmuDowelPositions,
+  cmuWalls,
+  courseCount,
+  mixedCmuWall,
+  snapCmuHeight,
+} from '../engines/cmu'
 import {
   type BuildingCharacteristics,
   computeCharacteristics,
@@ -726,15 +733,13 @@ function computeLevelUncached(
     // bolt kit for #5 dowels lapping the wall's own grouted-cell verticals
     // (one layout truth: cmu.ts cmuDowelPositions). Mixed walls keep their
     // seam-sill bolts on the bond beam (cmu.ts).
-    const cmuAnchorage = new Map<string, { dowelUs: number[] }>()
+    const cmuAnchorage = new Map<string, CmuDowelLayout>()
     for (const wall of activeWalls) {
       if (wall.curved) continue
       const resolved = resolveWallConstruction(wall, config, profile.exteriorWallDefault)
       if (resolved.construction !== 'cmu') continue
       const neighbors = activeWalls.filter((w) => w.id !== wall.id && !w.curved)
-      cmuAnchorage.set(wall.id, {
-        dowelUs: cmuDowelPositions(wall, resolved.cmuHeightM, neighbors),
-      })
+      cmuAnchorage.set(wall.id, cmuDowelPositions(wall, resolved.cmuHeightM, neighbors))
     }
     // B18d: the storey ABOVE's girder 4x4 posts land on this level's floor
     // plane — derive their plan spots from the same floor-framing pass the

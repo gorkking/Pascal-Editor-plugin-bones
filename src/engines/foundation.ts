@@ -33,6 +33,7 @@
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, SlabSlice, WallSlice } from '../core/types'
 import { formatIn, inches } from '../core/units'
+import type { CmuDowelLayout } from './cmu'
 import { openingSpans } from './electrical'
 import { intersectIntervals, polygonSpans, subtractInterval } from './floor-framing'
 
@@ -92,6 +93,25 @@ const INTERIOR_BEARING_MIN_LENGTH = 2.4
 
 /** 2x mudsill thickness — the plate the R602.11.1 washer bears on. */
 const PLATE_THICKNESS = inches(1.5)
+
+/**
+ * R403.1.6 edge distance: a bolt needs ~7 diameters from a plate-section
+ * end (4-3/8" for the 5/8" J-bolt) — one bolt fits only when the section
+ * holds that both sides.
+ */
+const MIN_BOLT_EDGE = 7 * BOLT_SIDE
+/**
+ * Shortest plate section that can hold the full ≥2-bolt layout: 7d_b edge
+ * distance each side + a 6" clear gap between bolts (two 3" plate washers
+ * must never overlap — skeptic F2: third-point bolts on a ~9" sliver put
+ * washer inside washer and inside the corner HDU).
+ */
+const MIN_TWO_BOLT_SECTION = 2 * MIN_BOLT_EDGE + inches(6)
+
+/** Sliver plate sections can't hold the R403.1.6 layout — flagged, never
+ * silently crowded with colliding steel (skeptic B18 round 1, F2). */
+export const SHORT_PLATE_SECTION_FLAG =
+  'plate section too short for R403.1.6 layout — strap per detail, verify'
 /** R602.11.1 (SDC D0–D2): 0.229" × 3" × 3" steel plate washers. */
 const PLATE_WASHER_SIDE = inches(3)
 const PLATE_WASHER_THICKNESS = inches(0.229)
@@ -108,25 +128,36 @@ const DOWEL_LAP = inches(30)
 const DOWEL_OFFSET = inches(1)
 
 /**
+ * A CMU zone shorter than the full 48d_b lap (knee walls) caps the dowel at
+ * the zone's bar top instead — labeled with the TRUE overlap and flagged
+ * (skeptic B18 round 1, F1: fixed 30" dowels punched through the PT seam
+ * sill and the framed zone above a 0.61 m knee).
+ */
+export const DOWEL_SHORT_LAP_FLAG =
+  '#5 dowel lap short of 48d_b — hook into bond beam per detail, verify'
+
+/**
  * Per-wall foundation interface (LOD-400 B18).
  *
  * `cmu`: walls whose BASE is unit masonry (full-CMU and mixed knee walls).
  * They carry NO sole plate at the foundation top, so the R403.1.6 sole-plate
  * kit (anchor bolts, plate washers, HDU hold-downs) is fiction there — the
  * wall anchors through its grouted cells instead: foundation DOWELS rise
- * beside the wall's own #5 verticals (`dowelUs`, cmu.ts cmuDowelPositions)
- * and lap them 48d_b; the mixed wall's framed zone keeps its seam-sill
- * bolts (cmu.ts).
+ * beside the wall's own #5 verticals (cmu.ts `cmuDowelPositions`), lapping
+ * 48d_b where the zone is tall enough and capping at the zone's `barTop`
+ * (bond-beam mid-height) where it is not — a knee wall's dowels must never
+ * rise into the PT seam sill / framed zone above the seam. The mixed
+ * wall's framed zone keeps its seam-sill bolts (cmu.ts).
  *
  * `girderPosts`: plan spots where the storey ABOVE's girder 4x4 posts land
  * (level-above floor framing, B18d). Each gets a pad footing (R403.1 /
  * R407.3) poured monolithically with the slab — top at y = 0, the post's
- * bearing seat — unless the spot already sits on a poured run (perimeter /
- * interior footing band), where the post bears on THAT concrete. The slab
+ * bearing seat — unless the POST lands on a poured run (perimeter /
+ * interior footing band), where it bears on THAT concrete. The slab
  * field carves around every pad like any other foundation element.
  */
 export type FoundationOptions = {
-  cmu?: Map<string, { dowelUs: number[] }>
+  cmu?: Map<string, CmuDowelLayout>
   girderPosts?: { plan: readonly [number, number]; sourceId: string }[]
 }
 
@@ -134,6 +165,16 @@ export type FoundationOptions = {
  * ASSUMPTION — Table R403.1(1) loads govern), 12" deep like the interior
  * thickened footings it pours with. */
 const PAD_FOOTING_SIDE = inches(24)
+/** Smallest useful pad: the 4x4 post (3-1/2") + ~4" bearing edge each side.
+ * A pad clipped below this beside an adjacent pour is not poured — the
+ * post flags instead (skeptic B18 round 1, F3). */
+const PAD_FOOTING_MIN = inches(12)
+
+/** A girder post with no room for even the minimum pad beside an existing
+ * pour bears on the bare slab — flagged on the pour it abuts, never
+ * silent (skeptic B18 round 1, F3). */
+export const UNFOOTED_POST_FLAG =
+  'girder post bears without a pad footing — R403.1 pad does not fit beside this pour; verify detail'
 
 /**
  * Anchor bolt centers along a wall (u from `start`, meters).
@@ -323,9 +364,11 @@ export function buildFoundation(
   // perimeter footing only on shallow specs). Collected from the ACTUAL
   // emitted runs (incl. corner extensions) so the carve matches the pour.
   const carveBands: CarveBand[] = []
-  // EVERY poured plan band regardless of depth — the pad-footing skip test
-  // (B18d): a girder post landing on a poured run bears on THAT concrete.
-  const pourBands: CarveBand[] = []
+  // EVERY poured plan band regardless of depth, tied to its emitted member —
+  // the pad-footing bearing test (B18d): a girder post LANDING on a poured
+  // run bears on THAT concrete, and an unfooted post flags the pour it
+  // abuts (skeptic F3).
+  const pourBands: { band: CarveBand; memberIdx: number }[] = []
 
   // Corner continuity only pairs EXTERIOR straight walls — the ones that
   // actually own perimeter runs below.
@@ -359,6 +402,7 @@ export function buildFoundation(
       material: Member['material'],
       label?: string,
       centerV = 0,
+      flag?: string,
     ) => {
       members.push({
         system: 'foundation',
@@ -370,6 +414,7 @@ export function buildFoundation(
         material,
         sourceId: wall.id,
         label,
+        flag,
       })
     }
 
@@ -419,21 +464,33 @@ export function buildFoundation(
      * bottom), rising 48d_b (30") past the foundation top so the wall
      * vertical standing at the same cell laps it — offset 1" across the
      * wall so the two bars stand side by side, tie-wired in one cell.
+     * The top CAPS at the zone's bar top (bond-beam mid-height): a knee
+     * wall's CMU story can be shorter than the full lap, and a dowel
+     * rising past the seam punched through the PT sill / framed zone
+     * (skeptic F1). A capped dowel is labeled with its TRUE overlap and
+     * carries the short-lap flag — honesty over an invented full lap.
      */
-    const emitDowels = (dowelUs: number[], footingBottomY: number): void => {
+    const emitDowels = (layout: CmuDowelLayout, footingBottomY: number): void => {
+      const top = Math.min(DOWEL_LAP, layout.barTop)
+      if (top <= EPS) return
       const bottom = footingBottomY + REBAR_BOTTOM_COVER
-      const height = DOWEL_LAP - bottom
+      const height = top - bottom
       if (height <= EPS) return
-      for (const u of dowelUs) {
+      const short = top < DOWEL_LAP - EPS
+      const label = short
+        ? `#5 dowel — laps CMU wall vertical ${formatIn(top)} (R606.12)`
+        : '#5 dowel — laps CMU wall vertical (R606.12)'
+      for (const u of layout.us) {
         emit(
           'rebar',
           [DOWEL_SIDE, height, DOWEL_SIDE],
           u,
-          (bottom + DOWEL_LAP) / 2,
+          (bottom + top) / 2,
           height,
           'steel',
-          '#5 dowel — laps CMU wall vertical (R606.12)',
+          label,
           DOWEL_OFFSET,
+          short ? DOWEL_SHORT_LAP_FLAG : undefined,
         )
       }
     }
@@ -495,11 +552,11 @@ export function buildFoundation(
       // The thickened section IS slab concrete poured monolithically — the
       // field strips stop at its faces (booked once, drawn once).
       carveBands.push(bandOf(iCenter, iLen, spec.footingWidth))
-      pourBands.push(bandOf(iCenter, iLen, spec.footingWidth))
+      pourBands.push({ band: bandOf(iCenter, iLen, spec.footingWidth), memberIdx: members.length - 1 })
       // Rebar rides "every footing run" — including interior thickened ones.
       emitFootingBars(iCenter, iLen, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
       // Interior CMU bearing walls anchor through their cells too (B18b).
-      if (cmuInfo) emitDowels(cmuInfo.dowelUs, -INTERIOR_FOOTING_DEPTH)
+      if (cmuInfo) emitDowels(cmuInfo, -INTERIOR_FOOTING_DEPTH)
       continue
     }
 
@@ -537,16 +594,37 @@ export function buildFoundation(
       }
       if (len > cursor + EPS) plateSections.push({ a: cursor, b: len })
     }
-    const boltUs: number[] = plateSections.flatMap((seg) =>
-      anchorBoltPositions(seg.b - seg.a, spec.anchorBoltSpacing, spec.anchorBoltEndDistance).map(
-        (u) => seg.a + u,
-      ),
-    )
+    // Sliver sections (skeptic F2): the blanket ≥2-bolt rule on a section
+    // shorter than ~14-3/4" pushed the two bolts a third apart — 3" plate
+    // washers overlapped each other (and the corner HDU), and R403.1.6's
+    // 7-diameter end distance (4-3/8" for a 5/8" bolt) is unmeetable for
+    // two bolts below 2×(7d_b) + a washer-clear gap. Such sections take
+    // ONE centered bolt (edge ≥ 7d_b both sides) — or NONE when even one
+    // can't keep the edge distance — and the wall's footing carries the
+    // strap-per-detail flag. Normal sections are untouched: their layout
+    // end = min(12", L/3) already keeps ≥ 7d_b edges at every L above the
+    // two-bolt threshold.
+    const boltUs: number[] = []
+    let shortSections = 0
+    for (const seg of plateSections) {
+      const segLen = seg.b - seg.a
+      if (segLen < MIN_TWO_BOLT_SECTION) {
+        shortSections += 1
+        if (segLen >= 2 * MIN_BOLT_EDGE) boltUs.push(seg.a + segLen / 2)
+        continue
+      }
+      for (const u of anchorBoltPositions(segLen, spec.anchorBoltSpacing, spec.anchorBoltEndDistance)) {
+        boltUs.push(seg.a + u)
+      }
+    }
 
     // ---- footing ----
     // R403.1.4.1: bearing must sit below the frost line → footing BOTTOM at
     // -spec.footingDepth (jurisdiction-resolved). Width from spec (Table
     // R403.1(1) sizing), centered under the wall so the load path is axial.
+    // A sliver plate section that can't hold the R403.1.6 layout flags HERE
+    // — the run that carries the section (a zero-bolt sliver has no bolt
+    // member to carry it).
     emit(
       'footing',
       [runLen, FOOTING_HEIGHT, spec.footingWidth],
@@ -555,6 +633,8 @@ export function buildFoundation(
       runLen,
       'concrete',
       `Footing ${formatIn(spec.footingWidth)}×${formatIn(FOOTING_HEIGHT)}`,
+      0,
+      shortSections > 0 ? SHORT_PLATE_SECTION_FLAG : undefined,
     )
     // Shallow specs (footing top inside the slab's vertical band, e.g. the
     // 8"-frost minimum where footing top = y 0) put the FOOTING where the
@@ -563,7 +643,7 @@ export function buildFoundation(
     if (-spec.footingDepth + FOOTING_HEIGHT > -SLAB_THICKNESS + EPS) {
       carveBands.push(bandOf(runCenterU, runLen, spec.footingWidth))
     }
-    pourBands.push(bandOf(runCenterU, runLen, spec.footingWidth))
+    pourBands.push({ band: bandOf(runCenterU, runLen, spec.footingWidth), memberIdx: members.length - 1 })
 
     // ---- footing rebar (LOD 350) ----
     if (fabDetail) {
@@ -593,7 +673,10 @@ export function buildFoundation(
       // The slab pours AGAINST the stemwall (R403.1) — the field strips
       // stop at its faces; anchor bolts/hold-downs live inside this band.
       carveBands.push(bandOf(stemRun.center, stemRun.len, spec.stemwallThickness))
-      pourBands.push(bandOf(stemRun.center, stemRun.len, spec.stemwallThickness))
+      pourBands.push({
+        band: bandOf(stemRun.center, stemRun.len, spec.stemwallThickness),
+        memberIdx: members.length - 1,
+      })
 
       // ---- stemwall vertical rebar (LOD 350) ----
       // R403.1.3.2 / SDC practice: #4 verticals tying footing to stemwall,
@@ -664,7 +747,7 @@ export function buildFoundation(
     // Rise from the perimeter footing mat past y = 0 into the grouted
     // cells, one beside each wall vertical (also with NO stemwall — the
     // shallow footing tops out at the block seat).
-    if (fabDetail && cmuInfo) emitDowels(cmuInfo.dowelUs, -spec.footingDepth)
+    if (fabDetail && cmuInfo) emitDowels(cmuInfo, -spec.footingDepth)
 
     // ---- anchor bolts ----
     // R403.1.6: max spacing (6' o.c. default, tighter in SDC D via the
@@ -740,34 +823,54 @@ export function buildFoundation(
   // (y = 0) — before B18d they bore on the unmodeled slab with no R403.1 /
   // R407.3 footing under them. Each post gets a 24"×24"×12" pad poured
   // monolithically with the slab (top at y = 0 = the post's bearing seat,
-  // the interior-thickened-footing convention). A post whose pad would
-  // overlap an already-poured run (perimeter/interior footing, stemwall,
-  // an earlier pad) bears on that concrete instead — never two pours in
-  // one volume. Registered as carve bands so the slab field pours AROUND
-  // every pad (B17 machinery).
+  // the interior-thickened-footing convention). The bearing test is the
+  // POST POINT, not the pad rectangle (skeptic F3 — the rect-overlap skip
+  // left a post whose pad merely GRAZED a band bearing on the bare 3-1/2"
+  // slab, silently): a post landing ON a poured run bears on that
+  // concrete; a post beside one keeps its pad, SHRUNK centered (down to
+  // the 12" minimum) until it clears every pour; a post with no room for
+  // even the minimum pad flags the pour it abuts — loudly, never bare.
+  // Pads register as carve bands so the slab field pours AROUND them
+  // (B17 machinery).
   if (fabDetail) {
     for (const post of options.girderPosts ?? []) {
       const [px, pz] = post.plan
-      const band: CarveBand = {
-        a: [px - PAD_FOOTING_SIDE / 2, pz],
-        b: [px + PAD_FOOTING_SIDE / 2, pz],
-        w: PAD_FOOTING_SIDE,
+      if (pourBands.some((o) => pointInBand(post.plan, o.band))) continue // bears on that pour
+      const bandFor = (s: number): CarveBand => ({
+        a: [px - s / 2, pz],
+        b: [px + s / 2, pz],
+        w: s,
+      })
+      let side = PAD_FOOTING_SIDE
+      while (
+        side >= PAD_FOOTING_MIN - EPS &&
+        pourBands.some((o) => plansOverlap(bandFor(side), o.band))
+      ) {
+        side -= inches(1)
       }
-      if (pourBands.some((o) => plansOverlap(band, o))) continue
+      if (side < PAD_FOOTING_MIN - EPS) {
+        // No room for even the minimum pad beside the pour: the post
+        // bears unfooted — flag the abutting pour (F3: never silent).
+        const offender = pourBands.find((o) => plansOverlap(bandFor(PAD_FOOTING_MIN), o.band))
+        const m = offender ? members[offender.memberIdx] : undefined
+        if (m) m.flag = m.flag ? `${m.flag} | ${UNFOOTED_POST_FLAG}` : UNFOOTED_POST_FLAG
+        continue
+      }
+      const band = bandFor(side)
+      const clipped = side < PAD_FOOTING_SIDE - EPS
       members.push({
         system: 'foundation',
         role: 'footing',
-        dims: [PAD_FOOTING_SIDE, INTERIOR_FOOTING_DEPTH, PAD_FOOTING_SIDE],
-        length: PAD_FOOTING_SIDE,
+        dims: [side, INTERIOR_FOOTING_DEPTH, side],
+        length: side,
         position: [px, -INTERIOR_FOOTING_DEPTH / 2, pz],
         rotation: [0, 0, 0],
         material: 'concrete',
         sourceId: post.sourceId,
-        label: `Pad footing ${formatIn(PAD_FOOTING_SIDE)}×${formatIn(PAD_FOOTING_SIDE)}×${formatIn(INTERIOR_FOOTING_DEPTH)} — girder post (R403.1/R407.3)`,
-        advisory:
-          'pad sized prescriptively — verify per R403.1(1) loads; lateral restraint at the post base per R407.3',
+        label: `Pad footing ${formatIn(side)}×${formatIn(side)}×${formatIn(INTERIOR_FOOTING_DEPTH)} — girder post (R403.1/R407.3)`,
+        advisory: `pad sized prescriptively — verify per R403.1(1) loads; lateral restraint at the post base per R407.3${clipped ? '; clipped beside an adjacent pour' : ''}`,
       })
-      pourBands.push(band)
+      pourBands.push({ band, memberIdx: members.length - 1 })
       carveBands.push(band)
     }
   }
@@ -820,6 +923,19 @@ function bandPolygon(band: CarveBand): [number, number][] {
     [bx - nx, bz - nz],
     [ax - nx, az - nz],
   ]
+}
+
+/** Is a plan point inside a band's rectangle (the post-bearing test, F3)? */
+function pointInBand(p: readonly [number, number], band: CarveBand): boolean {
+  const [ax, az] = band.a
+  const [bx, bz] = band.b
+  const dx = bx - ax
+  const dz = bz - az
+  const len = Math.hypot(dx, dz)
+  if (len < EPS) return false
+  const along = ((p[0] - ax) * dx + (p[1] - az) * dz) / len
+  const across = ((p[0] - ax) * -dz + (p[1] - az) * dx) / len
+  return along >= -EPS && along <= len + EPS && Math.abs(across) <= band.w / 2 + EPS
 }
 
 /** 2D SAT overlap of two band rectangles (edge/corner CONTACT ≠ overlap). */

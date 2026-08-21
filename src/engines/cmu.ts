@@ -218,30 +218,45 @@ export function verticalBarPositions(
 }
 
 /**
- * Wall-local u positions where the FOUNDATION's dowels must rise so they lap
- * this CMU wall's grouted-cell verticals (LOD-400 B18b: stemwall dowels used
- * to march on the generic 48"-grid and never lapped the wall's own bars).
+ * Foundation-facing dowel layout for one CMU-based wall (LOD-400 B18b).
+ * `us`: wall-local positions where the foundation's dowels must rise so
+ * they lap this wall's grouted-cell verticals. `barTop`: the y where the
+ * ZONE's verticals top out (bond-beam mid-height, cmuWall's own barTop
+ * formula: zone courses × 8" − 4") — the HIGHEST steel a dowel can lap
+ * into. On a knee wall that is the SEAM story, not the wall top: a dowel
+ * rising past it punches through the PT seam sill and the framed zone
+ * (skeptic B18 round 1, F1 — fixed 30" laps on a 0.61 m knee put steel
+ * 14-76 mm inside the wood).
+ */
+export type CmuDowelLayout = { us: number[]; barTop: number }
+
+/**
+ * Dowel layout so the FOUNDATION laps this CMU wall's verticals (LOD-400
+ * B18b: stemwall dowels used to march on the generic 48"-grid and never
+ * lapped the wall's own bars).
  * One truth with the wall engine: the same `verticalBarPositions` layout —
  * WITHOUT the corner skip flags, so every emitted vertical (including a
  * skipped end's neighbor-owned corner core) has a dowel partner; the extra
  * end-cell dowel is standard corner detailing, never a clash (rebar laps).
  * MIXED walls (CMU below a course-snapped seam) map the layout onto the
  * inset CMU zone run — the same insets `mixedCmuWall` courses with — so no
- * dowel rises outside the blockwork into the framed-zone air.
+ * dowel rises outside the blockwork into the framed-zone air, and `barTop`
+ * caps the dowels below the seam story.
  */
 export function cmuDowelPositions(
   wall: WallSlice,
   cmuHeightM?: number,
   neighbors: WallSlice[] = [],
-): number[] {
-  if (wall.curved) return []
+): CmuDowelLayout {
+  const none: CmuDowelLayout = { us: [], barTop: 0 }
+  if (wall.curved) return none
   let startInset = 0
   let endInset = 0
   let zoneHeight = wall.height
   let openings = wall.openings
   if (cmuHeightM !== undefined) {
     const seam = snapCmuHeight(cmuHeightM, wall.height)
-    if (seam <= 0) return []
+    if (seam <= 0) return none
     if (courseCount(seam) < courseCount(wall.height)) {
       const insets = mixedWallInsets(wall, neighbors)
       startInset = insets.startInset
@@ -255,12 +270,15 @@ export function cmuDowelPositions(
     }
   }
   const len = wall.length - startInset - endInset
-  if (len <= EPS || courseCount(zoneHeight) < 1) return []
+  if (len <= EPS || courseCount(zoneHeight) < 1) return none
   const ro = openings.map((o) => ({
     u0: o.u - o.roughWidth / 2 - startInset,
     u1: o.u + o.roughWidth / 2 - startInset,
   }))
-  return verticalBarPositions(len, ro).map((u) => u + startInset)
+  return {
+    us: verticalBarPositions(len, ro).map((u) => u + startInset),
+    barTop: courseCount(zoneHeight) * COURSE_HEIGHT - COURSE_HEIGHT / 2,
+  }
 }
 
 // ---------------------------------------------------------------------------

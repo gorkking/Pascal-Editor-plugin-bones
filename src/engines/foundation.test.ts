@@ -7,7 +7,14 @@ import { computeLevel } from '../framing/compute'
 import { FramingNode } from '../framing/schema'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { cmuDowelPositions } from './cmu'
-import { anchorBoltPositions, buildFoundation, cornerExtensions } from './foundation'
+import {
+  DOWEL_SHORT_LAP_FLAG,
+  SHORT_PLATE_SECTION_FLAG,
+  UNFOOTED_POST_FLAG,
+  anchorBoltPositions,
+  buildFoundation,
+  cornerExtensions,
+} from './foundation'
 import { computeTakeoff } from './takeoff'
 
 const FOOTING_HEIGHT = inches(8)
@@ -244,6 +251,78 @@ describe('buildFoundation — anchor bolts split at door ROs (B18a)', () => {
     }
   })
 
+  test('SLIVER sections never crowd steel: 150mm corner sliver → ZERO bolts + strap flag (skeptic F2)', () => {
+    // Door RO ending 150 mm from the corner — the old ≥2-bolt rule put two
+    // bolts 50 mm apart there (3" washers inside each other and inside the
+    // corner HDU). 150 mm can't hold even ONE bolt at the 7d_b edge
+    // distance (4-3/8" each side) → zero bolts, footing flagged.
+    const sliverDoor = { ...garageDoor, u: 0.15 + garageDoor.roughWidth / 2 }
+    const fabSeismic: FramingSpec = { ...DEFAULT_SPEC, detail: '400', seismicHoldDowns: true }
+    const members = buildFoundation(
+      [makeWall({ id: 'w_garage', end: [9, 0], openings: [sliverDoor] })],
+      [],
+      fabSeismic,
+    )
+    const sliverBolts = byRole(members, 'anchor-bolt').filter((b) => (b.position[0] ?? 0) < 0.15)
+    expect(sliverBolts).toHaveLength(0)
+    const footing = byRole(members, 'footing')[0] as Member
+    expect(footing.flag).toBe(SHORT_PLATE_SECTION_FLAG)
+    // washers exactly mirror the surviving bolts — none stranded in the sliver
+    expect(byRole(members, 'plate-washer')).toHaveLength(byRole(members, 'anchor-bolt').length)
+    // the normal section keeps its full R403.1.6 layout (jamb rule intact)
+    const normal = byRole(members, 'anchor-bolt').map((b) => b.position[0] ?? 0)
+    const jamb = sliverDoor.u + sliverDoor.roughWidth / 2
+    expect(Math.min(...normal) - jamb).toBeLessThanOrEqual(endDist + 1e-9)
+  })
+
+  test('two doors leaving a 200mm middle: zero bolts between the jambs + flag; outer sections intact (skeptic F2)', () => {
+    const doorAt = (u: number) => ({ ...garageDoor, id: `d${u}`, u, roughWidth: 2 })
+    const members = buildFoundation(
+      [makeWall({ id: 'w_two', end: [9, 0], openings: [doorAt(2), doorAt(4.2)] })],
+      [],
+    )
+    const us = byRole(members, 'anchor-bolt')
+      .map((b) => b.position[0] ?? 0)
+      .sort((a, b) => a - b)
+    // middle section [3, 3.2] holds nothing
+    expect(us.filter((u) => u > 3 - 1e-9 && u < 3.2 + 1e-9)).toHaveLength(0)
+    expect((byRole(members, 'footing')[0] as Member).flag).toBe(SHORT_PLATE_SECTION_FLAG)
+    // outer sections keep the per-section rule: ≥2 bolts, ends within 12"
+    for (const [a, b] of [
+      [0, 1],
+      [5.2, 9],
+    ] as [number, number][]) {
+      const inSection = us.filter((u) => u >= a - 1e-9 && u <= b + 1e-9)
+      expect(inSection.length).toBeGreaterThanOrEqual(2)
+      expect((inSection[0] ?? 0) - a).toBeLessThanOrEqual(endDist + 1e-9)
+      expect(b - (inSection[inSection.length - 1] ?? 0)).toBeLessThanOrEqual(endDist + 1e-9)
+    }
+  })
+
+  test('a section that holds exactly ONE legal bolt gets one, centered, edges ≥ 7d_b + flag (skeptic F2)', () => {
+    // RO starting 300 mm from the corner: too short for two bolts at the
+    // 7d_b edge distance + washer gap, long enough for one.
+    const door300 = { ...garageDoor, u: 0.3 + garageDoor.roughWidth / 2 }
+    const members = buildFoundation(
+      [makeWall({ id: 'w_one', end: [9, 0], openings: [door300] })],
+      [],
+    )
+    const sectionBolts = byRole(members, 'anchor-bolt').filter(
+      (b) => (b.position[0] ?? 0) < 0.3,
+    )
+    expect(sectionBolts).toHaveLength(1)
+    const u = sectionBolts[0]?.position[0] ?? 0
+    expect(u).toBeCloseTo(0.15, 6) // centered
+    expect(u).toBeGreaterThanOrEqual(7 * inches(5 / 8) - 1e-9) // 7 diameters clear
+    expect(0.3 - u).toBeGreaterThanOrEqual(7 * inches(5 / 8) - 1e-9)
+    expect((byRole(members, 'footing')[0] as Member).flag).toBe(SHORT_PLATE_SECTION_FLAG)
+  })
+
+  test('normal walls carry NO short-section flag (non-vacuous inverse)', () => {
+    const members = buildFoundation([makeWall({ id: 'w_plain', end: [9, 0] })], [])
+    expect((byRole(members, 'footing')[0] as Member).flag).toBeUndefined()
+  })
+
   test('stemwall verticals still nudge clear of the SECTION bolt layout', () => {
     const members = buildFoundation([wall], [])
     const boltPos = byRole(members, 'anchor-bolt').map((b) => b.position[0] ?? 0)
@@ -264,8 +343,8 @@ describe('buildFoundation — anchor bolts split at door ROs (B18a)', () => {
 describe('buildFoundation — CMU walls swap the bolt kit for lapping dowels (B18b)', () => {
   const fabSeismic: FramingSpec = { ...DEFAULT_SPEC, detail: '400', seismicHoldDowns: true }
   const wall = makeWall({ thickness: 0.2032 })
-  const dowelUs = cmuDowelPositions(wall)
-  const cmuOpts = { cmu: new Map([[wall.id, { dowelUs }]]) }
+  const layout = cmuDowelPositions(wall)
+  const cmuOpts = { cmu: new Map([[wall.id, layout]]) }
   const members = buildFoundation([wall], [], fabSeismic, cmuOpts)
 
   test('NO sole-plate hardware: zero anchor bolts, washers and hold-downs on the CMU wall', () => {
@@ -278,7 +357,7 @@ describe('buildFoundation — CMU walls swap the bolt kit for lapping dowels (B1
 
   test('dowels rise beside every wall vertical: footing mat → 48d_b past the top', () => {
     const dowels = members.filter((m) => m.label?.startsWith('#5 dowel'))
-    expect(dowels.length).toBe(dowelUs.length)
+    expect(dowels.length).toBe(layout.us.length)
     expect(dowels.length).toBeGreaterThan(0)
     for (const d of dowels) {
       expect(d.material).toBe('steel')
@@ -297,7 +376,7 @@ describe('buildFoundation — CMU walls swap the bolt kit for lapping dowels (B1
     // one dowel per wall-vertical cell, at the exact cell positions
     const us = dowels.map((d) => d.position[0] ?? 0).sort((a, b) => a - b)
     expect(us.map((u) => Number(u.toFixed(6)))).toEqual(
-      dowelUs.map((u) => Number(u.toFixed(6))),
+      layout.us.map((u) => Number(u.toFixed(6))),
     )
   })
 
@@ -322,12 +401,12 @@ describe('buildFoundation — CMU walls swap the bolt kit for lapping dowels (B1
 
   test('interior CMU bearing wall: dowels rise from its thickened footing', () => {
     const interior = makeWall({ id: 'w_int', exterior: false, start: [0, 2], end: [4, 2] })
-    const intUs = cmuDowelPositions(interior)
+    const intLayout = cmuDowelPositions(interior)
     const intMembers = buildFoundation([interior], [slab], DEFAULT_SPEC, {
-      cmu: new Map([[interior.id, { dowelUs: intUs }]]),
+      cmu: new Map([[interior.id, intLayout]]),
     })
     const dowels = intMembers.filter((m) => m.label?.startsWith('#5 dowel'))
-    expect(dowels.length).toBe(intUs.length)
+    expect(dowels.length).toBe(intLayout.us.length)
     expect(dowels.length).toBeGreaterThan(0)
     for (const d of dowels) {
       const bottom = (d.position[1] ?? 0) - d.dims[1] / 2
@@ -339,7 +418,7 @@ describe('buildFoundation — CMU walls swap the bolt kit for lapping dowels (B1
     const shallow: FramingSpec = { ...DEFAULT_SPEC, footingDepth: inches(8) }
     const m = buildFoundation([wall], [], shallow, cmuOpts)
     const dowels = m.filter((d) => d.label?.startsWith('#5 dowel'))
-    expect(dowels.length).toBe(dowelUs.length)
+    expect(dowels.length).toBe(layout.us.length)
   })
 })
 
@@ -445,6 +524,44 @@ describe('computeLevel — CMU scene anchor truth end-to-end (B18b)', () => {
       result.areas,
     ).find((r) => r.item === 'Rebar' && r.section === 'Foundation')
     expect((withoutDowels?.quantity as number) < (foundationRebar?.quantity as number)).toBe(true)
+  })
+
+  test('KNEE wall through compute: dowels cap at the seam story, flagged + true-lap labeled (skeptic F1)', () => {
+    // The verbatim repro: cmuHeightM 0.61 → 3 courses (seam 0.6096), zone
+    // bar top 0.508 m. Fixed 30" dowels punched through the PT seam sill
+    // and framed zone (13 SAT pairs). Compute must plumb barTop through.
+    const kneeConfig = FramingNode.parse({
+      ...config,
+      id: 'bonesframing_cmuknee',
+      wallOverrides: { w_w: { construction: 'cmu', cmuHeightM: 0.61 } },
+    })
+    const knee = computeLevel(scene, kneeConfig)
+    const kneeDowels = knee.members.filter(
+      (m) => m.sourceId === 'w_w' && m.label?.startsWith('#5 dowel'),
+    )
+    expect(kneeDowels.length).toBeGreaterThan(0)
+    for (const d of kneeDowels) {
+      expect((d.position[1] ?? 0) + d.dims[1] / 2).toBeCloseTo(3 * 0.2032 - 0.1016, 6)
+      expect(d.label).toContain('laps CMU wall vertical 20"')
+      expect(d.flag).toBe(DOWEL_SHORT_LAP_FLAG)
+    }
+    // the PT seam sill sits ABOVE every dowel top — numerically clear
+    const sill = knee.members.find((m) => m.sourceId === 'w_w' && m.role === 'mudsill')
+    expect(sill).toBeDefined()
+    const sillBottom = (sill?.position[1] ?? 0) - (sill?.dims[1] ?? 0) / 2
+    for (const d of kneeDowels) {
+      expect((d.position[1] ?? 0) + d.dims[1] / 2).toBeLessThanOrEqual(sillBottom + 1e-9)
+    }
+    // FULL-height CMU walls in the same scene keep the unflagged 48d_b lap
+    const fullDowels = knee.members.filter(
+      (m) => m.sourceId === 'w_s' && m.label?.startsWith('#5 dowel'),
+    )
+    expect(fullDowels.length).toBeGreaterThan(0)
+    for (const d of fullDowels) {
+      expect((d.position[1] ?? 0) + d.dims[1] / 2).toBeCloseTo(inches(30), 6)
+      expect(d.flag).toBeUndefined()
+      expect(d.label).toBe('#5 dowel — laps CMU wall vertical (R606.12)')
+    }
   })
 })
 
@@ -1102,6 +1219,64 @@ describe('buildFoundation — girder-post pad footings (B18d)', () => {
       ],
     })
     expect(doubled.filter((m) => m.label?.startsWith('Pad footing'))).toHaveLength(1)
+  })
+
+  test('GRAZING pad, post OFF the band: pad pours CLIPPED beside the pour — never a silent bare post (skeptic F3)', () => {
+    // Bearing wall at z = 3.5 → footing band z ∈ [3.2968, 3.7032]. The full
+    // 24" pad for a post at [4, 3] reaches 3.3048 — a graze the old
+    // rect-overlap skip turned into NO pad at all (post on the bare slab,
+    // silent). The pad now shrinks centered until it clears: 23".
+    const bearing = makeWall({ id: 'w_bear', exterior: false, start: [0, 3.5], end: [8, 3.5] })
+    const m = buildFoundation([...perimeter, bearing], [bigSlab as never], DEFAULT_SPEC, {
+      girderPosts: [{ plan: [4, 3], sourceId: 'slab_up' }],
+    })
+    const pad = m.find((x) => x.label?.startsWith('Pad footing'))
+    expect(pad).toBeDefined()
+    expect(pad?.dims[0]).toBeCloseTo(inches(23), 6)
+    expect(pad?.dims[2]).toBeCloseTo(inches(23), 6)
+    expect(pad?.position[0]).toBeCloseTo(4, 6) // still centered on the POST
+    expect(pad?.position[2]).toBeCloseTo(3, 6)
+    expect(pad?.label).toContain('23"')
+    expect(pad?.advisory).toContain('clipped beside an adjacent pour')
+    // clear of the footing band (contact allowed, overlap not)
+    expect((pad?.position[2] ?? 0) + (pad?.dims[2] ?? 0) / 2).toBeLessThanOrEqual(3.2968 + 1e-9)
+    // no unfooted flag anywhere — the post GOT its pad
+    expect(m.some((x) => x.flag?.includes('bears without a pad footing'))).toBe(false)
+  })
+
+  test('NO room even for the 12" minimum pad: the post flags the pour it abuts — loudly (skeptic F3 repro)', () => {
+    // The verbatim repro: bearing wall z = 3.35 (band lo 3.1468), post
+    // [4, 3] — even the minimum pad reaches 3.1524. Old behavior: silent
+    // skip, post on the bare 3-1/2" slab.
+    const bearing = makeWall({ id: 'w_bear', exterior: false, start: [0, 3.35], end: [8, 3.35] })
+    const m = buildFoundation([...perimeter, bearing], [bigSlab as never], DEFAULT_SPEC, {
+      girderPosts: [{ plan: [4, 3], sourceId: 'slab_up' }],
+    })
+    expect(m.filter((x) => x.label?.startsWith('Pad footing'))).toHaveLength(0)
+    const flagged = m.find((x) => x.flag?.includes(UNFOOTED_POST_FLAG))
+    expect(flagged).toBeDefined()
+    expect(flagged?.sourceId).toBe('w_bear') // the pour the post abuts
+    expect(flagged?.role).toBe('footing')
+  })
+
+  test('two posts 0.5 m apart: BOTH bear on concrete — full pad + clipped neighbor (skeptic F3)', () => {
+    const m = buildFoundation(perimeter, [bigSlab as never], DEFAULT_SPEC, {
+      girderPosts: [
+        { plan: [3.5, 3], sourceId: 'slab_up' },
+        { plan: [4, 3], sourceId: 'slab_up' },
+      ],
+    })
+    const twoPads = m.filter((x) => x.label?.startsWith('Pad footing'))
+    expect(twoPads).toHaveLength(2)
+    const [a, b] = twoPads as [Member, Member]
+    expect(a.dims[0]).toBeCloseTo(inches(24), 6) // first post: the full pad
+    expect(b.dims[0]).toBeCloseTo(inches(15), 6) // second: clipped clear
+    expect(b.dims[0]).toBeGreaterThanOrEqual(inches(12) - 1e-9)
+    // the two pours never share volume (centers 0.5 m apart)
+    expect(Math.abs((a.position[0] ?? 0) - (b.position[0] ?? 0))).toBeGreaterThanOrEqual(
+      (a.dims[0] + b.dims[0]) / 2 - 1e-9,
+    )
+    expect(m.some((x) => x.flag?.includes('bears without a pad footing'))).toBe(false)
   })
 
   test('LOD 200 pours no pads (350 gate, like the interior thickened footings)', () => {

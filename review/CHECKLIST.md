@@ -336,7 +336,15 @@ AND a gate — a checklist line without a test is a wish.
   the plate band [0, 1.5"] (the sole plate is interrupted there — a J-bolt
   inside a doorway anchors nothing) and every remaining section keeps its
   own layout — one bolt within 12" of EACH section end (the door jambs),
-  never fewer than two per section, ≤ spacing o.c. Windows (sill above the
+  never fewer than two per section, ≤ spacing o.c. SLIVER sections never
+  crowd steel (skeptic round 1, F2): a section too short for two bolts at
+  the R403.1.6 7-diameter edge distance (4-3/8" for the 5/8" J-bolt) plus
+  a washer-clear 6" gap — under ~14-3/4" — takes ONE centered bolt, and
+  below 2×7d_b (~8-3/4") NONE; either way the wall's footing carries
+  'plate section too short for R403.1.6 layout — strap per detail,
+  verify'. The old blanket ≥2 rule put third-point bolts ~2" apart on a
+  corner sliver: 3" plate washers inside each other and inside the corner
+  HDU. Windows (sill above the
   plate band) never split the plate; plate washers (R602.11.1) follow the
   section bolts one-for-one; stemwall verticals nudge clear of the ACTUAL
   emitted bolt layout. SDC D0–D2 stemwalls carry the R403.1.3.1 horizontal
@@ -353,7 +361,14 @@ AND a gate — a checklist line without a test is a wish.
   (30") past y = 0, one BESIDE every wall vertical (1" across-wall
   offset, same cell — cmu.ts `cmuDowelPositions` is the one layout truth
   compute feeds the foundation), replacing the generic 48"-grid stemwall
-  verticals that never lapped the wall bars. Mixed walls keep their
+  verticals that never lapped the wall bars. The dowel top CAPS at the
+  ZONE's bar top (`barTop`, bond-beam mid-height — skeptic round 1, F1):
+  on a knee wall the CMU story can be shorter than the full lap, and a
+  fixed 30" dowel punched through the PT seam sill, the framed zone's
+  bottom plate and its studs; a capped dowel prints its TRUE overlap in
+  the label ('laps CMU wall vertical 20"') and carries '#5 dowel lap
+  short of 48d_b — hook into bond beam per detail, verify' — honesty
+  over an invented full lap. Mixed walls keep their
   seam-sill bolts on the bond beam (cmu.ts) — on a CMU scene the ONLY
   'Anchor bolts' takeoff row is the seam sill's, and the dowels book on
   the Foundation rebar lf row. No new S1 allow-list pair: rebar×block /
@@ -365,9 +380,18 @@ AND a gate — a checklist line without a test is a wish.
   reproduces exactly) and the foundation pours a 24"×24"×12" pad footing
   (R403.1 sizing assumption labeled / R407.3 restraint advisory) under
   each, monolithic with the slab (top at y = 0 = the post's bearing
-  seat, the interior-thickened-footing convention). A post landing on an
-  already-poured band (perimeter/interior footing, stemwall, an earlier
-  pad) bears on THAT concrete — never two pours in one volume. Pads
+  seat, the interior-thickened-footing convention). The bearing test is
+  the POST POINT, never the pad rectangle (skeptic round 1, F3 — the
+  rect-overlap skip left a post whose pad merely GRAZED a band bearing on
+  the bare 3-1/2" slab, silently): a post landing ON a poured band
+  (perimeter/interior footing, stemwall, an earlier pad) bears on THAT
+  concrete — never two pours in one volume; a post BESIDE one keeps its
+  pad, SHRUNK centered in 1" steps (down to the 12" minimum — post +
+  bearing edges) until it clears every pour, labeled at its true size
+  with a 'clipped beside an adjacent pour' advisory; a post with no room
+  for even the minimum pad flags the pour it abuts ('girder post bears
+  without a pad footing — R403.1 pad does not fit beside this pour;
+  verify detail'), loudly, never bare. Pads
   register as B17 carve bands so the slab field pours AROUND them, and
   they join the Foundation 'footings' yd³ row (S4). The POST itself now
   spans girder underside → the storey-below floor plane exactly (the old
@@ -376,23 +400,32 @@ AND a gate — a checklist line without a test is a wish.
   Origin: LOD-400 wave-2 audit B18 (a)+(b)+(c)+(d), 2026-08-20 (3 bolts
   booked installable inside a 16-ft garage door RO; dead per-section end
   rule; 'sole plate anchorage' J-bolts up into block cells; dowels never
-  lapping the wall verticals; girder posts bearing on nothing).
+  lapping the wall verticals; girder posts bearing on nothing) + skeptic
+  round 1, 2026-08-21 (F1 knee-wall dowels through the seam wood; F2
+  sliver sections crowding washers into each other and the HDU; F3 the
+  grazing-pad silent skip).
   Gates: `src/engines/foundation.test.ts` (B18a describe: RO exclusion,
   per-section layout, window byte-equality, washer parity, vertical
-  nudge; B18b describes: kit absence, dowel geometry/lap, per-wall
-  interface, interior-CMU dowels, computeLevel FL scene truth + takeoff
-  rows; B18c describe: seismic top bar presence/position, INTL absence,
-  AK/CA-vs-INTL profile matrix; B18d describe: pad geometry/label, slab
-  carve, poured-band skip, coincident-post dedupe, LOD-350 gate, footings
-  row growth) + `src/engines/cmu.test.ts` (cmuDowelPositions layout
-  matrix incl. mixed-zone insets) +
-  `src/engines/interpenetration.test.ts` (B18b compose: foundation +
-  blockwork SAT-clean, verticals all lapped, kit-absence pin; B18d
-  two-storey compose: post-on-pad census, bearing plane y = 0,
-  SAT-clean) + `src/engines/floor-framing.test.ts` (post bearing-plane
-  pin) + `src/framing/compute.multistorey.test.ts` (B18d describe:
-  end-to-end census, slab carve, takeoff rows, no-upper-storey and
-  upper-storey exclusions).
+  nudge, F2 sliver matrix — corner sliver zero bolts, twin-door middle,
+  one-bolt section, flag pins, no-flag inverse; B18b describes: kit
+  absence, dowel geometry/lap, per-wall interface, interior-CMU dowels,
+  computeLevel FL scene truth + takeoff rows, F1 knee-through-compute —
+  cap/label/flag + sill clearance + full-wall inverse; B18c describe:
+  seismic top bar presence/position, INTL absence, AK/CA-vs-INTL profile
+  matrix; B18d describe: pad geometry/label, slab carve, post-point
+  bearing skip, coincident-post dedupe, LOD-350 gate, footings row
+  growth, F3 matrix — clipped grazing pad, unfooted-flag repro,
+  two-posts-0.5m both-on-concrete) + `src/engines/cmu.test.ts`
+  (cmuDowelPositions layout matrix incl. mixed-zone insets + barTop
+  formula pins) + `src/engines/interpenetration.test.ts` (B18b compose:
+  foundation + blockwork SAT-clean, verticals all lapped, kit-absence
+  pin; F1 knee compose at 0.61 m and 1-course seams — dowel×wood class
+  dead; F2 sliver composes — zero washer×washer / washer×hold-down
+  pairs; B18d two-storey compose: post-on-pad census, bearing plane
+  y = 0, SAT-clean) + `src/engines/floor-framing.test.ts` (post
+  bearing-plane pin) + `src/framing/compute.multistorey.test.ts` (B18d
+  describe: end-to-end census, slab carve, takeoff rows,
+  no-upper-storey and upper-storey exclusions).
 
 ## M — Mechanical (HVAC)
 

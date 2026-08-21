@@ -575,13 +575,13 @@ describe('snapCmuHeight', () => {
 describe('cmuDowelPositions — foundation-facing dowel layout (B18b)', () => {
   test('full-height CMU wall: dowels land exactly on the vertical-bar layout (no skips)', () => {
     const wall = makeWall()
-    expect(cmuDowelPositions(wall)).toEqual(verticalBarPositions(4, []))
+    expect(cmuDowelPositions(wall).us).toEqual(verticalBarPositions(4, []))
   })
 
   test('openings: no dowel inside the RO, jamb cells covered (matches the wall bars)', () => {
     const wall = makeWall({ openings: [window_(2)] })
     const ro = { u0: 2 - (1.2 + PAD) / 2, u1: 2 + (1.2 + PAD) / 2 }
-    const us = cmuDowelPositions(wall)
+    const { us } = cmuDowelPositions(wall)
     expect(us).toEqual(verticalBarPositions(4, [ro]))
     for (const u of us) expect(u <= ro.u0 + 1e-9 || u >= ro.u1 - 1e-9).toBe(true)
     expect(us.some((u) => Math.abs(u - (ro.u0 - CELL_CENTER)) < 1e-6)).toBe(true)
@@ -599,14 +599,28 @@ describe('cmuDowelPositions — foundation-facing dowel layout (B18b)', () => {
     expect(vertUs.length).toBeGreaterThan(0)
     const dowels = cmuDowelPositions(wall)
     for (const u of vertUs) {
-      expect(dowels.some((d) => Math.abs(d - u) < 1e-6)).toBe(true)
+      expect(dowels.us.some((d) => Math.abs(d - u) < 1e-6)).toBe(true)
     }
+  })
+
+  test('barTop == the y where the wall/zone verticals actually top out (skeptic F1)', () => {
+    // full-height wall: cmuWall's own bar formula (bond-beam mid-height)
+    const wall = makeWall() // 2.4 m → 11 full courses
+    const members = cmuWall(wall, { ...DEFAULT_SPEC, detail: '400' })
+    const vert = members.find((m) => m.label?.startsWith('#5 vertical'))
+    const vertTop = (vert?.position[1] ?? 0) + (vert?.dims[1] ?? 0) / 2
+    expect(cmuDowelPositions(wall).barTop).toBeCloseTo(vertTop, 6)
+    // knee wall: the ZONE's bar top — the seam story, NOT the wall top
+    const knee = cmuDowelPositions(wall, 0.61) // snaps to 3 courses
+    expect(knee.barTop).toBeCloseTo(3 * H - H / 2, 6) // 0.508 m — 20"
+    // one-course knee: bond-beam mid-height of the single course
+    expect(cmuDowelPositions(wall, 0.2).barTop).toBeCloseTo(H / 2, 6)
   })
 
   test('MIXED wall: dowels stay inside the inset CMU zone run (never in the butt joint)', () => {
     const wall = makeWall({ id: 'wall_mx', thickness: 0.2032 })
     const neighbor = makeWall({ id: 'wall_nb', start: [4, 0], end: [4, 3], thickness: 0.2032 })
-    const us = cmuDowelPositions(wall, 1.22, [neighbor])
+    const { us } = cmuDowelPositions(wall, 1.22, [neighbor])
     expect(us.length).toBeGreaterThan(0)
     // the end corner butts: the zone retreats, and so must the dowels
     const { endInset } = mixedWallInsets(wall, [neighbor])
@@ -623,7 +637,7 @@ describe('cmuDowelPositions — foundation-facing dowel layout (B18b)', () => {
   })
 
   test('guards: curved walls and sub-course walls carry no dowels', () => {
-    expect(cmuDowelPositions(makeWall({ curved: true }))).toEqual([])
-    expect(cmuDowelPositions(makeWall({ height: 0.15 }))).toEqual([])
+    expect(cmuDowelPositions(makeWall({ curved: true }))).toEqual({ us: [], barTop: 0 })
+    expect(cmuDowelPositions(makeWall({ height: 0.15 }))).toEqual({ us: [], barTop: 0 })
   })
 })
