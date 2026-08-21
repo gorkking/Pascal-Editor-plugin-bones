@@ -2219,31 +2219,110 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     }
   })
 
-  const squeezedCourtyardSvg = () => {
-    const uWalls = [
-      swall('u_s', [0, 0], [12, 0]),
-      swall('u_e', [12, 0], [12, 8]),
-      swall('u_n', [12, 8], [0, 8]),
-      swall('u_w', [0, 8], [0, 0]),
-      swall('u_c1', [5, 2], [5, 6]),
-      swall('u_c2', [7, 2], [7, 6]),
+  // the condenser parked ON the exit: rails + CU bubble crowd the
+  // crossing — the examiner's under-clearing exhibit (tips 2.9/bubble 8)
+  const squeezedCourtyardSvg = () => courtyardAt(4.2).svg
+
+  test('MANDATE: every glyph invariant on all three round-8 composes', () => {
+    // The examiner's exhibits, rebuilt from the round notes (frost MEP
+    // with the condenser forced onto the exit wall; courtyard east-exit;
+    // the squeezed variant). Every glyph family asserts on each compose.
+    const composes: { name: string; svg: string; members: Member[] }[] = [
+      { name: 'frost-mep', ...frostMep() },
+      { name: 'courtyard', ...courtyardAt(5.5) },
+      { name: 'squeezed', ...courtyardAt(4.2) },
     ]
-    const uRooms = [
-      sroom('r_ubath', 'bathroom', [[8, 2], [11, 2], [11, 6], [8, 6]], ['u_e']),
-      sroom('r_ukitchen', 'kitchen', [[1, 2], [4, 2], [4, 6], [1, 6]], ['u_w']),
-    ]
-    const p = layoutPlumbing(uWalls, uRooms, specFrost)
-    // the condenser parked ON the exit: rails + CU bubble crowd the
-    // crossing — the examiner's under-clearing exhibit (tips 2.9/bubble 8)
-    const h = layoutHvac(uWalls, uRooms, specFrost, { heatPump: { position: [12.5, 0, 4.2] } })
-    const f = buildFoundation(uWalls, [sslab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
-    const mep = buildPlanSet(
-      [...p.members, ...h.members, ...f],
-      [...p.fixtures, ...h.fixtures],
+    const citeW = ('SLEEVE (P2603.4)'.length * 6) / 2
+    for (const { name, svg, members } of composes) {
+      const foreign = svgRects(svg, ['#35b8c9', '#d98134', '#4a7dbf', '#c0504d', '#b5aa97'])
+      const bubbles = parseBubbles(svg)
+      const ticks = parseTicks(svg)
+      const cites = [...svg.matchAll(/<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*>SLEEVE/g)].map(
+        (m) => [Number(m[1]), Number(m[2]) - 3] as [number, number],
+      )
+      // --- ticks: 4/12 or a recorded, provenance-carrying exhaustion ---
+      expect(ticks.length).toBeGreaterThan(0)
+      const crowdedTicks = (svg.match(/<!-- sleeve-tick crowded:/g) ?? []).length
+      for (const t of ticks) {
+        const tipOk = foreign.every((r) => tickTips(t).every(([qx, qy]) => rectDist(qx, qy, r) >= 4))
+        const bubOk = bubbles.every(([bx, by]) => Math.hypot(bx - t.x, by - t.y) >= 12)
+        if (!(tipOk && bubOk)) {
+          expect({ name, at: [t.x, t.y], crowdedTicks }.crowdedTicks).toBeGreaterThan(0)
+        }
+      }
+      // --- cites: census 1:1 (joint pass) or recorded drops; never on own tick ---
+      const citeDrops = (svg.match(/<!-- sleeve-cite dropped/g) ?? []).length
+      expect({ name, n: cites.length + citeDrops }.n).toBe(ticks.length)
+      expect({ name, citeDrops }.citeDrops).toBe(0) // all three composes place every cite
+      for (const [cx, cy] of cites) {
+        const t = ticks.reduce((b, k) =>
+          Math.hypot(k.x - cx, k.y - cy) < Math.hypot(b.x - cx, b.y - cy) ? k : b,
+        )
+        expect(textHits(cx, cy, citeW + 2, 5 + 2, { w: 7, h: 13.6, fill: '', x: t.x, y: t.y, rot: t.rot })).toBe(false)
+      }
+      // --- arrows: census accounts drops; printed ones clear pipes,
+      // bubbles AND text rects (round-4 F1: an arrow printed INSIDE the
+      // kitchen cite on both courtyards) ---
+      const arrows = [...svg.matchAll(
+        /M-3\.5 -3 L4\.5 0 L-3\.5 3 Z" fill="#41637a" transform="translate\((-?[\d.]+) (-?[\d.]+)\)/g,
+      )].map((m) => [Number(m[1]), Number(m[2])] as [number, number])
+      expect({ name, n: arrows.length + arrowDrops(svg) }.n).toBe(eligibleArrows(members, svg))
+      for (const [ax, ay] of arrows) {
+        for (const r of foreign) expect(rectDist(ax, ay, r)).toBeGreaterThanOrEqual(4)
+        for (const [bx, by] of bubbles) {
+          expect(Math.hypot(bx - ax, by - ay)).toBeGreaterThanOrEqual(12)
+        }
+        for (const [cx, cy] of cites) {
+          const inCite = Math.abs(cx - ax) < citeW + 6 && Math.abs(cy - ay) < 5 + 6
+          expect({ name, at: [ax, ay], inCite }.inCite).toBe(false)
+        }
+      }
+      // --- marker: present, on-sheet, off pipes/equipment, clear of cites ---
+      const txt = svg.match(
+        /<text x="(-?[\d.]+)" y="(-?[\d.]+)"[^>]*text-anchor="(\w+)"[^>]*>SEWER\/SEPTIC/,
+      )
+      expect(txt).not.toBeNull()
+      const wTxt = 'SEWER/SEPTIC (P3005.4)'.length * 6
+      const anchor2 = txt?.[3]
+      const tx0 = Number(txt?.[1])
+      const ty0 = Number(txt?.[2]) - 3
+      const left = anchor2 === 'start' ? tx0 : anchor2 === 'end' ? tx0 - wTxt : tx0 - wTxt / 2
+      expect(left).toBeGreaterThan(48)
+      expect(left + wTxt).toBeLessThan(1056 - 48)
+      const cxT = left + wTxt / 2
+      const pipeHits = [...foreign, ...svgRects(svg, ['#8fb0c4'])].filter((r) =>
+        textHits(cxT, ty0, wTxt / 2, 5, r),
+      )
+      expect({ name, pipeHits: pipeHits.length }.pipeHits).toBe(0)
+      for (const [cx, cy] of cites) {
+        expect(Math.hypot(cx - cxT, cy - ty0)).toBeGreaterThanOrEqual(12)
+      }
+      // --- legend: the standing tick row prints whenever ticks do (an
+      // uncited bar stays self-describing), equipment row when bodies do ---
+      expect(svg).toContain('TICKS = SLEEVED CROSSING (P2603.4)')
+      if (members.some((m) => m.role === 'equipment')) {
+        expect(svg).toContain('equipment body (AHU / CU)')
+      }
+    }
+    // …and a tick-less sheet carries NO tick row (the row keys off ticks)
+    const bare = buildPlanSet(
+      [
+        {
+          system: 'plumbing',
+          role: 'pipe-run',
+          dims: [3, 0.02, 0.02],
+          length: 3,
+          position: [2, 0.28, 1],
+          rotation: [0, 0, 0],
+          material: 'copper',
+          sourceId: 'cold-lav',
+        },
+      ],
+      [],
       {},
     ).find((s) => s.title.startsWith('Plumbing'))
-    return mep?.svg ?? ''
-  }
+    expect(bare?.svg ?? '').not.toContain('TICKS = SLEEVED CROSSING')
+  })
 
   test('R3: squeezed exit — every tick meets 4/12 OR is provably score-max over the widened budget', () => {
     const svg = squeezedCourtyardSvg()
@@ -2324,7 +2403,7 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     expect(sawCrowded).toBeGreaterThanOrEqual(1) // the exhibit really is squeezed
   })
 
-  const courtyardSvg = () => {
+  const courtyardAt = (hpZ: number) => {
     const uWalls = [
       swall('u_s', [0, 0], [12, 0]),
       swall('u_e', [12, 0], [12, 8]),
@@ -2338,15 +2417,15 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
       sroom('r_ukitchen', 'kitchen', [[1, 2], [4, 2], [4, 6], [1, 6]], ['u_w']),
     ]
     const p = layoutPlumbing(uWalls, uRooms, specFrost)
-    const h = layoutHvac(uWalls, uRooms, specFrost, { heatPump: { position: [12.5, 0, 5.5] } })
+    const h = layoutHvac(uWalls, uRooms, specFrost, { heatPump: { position: [12.5, 0, hpZ] } })
     const f = buildFoundation(uWalls, [sslab([[0, 0], [12, 0], [12, 8], [0, 8]])], specFrost)
-    const mep = buildPlanSet(
-      [...p.members, ...h.members, ...f],
-      [...p.fixtures, ...h.fixtures],
-      {},
-    ).find((s) => s.title.startsWith('Plumbing'))
-    return mep?.svg ?? ''
+    const members = [...p.members, ...h.members, ...f]
+    const mep = buildPlanSet(members, [...p.fixtures, ...h.fixtures], {}).find((s) =>
+      s.title.startsWith('Plumbing'),
+    )
+    return { svg: mep?.svg ?? '', members }
   }
+  const courtyardSvg = () => courtyardAt(5.5).svg
 
   test('courtyard east exit: marker text clears pipes, bubbles, CITES, equipment + the viewBox', () => {
     const svg = courtyardSvg()
