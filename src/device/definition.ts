@@ -72,6 +72,20 @@ export const deviceDefinition: DeviceDefinition = {
 
   renderer: { kind: 'parametric', module: () => import('./renderer') },
 
+  // Window-parity move (wall-mount move tool): the host's MoveTool dispatcher
+  // mounts this INSTEAD of the generic planar mover whenever the Move cross /
+  // press-drag arms a device — the box slides along the wall surface with the
+  // #689 hidden-wall hold + #694 own-wall gate, previews through
+  // useLiveNodeOverrides (the framing live recompute routes it through
+  // applyDeviceOverrides — stud snap + height bands stay the truth), and
+  // commits ONE tracked anchor write (wallId + wallT + heightAff).
+  // `capabilities.movable` above stays: it keeps the context-toolbar Move
+  // cross + Ctrl-drag gates (isRegistryMovable / hasRegistry3DMoveTool) and
+  // the 2D fallback exactly as before. `affordanceTools` is a newer host
+  // contract field than the pinned @pascal-app/core types — it rides the
+  // definition's Record<string, unknown> like the parentFrame cast.
+  affordanceTools: { move: () => import('../wall-mount/move-tool') },
+
   presentation: {
     label: 'Electrical device',
     description:
