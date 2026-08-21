@@ -51,7 +51,10 @@ describe('wall-node move parity registration pins', () => {
       // React.lazy — a broken dynamic import would crash move activation).
       const module = await loader()
       expect(typeof module.default).toBe('function')
-    })
+      // 15s: the first dynamic import of move-tool.tsx transpiles its whole
+      // R3F import graph — flaked once at the 5s default under full-suite
+      // load (passes in 0.5s isolated).
+    }, 15000)
   }
 
   test('both kinds share ONE move tool module (device ↔ service parity)', async () => {
