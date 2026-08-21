@@ -98,8 +98,9 @@ export function joistSizeFor(span: number, spec: FramingSpec): LumberSize | null
   return null
 }
 
-/** Subtract an interval from a list of spans. */
-function subtractInterval(spans: [number, number][], cut: [number, number]): [number, number][] {
+/** Subtract an interval from a list of spans. Exported for the foundation
+ * engine's slab-field strips (B17) — one carve implementation repo-wide. */
+export function subtractInterval(spans: [number, number][], cut: [number, number]): [number, number][] {
   const out: [number, number][] = []
   for (const [s, e] of spans) {
     if (cut[1] <= s + EPS || cut[0] >= e - EPS) {
@@ -112,8 +113,9 @@ function subtractInterval(spans: [number, number][], cut: [number, number]): [nu
   return out
 }
 
-/** Intersect two interval lists (used for two-sided girder presence). */
-function intersectIntervals(
+/** Intersect two interval lists (two-sided girder presence; also the
+ * foundation slab field's edge-sampled strips — B17). */
+export function intersectIntervals(
   a: [number, number][],
   b: [number, number][],
 ): [number, number][] {

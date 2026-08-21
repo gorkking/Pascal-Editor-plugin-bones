@@ -679,6 +679,26 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(buildFoundation(rectWalls(), [slab(rect(6, 4))], spec400))).toEqual([])
   })
 
+  test('foundation: slab-on-grade field with a stair hole — carved, SAT-clean (B17)', () => {
+    // The field + vapor retarder tile around the opening AND around every
+    // stemwall/interior-footing band; the composed pour may not overlap
+    // itself, the perimeter kit, or reach into the hole.
+    const members = buildFoundation(
+      rectWalls(),
+      [slab(rect(6, 4), { holes: [[[2, 1.2], [3.2, 1.2], [3.2, 2.8], [2, 2.8]]] })],
+      spec400,
+    )
+    const field = members.filter((m) => m.role === 'slab')
+    expect(field.length).toBeGreaterThan(0)
+    expect(violations(members)).toEqual([])
+    for (const m of field) {
+      const [hx, hz] = [m.dims[0] / 2, m.dims[2] / 2]
+      const ox = Math.min(m.position[0] + hx, 3.2) - Math.max(m.position[0] - hx, 2)
+      const oz = Math.min(m.position[2] + hz, 2.8) - Math.max(m.position[2] - hz, 1.2)
+      expect(Math.min(ox, oz)).toBeLessThanOrEqual(1e-6)
+    }
+  })
+
   test('slab-on-grade compose: anchor bolts clamp the PT sole plate — design intent, never a clash (B5)', () => {
     // Foundation + ground-level walls composed in one SAT pass: the bolts
     // rise through the wall engine's bottom plate — the (PT, R317.1) sole

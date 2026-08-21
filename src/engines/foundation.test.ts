@@ -137,9 +137,10 @@ describe('buildFoundation — exterior wall, default spec', () => {
     }
   })
 
-  test('no hold-downs and no slab edge without seismic spec / slabs', () => {
+  test('no hold-downs and no slab field without seismic spec / slabs', () => {
     expect(byRole(members, 'hold-down')).toHaveLength(0)
-    expect(byRole(members, 'slab-edge')).toHaveLength(0)
+    expect(byRole(members, 'slab')).toHaveLength(0)
+    expect(byRole(members, 'vapor-retarder')).toHaveLength(0)
   })
 })
 
@@ -185,19 +186,21 @@ describe('buildFoundation — seismic hold-downs', () => {
   })
 })
 
-describe('buildFoundation — slab edge', () => {
+describe('buildFoundation — slab-on-grade perimeter detail', () => {
   const wall = makeWall()
-  const edges = byRole(buildFoundation([wall], [slab]), 'slab-edge')
 
   test('NO thickened edge where a footing + stemwall already run (round-10)', () => {
     // The slab pours AGAINST the stemwall (R403.1); a turned-down
     // monolithic edge is the alternative detail. Emitting both doubled the
     // perimeter concrete inside one volume — the interpenetration gate
-    // pinned it. Footing + stemwall remain the perimeter elements.
-    expect(edges).toHaveLength(0)
+    // pinned it. Footing + stemwall remain the perimeter elements; the
+    // FIELD (role 'slab', B17) pours beside them — the old 'slab-edge'
+    // role is gone from the Member union entirely (nothing ever emitted
+    // it, the takeoff mapped a phantom pour).
     const members = buildFoundation([wall], [slab])
     expect(byRole(members, 'footing').length).toBeGreaterThan(0)
     expect(byRole(members, 'stemwall').length).toBeGreaterThan(0)
+    expect(byRole(members, 'slab').length).toBeGreaterThan(0)
   })
 })
 
@@ -230,19 +233,27 @@ describe('buildFoundation — wall frame mapping (rotated wall)', () => {
 })
 
 describe('buildFoundation — guards', () => {
-  test('interior walls get no perimeter run (no stemwall/bolts/slab-edge)', () => {
+  test('interior walls get no perimeter run (no stemwall/bolts/hold-downs)', () => {
     const interior = makeWall({ exterior: false })
     const members = buildFoundation([interior], [slab])
     expect(byRole(members, 'stemwall')).toHaveLength(0)
     expect(byRole(members, 'anchor-bolt')).toHaveLength(0)
-    expect(byRole(members, 'slab-edge')).toHaveLength(0)
     expect(byRole(members, 'hold-down')).toHaveLength(0)
+    // The slab field pours regardless — sourced to the SLAB, never the wall.
+    for (const m of members) {
+      if (m.role === 'slab' || m.role === 'vapor-retarder') expect(m.sourceId).toBe('slab_test')
+      else expect(m.sourceId).not.toBe('slab_test')
+    }
   })
 
-  test('at LOD 200 interior walls get nothing at all (slab bears them)', () => {
+  test('at LOD 200 interior walls get nothing — the slab field still pours', () => {
     const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
     const interior = makeWall({ exterior: false })
-    expect(buildFoundation([interior], [slab], lod200)).toHaveLength(0)
+    const members = buildFoundation([interior], [slab], lod200)
+    // no wall-sourced members (the partition bears on the slab)…
+    expect(members.filter((m) => m.sourceId === 'wall_test')).toHaveLength(0)
+    // …but the floor itself is core geometry at EVERY detail level (B17).
+    expect(byRole(members, 'slab').length).toBeGreaterThan(0)
   })
 
   test('curved walls are skipped like wall-framing v1', () => {
@@ -266,7 +277,7 @@ describe('buildFoundation — guards', () => {
       makeWall({ id: 'ext_c', start: [0, 0], end: [0, 4] }),
     ]
     const members = buildFoundation(walls, [])
-    const perimeterRoles = ['stemwall', 'anchor-bolt', 'slab-edge', 'hold-down']
+    const perimeterRoles = ['stemwall', 'anchor-bolt', 'hold-down']
     const intMembers = members.filter((m) => m.sourceId === 'int_b')
     // the long interior wall gets ONLY its thickened footing + bars
     expect(intMembers.length).toBeGreaterThan(0)
@@ -429,12 +440,15 @@ describe('buildFoundation — interior thickened footings (LOD 350)', () => {
 
   test('short partitions (≤ 2.4 m) bear on the slab — no footing', () => {
     const short = makeWall({ id: 'int_short', exterior: false, start: [0, 1], end: [2.4, 1] })
-    expect(buildFoundation([short], [slab])).toHaveLength(0)
+    // only the slab field itself pours (B17) — nothing wall-sourced
+    expect(buildFoundation([short], [slab]).filter((m) => m.sourceId === 'int_short')).toHaveLength(0)
   })
 
   test('gated at LOD 350: detail 200 emits nothing for interior walls', () => {
     const lod200: FramingSpec = { ...DEFAULT_SPEC, detail: '200' }
-    expect(buildFoundation([bearing], [slab], lod200)).toHaveLength(0)
+    expect(
+      buildFoundation([bearing], [slab], lod200).filter((m) => m.sourceId !== 'slab_test'),
+    ).toHaveLength(0)
   })
 
   test('interior footing carries its own 2× #4 bars at 3" clear off ITS bottom', () => {
@@ -645,5 +659,150 @@ describe('buildFoundation — short interior link walls (blueprint round-1 p_lin
     const members = buildFoundation([...perimeter, stub], [slab as never], FAB)
     const stubFootings = byRole(members, 'footing').filter((m) => m.sourceId === 'w_stub')
     expect(stubFootings).toEqual([])
+  })
+})
+
+describe('buildFoundation — slab-on-grade field + vapor retarder (LOD-400 B17)', () => {
+  // 6×4 closed shell + a bearing partition — the baseline foundation shape.
+  const perimeter = [
+    makeWall({ id: 'w_s', start: [0, 0], end: [6, 0] }),
+    makeWall({ id: 'w_e', start: [6, 0], end: [6, 4] }),
+    makeWall({ id: 'w_n', start: [6, 4], end: [0, 4] }),
+    makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+  ]
+  const rectSlab = {
+    id: 'slab_field',
+    polygon: [
+      [0, 0],
+      [6, 0],
+      [6, 4],
+      [0, 4],
+    ],
+    holes: [],
+    elevation: 0.05,
+    thickness: 0.1,
+  } as const
+  const members = buildFoundation(perimeter, [rectSlab as never])
+  const field = byRole(members, 'slab')
+  const membrane = byRole(members, 'vapor-retarder')
+
+  test('the field is REAL: concrete strips, 3-1/2" thick, walking surface at y = 0 (R506.1)', () => {
+    expect(field.length).toBeGreaterThan(0)
+    for (const m of field) {
+      expect(m.material).toBe('concrete')
+      expect(m.system).toBe('foundation')
+      expect(m.sourceId).toBe('slab_field')
+      expect(m.dims[1]).toBeCloseTo(inches(3.5), 6)
+      // top of slab = plate line (the PT sole plate bears on it, B5)
+      expect((m.position[1] ?? 0) + m.dims[1] / 2).toBeCloseTo(0, 6)
+      expect(m.label).toContain('R506.1')
+      // 4" base course is a stated ASSUMPTION, never invented geometry
+      expect(m.advisory).toContain('base course')
+      expect(m.advisory).toContain('R506.2.2')
+    }
+  })
+
+  test('the strips tile INSIDE the polygon and clear of the stemwall band', () => {
+    const stemHalf = DEFAULT_SPEC.stemwallThickness / 2
+    for (const m of field) {
+      const [hx, hz] = [m.dims[0] / 2, m.dims[2] / 2]
+      // inside the 6×4 footprint…
+      expect((m.position[0] ?? 0) - hx).toBeGreaterThanOrEqual(-1e-6)
+      expect((m.position[0] ?? 0) + hx).toBeLessThanOrEqual(6 + 1e-6)
+      expect((m.position[2] ?? 0) - hz).toBeGreaterThanOrEqual(-1e-6)
+      expect((m.position[2] ?? 0) + hz).toBeLessThanOrEqual(4 + 1e-6)
+      // …and clear of every perimeter stemwall band (the slab pours AGAINST
+      // the stemwall, R403.1 — the strip stops at its face)
+      expect((m.position[0] ?? 0) - hx).toBeGreaterThanOrEqual(stemHalf - 1e-6)
+      expect((m.position[0] ?? 0) + hx).toBeLessThanOrEqual(6 - stemHalf + 1e-6)
+      expect((m.position[2] ?? 0) - hz).toBeGreaterThanOrEqual(stemHalf - 1e-6)
+      expect((m.position[2] ?? 0) + hz).toBeLessThanOrEqual(4 - stemHalf + 1e-6)
+    }
+    // the field still covers most of the footprint — the carve is a band,
+    // not a moat (first compose lost 32% to axis-parallel over-carve)
+    const area = field.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    expect(area).toBeGreaterThan(0.8 * 6 * 4)
+    expect(area).toBeLessThan(6 * 4)
+  })
+
+  test('the 6-mil vapor retarder mirrors the field 1:1 directly UNDER it (R506.2.3)', () => {
+    expect(membrane.length).toBe(field.length)
+    const fieldArea = field.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    const memArea = membrane.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    expect(memArea).toBeCloseTo(fieldArea, 6)
+    for (const m of membrane) {
+      expect(m.material).toBe('pvc')
+      expect(m.dims[1]).toBeCloseTo(inches(0.006), 9) // 6 mil
+      // membrane top == slab bottom
+      expect((m.position[1] ?? 0) + m.dims[1] / 2).toBeCloseTo(-inches(3.5), 6)
+      expect(m.label).toContain('R506.2.3')
+    }
+  })
+
+  test('holes are CARVED: no strip crosses a stair/utility opening', () => {
+    const holed = {
+      ...rectSlab,
+      holes: [
+        [
+          [2, 1],
+          [3.2, 1],
+          [3.2, 2.6],
+          [2, 2.6],
+        ],
+      ],
+    }
+    const holedMembers = buildFoundation(perimeter, [holed as never])
+    const holedField = [
+      ...byRole(holedMembers, 'slab'),
+      ...byRole(holedMembers, 'vapor-retarder'),
+    ]
+    expect(byRole(holedMembers, 'slab').length).toBeGreaterThan(0)
+    for (const m of holedField) {
+      const [hx, hz] = [m.dims[0] / 2, m.dims[2] / 2]
+      const overlapX =
+        Math.min((m.position[0] ?? 0) + hx, 3.2) - Math.max((m.position[0] ?? 0) - hx, 2)
+      const overlapZ =
+        Math.min((m.position[2] ?? 0) + hz, 2.6) - Math.max((m.position[2] ?? 0) - hz, 1)
+      expect(Math.min(overlapX, overlapZ)).toBeLessThanOrEqual(1e-6)
+    }
+    // and the carved field books LESS than the unholed one
+    const holedArea = byRole(holedMembers, 'slab').reduce(
+      (sum, m) => sum + m.dims[0] * m.dims[2],
+      0,
+    )
+    const fullArea = field.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    expect(holedArea).toBeLessThan(fullArea - 1.2 * 1.6 + 0.2)
+  })
+
+  test('an interior bearing wall interrupts the field at its thickened footing', () => {
+    const bearing = makeWall({ id: 'w_bear', start: [3, 0], end: [3, 4], exterior: false })
+    const withBearing = buildFoundation([...perimeter, bearing], [rectSlab as never])
+    const footHalf = DEFAULT_SPEC.footingWidth / 2
+    // The thickened footing tee-retreats off the exterior runs, so test
+    // against its ACTUAL emitted extent (a sliver of field legitimately
+    // pours between the stemwall face and the retreated footing end).
+    const foot = byRole(withBearing, 'footing').find((m) => m.sourceId === 'w_bear')
+    expect(foot).toBeDefined()
+    const footZ: [number, number] = [
+      (foot?.position[2] ?? 0) - (foot?.dims[0] ?? 0) / 2,
+      (foot?.position[2] ?? 0) + (foot?.dims[0] ?? 0) / 2,
+    ]
+    let interrupted = 0
+    for (const m of byRole(withBearing, 'slab')) {
+      const [lo, hi] = [(m.position[0] ?? 0) - m.dims[0] / 2, (m.position[0] ?? 0) + m.dims[0] / 2]
+      const [zLo, zHi] = [(m.position[2] ?? 0) - m.dims[2] / 2, (m.position[2] ?? 0) + m.dims[2] / 2]
+      // strips inside the footing's z-extent must clear the x = 3 band
+      if (zLo >= footZ[0] - 1e-6 && zHi <= footZ[1] + 1e-6) {
+        expect(lo >= 3 + footHalf - 1e-6 || hi <= 3 - footHalf + 1e-6).toBe(true)
+        interrupted++
+      }
+    }
+    expect(interrupted).toBeGreaterThan(0) // non-vacuous
+  })
+
+  test('no slabs → no field, no membrane (hasSlab is live code again)', () => {
+    const bare = buildFoundation(perimeter, [])
+    expect(byRole(bare, 'slab')).toHaveLength(0)
+    expect(byRole(bare, 'vapor-retarder')).toHaveLength(0)
   })
 })

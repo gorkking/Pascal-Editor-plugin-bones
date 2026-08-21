@@ -98,6 +98,11 @@ const LEN_EPS_FT = 1e-4
 const M3_TO_YD3 = 1.30795
 /** A 4x8 sheet covers 32 ft² = 2.9729 m². */
 const SHEET_M2 = 32 / 10.7639
+/** ft² per m² — membranes (WRB, vapor retarder) book by the square foot. */
+const SQFT = 1 / 0.09290304
+/** R506.2.3 vapor retarder buys +10% over the field area: strip-seam laps
+ * and stemwall turn-ups (stated on the row so the estimate is auditable). */
+const VAPOR_LAP_FACTOR = 1.1
 /** Grout per filled 8" CMU cell (~0.3 ft³ with the core deducted). */
 const GROUT_M3_PER_CELL = 0.0085
 /** Mortar: one 80-lb Type S bag lays ~20 blocks (supplier rule of thumb). */
@@ -381,13 +386,18 @@ export function computeTakeoff(
   }
 
   // ---- CONCRETE + MASONRY per system ----
-  // Foundation pours split by ELEMENT (footing / stemwall / slab edge /
+  // Foundation pours split by ELEMENT (footing / stemwall / slab field /
   // other) so each can be ordered and formed separately; other systems'
   // pours (CMU lintels, bond beams) stay pooled per section.
+  // NOTE: the old 'slab-edge' → 'slab edge' mapping is GONE with its role —
+  // no engine ever emitted it (the stemwall detail replaced the turned-down
+  // edge, round-10), so it mapped a pour nothing built (LOD-400 audit B17).
+  // The slab-on-grade FIELD books here instead, derived from the real
+  // members the foundation engine now emits.
   const FOUNDATION_POUR: Partial<Record<Member['role'], string>> = {
     footing: 'footings',
     stemwall: 'stemwalls',
-    'slab-edge': 'slab edge',
+    slab: 'slab field (3-1/2" slab-on-grade, R506.1)',
   }
   const concretePours = new Map<string, { section: string; detail: string; m3: number }>()
   let blockCount = 0
@@ -422,6 +432,22 @@ export function computeTakeoff(
     // Ready-mix trucks batch to 0.1 yd³; never show a real pour as 0.0.
     push(pour.section, 'Concrete', pour.detail, Math.max(0.1, round1(pour.m3 * M3_TO_YD3)), 'yd³')
   }
+  // ---- vapor retarder (B17): booked from the membrane MEMBERS (S4) ----
+  // Plan area (dims run × width — the strips mirror the slab field 1:1) at
+  // the stated lap factor. Member-derived like every other booked row:
+  // no members, no row.
+  const vaporM2 = members
+    .filter((m) => m.role === 'vapor-retarder')
+    .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+  if (vaporM2 > 0) {
+    push(
+      'Foundation',
+      'Vapor retarder 6-mil poly',
+      'under slab, +10% seam laps/turn-ups (R506.2.3)',
+      round1(vaporM2 * VAPOR_LAP_FACTOR * SQFT),
+      'sqft',
+    )
+  }
   if (condenserPads > 0) {
     push('HVAC', 'Condenser pads', '4" concrete equipment pad (IRC M1403)', condenserPads, 'pcs')
   }
@@ -452,7 +478,6 @@ export function computeTakeoff(
   // label prefix ('batt R-13') is the grouping key, so two walls at
   // different R values buy on separate rows.
   const layerTallies = new Map<string, { item: string; sqft: number; detail: string }>()
-  const SQFT = 1 / 0.09290304
   for (const m of members) {
     if (
       m.role !== 'drywall' &&

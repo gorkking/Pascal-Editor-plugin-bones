@@ -4,6 +4,7 @@ import { feet } from '../core/units'
 import type { LumberSize } from '../lumber'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { WallSlice } from '../core/types'
+import { buildFoundation } from './foundation'
 import { frameWall, frameWalls } from './wall-framing'
 import { computeTakeoff, takeoffCsv, takeoffMarkdown, type TakeoffRow } from './takeoff'
 
@@ -264,19 +265,20 @@ describe('concrete', () => {
     })
   })
 
-  test('foundation pours split by ELEMENT: footing / stemwall / slab edge', () => {
+  test('foundation pours split by ELEMENT: footing / stemwall / slab field', () => {
+    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1)'
     const rows = computeTakeoff(
       [
         concrete([2, 0.5, 1]), // footing, 1 m³
         concrete([2, 0.4, 0.5], { role: 'stemwall' }), // 0.4 m³
-        concrete([2, 0.3, 0.3], { role: 'slab-edge' }), // 0.18 m³
+        concrete([2, 0.0889, 1], { role: 'slab' }), // 0.1778 m³ slab-field strip (B17)
       ],
       [],
     )
     expect(find(rows, 'Concrete', 'footings')?.quantity).toBeCloseTo(1.3, 5)
     expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBeCloseTo(0.5, 5)
-    expect(find(rows, 'Concrete', 'slab edge')?.quantity).toBeCloseTo(0.2, 5)
-    for (const detail of ['footings', 'stemwalls', 'slab edge']) {
+    expect(find(rows, 'Concrete', SLAB_DETAIL)?.quantity).toBeCloseTo(0.2, 5)
+    for (const detail of ['footings', 'stemwalls', SLAB_DETAIL]) {
       expect(find(rows, 'Concrete', detail)?.section).toBe('Foundation')
     }
   })
@@ -306,6 +308,100 @@ describe('concrete', () => {
   test('a real but tiny pour never rounds to 0.0 yd³', () => {
     const rows = computeTakeoff([concrete([0.3, 0.19, 0.19], { role: 'lintel' })], [])
     expect(find(rows, 'Concrete')?.quantity).toBe(0.1)
+  })
+})
+
+describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)', () => {
+  const makeWall = (id: string, start: [number, number], end: [number, number]): WallSlice => {
+    const dx = end[0] - start[0]
+    const dz = end[1] - start[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start,
+      end,
+      length,
+      dir: [dx / length, dz / length],
+      thickness: 0.15,
+      height: 2.5,
+      exterior: true,
+      openings: [],
+      curved: false,
+    }
+  }
+  const walls = [
+    makeWall('w_s', [0, 0], [8, 0]),
+    makeWall('w_e', [8, 0], [8, 5]),
+    makeWall('w_n', [8, 5], [0, 5]),
+    makeWall('w_w', [0, 5], [0, 0]),
+  ]
+  const slab = {
+    id: 'slab_b17',
+    polygon: [
+      [0, 0],
+      [8, 0],
+      [8, 5],
+      [0, 5],
+    ],
+    holes: [],
+    elevation: 0.05,
+    thickness: 0.1,
+  }
+  const members = buildFoundation(walls, [slab as never], DEFAULT_SPEC)
+  const rows = computeTakeoff(members, [])
+  const M3_TO_YD3 = 1.30795
+  const SQFT = 1 / 0.09290304
+  const round1 = (n: number) => Math.round(n * 10) / 10
+
+  test('the slab-field yd³ row derives from the MEMBERS, exactly', () => {
+    const vol = members
+      .filter((m) => m.role === 'slab')
+      .reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
+    expect(vol).toBeGreaterThan(0)
+    const row = find(rows, 'Concrete', 'slab field (3-1/2" slab-on-grade, R506.1)')
+    expect(row?.section).toBe('Foundation')
+    expect(row?.unit).toBe('yd³')
+    expect(row?.quantity).toBe(Math.max(0.1, round1(vol * M3_TO_YD3)))
+  })
+
+  test('the vapor-retarder sqft row = member plan area × the STATED +10% lap factor', () => {
+    const area = members
+      .filter((m) => m.role === 'vapor-retarder')
+      .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    expect(area).toBeGreaterThan(0)
+    const row = find(rows, 'Vapor retarder 6-mil poly')
+    expect(row?.section).toBe('Foundation')
+    expect(row?.unit).toBe('sqft')
+    expect(row?.detail).toContain('+10%')
+    expect(row?.detail).toContain('R506.2.3')
+    expect(row?.quantity).toBe(round1(area * 1.1 * SQFT))
+    // and the membrane mirrors the slab field's plan area 1:1 (S4)
+    const slabArea = members
+      .filter((m) => m.role === 'slab')
+      .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    expect(area).toBeCloseTo(slabArea, 6)
+  })
+
+  test('footings + stemwalls rows keep their own member-derived pours, unchanged', () => {
+    const volOf = (role: string) =>
+      members
+        .filter((m) => m.role === role)
+        .reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
+    expect(find(rows, 'Concrete', 'footings')?.quantity).toBe(
+      Math.max(0.1, round1(volOf('footing') * M3_TO_YD3)),
+    )
+    expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBe(
+      Math.max(0.1, round1(volOf('stemwall') * M3_TO_YD3)),
+    )
+  })
+
+  test('no membrane members → no vapor row (member-derived, never assumed)', () => {
+    const bare = computeTakeoff(
+      members.filter((m) => m.role !== 'vapor-retarder' && m.role !== 'slab'),
+      [],
+    )
+    expect(find(bare, 'Vapor retarder 6-mil poly')).toBeUndefined()
+    expect(find(bare, 'Concrete', 'slab field (3-1/2" slab-on-grade, R506.1)')).toBeUndefined()
   })
 })
 
