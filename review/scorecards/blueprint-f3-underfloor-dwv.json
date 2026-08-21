@@ -204,5 +204,78 @@
       "Queue an HVAC paper round for upper-storey condenser placement (pad/cabinet on a second-floor plan + below-floor-line cabinet on elevations) and the carried GRADE-datum advisory — pre-existing, not F3's."
     ],
     "shipStamp": "PASS — all three round-1 FAILs verified dead ON PIXELS across four scenes (two-row note inside its box everywhere; the 0.0 px arrow-under-bubble exhibit resolves to 15.7 px with the glyph still on its pipe, drops only where genuinely crowded and never the sewer arrow; SEWER/SEPTIC (P3005.4) legible at every ground-storey exit and correctly SUPPRESSED on the upper storey whose riser flag prints verbatim), the round-1 FLAG closed (buried == dashed on every elevation/section/cover, above-floor supply solid, counts exact), and the commit is provably paper-only (members/fixtures/takeoff byte-equal pin↔base; diffs exactly cover/MEP/elevations/section). 967/1/0 suite + tsc clean. Merge-order caveat: re-look at MEP after F1 lands."
+  },
+  "round3": {
+    "round": "F3-underfloor-dwv-r3 (light paper check on the skeptic-round-2 engine fixes: stack jog + per-crossing sleeves + corner-drop clamp)",
+    "pin": "331de783321db06715d6990fa314e8ecc73a8f23",
+    "branch": "feat/underfloor-dwv",
+    "base": "21168c0 (round-2 examiner pin — pin vs base isolates the skeptic fix commit)",
+    "protocol": "Round-3 light paper check per review/BLUEPRINTS.md. Pure buildPlanSet in a detached scratch worktree at the pin (/private/tmp/bones-f3r3) + the base worktree at 21168c0, FIXED date 08/20/2026. FOUR sets each side: demo-house-FL (fc866f2f271b over HTTP, 14 sheets), multibath-NY (round-2 regression scene, 12 sheets), NEW corner-powder-NY (skeptic R2 scene: SW powder room, exit forced west), NEW courtyard-NY (skeptic R3 scene: U-plan, kitchen branch across both courtyard stemwalls — the repo gate's own geometry). 50 pin sheets rasterized with Playwright page.setContent @2x (editor never opened) + 6x zoom crops of every wet core, the courtyard exit and the section/elevation stack bases; forensics recomputed independently of the drawing code: per-leg concrete-crossing recount vs sleeve labels, arrow census vs eligibility, dashed-vs-buried counts per sheet, drawn-vs-booked lf per size, member field-diff pin-vs-base; scratch SAT probes at pin AND base for the drop classes. Evidence in /tmp/bp-f3-r3-verify/ (+ /tmp/bp-f3r2base-verify/).",
+    "verdict": "REVISE",
+    "suite": {
+      "pass": 972,
+      "todo": 1,
+      "fail": 0,
+      "tests": 973,
+      "assertions": 31092,
+      "files": 42,
+      "tsc": "clean"
+    },
+    "items": {
+      "SWEEP-invariants": {
+        "status": "PASS",
+        "checklist": ["E1-E5", "S1-S11", "M1", "M2", "P1-P5", "A1-A4"],
+        "evidence": "bun test at 331de78: 972 pass / 1 todo / 0 fail (973 tests, 42 files, 31,092 expect() calls); bunx tsc --noEmit clean. The fix commit's gates present and green: stackToTreeGap <= ATTACH_TOL pins + jog-removal sensitivity (0.300 m gap reopens), corner-powder-room repro (frost, exit west — X-leg sleeved, SAT-clean), courtyard repro (kitchen branch sleeved through BOTH stemwalls), sleeveNoteFor sensitivity. master-baseline.json regenerated inside the same commit (E5 byte-equality re-keyed to the new plumbing output). No gated row regressed.",
+        "note": "968 -> 973 tests across the skeptic commit. S1's known-residual enumeration does not yet name the placed-path drop x interior-footing class (see ADVISORIES 2)."
+      },
+      "FOCUS-1-stack-jog-on-MEP": {
+        "status": "PASS",
+        "checklist": ["P3", "P1", "P5"],
+        "evidence": "The new dwv-stack-base floor-line jog (0.30 m, 1/4 in/ft fall — rz 0.0208, top 0.113 / bottom 0.037 m, clear of the 3/4 in deck band) prints in slate on all four MEP sheets WITHOUT cluttering the wet core: at 1:100/1:75 it is an 11 px leg riding the stack line (viewed at 6x on demo + multibath — invisible as separate ink under the CO bubble, exactly right for a 0.3 m fitting); at 1:50 the corner-powder wet core shows the jog and the sleeved-drop junction square cleanly beside the de-collided SO/CO/SO/SO row. Arrows unaffected: the jog stays under the 18 px glyph floor at 1:100/1:75 so no arrow minted; drawn arrow census unchanged vs recomputed eligibility (demo 3, multibath 4, powder 3, courtyard 1), every drawn arrow downstream-true (mains at the exits, powder junction arrow onto the drop). Stack reconnection engine-proven on all four sets (round-2's R1 regression closed: without the jog the stack-to-tree gap re-measures 0.300 m).",
+        "note": "The jog + lengthened drop are the ONLY demo/multibath member deltas (+2/-1 each, field-diff) — minimal blast radius on the already-PASSed scenes."
+      },
+      "FOCUS-2-sleeve-wording-on-paper": {
+        "status": "FAIL",
+        "checklist": ["P4", "C1"],
+        "evidence": "ENGINE TRUTH VERIFIED — sleeve labels now sit exactly on the concrete-CROSSING legs, 1:1 with an independent crossing recount on all four sets: corner-powder main X-leg 'sleeved through foundation wall (P2603.4)' crossing w_w (at base the sleeve sat on the EXIT leg and this leg was bare), courtyard kitchen branch sleeved crossing BOTH u_c1+u_c2 (bare at base), multibath main through w_s, exit legs bare. BUT NO SLEEVE INK REACHES PAPER: grep 'sleeve|P2603' across all 50 pin sheets = 0 hits; src/plans has zero sleeve awareness (plan-set never typesets member labels — the round-1 FOCUS-3 class exactly). On the corner-powder MEP sheet the 3 in main visibly crosses the west foundation wall band with no callout; same for both courtyard stemwall crossings. A plans examiner reviewing a LOD-400 set sees foundation-crossing drains with no sleeve detail anywhere.",
+        "note": "The engine now carries per-crossing truth, so printing it is cheap: stamp a halo'd 'SLEEVE (P2603.4)' tick at each crossing on the MEP sheet, keyed off the member label the way the E3 SEWER marker keys off the cleanout fixture — plus a grep gate on the two compose scenes."
+      },
+      "FOCUS-3-jog-drop-dash-convention": {
+        "status": "PASS",
+        "checklist": ["P3", "P2"],
+        "evidence": "dashed plumbing lines == buried members EXACTLY on every elevation of every set (demo 7/7 x4, multibath 14/14 x4, powder 6/6 x4, courtyard 4/4 x4) and the sections stay consistent (multibath 12 dashed in the cut band). Viewed at 6x on the multibath section + south elevation: the jog prints SOLID above the floor line (top 0.113 > grade — correct, it is not hidden work), the floor-spanning stack drop prints solid over its whole length (the documented round-2 member-granularity convention), buried trap drops and the falling main print dashed, threading the dashed stemwall hatch; the coaxial shower drop reads as dashes overlaying the solid stack-drop projection (consistent, see ADVISORIES 1).",
+        "note": "Round-2's FIX-FLAG machinery needed no change for the jog — the top-below-floor predicate classifies it right by construction."
+      },
+      "FOCUS-4-courtyard-exit-marker": {
+        "status": "FAIL",
+        "checklist": ["P4"],
+        "evidence": "The NEW courtyard scene (east-wall exit beside the condenser pad) exposes two holes in the round-2 E3 marker machinery, both verified on pixels and in the SVG: (a) the halo'd bold 'SEWER/SEPTIC (P3005.4)' starts at x=990.6 with ~106 px of text against viewBox width 1056 — ~40 px run OFF THE SHEET, the raster shows 'SEWER/SEPTIC (' clipped mid-word at the frame; (b) the marker glyph prints at (978.6, 468.0) with the nearest SO bubble center 3.0 px away — the glyph overprints the bubble almost concentrically (the marker has neither the edge-awareness nor the bubble de-collision the round-2 ARROWS got). Compounding: the courtyard main's own 45 px arrow — the only flow glyph that would point at this exit — is dropped as crowded at the same cluster, so the clipped marker is the exit's only signal.",
+        "note": "Not a regression of a round-2 exhibit (their four scenes had no east-pointing exit near the right frame) but a P4 checklist violation on this round's sanctioned scene. Fix: anchor-flip ('end') or slide the marker text when its rect exceeds the frame, and register the glyph in the bubbles' placed list; gate pins an east-exit scene."
+      },
+      "REG-round-2-fixes-hold": {
+        "status": "PASS",
+        "checklist": ["P4", "P2", "P1", "P3"],
+        "evidence": "All four round-2 fixes re-verified at the pin: (1) the TWO-ROW slope note prints inside the 250 px legend box on all four MEP sheets, zero contact with drawing linework; (2) arrows draw after bubbles and slide — drawn == eligible minus designed crowded drops on every set, the multibath main's arrow still clear of the register bubbles (viewed), all angles downstream-true; (3) the SEWER/SEPTIC marker prints legibly on demo (halo over the condenser-pad linework), multibath (bare paper) and powder (bare paper) — the courtyard failure is a new-scene hole, not a regression; (4) buried == dashed exact everywhere (FOCUS-3). Flag blocks verbatim: demo's 5 warnings + compressed member-flags print on schedules 3/3, the slab-on-grade pointer prints on every compose.",
+        "note": "Two CO bubbles + DS/CU cluster over the demo pad unchanged from round 2 (legible)."
+      },
+      "REG-takeoff-blast-radius": {
+        "status": "PASS",
+        "checklist": ["S4", "C5", "E3", "A3"],
+        "evidence": "Drawn-vs-booked EXACT per size on all four sets (demo PVC 3in 32.5 / 1.5in 74.1 lf; multibath 29.1/47.1/70.1; powder 21.4/1.5/3.7; courtyard 18.9/39.7/50.2 — booked rows equal summed member lengths to 0.1 lf); cleanouts 2 drawn == 2 booked everywhere; stub-outs 2/8/3/4 match the wet rooms. Member field-diff pin-vs-base: NON-PLUMBING DIFFS ZERO on all four sets — demo +2/-1 (jog + relengthened drop), multibath +2/-1, powder +18/-17 (clamped drops + supply stubs following them + the sleeve label swap main-exit->main-crossing), courtyard +11/-12 (jog, branch sleeve label, bath drops re-anchored). Electrical, foundation, framing, roof sheets and their legends untouched by construction.",
+        "note": "Takeoff deltas vs base are exactly the geometry deltas (demo 3in 31.2->32.5 lf == jog+drop; powder 1.5in 4.4->3.7 == shortened clamped arms)."
+      },
+      "ADVISORIES": {
+        "status": "FLAG",
+        "evidence": "(1) COAXIAL DROP COLLAPSE (skeptic queue, new-at-pin on gap scenes): fallbackStubs' clampOffset returns 0 for EVERY stub when the inboard drop band lies outside the room polygon (a zone that never reaches its boundary wall — the repo's own R3 courtyard gate geometry): the courtyard bath books FOUR coaxial verticals at (11.70, 4.00) — 3in toilet + 2in shower + 1.5in lav + 3in stack drop, y-overlap -0.688..0 — an S1-class member-in-member no gate tests (the drainage SAT suites test drains vs STRUCTURE only); paper stays legible only because bubble de-collision spreads the coincident SO tags. Pre-existing sibling AT BASE (not a regression, double-draws + double-books the shared span): the stack drop is exactly coaxial with the nearest fallback drop on powder (0.50,0.30) and multibath (6.00,2.30). Fix candidates: splay degenerate stubs by pipe diameters, clamp to the nearest polygon point, or emit one shared drop; add a plumbing-x-plumbing SAT scenario. (2) PLACED-PATH DROP RESIDUALS (pre-existing, base-parity proven by scratch probes at 21168c0): a placed toilet 0.22 m off an interior bearing wall centerline puts its 3in trap drop THROUGH the 12in thickened footing (SAT hit, unsleeved, unflagged); a corner-flush placed lav (0.08 m off the wall) drops inside the stemwall band. The pin strictly SHRINKS the class (the lav scene: 4 clashes at base -> 1 at pin) but S1's residual list should name it; drops near concrete want the bolt-style layout nudge or a flag. (3) The courtyard main's sewer-pointing arrow drops as crowded at the pad cluster — per design, but fold into the FOCUS-4 fix so the exit keeps at least one uncovered signal. (4) LOD-200 not re-rasterized this light round (engine delta is detail-agnostic; rounds 1-2 covered it) — spot it in the fix-check. (5) Round-2 carried advisories unchanged: upper-storey 'ARROWS POINT DOWNSTREAM' note wording, the flow-arrow legend swatch row, the F1-merge MEP re-look.",
+        "note": "None of these blocks alone; (1) deserves the skeptic's next round since the collapse geometry ships inside the repo's own gate scene."
+      }
+    },
+    "recommendations": [
+      "Print the per-crossing sleeve truth: a halo'd 'SLEEVE (P2603.4)' tick/text at each concrete crossing on the MEP sheet, keyed off the member label like the SEWER marker (de-collided like circuit labels); gate greps the corner-powder + courtyard MEP sheets (FOCUS-2).",
+      "Give the E3 marker edge- and bubble-awareness: flip text-anchor / slide the anchor when the text rect exceeds the sheet frame, and register the glyph rect in the shared placed list; gate pins an east-wall exit beside a fixture cluster (FOCUS-4 — today: ~40 px of 'SEWER/SEPTIC (P3005.4)' off-paper, glyph 3.0 px from an SO bubble center).",
+      "Skeptic round: de-collapse coincident fallback stubs when clampOffset degenerates to 0 (splay or nearest-polygon-point) and add a plumbing-x-plumbing SAT scenario on the courtyard gate scene; enumerate or nudge the placed-path trap-drop x interior-footing / flush-corner stemwall class (pre-existing, probes on file).",
+      "Fix-check should re-rasterize the LOD-200 demo set alongside the two paper fixes; keep the F1-merge MEP re-look queued."
+    ],
+    "shipStamp": "REVISE — the skeptic commit's engine story verifies end-to-end (jog reconnects the stack on every set with the 0.300 m sensitivity proof; sleeve labels 1:1 with an independent concrete-crossing recount, crossings sleeved and exit legs bare; drops clamped clear of the powder stemwalls; blast radius exactly plumbing; takeoff conserved to 0.1 lf; 972/1/0 suite + tsc clean; all four round-2 paper fixes hold on pixels), but two paper defects block: the per-crossing sleeve truth never reaches ANY sheet (0 hits across 50 sheets — foundation-crossing drains print bare, the round-1 FOCUS-3 class again), and the new courtyard scene clips the SEWER/SEPTIC marker mid-word at the sheet frame while its glyph overprints an SO bubble at 3.0 px. Both fixes are plan-set-only; the DWV engine needs no further change for paper."
   }
 }
