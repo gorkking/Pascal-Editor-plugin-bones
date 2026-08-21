@@ -39,7 +39,7 @@ import {
 } from '../engines/electrical'
 import { deriveWallDevices, type DerivedDevice } from '../device/derive'
 import { extractDeviceOverrides } from '../device/overrides'
-import { layoutHvac } from '../engines/hvac'
+import { flagLinesetTradeCrossings, layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
@@ -851,6 +851,13 @@ function computeLevelUncached(
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
     warnings.push(...hvac.warnings)
+    // Cross-trade coordination (post-merge seam round): the line-set pair
+    // rides a lateral off the plumbing plane, but a 3" DWV stack is wider
+    // than the wall cavity lets it dodge and thin-wall runs clamp back onto
+    // the shared plane — any residual crossing gets a coordinate-trades
+    // flag on the member, never a silent bore (M2). Plumbing landed its
+    // members earlier in this pass, so the scan sees both trades.
+    if (config.showPlumbing) flagLinesetTradeCrossings(members)
     // Thermostat override parity: same RO warning the panel/WH/water-entry
     // overrides get — the tstat mounts verbatim, never silently in a window.
     const tstatFx = hvac.fixtures.find((f) => f.kind === 'thermostat')

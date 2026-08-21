@@ -2,7 +2,15 @@ import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import { PLUMBING_COLORS, plumbingPipeColor } from '../plans/circuit-colors'
-import { LINESET_PAIR_OFFSET, layoutHvac } from './hvac'
+import type { PlacedFixtureSlice } from '../core/wall-model'
+import {
+  LINESET_LATERAL,
+  LINESET_PAIR_OFFSET,
+  flagLinesetTradeCrossings,
+  layoutHvac,
+} from './hvac'
+import { layoutPlumbing } from './plumbing'
+import { computeTakeoff } from './takeoff'
 
 /**
  * GATES (line-set round — "piped to the exchanger along a sensible path"):
@@ -30,6 +38,7 @@ function wall(
   end: [number, number],
   exterior = false,
   openings: OpeningSlice[] = [],
+  thickness = 0.2,
 ): WallSlice {
   const dx = end[0] - start[0]
   const dz = end[1] - start[1]
@@ -40,7 +49,7 @@ function wall(
     end,
     length,
     dir: [dx / length, dz / length],
-    thickness: 0.2,
+    thickness,
     height: 2.7,
     exterior,
     openings,
@@ -57,12 +66,12 @@ function room(
   return { id, name, category, polygon, boundaryWallIds: [], ceilingHeight: 2.5 }
 }
 
-function shell(W: number, D: number, southOpenings: OpeningSlice[] = []) {
+function shell(W: number, D: number, southOpenings: OpeningSlice[] = [], thickness = 0.2) {
   const walls = [
-    wall('w_south', [0, 0], [W, 0], true, southOpenings),
-    wall('w_north', [0, D], [W, D], true),
-    wall('w_west', [0, 0], [0, D], true),
-    wall('w_east', [W, 0], [W, D], true),
+    wall('w_south', [0, 0], [W, 0], true, southOpenings, thickness),
+    wall('w_north', [0, D], [W, D], true, [], thickness),
+    wall('w_west', [0, 0], [0, D], true, [], thickness),
+    wall('w_east', [W, 0], [W, D], true, [], thickness),
   ]
   const rooms = [
     room('r_laundry', 'Laundry', 'laundry', [[0, 0], [3, 0], [3, 3], [0, 3]]),
@@ -404,12 +413,19 @@ describe('line-set pair parallelism — non-vacuous over E1 detours', () => {
     // its risers live near x = 0 …
     const vertical = (m: Member) => m.rotation[1] === 0 && m.dims[1] === m.length
     const westRisers = [...suction, ...liquid].filter(
-      (m) => vertical(m) && Math.abs(m.position[0]) < 0.05,
+      (m) => vertical(m) && Math.abs(m.position[0]) < 0.08,
     )
     expect(westRisers.length).toBeGreaterThanOrEqual(2)
-    // … rolled ACROSS the wall (x = ±offset), never left ON the centerline
+    // … rolled ACROSS the wall around the cross-trade LATERAL plane
+    // (x = ±(lateral ± offset)) — never left ON the plumbing centerline
     for (const r of westRisers) {
-      expect(Math.abs(Math.abs(r.position[0]) - LINESET_PAIR_OFFSET)).toBeLessThan(1e-9)
+      const across = Math.abs(r.position[0])
+      const onPair = [
+        LINESET_LATERAL - LINESET_PAIR_OFFSET,
+        LINESET_LATERAL + LINESET_PAIR_OFFSET,
+      ].some((v) => Math.abs(across - v) < 1e-9)
+      expect(onPair).toBe(true)
+      expect(across).toBeGreaterThan(0.005)
     }
     expect(pairHits(suction, liquid)).toBe(0)
   })
@@ -454,15 +470,18 @@ describe('line-set pair parallelism — non-vacuous over E1 detours', () => {
     // exactly one wall and NEVER drops at the junction
     const risers = [...suction, ...liquid].filter(vertical)
     expect(risers.length).toBeGreaterThan(0)
+    const acrossBand = LINESET_LATERAL + LINESET_PAIR_OFFSET + 1e-9
+    const onPairPlane = (v: number): boolean =>
+      [LINESET_LATERAL - LINESET_PAIR_OFFSET, LINESET_LATERAL + LINESET_PAIR_OFFSET].some(
+        (o) => Math.abs(Math.abs(v) - o) < 1e-9,
+      )
     for (const r of risers) {
-      const xRoll = Math.abs(Math.abs(r.position[0]) - LINESET_PAIR_OFFSET) < 1e-9
-      const zRoll = Math.abs(Math.abs(r.position[2]) - LINESET_PAIR_OFFSET) < 1e-9
-      const onWest = Math.abs(r.position[0]) <= LINESET_PAIR_OFFSET + 1e-9
-      const onSouth = Math.abs(r.position[2]) <= LINESET_PAIR_OFFSET + 1e-9
+      const onWest = Math.abs(r.position[0]) <= acrossBand // wall axis Z
+      const onSouth = Math.abs(r.position[2]) <= acrossBand // wall axis X
       // never at the junction itself (that riser pair must have canceled)
       expect(onWest && onSouth).toBe(false)
-      if (onWest) expect(xRoll).toBe(true) // Z-wall → X-roll
-      if (onSouth) expect(zRoll).toBe(true) // X-wall → Z-roll
+      if (onWest) expect(onPairPlane(r.position[0])).toBe(true) // Z-wall → X-roll
+      if (onSouth) expect(onPairPlane(r.position[2])).toBe(true) // X-wall → Z-roll
     }
     // no byte-identical duplicates within a pipe (unique position|dims)
     for (const legs of [suction, liquid]) {
@@ -614,5 +633,441 @@ describe('line-set colors', () => {
     // whips and condensate never inherit pipe colors
     expect(plumbingPipeColor('ac-whip-1')).toBeNull()
     expect(plumbingPipeColor('r_laundry')).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 7. Cross-trade — the pair never silently shares the plumbing plane
+// (post-merge seam round: 24 OBB hits — both pipes through the 3" DWV
+// stack + 22 supply-riser hits at the wall centerline)
+// ---------------------------------------------------------------------------
+
+type V3 = [number, number, number]
+const dot = (a: V3, b: V3): number => a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+const cross = (a: V3, b: V3): V3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+]
+
+/** Local axes (columns of Rx·Ry·Rz — the repo's member euler) in world. */
+function memberAxes(m: Member): [V3, V3, V3] {
+  const [rx, ry, rz] = m.rotation
+  const cx = Math.cos(rx)
+  const sx = Math.sin(rx)
+  const cy = Math.cos(ry)
+  const sy = Math.sin(ry)
+  const cz = Math.cos(rz)
+  const sz = Math.sin(rz)
+  return [
+    [cy * cz, cx * sz + sx * sy * cz, sx * sz - cx * sy * cz],
+    [-cy * sz, cx * cz - sx * sy * sz, sx * cz + cx * sy * sz],
+    [sy, -sx * cy, cx * cy],
+  ]
+}
+
+/** Full 15-axis OBB SAT with the repo's 2 mm skin — INDEPENDENT of the
+ * engine's own sampled detector (a gate must not trust the code it gates). */
+function obbHit(a: Member, b: Member, skin = 0.002): boolean {
+  const A = memberAxes(a)
+  const B = memberAxes(b)
+  const ea: V3 = [a.dims[0] / 2, a.dims[1] / 2, a.dims[2] / 2]
+  const eb: V3 = [b.dims[0] / 2, b.dims[1] / 2, b.dims[2] / 2]
+  const d: V3 = [
+    b.position[0] - a.position[0],
+    b.position[1] - a.position[1],
+    b.position[2] - a.position[2],
+  ]
+  const axes: V3[] = [...A, ...B]
+  for (const ai of A) {
+    for (const bj of B) {
+      const c = cross(ai, bj)
+      const n = Math.hypot(c[0], c[1], c[2])
+      if (n > 1e-9) axes.push([c[0] / n, c[1] / n, c[2] / n])
+    }
+  }
+  for (const ax of axes) {
+    const ra =
+      ea[0] * Math.abs(dot(ax, A[0])) +
+      ea[1] * Math.abs(dot(ax, A[1])) +
+      ea[2] * Math.abs(dot(ax, A[2]))
+    const rb =
+      eb[0] * Math.abs(dot(ax, B[0])) +
+      eb[1] * Math.abs(dot(ax, B[1])) +
+      eb[2] * Math.abs(dot(ax, B[2]))
+    if (Math.abs(dot(ax, d)) > ra + rb - skin) return false
+  }
+  return true
+}
+
+const pf = (
+  id: string,
+  kind: PlacedFixtureSlice['kind'],
+  plan: [number, number],
+): PlacedFixtureSlice => ({
+  id,
+  kind,
+  plan,
+  yaw: 0,
+  hot: kind !== 'toilet',
+  dfu: kind === 'toilet' ? 3 : kind === 'lavatory' ? 1 : 2,
+  drainIn: kind === 'toilet' ? 3 : kind === 'lavatory' ? 1.25 : 2,
+})
+
+describe('cross-trade — line-set vs the plumbing plane', () => {
+  test('both-systems-hot compose: the lateral clears the supply plane; the stack crossing is FLAGGED, never silent', () => {
+    const { walls, rooms } = shell(26, 10)
+    // Wet program anchoring the SAME south wall the line-set runs along
+    // (the seam-round compose: bathroom + kitchen + laundry placed).
+    const placed = [
+      pf('wc', 'toilet', [5.2, 0.6]),
+      pf('lav', 'lavatory', [6.0, 0.6]),
+      pf('sink', 'kitchen-sink', [8.0, 0.6]),
+      pf('washer', 'clothes-washer', [1.0, 4.0]),
+    ]
+    const plumbing = layoutPlumbing(walls, rooms, LOD400, placed)
+    const hvac = layoutHvac(
+      walls, rooms, LOD400,
+      { heatPump: { position: [11.5, 0, -0.75] } },
+      { stateCode: 'MN' },
+    )
+    const combined = [...plumbing.members, ...hvac.members]
+    flagLinesetTradeCrossings(combined) // exactly what compute runs
+    const lineset = combined.filter(
+      (m) => m.system === 'hvac' && m.sourceId.startsWith('lineset-'),
+    )
+    const pipes = combined.filter(
+      (m) => m.system === 'plumbing' && (m.role === 'pipe-run' || m.role === 'vent-stack'),
+    )
+    expect(lineset.length).toBeGreaterThan(0)
+    // pre-condition: the compose is genuinely hot — a DWV stack stands on
+    // the run, and supply risers cross the pair's band at the centerline
+    expect(pipes.some((m) => m.role === 'vent-stack')).toBe(true)
+    let unflaggedHits = 0
+    let stackHits = 0
+    let supplyHits = 0
+    for (const ls of lineset) {
+      for (const p of pipes) {
+        if (!obbHit(ls, p)) continue
+        if (!ls.flag) unflaggedHits++
+        if (p.role === 'vent-stack' || p.sourceId.startsWith('dwv-')) stackHits++
+        else supplyHits++
+      }
+    }
+    // THE contract: zero silent bores across trades
+    expect(unflaggedHits).toBe(0)
+    // the lateral genuinely cleared the centerline supply plane (22 hits
+    // at the seam round) — cleared, not blanket-flagged away
+    expect(supplyHits).toBe(0)
+    // the 3" stack is wider than the cavity lets the pair dodge — it IS
+    // crossed, and it says so with the coordinate-trades class
+    expect(stackHits).toBeGreaterThan(0)
+    expect(
+      lineset.some((m) => m.flag === '⚠ line-set crosses DWV stack — coordinate trades'),
+    ).toBe(true)
+    // full-thickness walls never claim the thin-wall clamp
+    expect(lineset.some((m) => m.flag?.includes('clamped in a thin wall'))).toBe(false)
+    // the pair invariants keep holding on the hot compose
+    const { suction, liquid } = expectTwinned(combined, 1)
+    expect(pairHits(suction, liquid)).toBe(0)
+  })
+
+  test('a 0.114 thin wall CLAMPS the lateral inside the wall body — and says so', () => {
+    const thin = shell(26, 10, [], 0.114)
+    const out = layoutHvac(thin.walls, thin.rooms, DEFAULT_SPEC, {
+      heatPump: { position: [8, 0, -0.7] },
+    })
+    const lineset = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+    expect(lineset.length).toBeGreaterThan(0)
+    // clamp honesty: the run says the trade clearance shrank
+    expect(lineset.some((m) => m.flag?.includes('clamped in a thin wall'))).toBe(true)
+    // geometry honesty: every in-wall leg (the south run, z near the wall)
+    // keeps its FULL section inside the 0.114 body — clamped, not poking
+    const inWall = lineset.filter(
+      (m) => Math.abs(m.position[2]) < 0.06 && m.dims[0] === m.length,
+    )
+    expect(inWall.length).toBeGreaterThan(0)
+    for (const m of inWall) {
+      expect(Math.abs(m.position[2]) + m.dims[2] / 2).toBeLessThanOrEqual(0.114 / 2 + 1e-9)
+      // …and the offset is genuinely CLAMPED below the full lateral
+      expect(Math.abs(m.position[2])).toBeLessThan(LINESET_LATERAL - 1e-9)
+      expect(Math.abs(m.position[2])).toBeGreaterThan(0.005) // still off-plane
+    }
+    // the pair invariants survive the clamp
+    const { suction, liquid } = expectTwinned(out.members, 1)
+    expect(pairHits(suction, liquid)).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 8. Closing round — F1 flag composition, F2 acute-corner miter
+// ---------------------------------------------------------------------------
+
+describe('closing round — flag composition + acute corners', () => {
+  test('F1: a LONG run boring the stack carries BOTH the length advisory AND the crossing flag (composed, never masked)', () => {
+    // 40×10, stack on the south wall, heat pump at the far end: the run is
+    // >15 m so the mfr-length advisory rides EVERY leg — the old pass
+    // skipped flagged members, so the stack bore was SILENT on paper.
+    const { walls, rooms } = shell(40, 10)
+    const placed = [pf('wc', 'toilet', [5.2, 0.6]), pf('lav', 'lavatory', [6.0, 0.6])]
+    const plumbing = layoutPlumbing(walls, rooms, LOD400, placed)
+    const hvac = layoutHvac(
+      walls, rooms, LOD400,
+      { heatPump: { position: [39, 0, -0.75] } },
+      { stateCode: 'MN' },
+    )
+    const combined = [...plumbing.members, ...hvac.members]
+    flagLinesetTradeCrossings(combined)
+    const lineset = combined.filter(
+      (m) => m.system === 'hvac' && m.sourceId.startsWith('lineset-'),
+    )
+    const pipes = combined.filter(
+      (m) => m.system === 'plumbing' && (m.role === 'pipe-run' || m.role === 'vent-stack'),
+    )
+    // pre-conditions: genuinely long + the stack IS bored
+    const suctionLen = lineset
+      .filter((m) => m.sourceId === 'lineset-suction-1')
+      .reduce((s, m) => s + m.length, 0)
+    expect(suctionLen).toBeGreaterThan(15)
+    const stack = pipes.filter((m) => m.role === 'vent-stack')
+    expect(stack.length).toBeGreaterThan(0)
+    let stackBores = 0
+    let unflaggedHits = 0
+    for (const ls of lineset) {
+      for (const p of pipes) {
+        if (!obbHit(ls, p)) continue
+        if (!ls.flag) unflaggedHits++
+        if (p.role === 'vent-stack') {
+          stackBores++
+          // COMPOSED, both classes present, ' | ' join (B1 convention)
+          expect(ls.flag).toContain('verify manufacturer max line-set length')
+          expect(ls.flag).toContain('⚠ line-set crosses DWV stack — coordinate trades')
+          expect(ls.flag).toContain(' | ')
+        }
+      }
+    }
+    expect(stackBores).toBeGreaterThan(0)
+    expect(unflaggedHits).toBe(0)
+  })
+
+  test('F2: a 150° wedge corner miters the lateral closed — chains connect, pair clean, legs stay in their walls', () => {
+    // The per-member lateral opens 2·lat·sin(Δyaw/2) at junctions — fine
+    // at 90° (< the 6 cm continuity tolerance) but 150° opened 6.8 cm and
+    // BROKE chainConnects (a regression vs the centerline route). The
+    // miter extends both legs to the shifted lines' intersection: exact
+    // closure, the fitting geometry a real pipe pair gets.
+    const walls = [
+      wall('w_a', [0, 0], [12, 0], true),
+      wall('w_b', [12, 0], [-0.12, 7.0], true),
+    ]
+    const rooms = [
+      room('r_laundry', 'Laundry', 'laundry', [[0.2, 5.2], [1.8, 5.2], [1.8, 6.6], [0.2, 6.6]]),
+      room('r_wedge', 'Wedge', 'other', [[0, 0], [12, 0], [0.5, 4.5]]),
+    ]
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [6, 0, -0.7] } })
+    const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    // oblique walls: the axis-aligned twin/AABB helpers don't apply here —
+    // pair the runs directly and SAT them with the full 15-axis obbHit
+    const suction = runOf(out.members, 'lineset-suction-1')
+    const liquid = runOf(out.members, 'lineset-liquid-1')
+    expect(suction.length).toBeGreaterThan(0)
+    expect(suction.length).toBe(liquid.length)
+    // BOTH chains close condenser → air handler (master parity restored)
+    for (const legs of [suction, liquid]) {
+      expect(
+        chainConnects(
+          legs,
+          [unit.position[0], unit.position[2]],
+          [handler.position[0], handler.position[2]],
+        ),
+      ).toBe(true)
+    }
+    // the junction itself closes EXACTLY (miter, not tolerance luck)
+    const inWallLegs = suction.filter((m) => {
+      if (!(m.dims[0] === m.length)) return false
+      const mid: [number, number] = [m.position[0], m.position[2]]
+      return walls.some((w) => {
+        const t = (mid[0] - w.start[0]) * w.dir[0] + (mid[1] - w.start[1]) * w.dir[1]
+        const q: [number, number] = [w.start[0] + w.dir[0] * t, w.start[1] + w.dir[1] * t]
+        return Math.hypot(q[0] - mid[0], q[1] - mid[1]) < 0.06
+      })
+    })
+    expect(inWallLegs.length).toBe(2)
+    const ends = (m: Member): [number, number][] => {
+      const yaw = m.rotation[1]
+      const hx = (m.dims[0] / 2) * Math.cos(yaw)
+      const hz = -(m.dims[0] / 2) * Math.sin(yaw)
+      return [
+        [m.position[0] - hx, m.position[2] - hz],
+        [m.position[0] + hx, m.position[2] + hz],
+      ]
+    }
+    let junctionGap = Number.POSITIVE_INFINITY
+    for (const a of ends(inWallLegs[0] as Member)) {
+      for (const b of ends(inWallLegs[1] as Member)) {
+        junctionGap = Math.min(junctionGap, Math.hypot(a[0] - b[0], a[1] - b[1]))
+      }
+    }
+    expect(junctionGap).toBeLessThan(1e-6)
+    // the mitered legs (extension included) stay inside their wall bodies:
+    // every endpoint ≤ halfT off its nearest wall CENTERLINE LINE
+    for (const m of inWallLegs) {
+      for (const e of ends(m)) {
+        const off = Math.min(
+          ...walls.map((w) => {
+            const t = (e[0] - w.start[0]) * w.dir[0] + (e[1] - w.start[1]) * w.dir[1]
+            const q: [number, number] = [w.start[0] + w.dir[0] * t, w.start[1] + w.dir[1] * t]
+            return Math.hypot(q[0] - e[0], q[1] - e[1])
+          }),
+        )
+        expect(off).toBeLessThanOrEqual(0.1 + 1e-9)
+      }
+    }
+    let hits = 0
+    for (const sm of suction) {
+      for (const lm of liquid) if (obbHit(sm, lm)) hits++
+    }
+    expect(hits).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 9. Merge-gate round — F1 combined-trim floor, F2 engine-flag composition
+// ---------------------------------------------------------------------------
+
+/** Double-turn wedge: w1 (10 m) → mid-wall (midLen) at −turnDeg → w3 (5 m)
+ * at another −turnDeg; laundry at w3's far end so the route traverses both
+ * junctions. The merge-gate F1 repro shape: per-junction trim caps let the
+ * short mid-leg accumulate NEGATIVE length (−6.2 mm at 100°/0.08 m) —
+ * subtracting takeoff lf and reading separated on every SAT axis. */
+function doubleTurn(turnDeg: number, midLen: number) {
+  const rot = (d: [number, number], deg: number): [number, number] => {
+    const r = (deg * Math.PI) / 180
+    return [d[0] * Math.cos(r) - d[1] * Math.sin(r), d[0] * Math.sin(r) + d[1] * Math.cos(r)]
+  }
+  const d2 = rot([1, 0], -turnDeg)
+  const d3 = rot(d2, -turnDeg)
+  const p1: [number, number] = [10, 0]
+  const p2: [number, number] = [p1[0] + d2[0] * midLen, p1[1] + d2[1] * midLen]
+  const p3: [number, number] = [p2[0] + d3[0] * 5, p2[1] + d3[1] * 5]
+  const walls = [
+    wall('w1', [0, 0], p1, true),
+    wall('w2', p1, p2, true),
+    wall('w3', p2, p3, true),
+  ]
+  const rooms = [
+    room('r_laundry', 'Laundry', 'laundry', [
+      [p3[0] - 0.8, p3[1] - 0.8],
+      [p3[0] + 0.8, p3[1] - 0.8],
+      [p3[0] + 0.8, p3[1] + 0.8],
+      [p3[0] - 0.8, p3[1] + 0.8],
+    ]),
+    room('r_v', 'V', 'other', [[0, 0], [10, 0], [5, 3]]),
+  ]
+  return { walls, rooms }
+}
+
+describe('merge-gate round — trim floor + flag composition', () => {
+  test('F1: the double-turn repro keeps every member POSITIVE (>2 cm); lf and SAT stay sound', () => {
+    const { walls, rooms } = doubleTurn(100, 0.08)
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [2, 0, -0.7] } })
+    const lineset = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+    expect(lineset.length).toBeGreaterThan(0)
+    // (b) SAT gates are only non-vacuous over positive extents — assert
+    // BEFORE trusting any SAT verdict
+    for (const m of lineset) {
+      expect(m.length).toBeGreaterThan(0.02)
+      for (const d of m.dims) expect(d).toBeGreaterThan(0)
+    }
+    // (a) the takeoff books the POSITIVE sum — a negative member used to
+    // SUBTRACT soft-copper lf
+    const suction = lineset.filter((m) => m.sourceId === 'lineset-suction-1')
+    const lf = suction.reduce((sum, m) => sum + m.length, 0) * 3.28084
+    expect(lf).toBeGreaterThan(0)
+    const row = computeTakeoff(out.members, out.fixtures).find(
+      (r) => r.item === 'Line-set suction ¾"',
+    )
+    expect(row?.quantity).toBeCloseTo(Math.round(lf * 10) / 10, 1)
+    // the over-trimmed junction BRIDGED — the chain still closes end-to-end
+    const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    for (const id of ['lineset-suction-1', 'lineset-liquid-1']) {
+      expect(
+        chainConnects(
+          runOf(out.members, id),
+          [unit.position[0], unit.position[2]],
+          [handler.position[0], handler.position[2]],
+        ),
+      ).toBe(true)
+    }
+    // pair SAT (full 15-axis — the walls are oblique) stays clean
+    const liquid = lineset.filter((m) => m.sourceId === 'lineset-liquid-1')
+    let hits = 0
+    for (const sm of suction) for (const lm of liquid) if (obbHit(sm, lm)) hits++
+    expect(hits).toBe(0)
+  })
+
+  test('F1 sweep: 100–120° × 0.08–0.2 m mid-walls — no sliver ever survives', () => {
+    for (const turn of [100, 110, 120]) {
+      for (const mid of [0.08, 0.12, 0.2]) {
+        const { walls, rooms } = doubleTurn(turn, mid)
+        const out = layoutHvac(walls, rooms, DEFAULT_SPEC, {
+          heatPump: { position: [2, 0, -0.7] },
+        })
+        const lineset = out.members.filter((m) => m.sourceId.startsWith('lineset-'))
+        expect(lineset.length).toBeGreaterThan(0)
+        for (const m of lineset) {
+          expect(m.length).toBeGreaterThan(0.02)
+          for (const d of m.dims) expect(d).toBeGreaterThan(0)
+        }
+        const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+        const unit = condensersOf(out.fixtures)[0] as Fixture
+        for (const id of ['lineset-suction-1', 'lineset-liquid-1']) {
+          expect(
+            chainConnects(
+              runOf(out.members, id),
+              [unit.position[0], unit.position[2]],
+              [handler.position[0], handler.position[2]],
+            ),
+          ).toBe(true)
+        }
+      }
+    }
+  })
+
+  test('F2: a THIN-WALL LONG run boring the stack carries ALL THREE classes composed', () => {
+    // 0.114 walls (clamp flag) + >15 m run (advisory) + stack on the path
+    // (crossing class): precedence used to keep only the first truth.
+    const { walls, rooms } = shell(40, 10, [], 0.114)
+    const placed = [pf('wc', 'toilet', [5.2, 0.6]), pf('lav', 'lavatory', [6.0, 0.6])]
+    const plumbing = layoutPlumbing(walls, rooms, LOD400, placed)
+    const hvac = layoutHvac(
+      walls, rooms, LOD400,
+      { heatPump: { position: [39, 0, -0.75] } },
+      { stateCode: 'MN' },
+    )
+    const combined = [...plumbing.members, ...hvac.members]
+    flagLinesetTradeCrossings(combined)
+    const lineset = combined.filter(
+      (m) => m.system === 'hvac' && m.sourceId.startsWith('lineset-'),
+    )
+    const stack = combined.filter(
+      (m) => m.system === 'plumbing' && m.role === 'vent-stack',
+    )
+    expect(stack.length).toBeGreaterThan(0)
+    let bores = 0
+    for (const ls of lineset) {
+      for (const st of stack) {
+        if (!obbHit(ls, st)) continue
+        bores++
+        expect(ls.flag).toContain('clamped in a thin wall')
+        expect(ls.flag).toContain('verify manufacturer max line-set length')
+        expect(ls.flag).toContain('⚠ line-set crosses DWV stack — coordinate trades')
+        // three truths = two joins
+        expect((ls.flag?.match(/ \| /g) ?? []).length).toBeGreaterThanOrEqual(2)
+      }
+    }
+    expect(bores).toBeGreaterThan(0)
   })
 })
