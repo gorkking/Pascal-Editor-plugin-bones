@@ -131,14 +131,12 @@ const ALLOWED: ReadonlySet<string> = new Set(
     // 'anchor-bolt × bottom-plate' class (LOD-400 audit B5).
     ['anchor-bolt', 'bottom-plate'],
     ['anchor-bolt', 'stemwall'],
-    ['anchor-bolt', 'slab-edge'],
     ['anchor-bolt', 'footing'],
     ['anchor-bolt', 'bond-beam'],
     ['anchor-bolt', 'plate-washer'],
     ['plate-washer', 'mudsill'],
     ['hold-down', 'mudsill'],
     ['hold-down', 'stemwall'],
-    ['hold-down', 'slab-edge'],
     ['hold-down', 'stud'],
     ['hold-down', 'king-stud'],
     ['hold-down', 'anchor-bolt'],
@@ -151,7 +149,6 @@ const ALLOWED: ReadonlySet<string> = new Set(
     ['rebar', 'lintel'],
     ['rebar', 'footing'],
     ['rebar', 'stemwall'],
-    ['rebar', 'slab-edge'],
     // Mixed-wall seam bolts embed 7" into the grouted bond beam (R403.1.6)
     // exactly where its horizontal bars run — a J-bolt sits beside/around
     // the bar inside the grout (tie-wired in practice). Thin walls carry a

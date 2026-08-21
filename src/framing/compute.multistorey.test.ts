@@ -834,6 +834,24 @@ describe('LOD-400 B17: slab-on-grade booked == built, ground storeys only', () =
     expect(rows.some((r) => r.item === 'Vapor retarder 6-mil poly')).toBe(false)
   })
 
+  test('showFoundation OFF: the warning stops promising members and names the toggle instead', () => {
+    // Skeptic rider (round 1): with Foundation off, the old wording pointed
+    // at geometry that is NOT in the result. The pointer clause is gated.
+    const nodes = baselineScene()
+    const node = FramingNode.parse({
+      ...(baselineConfig('INTL') as unknown as Record<string, unknown>),
+      id: 'bonesframing_nofnd',
+      showFoundation: false,
+    }) as FramingNode
+    nodes.bonesframing_nofnd = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    expect(result.members.filter((m) => m.role === 'slab')).toHaveLength(0)
+    expect(result.members.filter((m) => m.role === 'vapor-retarder')).toHaveLength(0)
+    const warning = result.warnings.find((w) => w.startsWith('Ground floor is slab-on-grade'))
+    expect(warning).toContain('enable Foundation')
+    expect(warning).not.toContain('draws')
+  })
+
   test('ground storey of the two-storey scene builds the field once a slab exists', () => {
     const nodes = twoStoreyScene()
     nodes.slab_gnd_b17 = {

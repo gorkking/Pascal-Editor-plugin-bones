@@ -882,7 +882,20 @@ function memberAxis(m: Member, lift: number): { a: [number, number, number]; b: 
   vz = vy * sx + vz * cx
   vy = ty
   const c: [number, number, number] = [m.position[0], m.position[1] + lift, m.position[2]]
-  const w = [...dims].sort((p, q) => q - p)[1] ?? 0.05
+  // Stroke width on side views (elevations / section beyond-work / cover
+  // iso) = the member's extent PERPENDICULAR to its long axis. The
+  // second-largest dim is right for STICKS (a stud's plan depth, a joist's
+  // depth) but wrong for PLATE-like horizontals whose VERTICAL dim is the
+  // SMALLEST — slab field, vapor retarder, subfloor deck strips, wall
+  // plates, footings: it picked the PLAN width, printing a 3-1/2" pour as
+  // a ~1.2 m band straddling grade on every elevation + the cover iso
+  // (examiner B17 round-1 FAIL, ~13× too thick at 1:75). Plate-like
+  // members stroke at their true thickness dims[1]; a vertical member's
+  // dims[1] is its largest, so the predicate can never demote a stud.
+  const w =
+    dims[1] <= dims[0] && dims[1] <= dims[2]
+      ? dims[1]
+      : ([...dims].sort((p, q) => q - p)[1] ?? 0.05)
   return {
     a: [c[0] - vx * half, c[1] - vy * half, c[2] - vz * half],
     b: [c[0] + vx * half, c[1] + vy * half, c[2] + vz * half],
@@ -1093,6 +1106,15 @@ function rafterSpacingNote(members: Member[], opts: PlanSetOptions): string | nu
   return std !== undefined ? `RAFTERS @ ${std}" O.C.` : fallback
 }
 
+/**
+ * Line-art segments for the side views (elevations, section beyond-work,
+ * cover iso). NOTE (B17): the 6-mil vapor retarder strokes at its true
+ * dims[1] ≈ 0.15 mm, which segSvg clamps to its 0.7 px minimum — a
+ * deliberate HAIRLINE directly under the slab band. That is the standard
+ * membrane-line detail convention and can never read as a second pour
+ * (examiner round-1: the old plan-width stroke printed an identical twin
+ * band 2.3 px below the slab's).
+ */
 function memberSegs(
   members: Member[],
   opts: PlanSetOptions,
