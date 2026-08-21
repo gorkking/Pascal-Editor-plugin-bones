@@ -81,6 +81,12 @@ AND a gate — a checklist line without a test is a wish.
   matrix) + `src/service/frame.test.ts` (onCommit-ABSENCE pin for both drag
   frames + `normalizeServiceAnchors` matrix) + the device-blocking SAT
   scenario in `src/engines/interpenetration.test.ts`.
+  MOVE-PARITY ENCODING (2026-08-21): the affordance-tool path writes
+  the ANCHOR form directly (wallId+wallT+heightAff, position reset to
+  the [0,0,0] sentinel; live preview rides OVERRIDE_Y=1e-4 so the
+  sentinel never collides) — the {position}+reconciler conversion
+  stays for MCP/legacy writes. Plugin-side #694 own-wall gate +
+  one-entry session gated in src/wall-mount/*.test.ts.
 
 ## S — Structure
 
