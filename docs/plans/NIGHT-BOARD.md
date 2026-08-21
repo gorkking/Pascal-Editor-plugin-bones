@@ -1,5 +1,24 @@
 # Bones night board — NIGHT-7 (2026-08-20 → 21) — all-nighter, loop as usual
 
+## ~03:30 state — three merges on master (d64bfc5, 1013 tests)
+MERGED: F3 under-floor DWV (4 rounds — buried sloped tree, per-crossing
+sleeves, floor-line jog, upper-storey truth, arrows/marker/ticks with
+de-collision); F1 line-set (4 rounds — shared-route pair, rolled risers
+w/ triplet-index axis + corner-cancel, both colors on paper); B17 slab
+truth (2 rounds — field+vapor members, first-principles pour math,
+plate-like TRUE-thickness stroke class incl. the latent subfloor twin).
+Conflict seams (baseline recapture + two deduped-brace test merges)
+resolved; baseline byte-stable across double recapture.
+IN FLIGHT: post-merge combined round wpw34n3d4 (arrows x lineset seam,
+launched at 086ad18 — conclusions carry to d64bfc5); B19 round 2
+(return-trunk keep-out + fallback flags + fictitious-section fix);
+F2 final browser QA (selection + hover glow + fresh-load self-heal).
+QUEUED at dawn: merge B19 on green -> final pre-ship round on the ship
+sha -> visual full-stack round -> ship chain (plugin pin + editor PR
+w/ F2 + private-editor) -> morning review.
+NOTE api instability all night: verify agents stalled repeatedly;
+inline merge-gate verification (B5 precedent) used for F1 rounds 3-4.
+
 ## NIGHT-7 PLAN (user directive ~19:00: "all nighter again, adversarial loop as usual")
 PHASE 1 — close + ship the day-feedback batch:
 - F1 line-set @ 40276ab: closing skeptic gate resumed (wf_9d7dc388).
