@@ -4,7 +4,7 @@ import { useLiveNodeOverrides, useLiveTransforms, useRegistry, useScene } from '
 import { useNodeEvents } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef } from 'react'
 import { CanvasTexture, DoubleSide, type Group } from 'three'
-import { resolveServicePlacement, SERVICE_BODY } from './placement'
+import { resolveServicePlacement, SERVICE_BODY, servicePresentation } from './placement'
 import type { ServiceNode } from './schema'
 
 /**
@@ -79,6 +79,14 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
     () => resolveServicePlacement(nodes as Record<string, Record<string, unknown>>, node),
     [nodes, node],
   )
+  // View-mode presentation (advisory 2026-08-21): in the level's 'off'
+  // (finished house) mode the hazard-yellow sign plates hide everywhere and
+  // only PHYSICAL equipment keeps its body (placement.ts states the call);
+  // xray/basement — and levels with no X-ray node — show box + sign.
+  const presentation = useMemo(
+    () => servicePresentation(nodes as Record<string, Record<string, unknown>>, node),
+    [nodes, node],
+  )
 
   const body = SERVICE_BODY[node.serviceType]
   const texture = useMemo(
@@ -96,6 +104,9 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
   }, [texture])
 
   if (node.visible === false) return null
+  // Finished house: a hidden body means the whole node steps aside (switch
+  // to X-ray/Basement to see or manage it — nothing here is pickable).
+  if (!presentation.body) return null
 
   // Unresolvable anchor (missing/curved/foreign wall + never-moved position):
   // render only a small selectable stub — the node stays pickable/deletable
@@ -143,7 +154,8 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
         <boxGeometry args={[body.dims[0], body.dims[1], body.dims[2]]} />
         <meshStandardMaterial color={body.color} roughness={0.7} />
       </mesh>
-      {texture &&
+      {presentation.sign &&
+        texture &&
         signPlates.map(({ offset: [sx, sy, sz], rotY }, i) => (
           <mesh key={String(i)} position={[sx, position[1] + sy, sz]} rotation={[0, rotY, 0]}>
             <planeGeometry args={[SIGN_W, SIGN_H]} />

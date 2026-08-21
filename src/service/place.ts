@@ -106,3 +106,34 @@ export function buildServicePointNodes(
 
   return out
 }
+
+/**
+ * ONE-SHOT service seeding plan for a level whose X-ray already exists but
+ * predates automatic service points (user round 2026-08-20: "service points
+ * should be placed automatically") — the auto-heal the FramingRenderer's
+ * reconcile batch applies. The framing node's `servicesSeeded` latch makes
+ * it run at most once per level, so a user DELETING a service point is
+ * respected forever after:
+ *
+ *  - latch already set → nothing (the deleted-node no-resurrection contract);
+ *  - level already carries ANY service node → ADOPT it: set the latch, create
+ *    nothing (a pre-existing manual placement, possibly with deliberate
+ *    deletions, is the user's arrangement — we never fill the gaps);
+ *  - no service nodes yet → seed every type at the engines' auto spots and
+ *    set the latch IN THE SAME batch;
+ *  - nothing placeable yet (no walls) → no creates AND no latch, so the seed
+ *    retries when the level grows geometry.
+ */
+export function planServiceSeeding(
+  nodes: Record<string, Record<string, unknown>>,
+  levelId: string,
+  framing: { id: string; servicesSeeded?: unknown },
+): { create: ServiceNode[]; update: { id: string; data: Record<string, unknown> }[] } {
+  if (framing.servicesSeeded === true) return { create: [], update: [] }
+  if (placedServiceTypes(nodes, levelId).size > 0) {
+    return { create: [], update: [{ id: framing.id, data: { servicesSeeded: true } }] }
+  }
+  const create = buildServicePointNodes(nodes, levelId)
+  if (create.length === 0) return { create: [], update: [] }
+  return { create, update: [{ id: framing.id, data: { servicesSeeded: true } }] }
+}

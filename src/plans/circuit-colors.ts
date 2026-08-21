@@ -74,6 +74,10 @@ const FAMILY: Record<string, { hint: string; hue: number }> = {
   // hue 130 collided with LTG-7 (dist 5) and hue 160's walk hit LA-1
   // at 18.7 (two dawn rounds).
   AC: { hint: 'AC condenser (dedicated 2-pole)', hue: 218 },
+  // Smoke/CO alarm circuit (B13 — one interconnected branch, SD-1 only).
+  // Hue 338 @ lightness 42 sits between GEN-6 (336 @ 63) and SA-1 (21 @ 42)
+  // with a wide RGB margin (gate: circuit-colors.test.ts real-id floor).
+  SD: { hint: 'smoke/CO alarms (interconnected, R314.4)', hue: 338 },
 }
 
 export function circuitZoneHint(circuit: string): string {

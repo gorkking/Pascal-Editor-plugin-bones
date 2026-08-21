@@ -81,6 +81,51 @@ AND a gate — a checklist line without a test is a wish.
   matrix) + `src/service/frame.test.ts` (onCommit-ABSENCE pin for both drag
   frames + `normalizeServiceAnchors` matrix) + the device-blocking SAT
   scenario in `src/engines/interpenetration.test.ts`.
+  MOVE-PARITY ENCODING (2026-08-21): the affordance-tool path writes
+  the ANCHOR form directly (wallId+wallT+heightAff, position reset to
+  the [0,0,0] sentinel; live preview rides OVERRIDE_Y=1e-4 so the
+  sentinel never collides) — the {position}+reconciler conversion
+  stays for MCP/legacy writes. Plugin-side #694 own-wall gate +
+  one-entry session gated in src/wall-mount/*.test.ts.
+- **E6 Life-safety alarms are complete, on ONE circuit, and their
+  interconnect is pullable cable.** Placement (IRC R314.3/R315.3): every
+  bedroom alarms; the outside-sleeping-area alarm NEVER silently drops —
+  a missing hallway falls back to a bedroom-ADJACENT room (polygon
+  adjacency, garage/bathroom last) and an impossible proxy is a LEVEL
+  WARNING; every story with rooms carries at least one alarm
+  (R314.3(3)); a level with an attached garage + bedrooms places a
+  `co-alarm` outside the sleeping area (R315.3 — the fuel-appliance
+  condition rides the same garage trigger as the plumbing tank-WH
+  assumption); centroid nudges clamp INTO the host polygon (narrow-
+  corridor hosts, `nudgeInside`). Circuits (R314.4 / NEC 210.12): EVERY
+  smoke/CO alarm rides the single `SD-1` branch (`ALARM_CIRCUIT`), marked
+  `interconnected` — alarms scattered across two breakers cannot be
+  interconnected. Wiring — the PER-STOREY contract: compute routes one
+  LEVEL, so each storey mints its own panel + SD-1 and the modeled chain
+  truthfully claims ONLY its storey — 14/3 legs are labeled 'alarm
+  interconnect (this storey) — IRC R314.4', walkably CONTINUOUS through
+  every alarm box on the level (E2-style union-find scoped to the
+  interconnect members), and any scene whose sibling storeys carry rooms
+  gets the level warning 'alarm interconnect modeled per storey — R314.4
+  requires interconnection across the dwelling; verify the cross-storey
+  chain' (single-storey scenes stay warning-free; room-less roof levels
+  don't count). threeWay switch groups get a 14/3 traveler chain
+  box-to-box (NEC 210.70/404.2) under the TRAVELER PREDICATE (round 3):
+  same threeWay room AND same branch circuit AND distinct openings (one
+  switch per wall+opening deviceId key — a door's -p/-m face twins are
+  two rooms' controls, never a pair; a duplicate overlapping zone once
+  welded a cross-circuit LTG-1×LTG-2 'traveler' boring 0.07 m through
+  the wall). The takeoff books 14/3 as its own NM-B SKU (it used to book
+  as phantom 14/2 lf) and the ceiling-box census counts lights + smoke +
+  CO alarms exactly.
+  Origin: LOD-400 audit BATCH 13 (2026-08-20), confirmed defects (a)+(b);
+  cross-storey honesty + nudge clamp = round-2 skeptic driver/advisory.
+  Gate: `src/engines/electrical.alarms.test.ts` (proxy census + warning,
+  per-story pin on a two-storey scene, CO presence/absence matrix,
+  one-circuit pin, 14/3 interconnect walk, traveler continuity, takeoff
+  row split, 3-storey cross-storey warning matrix + scoped labels,
+  corridor nudge-clamp repro, duplicate-zone/face-twin traveler
+  exhibits + legitimate-pair keep, ceiling-box census).
 
 ## S — Structure
 
@@ -440,6 +485,52 @@ AND a gate — a checklist line without a test is a wish.
   ratio scale, north arrow.** Gate: `plan-set.test.ts` pins
 - **P4 Engine warnings print verbatim in the schedules flag block** — a
   silent drop of a warning is a lie on paper.
+- **P6 Every opening is SCHEDULED and cross-referenced.** When the caller
+  passes the wall model (`PlanSetOptions.walls` = compute's deduped active
+  walls), the set carries a door + window schedule with ONE row per
+  opening — census equals the scene's OpeningSlices, marks D1…/W1… assigned
+  deterministically by wall order (length desc with the wall ID as a
+  CONTENT tiebreaker — equal-length walls must never ride node insertion
+  order, round-2 F2) + ascending u, so an unchanged scene reproduces
+  identical marks. Tables at ≤18 lines FOLD onto the Schedules + takeoff
+  sheet (round-1 examiner: a 5-opening dedicated sheet reads ~80% empty):
+  both takeoff columns start below the folded table and EVERY capacity is
+  page-indexed — including the FLAG BUDGET when a one-page takeoff puts
+  the bottom-anchored flag/characteristics blocks on the fold's own page
+  (closing round: the un-indexed budget let a 45-warning block climb INTO
+  the fold table while the 4-row floor clamped takeoff rows into the flag
+  band); a page 0 that cannot host fold + blocks + the 4-row takeoff
+  floor REJECTS the fold back to the dedicated sheet — the schedule never
+  overprints and never vanishes. Bigger tables keep dedicated sheet(s)
+  with (p/N) titles and contiguous SHEET numbers; multi-page takeoffs
+  anchor the blocks on the LAST page under the unchanged budget. The RO cell prints the engine's roughWidth/roughHeight
+  verbatim and the HEADER cell reads the FRAMED member back, claimed by
+  RO-SPAN CONTAINMENT first and global distance order second — a
+  clamp-slid header must never STEAL a neighbor's stick (round-2 F1
+  blocker: D1 printed the window's 4x6 over a 16-ft opening and every
+  ENGINEERED flag vanished from paper). Size verbatim; material
+  'engineered' prints 'ENGINEERED (by supplier)', never the drawn
+  placeholder stick; CMU lintels print 'precast lintel'; an opening whose
+  head lands within MIN_PIECE of the bond beam (the FL tie-beam detail —
+  cmu.ts frames NO lintel by design) prints 'bond beam as lintel', never
+  a dishonest '—'. Window sills print AFF; every flag riding the opening's
+  head/sill members prints WHOLE (wrapRow — P4 applies), and a flag the
+  wall's non-opening members also carry is WALL-scoped (the S7 compression
+  aggregate) and prints prefixed 'wall <id>:' so it never reads
+  opening-scoped. Each mark also prints on the wall framing plan as a
+  small bubble de-collided through the placed[] registry (A-A section
+  bubbles included) with a legend row keying the symbol (P2). Zero
+  openings → no schedule; callers that don't pass walls get paper
+  byte-equal to pre-B21d.
+  Origin: LOD-400 wave-2 audit B21(d) — openings framed to fabrication
+  level but never tabulated, no out-of-scope label.
+  Gates: `src/plans/plan-set.test.ts` 'door + window schedule (LOD-400
+  B21d)' describe (census/byte-match/determinism/F1 steal exhibit/F2 tie
+  shuffle/CMU-through-computeLevel incl. the bond-beam cell/wall-scoped
+  flag prefix/fold-vs-dedicated/fold×flags overprint (one-page corrected
+  budget + multi-page untouched budget + reject hatch)/bubble clearances/
+  40-opening pagination/
+  byte-equal fallback).
 
 ## P — Plumbing
 
@@ -526,15 +617,44 @@ AND a gate — a checklist line without a test is a wish.
   moving the heat pump re-anchors pad + cabinet + lineset. Every verbatim
   wall mount forced into a door/window RO warns (panel / WH / water entry /
   thermostat / electric meter — parity, no silent RO squatters).
-  Auto-placement applies ONLY when no node exists; the panel's "Place
-  service points" action is idempotent per level and seeds the nodes at the
-  engines' current auto spots so creation alone never moves anything.
+  Auto-placement applies ONLY when no node exists; seeding is AUTOMATIC and
+  idempotent per level (no button since 2026-08-20) — the activation click
+  creates all types at the engines' current auto spots in the SAME undo
+  entry as the framing node, pre-automation scenes heal once through the
+  reconcile batch, and the `servicesSeeded` latch guarantees a service
+  point the user deletes is never resurrected. Creation alone never moves
+  anything.
   Origin: service-nodes plan 2026-08-16 ("drag the panel like a door — the
   wires follow").
   Gates: `src/engines/service-overrides.test.ts` (override → re-route,
   continuity + downhill re-proofs) + `src/service/place.test.ts`
-  (idempotent placement at engine auto spots) +
+  (idempotent placement at engine auto spots + the seeding latch) +
+  `src/activation.test.ts` (one-entry creation, position parity) +
   `src/framing/compute.test.ts` (RO-warning parity)
+
+- **A5 The wall-mode restore never fires while ANY other X-ray is live.**
+  Wall mode is one global host pref; X-rays are per-level. Activation
+  imposes 'down' ONCE, click-scoped (src/activation.ts — never renderer
+  mount magic), remembering the user's previous mode; the restore rides
+  ONLY the action that deactivates the LAST live X-ray (viewMode → 'off'
+  or the panel Remove), and only while walls are still 'down' — a manual
+  wall-mode change after activation is the user's and survives every
+  recompute / re-render / remount. "Live" = a bones:framing node whose
+  effective view mode isn't 'off' (an X-ray parked in Normal holds
+  nothing). UNDO CONTRACT (deliberate, confirmed browser QA round 3): undo
+  restores CONTENT, never viewer state — undoing the activation entry
+  leaves the wall chip on Low, because wall mode is a host viewer pref
+  outside scene history and replaying viewer writes on undo/redo would
+  fight the user's own chip clicks; the restore belongs only to the
+  explicit deactivation actions (viewMode → 'off', panel Remove), and the
+  pre-X-ray mode is one click away after an undo.
+  Origin: skeptic blocker 2026-08-21 — removing level A's X-ray restored
+  the walls while level B's X-ray was still on (the same failure class the
+  round-1 fix closed at the renderer, surviving at the remove/off
+  boundary).
+  Gate: `src/activation.test.ts` ("INVARIANT W1" describe — the A+B
+  remove repro, the viewMode-off variant, parked-in-Normal holds nothing)
+  plus the one-shot / manual-survival rows in the activation describe
 
 ## Process
 

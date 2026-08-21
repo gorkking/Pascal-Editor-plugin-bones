@@ -25,6 +25,7 @@ describe('circuit colors (checklist E3)', () => {
       'LTG-2',
       ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
       ...Array.from({ length: 3 }, (_, i) => `AC-${i + 1}`),
+      'SD-1', // B13 smoke/CO alarm circuit
     ]
     const colors = ids.map(circuitColor)
     expect(new Set(colors).size).toBe(ids.length)
@@ -71,6 +72,7 @@ describe('circuit colors (checklist E3)', () => {
       ...Array.from({ length: 8 }, (_, i) => `LTG-${i + 1}`),
       ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
       ...Array.from({ length: 3 }, (_, i) => `AC-${i + 1}`),
+      'SD-1', // B13 — the alarm circuit joins the real-id floor
     ]
     const colors = ids.map(circuitColor)
     for (let i = 0; i < colors.length; i++) {

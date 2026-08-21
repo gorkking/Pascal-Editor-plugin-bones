@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
-import type { Fixture, Member, RoomSlice, SlabSlice, WallSlice } from '../core/types'
-import { feet, inches } from '../core/units'
+import type { Fixture, Member, OpeningSlice, RoomSlice, SlabSlice, WallSlice } from '../core/types'
+import { feet, formatFtIn, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { buildFoundation } from '../engines/foundation'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
-import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
+import { frameWalls } from '../engines/wall-framing'
+import { assignOpeningMarks, buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
   system: 'floor-framing',
@@ -2549,5 +2550,578 @@ describe('MEP sheet — WH T&P discharge tone (B20 closing round)', () => {
     expect(svg).not.toContain('supply / DWV pipe')
     // the discharge reads as the hot family — and the row is in the legend
     expect(svg).toContain('supply — hot water')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B21d: door + window SCHEDULE — openings were framed to fabrication
+// level but never tabulated (no schedule sheet anywhere in the set, no
+// out-of-scope label). Gates: schedule census == openings in the scene,
+// marks unique + deterministic (wall order + u), RO/header cells byte-match
+// the FRAMED members, engineered rows say by-supplier, flags print verbatim,
+// wall-plan mark bubbles present + de-collided (placed[] registry incl. the
+// A-A bubbles), a 40-opening scene paginates with contiguous numbering, an
+// opening-less scene emits no sheet, and paper without the option stays
+// byte-equal to pre-B21d.
+// ---------------------------------------------------------------------------
+
+describe('door + window schedule (LOD-400 B21d)', () => {
+  const spec400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const opening = (
+    id: string,
+    kind: OpeningSlice['kind'],
+    u: number,
+    width: number,
+    height: number,
+    sillHeight: number,
+    roughWidth: number,
+    roughHeight: number,
+  ): OpeningSlice => ({ id, kind, u, width, height, sillHeight, roughWidth, roughHeight })
+  const bwall = (
+    id: string,
+    s: [number, number],
+    e: [number, number],
+    openings: OpeningSlice[],
+    thickness = 0.114,
+  ): WallSlice => {
+    const dx = e[0] - s[0]
+    const dz = e[1] - s[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start: s,
+      end: e,
+      length,
+      dir: [dx / length, dz / length],
+      thickness,
+      height: 2.5,
+      exterior: true,
+      openings,
+      curved: false,
+    }
+  }
+  /** The composed exhibit: 4-wall shell + a floating tall-door wall. */
+  const scene = (): { walls: WallSlice[]; members: Member[] } => {
+    const walls = [
+      bwall('w_s', [0, 0], [8, 0], [
+        opening('d1', 'door', 2, 0.914, 2.032, 0, 0.965, 2.083),
+        opening('n1', 'window', 5, 1.219, 1.219, 0.914, 1.27, 1.27),
+      ]),
+      bwall('w_e', [8, 0], [8, 6], [opening('n2', 'window', 3, 0.61, 0.61, 1.2, 0.66, 0.66)]),
+      // 16-ft garage door — past the prescriptive header span (engineered)
+      bwall('w_n', [8, 6], [0, 6], [opening('d2', 'door', 4, 4.877, 2.134, 0, 4.928, 2.185)]),
+      bwall('w_w', [0, 6], [0, 0], []),
+      // tall door crowds the plates → the composed header-depth flag fires
+      bwall('w_t', [0, 9], [8, 9], [opening('d3', 'door', 4, 0.914, 2.38, 0, 0.965, 2.43)]),
+    ]
+    return { walls, members: frameWalls(walls, spec400) }
+  }
+  const unesc = (t: string): string =>
+    t
+      .replaceAll('&quot;', '"')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&amp;', '&')
+  /** Mark cells: bold #222 at the MARK column (x=48). */
+  const parseMarks = (svg: string): { mark: string; y: number }[] =>
+    [...svg.matchAll(
+      /<text x="48" y="(\d+)" font-size="10" font-weight="bold"[^>]*fill="#222">([DW]\d+)<\/text>/g,
+    )].map((m) => ({ mark: m[2] as string, y: Number(m[1]) }))
+  /** Read one non-bold cell at (x, y). */
+  const cellAt = (svg: string, x: number, y: number): string | null => {
+    const m = svg.match(
+      new RegExp(`<text x="${x}" y="${y}" font-size="10" font-family[^>]*>([^<]*)</text>`),
+    )
+    return m ? unesc(m[1] as string) : null
+  }
+  /** All rendered text contents, joined (flag verbatim-print checks). */
+  const allText = (svg: string): string =>
+    [...svg.matchAll(/>([^<>]+)<\/text>/g)].map((m) => unesc(m[1] as string)).join(' ')
+  const schedSheetsOf = (sheets: { title: string; svg: string }[]) =>
+    sheets.filter((s) => s.title.startsWith('Door + window schedule'))
+  /** The sheet carrying the schedule TABLE — folded or dedicated (page 1). */
+  const tableSvgOf = (sheets: { title: string; svg: string }[]): string =>
+    sheets.find((s) => s.svg.includes('>MARK</text>'))?.svg ?? ''
+  /** Wall-plan mark bubbles (r=8 white circles with the mark text). */
+  const parseBubbles = (svg: string): { x: number; y: number; mark: string }[] =>
+    [...svg.matchAll(
+      /<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="8"[^/]*\/><text[^>]*>([DW]\d+)<\/text>/g,
+    )].map((m) => ({ x: Number(m[1]), y: Number(m[2]), mark: m[3] as string }))
+  const memberUOn = (m: Member, wall: WallSlice): number =>
+    (m.position[0] - wall.start[0]) * wall.dir[0] + (m.position[2] - wall.start[1]) * wall.dir[1]
+
+  test('census: one row per opening, marks by wall order + u, cells byte-match the framed members', () => {
+    const { walls, members } = scene()
+    const sheets = buildPlanSet(members, [], { walls })
+    // the 5-opening exhibit table is small → FOLDED into the schedules
+    // sheet (examiner round-1 judgment); the fold test below pins that
+    const svg = tableSvgOf(sheets)
+    expect(svg).not.toBe('')
+    const rows = parseMarks(svg)
+    // census == openings in the scene; deterministic traversal order
+    // (walls by length desc + id asc: w_n, w_s, w_t at 8 m, then w_e)
+    expect(rows.map((r) => r.mark)).toEqual(['D1', 'D2', 'W1', 'D3', 'W2'])
+    expect(new Set(rows.map((r) => r.mark)).size).toBe(5)
+    const rowY = new Map(rows.map((r) => [r.mark, r.y]))
+    // D1: the 16-ft garage door on w_n framed an ENGINEERED header — the
+    // row says by-supplier, never the drawn placeholder stick
+    const yD1 = rowY.get('D1') as number
+    const d1Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_n',
+    ) as Member
+    expect(d1Header.material).toBe('engineered')
+    expect(cellAt(svg, 92, yD1)).toBe('door')
+    expect(cellAt(svg, 302, yD1)).toBe(`${formatFtIn(4.928)} × ${formatFtIn(2.185)}`)
+    expect(cellAt(svg, 522, yD1)).toBe('ENGINEERED (by supplier)')
+    expect(cellAt(svg, 700, yD1)).toBe('w_n')
+    // D2: w_s door — nominal + RO cells are the OpeningSlice values
+    // verbatim, the header cell reads the FRAMED member back
+    const yD2 = rowY.get('D2') as number
+    expect(cellAt(svg, 92, yD2)).toBe('door')
+    expect(cellAt(svg, 152, yD2)).toBe(`${formatFtIn(0.914)} × ${formatFtIn(2.032)}`)
+    expect(cellAt(svg, 302, yD2)).toBe(`${formatFtIn(0.965)} × ${formatFtIn(2.083)}`)
+    expect(cellAt(svg, 452, yD2)).toBe('—') // doors carry no sill
+    expect(cellAt(svg, 700, yD2)).toBe('w_s')
+    const wS = walls[0] as WallSlice
+    const d2Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_s' && Math.abs(memberUOn(m, wS) - 2) < 0.5,
+    ) as Member
+    expect(d2Header).toBeDefined()
+    expect(cellAt(svg, 522, yD2)).toBe(d2Header.size as string)
+    // W1: window row — sill AFF prints; header byte-matches its member too
+    const yW1 = rowY.get('W1') as number
+    expect(cellAt(svg, 92, yW1)).toBe('window')
+    expect(cellAt(svg, 452, yW1)).toBe(formatFtIn(0.914))
+    const w1Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_s' && Math.abs(memberUOn(m, wS) - 5) < 0.5,
+    ) as Member
+    expect(cellAt(svg, 522, yW1)).toBe(w1Header.size as string)
+    // D3: the tall door's composed header flag prints VERBATIM (P4) — the
+    // member's own flag string, wrap-reassembled from the sheet text
+    const d3Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_t',
+    ) as Member
+    expect(d3Header.flag).toBeDefined()
+    expect(d3Header.flag).toContain('does not fit between the RO and the plates')
+    expect(allText(svg)).toContain(d3Header.flag as string)
+  })
+
+  test('marks + schedule deterministic across recomputes', () => {
+    const a = scene()
+    const b = scene()
+    expect(assignOpeningMarks(a.walls).map((m) => [m.mark, m.opening.id])).toEqual(
+      assignOpeningMarks(b.walls).map((m) => [m.mark, m.opening.id]),
+    )
+    const sa = buildPlanSet(a.members, [], { walls: a.walls })
+    const sb = buildPlanSet(b.members, [], { walls: b.walls })
+    expect(sa.map((s) => s.svg)).toEqual(sb.map((s) => s.svg))
+  })
+
+  test('F1: an RO-clamp slide never steals a neighbor header (skeptic exhibit)', () => {
+    // 16-ft garage door drawn at u=0.5: the frame slides its header to
+    // u≈2.578 — PAST the u=1.0 window. The old greedy nearest-in-mark-order
+    // join gave D1 the window's stick, W1 '—', and dropped all three
+    // composed ENGINEERED flags from paper.
+    const wx = bwall('w_x', [0, 0], [8, 0], [
+      opening('gd', 'door', 0.5, 4.877, 2.134, 0, 4.928, 2.185),
+      opening('wn', 'window', 1.0, 0.61, 0.61, 1.2, 0.66, 0.66),
+    ])
+    const members = frameWalls([wx], spec400)
+    const heads = members.filter((m) => m.role === 'header')
+    expect(heads.length).toBe(2)
+    const eng = heads.find((m) => m.material === 'engineered') as Member
+    const winHead = heads.find((m) => m.material !== 'engineered') as Member
+    // the exhibit premise: the clamp slid the engineered header past the window
+    expect(memberUOn(eng, wx)).toBeGreaterThan(memberUOn(winHead, wx))
+    expect(eng.flag).toContain('ENGINEERED BEAM REQUIRED')
+    expect(eng.flag).toContain('RO shifted')
+    const svg = tableSvgOf(buildPlanSet(members, [], { walls: [wx] }))
+    const rows = parseMarks(svg)
+    expect(rows.map((r) => r.mark)).toEqual(['D1', 'W1'])
+    const rowY = new Map(rows.map((r) => [r.mark, r.y]))
+    // D1 owns the engineered header; W1 keeps its OWN stick — never '—'
+    expect(cellAt(svg, 522, rowY.get('D1') as number)).toBe('ENGINEERED (by supplier)')
+    expect(cellAt(svg, 522, rowY.get('W1') as number)).toBe(winHead.size as string)
+    // every composed flag part prints verbatim
+    expect(allText(svg)).toContain(eng.flag as string)
+  })
+
+  test('F2: equal-length walls tie-break by wall id — marks immune to caller order', () => {
+    const pair = (): WallSlice[] => [
+      bwall('wa', [0, 0], [6, 0], [opening('oa', 'door', 2, 0.914, 2.032, 0, 0.965, 2.083)]),
+      bwall('wb', [0, 3], [6, 3], [opening('ob', 'door', 2, 0.914, 2.032, 0, 0.965, 2.083)]),
+    ]
+    const fwd = assignOpeningMarks(pair())
+    const rev = assignOpeningMarks(pair().reverse())
+    expect(fwd.map((m) => [m.mark, m.opening.id])).toEqual(rev.map((m) => [m.mark, m.opening.id]))
+    expect(fwd.map((m) => [m.mark, m.wall.id])).toEqual([
+      ['D1', 'wa'],
+      ['D2', 'wb'],
+    ])
+  })
+
+  test('F4: CMU openings through computeLevel — precast lintel + bond-beam-as-lintel cells', () => {
+    const { computeLevel } = require('../framing/compute') as typeof import('../framing/compute')
+    const { FramingNode } = require('../framing/schema') as typeof import('../framing/schema')
+    const nodesFor = (doorHeight: number): Record<string, Record<string, unknown>> => ({
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.7 },
+      wall_cmu: {
+        id: 'wall_cmu',
+        type: 'wall',
+        parentId: 'level_1',
+        start: [0, 0],
+        end: [6, 0],
+        thickness: 0.2,
+        height: 2.5,
+        frontSide: 'exterior',
+        backSide: 'interior',
+        children: ['door_1'],
+      },
+      door_1: {
+        id: 'door_1',
+        type: 'door',
+        position: [2, doorHeight / 2, 0],
+        width: 0.9,
+        height: doorHeight,
+      },
+    })
+    const config = {
+      ...FramingNode.parse({ jurisdiction: 'INTL', wallOverrides: { wall_cmu: 'cmu' } }),
+      parentId: 'level_1',
+    } as Parameters<typeof computeLevel>[1]
+    // (a) head well below the bond beam → the precast lintel frames and
+    // the schedule cell reads it back (ComputeResult.walls plumb-through)
+    const r1 = computeLevel(nodesFor(2.1), config)
+    expect(r1.walls.some((w2) => w2.id === 'wall_cmu' && w2.openings.length === 1)).toBe(true)
+    expect(r1.members.some((m) => m.role === 'lintel')).toBe(true)
+    const s1 = tableSvgOf(buildPlanSet(r1.members, r1.fixtures, { walls: r1.walls }))
+    const rows1 = parseMarks(s1)
+    expect(rows1.map((r) => r.mark)).toEqual(['D1'])
+    expect(cellAt(s1, 522, (rows1[0] as { y: number }).y)).toBe('precast lintel')
+    // (b) head within a course of the top → cmu emits NO lintel by design
+    // (the bond beam doubles as the lintel, the FL tie-beam detail) — the
+    // cell says so instead of a dishonest '—'
+    const r2 = computeLevel(nodesFor(2.2), config)
+    expect(r2.members.some((m) => m.role === 'lintel')).toBe(false)
+    expect(r2.members.some((m) => m.role === 'bond-beam')).toBe(true)
+    const s2 = tableSvgOf(buildPlanSet(r2.members, r2.fixtures, { walls: r2.walls }))
+    const rows2 = parseMarks(s2)
+    expect(rows2.map((r) => r.mark)).toEqual(['D1'])
+    expect(cellAt(s2, 522, (rows2[0] as { y: number }).y)).toBe('bond beam as lintel')
+  })
+
+  test('wall-scoped flags print prefixed — never read opening-scoped', () => {
+    // a 0.15 m wall defaults to 2x6 → cavity-fit compression: the S7
+    // aggregate flag rides EVERY member incl. this window's header, but it
+    // describes the WALL, not the opening
+    const wc = bwall(
+      'w_c',
+      [0, 0],
+      [8, 0],
+      [opening('ow', 'window', 4, 1.219, 1.219, 0.914, 1.27, 1.27)],
+      0.15,
+    )
+    const members = frameWalls([wc], spec400)
+    const head = members.find((m) => m.role === 'header') as Member
+    expect(head.flag).toContain('compressed')
+    // the same string rides non-opening members (that's what makes it wall-scoped)
+    expect(members.some((m) => m.role === 'stud' && m.flag === head.flag)).toBe(true)
+    const svg = tableSvgOf(buildPlanSet(members, [], { walls: [wc] }))
+    expect(allText(svg)).toContain(`wall w_c: ${head.flag}`)
+  })
+
+  test('fold judgment: small tables fold into Schedules + takeoff; big ones keep dedicated sheets', () => {
+    // SMALL: the 5-opening exhibit folds — no dedicated sheet, table on the
+    // schedules sheet, cover index without a schedule entry, sheet census
+    // identical to the no-walls set (folding adds no sheet)
+    const { walls, members } = scene()
+    const folded = buildPlanSet(members, [], { walls })
+    expect(folded.map((s) => s.title)).not.toContain('Door + window schedule')
+    const schedSvg = folded.find((s) => s.title === 'Schedules + takeoff')?.svg ?? ''
+    expect(schedSvg).toContain('>MARK</text>')
+    expect(schedSvg).toContain('Door + window schedule (3 doors / 2 windows) · Material takeoff')
+    expect(parseMarks(schedSvg).length).toBe(5)
+    expect(folded[0]?.svg ?? '').not.toContain('Door + window schedule')
+    expect(folded.length).toBe(buildPlanSet(members, [], {}).length)
+    // takeoff rows flow BELOW the folded table — no overprint: the topmost
+    // takeoff row starts under the lowest table line (marks + red flags)
+    const tableYs = [
+      ...parseMarks(schedSvg).map((r) => r.y),
+      ...[...schedSvg.matchAll(/<text x="7[26]" y="(\d+)"[^>]*fill="#a03015"/g)].map((m) =>
+        Number(m[1]),
+      ),
+    ]
+    const takeoffYs = [
+      ...schedSvg.matchAll(/<text x="48" y="(\d+)" font-size="10" font-family[^>]*fill="#222">/g),
+    ].map((m) => Number(m[1]))
+    expect(takeoffYs.length).toBeGreaterThan(0)
+    expect(Math.min(...takeoffYs)).toBeGreaterThan(Math.max(...tableYs))
+    // BIG: the 40-opening stress scene keeps its dedicated sheets (pinned in
+    // the stress test) and the cover indexes them
+    const wallsBig: WallSlice[] = []
+    for (let i = 0; i < 5; i++) {
+      const os: OpeningSlice[] = []
+      for (let k = 0; k < 8; k++) {
+        os.push(opening(`o${i}_${k}`, 'window', 2 + k * 5, 1.219, 1.219, 0.9, 1.27, 1.27))
+      }
+      wallsBig.push(bwall(`w${i}`, [0, i * 3], [40, i * 3], os))
+    }
+    const big = buildPlanSet(frameWalls(wallsBig, spec400), [], { walls: wallsBig })
+    expect(big.some((s) => s.title.startsWith('Door + window schedule ('))).toBe(true)
+    expect(big[0]?.svg ?? '').toContain('Door + window schedule (1/')
+    // dedicated sheets sit after the drawings, before the takeoff
+    const bigTitles = big.map((s) => s.title)
+    const firstSched = bigTitles.findIndex((t) => t.startsWith('Door + window schedule'))
+    expect(firstSched).toBeGreaterThan(bigTitles.indexOf('Section A-A (transverse)'))
+    expect(firstSched).toBeLessThan(bigTitles.findIndex((t) => t.startsWith('Schedules + takeoff')))
+  })
+
+  test('wall framing plan prints one de-collided mark bubble per opening', () => {
+    const { walls, members } = scene()
+    const sheets = buildPlanSet(members, [], { walls })
+    const svg = sheets.find((s) => s.title === 'Wall framing plan')?.svg ?? ''
+    const bubbles = parseBubbles(svg)
+    expect(new Set(bubbles.map((b) => b.mark))).toEqual(new Set(['D1', 'D2', 'D3', 'W1', 'W2']))
+    expect(bubbles.length).toBe(5)
+    // clearances like the glyph gates: bubbles pairwise apart…
+    for (let i = 0; i < bubbles.length; i++) {
+      for (let j = i + 1; j < bubbles.length; j++) {
+        const bi = bubbles[i] as { x: number; y: number }
+        const bj = bubbles[j] as { x: number; y: number }
+        expect(Math.hypot(bi.x - bj.x, bi.y - bj.y)).toBeGreaterThanOrEqual(15)
+      }
+    }
+    // …and clear of the A-A section bubbles (registered in placed[])
+    const aBubbles = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="10"/g)].map(
+      (m) => [Number(m[1]), Number(m[2])] as [number, number],
+    )
+    expect(aBubbles.length).toBe(2)
+    for (const b of bubbles) {
+      for (const [ax, ay] of aBubbles) {
+        expect(Math.hypot(b.x - ax, b.y - ay)).toBeGreaterThanOrEqual(15)
+      }
+    }
+    // no crowded fallback fired on this scene
+    expect(svg).not.toContain('opening-mark crowded')
+    // the symbol is keyed in the sheet legend (P2)
+    expect(svg).toContain('opening mark — see door + window schedule')
+  })
+
+  test('40-opening stress scene splits sheets cleanly, numbering contiguous', () => {
+    const walls: WallSlice[] = []
+    for (let i = 0; i < 5; i++) {
+      const os: OpeningSlice[] = []
+      for (let k = 0; k < 8; k++) {
+        os.push(opening(`o${i}_${k}`, 'window', 2 + k * 5, 1.219, 1.219, 0.9, 1.27, 1.27))
+      }
+      walls.push(bwall(`w${i}`, [0, i * 3], [40, i * 3], os))
+    }
+    const members = frameWalls(walls, spec400)
+    const sheets = buildPlanSet(members, [], { walls })
+    const sched = schedSheetsOf(sheets)
+    expect(sched.length).toBeGreaterThanOrEqual(2)
+    // page titles carry (p/N) and the global SHEET numbers run consecutive
+    for (const [p, s] of sched.entries()) {
+      expect(s.title).toBe(`Door + window schedule (${p + 1}/${sched.length})`)
+    }
+    const sheetNos = sched.map((s) => Number(s.svg.match(/SHEET (\d+)\//)?.[1]))
+    for (let i = 1; i < sheetNos.length; i++) {
+      expect(sheetNos[i]).toBe((sheetNos[i - 1] as number) + 1)
+    }
+    // every mark W1…W40 exactly once across the pages; each page repeats the
+    // column header and keeps rows above the title block
+    const all = sched.map((s) => s.svg).join('')
+    for (let i = 1; i <= 40; i++) {
+      expect([...all.matchAll(new RegExp(`>W${i}</text>`, 'g'))].length).toBe(1)
+    }
+    for (const s of sched) {
+      expect(s.svg).toContain('>MARK</text>')
+      for (const { y } of parseMarks(s.svg)) {
+        expect(y).toBeLessThan(816 - 76 - 8)
+      }
+    }
+    // census on paper == openings in the scene
+    expect(sched.reduce((n, s) => n + parseMarks(s.svg).length, 0)).toBe(40)
+    // the wall plan carries all 40 bubbles, pairwise de-collided
+    const wallSvg = sheets.find((s) => s.title === 'Wall framing plan')?.svg ?? ''
+    const bubbles = parseBubbles(wallSvg)
+    expect(bubbles.length).toBe(40)
+    for (let i = 0; i < bubbles.length; i++) {
+      for (let j = i + 1; j < bubbles.length; j++) {
+        const bi = bubbles[i] as { x: number; y: number }
+        const bj = bubbles[j] as { x: number; y: number }
+        expect(Math.hypot(bi.x - bj.x, bi.y - bj.y)).toBeGreaterThanOrEqual(15)
+      }
+    }
+  })
+
+  test('opening-less scene emits no schedule sheet; paper without the option stays byte-equal', () => {
+    const bare = [bwall('w_a', [0, 0], [6, 0], []), bwall('w_b', [0, 3], [6, 3], [])]
+    const members = frameWalls(bare, spec400)
+    const withWalls = buildPlanSet(members, [], { walls: bare })
+    const without = buildPlanSet(members, [], {})
+    expect(withWalls.map((s) => s.title)).not.toContain('Door + window schedule')
+    // zero openings → the option is inert: sheets byte-equal
+    expect(withWalls.map((s) => s.svg)).toEqual(without.map((s) => s.svg))
+    // and a scene WITH openings but WITHOUT the option = pre-B21d paper:
+    // no schedule sheet, no bubbles (old callers unchanged)
+    const { members: m2 } = scene()
+    const legacy = buildPlanSet(m2, [], {})
+    expect(legacy.map((s) => s.title)).not.toContain('Door + window schedule')
+    expect(parseBubbles(legacy.find((s) => s.title === 'Wall framing plan')?.svg ?? '')).toEqual([])
+  })
+
+  // ---- closing round: fold × flags (the quality-round-3 overprint class).
+  // The row capacities were page-indexed but the flag BUDGET was not: with
+  // a one-page takeoff the fold and the bottom-anchored blocks share page 0
+  // and the flag block climbed INTO the fold table while the 4-row floor
+  // clamped takeoff rows into the flag band. ----
+
+  /** 3 walls × 5 windows = a 17-line foldable table, flag-free rows. */
+  const foldScene = (): { walls: WallSlice[]; members: Member[] } => {
+    const walls: WallSlice[] = []
+    for (let i = 0; i < 3; i++) {
+      const os: OpeningSlice[] = []
+      for (let k = 0; k < 5; k++) {
+        os.push(opening(`f${i}_${k}`, 'window', 2 + k * 3, 1.219, 1.219, 0.9, 1.27, 1.27))
+      }
+      walls.push(bwall(`wf${i}`, [0, i * 4], [16, i * 4], os))
+    }
+    return { walls, members: frameWalls(walls, spec400) }
+  }
+  const warns45 = (): string[] =>
+    Array.from({ length: 45 }, (_, i) => `advisory w${i + 1} — verify`)
+  /** Kept-flag lines on a schedules sheet (second column, red). */
+  const flagYsOf = (svg: string): number[] =>
+    [...svg.matchAll(/<text x="(?:528|540)" y="([\d.]+)"[^>]*fill="#a03015"/g)].map((m) =>
+      Number(m[1]),
+    )
+  /** Takeoff/table body texts (non-bold #222 10px) with their column x. */
+  const bodyTextsOf = (svg: string): { x: number; y: number }[] =>
+    [...svg.matchAll(/<text x="(\d+)" y="(\d+)" font-size="10" font-family[^>]*fill="#222">/g)].map(
+      (m) => ({ x: Number(m[1]), y: Number(m[2]) }),
+    )
+
+  test('closing round: fold + one-page takeoff + 45 warnings — flag budget is fold-indexed, zero overprint', () => {
+    const { walls, members } = foldScene()
+    const sheets = buildPlanSet(members, [], { walls, warnings: warns45() })
+    // the corrected budget fits (41 − foldTop 18 − reserve 18 = 5): fold retained
+    expect(sheets.map((s) => s.title)).not.toContain('Door + window schedule')
+    const schedSheets = sheets.filter((s) => s.title.startsWith('Schedules + takeoff'))
+    expect(schedSheets.length).toBe(1) // the defect's premise: ONE takeoff page
+    const svg = (schedSheets[0] as { svg: string }).svg
+    expect(svg).toContain('>MARK</text>')
+    const markYs = parseMarks(svg).map((r) => r.y)
+    expect(markYs.length).toBe(15)
+    const tableBottom = Math.max(...markYs)
+    const flagYs = flagYsOf(svg)
+    expect(flagYs.length).toBeGreaterThan(0)
+    const flagTop = Math.min(...flagYs)
+    // THE DEFECT: the block climbed to y≈258 across table rows at 102..312.
+    // Now the flag top sits BELOW the fold bottom with a clear band…
+    expect(flagTop).toBeGreaterThan(tableBottom + 10)
+    // …takeoff rows sit between the two, and the second column NEVER runs
+    // into the flag band (the old 4-row-floor clamp put 3 rows inside it)
+    const rows = bodyTextsOf(svg).filter((t) => t.y > tableBottom)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const t of rows) {
+      if (t.x >= 500) expect(t.y).toBeLessThan(flagTop - 10)
+    }
+    // every one of the 45 warnings still prints exactly once — kept block +
+    // pointer + continuation sheets (P4: nothing truncates, nothing hides)
+    expect(svg).toContain('more flag')
+    expect(sheets.some((s) => s.title.startsWith('Flags (continued'))).toBe(true)
+    const all = sheets.map((s) => s.svg).join('')
+    for (let i = 1; i <= 45; i++) {
+      expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
+    }
+  })
+
+  test('closing round: fold + MULTI-page takeoff + 45 warnings stays green — flags land on the last page, budget untouched', () => {
+    const { walls, members } = foldScene()
+    // bulk floor framing drives the takeoff past one page: 10 sizes ×
+    // 7 stock-length buckets of joists (+ bd-ft rows) ≈ 80+ rows
+    const sizes = ['2x4', '2x6', '2x8', '2x10', '2x12', '4x4', '4x6', '4x8', '4x10', '4x12'] as const
+    const bulk: Member[] = []
+    for (const size of sizes) {
+      for (const L of [2, 2.6, 3.2, 3.9, 4.5, 5.2, 5.8]) {
+        bulk.push(
+          member({
+            role: 'joist',
+            size,
+            dims: [L, 0.235, 0.038],
+            length: L,
+            sourceId: `bulk_${size}_${L}`,
+          }),
+        )
+      }
+    }
+    const sheets = buildPlanSet([...members, ...bulk], [], { walls, warnings: warns45() })
+    expect(sheets.map((s) => s.title)).not.toContain('Door + window schedule')
+    const schedSheets = sheets.filter((s) => s.title.startsWith('Schedules + takeoff'))
+    expect(schedSheets.length).toBeGreaterThanOrEqual(2) // the stack's premise
+    // fold on page 0 ONLY, census intact, takeoff rows below the table
+    const first = (schedSheets[0] as { svg: string }).svg
+    expect(first).toContain('>MARK</text>')
+    const markYSet = new Set(parseMarks(first).map((r) => r.y))
+    expect(markYSet.size).toBe(15)
+    const tableBottom = Math.max(...markYSet)
+    for (const t of bodyTextsOf(first)) {
+      expect(markYSet.has(t.y) || t.y > tableBottom).toBe(true)
+    }
+    // flags never print on the fold page — they bottom-anchor on the LAST
+    // page, where no fold lives, so the UNCORRECTED budget still applies
+    // (34 kept + pointer = 35 lines) and the second column stays clear
+    expect(first).not.toContain('#a03015')
+    const last = (schedSheets[schedSheets.length - 1] as { svg: string }).svg
+    expect(last).not.toContain('>MARK</text>')
+    const lastFlagYs = flagYsOf(last)
+    expect(lastFlagYs.length).toBe(35)
+    const lastFlagTop = Math.min(...lastFlagYs)
+    for (const t of bodyTextsOf(last)) {
+      if (t.x >= 500) expect(t.y).toBeLessThan(lastFlagTop - 10)
+    }
+    // all 45 warnings print exactly once across the set
+    const all = sheets.map((s) => s.svg).join('')
+    for (let i = 1; i <= 45; i++) {
+      expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
+    }
+  })
+
+  test('closing round: a page 0 that cannot host fold + blocks REJECTS the fold — dedicated fallback, never overprint', () => {
+    // characteristics add ~6 reserve lines: corrected reserve 19 →
+    // 41 − foldTop 18 − 19 = 4 < 5 (the 4-row floor would clamp takeoff
+    // rows into the flag band) → the escape hatch fires
+    const chars: BuildingCharacteristics = {
+      floorAreaM2: 40,
+      volumeM3: 108,
+      envelopeAreaM2: 61.4,
+      windowCount: 15,
+      windowAreaM2: 22.3,
+      doorCount: 0,
+      insulation: { climateZone: '2A', wallR: 13, citation: '2021 IECC Table R402.1.3' },
+      uaWPerK: 30.1,
+      designHeatLossW: 662,
+      coolingTonsEstimate: 0.9,
+      notes: [],
+    }
+    const { walls, members } = foldScene()
+    const sheets = buildPlanSet(members, [], {
+      walls,
+      warnings: warns45(),
+      characteristics: chars,
+    })
+    // the schedule falls back to its DEDICATED sheet (never vanishes)…
+    expect(sheets.map((s) => s.title)).toContain('Door + window schedule')
+    expect(parseMarks(tableSvgOf(sheets)).length).toBe(15)
+    // …and the schedules sheet keeps NO fold — blocks own the bottom
+    const sched = sheets.find((s) => s.title.startsWith('Schedules + takeoff'))
+    expect(sched?.svg ?? '').not.toContain('>MARK</text>')
+    expect(sched?.svg ?? '').toContain('BUILDING CHARACTERISTICS')
+    // every warning still prints exactly once
+    const all = sheets.map((s) => s.svg).join('')
+    for (let i = 1; i <= 45; i++) {
+      expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
+    }
   })
 })
