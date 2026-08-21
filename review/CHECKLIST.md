@@ -454,6 +454,26 @@ AND a gate — a checklist line without a test is a wish.
   plumbing).
   Gate: `src/engines/plumbing.connectivity.test.ts`
 
+- **P6 The water heater ships SAFE, vent distance is measured at the weir,
+  and thin walls confess their cover.** Every placed-path WH carries a T&P
+  relief valve whose ¾" discharge terminates within 6" of the floor
+  (P2803.6.1); a tank sits on a real STAND (M1307.3 — 18" of steel, not
+  air) inside a drain pan (P2801.6); SDC-D specs (`seismicHoldDowns`)
+  strap the tank at its upper+lower thirds (P2801.8) and low-seismic specs
+  ship ZERO straps — all booked as takeoff pieces from the members.
+  P3105.1 flags measure TRAP WEIR → VENT (the developed distance to the
+  re-vent riser actually serving the wall, printed in ft) — one re-vent
+  never silently "serves" a whole wall; island fixtures flag P3112 island
+  venting as not modeled. A 3" stack with <1.5" cover to the wall face
+  flags steel shield plates (P2603.2.1 — the plate members ride B15). The
+  water meter + cold-main riser WARN when they land in the panel's NEC
+  110.26(E) dedicated space (reservation rides B12/B16). Trap-DROP
+  verticals clamp clear of EVERY wall's concrete (perpendicular corner
+  stemwalls, interior thickened footings) or emit sleeved (P2603.4).
+  Origin: LOD-400 wave-2 audit B20 + F3 trap-drop residuals (2026-08-21).
+  Gates: `src/engines/plumbing.safety.test.ts` +
+  `src/engines/interpenetration.test.ts` (F3 corner-drop repros)
+
 ## App
 
 - **A1 X-ray off = the editor's own look.** No plugin layers rendered solid

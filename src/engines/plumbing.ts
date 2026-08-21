@@ -498,13 +498,15 @@ function clampDropClear(
       if (u < -need || u > w.length + need) continue
       const off = -dx * w.dir[1] + dz * w.dir[0]
       if (Math.abs(off) >= need) continue
-      // push across the wall to the band edge, on the side the point
-      // already leans (drops arrive inboard of their OWN wall, so the
-      // lean picks the room side of the offending wall)
+      // push across the wall just PAST the band edge (the 5 mm overshoot
+      // keeps float noise from re-triggering this wall next pass), on the
+      // side the point already leans (drops arrive inboard of their OWN
+      // wall, so the lean picks the room side of the offending wall)
       const s = off >= 0 ? 1 : -1
+      const out = need + 0.005
       p = [
-        w.start[0] + w.dir[0] * u - w.dir[1] * s * need,
-        w.start[1] + w.dir[1] * u + w.dir[0] * s * need,
+        w.start[0] + w.dir[0] * u - w.dir[1] * s * out,
+        w.start[1] + w.dir[1] * u + w.dir[0] * s * out,
       ]
       moved = true
     }

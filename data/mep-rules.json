@@ -101,7 +101,17 @@
         "atticPassagewayMinHighIn": 30,
         "atticPassagewayMinWideIn": 22,
         "accessDoorMinWideIn": 24,
-        "note": "IRC M1305.1 (30x30 in level working space at control side), M1307.3 (ignition source 18 in above garage floor), M1305.1.2 (attic access). Combustion clearances per appliance listing."
+        "note": "IRC M1305.1 (30x30 in level working space at control side), M1307.3 (ignition source 18 in above garage floor), M1305.1.2 (attic access). Combustion clearances per appliance listing.",
+        "tpDischargeMaxAboveFloorIn": 6,
+        "tpNote": "IRC P2803.1 requires a temperature-and-pressure relief valve on every storage water heater; P2803.6.1 pipes the discharge FULL SIZE, never trapped or threaded, terminating not more than 6 in above the floor / waste receptor / drain pan it serves.",
+        "panMinDepthIn": 1.5,
+        "panNote": "IRC P2801.6: a storage-tank water heater installed where leakage causes damage sits in a pan not less than 1.5 in deep, drained by a 3/4 in minimum pipe to an approved location (P2801.6.1/.2). Modeled 2 in deep.",
+        "seismicStraps": {
+          "count": 2,
+          "zones": "upper third + lower third of the tank's vertical dimension",
+          "lowerAboveControlsIn": 4,
+          "note": "IRC P2801.8 (Seismic Design Categories D0-D2 — CA/WA/NV style amendments): strap the tank against horizontal displacement at points within the upper one-third AND lower one-third of its height; the lower strap at least 4 in above the controls. Not required in low-seismic jurisdictions."
+        }
       }
     },
     "fixtureRoughIn": {

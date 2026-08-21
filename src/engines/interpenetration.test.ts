@@ -1329,4 +1329,65 @@ describe('under-floor DWV vs footings + floor platform (drainage gate)', () => {
     expect(stackBase).toBeDefined()
     expect(stackBase?.label).toContain('P2603.4')
   })
+
+  // ---- F3 trap-drop residuals (B20): drops were validated only against
+  // the fixture's OWN anchor wall — both confirmed exhibits below clashed
+  // pre-fix (verified: the repros SAT-failed on the pre-clamp engine). ----
+
+  test('F3 residual A: corner-flush lav at frost — the drop clears the PERPENDICULAR stemwall', () => {
+    // Lav 8 cm off the south wall, 10 cm from the east corner: anchored to
+    // w_s, its drop vertical used to stand INSIDE w_e's frost stemwall.
+    const lavCorner: PlacedFixtureSlice = {
+      id: 'lavc',
+      kind: 'lavatory',
+      plan: [9.9, 0.08],
+      yaw: 0,
+      hot: true,
+      dfu: 1,
+      drainIn: 1.25,
+    }
+    const { members } = layoutPlumbing(shell, wetRoomsExterior, specFrost, [
+      ...placedSet,
+      lavCorner,
+    ])
+    expect(drainClashes(members, structureFor(specFrost))).toEqual([])
+    // the clamp is real geometry, not an exemption: the drop stands clear
+    // of the east wall's concrete band (stemwall half + pipe half)
+    const drop = members.find(
+      (m) => m.sourceId === 'dwv-trap-lavc' && m.dims[1] > m.dims[0],
+    ) as Member
+    expect(drop).toBeDefined()
+    expect(10 - drop.position[0]).toBeGreaterThan(0.2)
+  })
+
+  test('F3 residual B: toilet 0.22 m off the interior bearing wall — the drop clears its 12" thickened footing', () => {
+    // Anchored to w_s (0.20 m) but 0.22 m off w_mid's centerline: the
+    // pulled drop used to sit inside w_mid's 16"-wide thickened footing.
+    const wc22: PlacedFixtureSlice = {
+      id: 'wc22',
+      kind: 'toilet',
+      plan: [5.22, 0.2],
+      yaw: 0,
+      hot: false,
+      dfu: 3,
+      drainIn: 3,
+    }
+    const lav: PlacedFixtureSlice = {
+      id: 'lav_b',
+      kind: 'lavatory',
+      plan: [8, 0.5],
+      yaw: 0,
+      hot: true,
+      dfu: 1,
+      drainIn: 1.25,
+    }
+    const { members } = layoutPlumbing(shell, wetRooms, spec400, [wc22, lav])
+    expect(drainClashes(members, structureFor(spec400))).toEqual([])
+    const drop = members.find(
+      (m) => m.sourceId === 'dwv-trap-wc22' && m.dims[1] > m.dims[0],
+    ) as Member
+    expect(drop).toBeDefined()
+    // clear of the interior footing band: 16"/2 + 3"-pipe half
+    expect(Math.abs(drop.position[0] - 5)).toBeGreaterThan(0.203 + 0.038)
+  })
 })

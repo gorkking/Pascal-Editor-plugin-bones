@@ -677,6 +677,31 @@ export function computeTakeoff(
       'pcs',
     )
   }
+  // ---- water-heater safety hardware (B20): bought pieces counted from the
+  // members the plumbing engine actually placed — never assumed. The T&P
+  // DISCHARGE pipe books above as ordinary ¾" copper lf; these are the
+  // fixtures/fabrications around the tank. Straps: one physical strap =
+  // one sourceId (wh-strap-upper / wh-strap-lower), several band segments.
+  const whCount = (sid: string): number =>
+    members.some((m) => m.sourceId === sid) ? 1 : 0
+  const tpValves = whCount('wh-tp-valve')
+  const whPans = whCount('wh-pan')
+  const whStands = whCount('wh-stand')
+  const whStraps = new Set(
+    members.filter((m) => m.sourceId.startsWith('wh-strap-')).map((m) => m.sourceId),
+  ).size
+  if (tpValves > 0) {
+    push('Plumbing', 'T&P relief valve', '¾" discharge to ≤6" AFF (P2803.6.1)', tpValves, 'pcs')
+  }
+  if (whPans > 0) {
+    push('Plumbing', 'Water-heater drain pan', 'with ¾" drain (P2801.6)', whPans, 'pcs')
+  }
+  if (whStands > 0) {
+    push('Plumbing', 'Water-heater stand', '18" ignition elevation (M1307.3)', whStands, 'pcs')
+  }
+  if (whStraps > 0) {
+    push('Plumbing', 'Seismic straps', 'tank upper+lower thirds (P2801.8)', whStraps, 'pcs')
+  }
   const linesetRunsNote = `${linesetRuns.size} run${linesetRuns.size === 1 ? '' : 's'} (M1411)`
   if (linesetSuctionLf > 0) {
     push(
