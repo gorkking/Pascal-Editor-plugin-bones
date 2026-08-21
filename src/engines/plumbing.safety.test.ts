@@ -252,7 +252,8 @@ describe('P6 — P3105.1 measures trap weir → vent, per trap', () => {
     // weir→vent = 0.3 m emitted arm + 6.2 m along the wall to the re-vent
     // riser at the near lav's junction = 6.5 m ≈ 21.3 ft (limit: 5 ft @ 1.25")
     expect(arm.flag).toContain('21.3 ft')
-    expect(arm.flag).toContain('from its vent')
+    // …and the flag STATES the measured target (skeptic attack 3)
+    expect(arm.flag).toContain("from its wall's re-vent")
   })
 
   test('near trap (the vent carrier) and the exempt-but-measured WC stay clean', () => {
@@ -385,5 +386,131 @@ describe('P6 — clamped corner drops keep full drainage continuity', () => {
     const placed = [pf('wc22', 'toilet', [5.22, 0.2]), pf('lavc', 'lavatory', [9.9, 0.08])]
     const { members } = layoutPlumbing(walls, rooms, { ...DEFAULT_SPEC, detail: '400' }, placed)
     expect(drainFailures(members, ['wc22', 'lavc'])).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Closing round (examiner + inline skeptic attacks)
+// ---------------------------------------------------------------------------
+
+describe('P6 closing — WH hardware anchors off the FINISHED FACE, never in the studs', () => {
+  // Examiner flag: whOff measured from the CENTERLINE put the pan edge on
+  // the centerline (6.2 cm into the studs) and the stand through the
+  // PT-plate band. Equipment is scoped out of the structural SAT matrix
+  // (S1) — assert the clearance directly: every across-wall half extent of
+  // tank/pan/stand stays outside the drawn wall body.
+  const { walls, rooms, placed } = garagePlan()
+  const { members } = layoutPlumbing(walls, rooms, CA_SPEC, placed)
+
+  test('tank, pan and stand all clear the wall face (plan-square boxes vs the host wall)', () => {
+    const tank = members.find((m) => m.role === 'water-heater') as Member
+    expect(tank).toBeDefined()
+    // host wall = nearest centerline to the tank
+    const host = walls.reduce((best, w) => {
+      const offOf = (wl: typeof w) => {
+        const dx = tank.position[0] - wl.start[0]
+        const dz = tank.position[2] - wl.start[1]
+        return Math.abs(-dx * wl.dir[1] + dz * wl.dir[0])
+      }
+      return offOf(w) < offOf(best) ? w : best
+    })
+    const offOf = (m: Member) => {
+      const dx = m.position[0] - host.start[0]
+      const dz = m.position[2] - host.start[1]
+      return Math.abs(-dx * host.dir[1] + dz * host.dir[0])
+    }
+    const pieces: [string, Member, number][] = [
+      ['tank', tank, tank.dims[2] / 2],
+      ['pan', bySource(members, 'wh-pan')[0] as Member, (bySource(members, 'wh-pan')[0] as Member).dims[2] / 2],
+      ['stand', bySource(members, 'wh-stand')[0] as Member, (bySource(members, 'wh-stand')[0] as Member).dims[2] / 2],
+    ]
+    for (const [name, m, half] of pieces) {
+      expect(m).toBeDefined()
+      const clear = offOf(m) - half - host.thickness / 2
+      expect(clear).toBeGreaterThan(0) // outside the drawn wall body
+      if (clear <= 0) throw new Error(`${name} enters the wall body by ${-clear}`)
+    }
+  })
+})
+
+describe('P6 closing — vent-less walls measure to the stack, and say so (attack 3)', () => {
+  test('island trap: the TRAP ARM flag names the stack vent as its measured target', () => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [10, 0] }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+    ]
+    const rooms = [room('r_kitchen', 'kitchen', [[0, 0], [10, 0], [10, 8], [0, 8]])]
+    const placed = [pf('island', 'kitchen-sink', [4, 4]), pf('wc', 'toilet', [8, 0.6])]
+    const { members } = layoutPlumbing(walls, rooms, DEFAULT_SPEC, placed)
+    const arm = members.find((m) => m.sourceId === 'dwv-arm-island') as Member
+    expect(arm.flag).toContain('the stack vent')
+  })
+
+  test('a lone fixture (its wall vent IS the stack) never crashes and stays clean', () => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [10, 0] }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+    ]
+    const rooms = [room('r_bath', 'bathroom', [[0, 0], [10, 0], [10, 8], [0, 8]])]
+    const { members } = layoutPlumbing(walls, rooms, DEFAULT_SPEC, [pf('lav', 'lavatory', [5, 0.6])])
+    const arm = members.find((m) => m.sourceId === 'dwv-arm-lav') as Member
+    expect(arm).toBeDefined()
+    expect(arm.flag).toBeUndefined()
+    // the stack IS this wall's vent — no redundant re-vent riser emits
+    expect(members.some((m) => m.sourceId.startsWith('dwv-vent-'))).toBe(false)
+  })
+})
+
+describe('P6 closing — pinched/surrounded drops give up with a FLAG, never loop (attacks 4+5b)', () => {
+  test('twin bearing walls 0.45 m apart: the pinched drop emits SLEEVED with a P4-visible flag', () => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [10, 0] }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+      // twin interior BEARING walls: two 16"-wide thickened-footing bands
+      // (need ≈ 0.26 m each) with 0.45 m between centerlines — no clear slot
+      makeWall({ id: 'w_a', start: [5, 0], end: [5, 8], exterior: false }),
+      makeWall({ id: 'w_b', start: [5.45, 0], end: [5.45, 8], exterior: false }),
+    ]
+    const rooms = [room('r_bath', 'bathroom', [[0, 0], [10, 0], [10, 8], [0, 8]])]
+    const { members } = layoutPlumbing(walls, rooms, DEFAULT_SPEC, [pf('wc', 'toilet', [5.2, 4])])
+    const drop = members.find(
+      (m) => m.sourceId === 'dwv-trap-wc' && m.dims[1] > m.dims[0],
+    ) as Member
+    expect(drop).toBeDefined()
+    // the label is the SAT exemption; the FLAG is the paper surface — the
+    // riser is VERTICAL, so the sheets' tick layer never draws it (P4)
+    expect(drop.label).toContain('sleeved')
+    expect(drop.flag).toContain('SLEEVE')
+    expect(drop.flag).toContain('P2603.4')
+  })
+
+  test('crawl-of-death: a drop surrounded by concrete on ALL sides terminates, sleeved + flagged', () => {
+    const cell = 0.45
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [10, 0] }),
+      makeWall({ id: 'w_e', start: [10, 0], end: [10, 8] }),
+      makeWall({ id: 'w_n', start: [10, 8], end: [0, 8] }),
+      makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+      // a tiny exterior cell (stemwalls on all four sides) around the fixture
+      makeWall({ id: 'c_s', start: [5 - cell / 2, 4 - cell / 2], end: [5 + cell / 2, 4 - cell / 2] }),
+      makeWall({ id: 'c_e', start: [5 + cell / 2, 4 - cell / 2], end: [5 + cell / 2, 4 + cell / 2] }),
+      makeWall({ id: 'c_n', start: [5 + cell / 2, 4 + cell / 2], end: [5 - cell / 2, 4 + cell / 2] }),
+      makeWall({ id: 'c_w', start: [5 - cell / 2, 4 + cell / 2], end: [5 - cell / 2, 4 - cell / 2] }),
+    ]
+    const rooms = [room('r_bath', 'bathroom', [[0, 0], [10, 0], [10, 8], [0, 8]])]
+    // completing at all proves clampDropClear terminates (bounded passes)
+    const { members } = layoutPlumbing(walls, rooms, DEFAULT_SPEC, [pf('wc', 'toilet', [5, 4])])
+    const drop = members.find(
+      (m) => m.sourceId === 'dwv-trap-wc' && m.dims[1] > m.dims[0],
+    ) as Member
+    expect(drop).toBeDefined()
+    expect(drop.label).toContain('sleeved')
+    expect(drop.flag).toContain('P2603.4')
   })
 })

@@ -808,6 +808,15 @@ function computeLevelUncached(
         'Upper-storey drains need a riser to the storey below — not modeled; runs shown end at the drain main',
       )
     }
+    // The room-category fallback's WH is a SCHEMATIC placeholder — the
+    // placed-fixture path ships real T&P/pan/stand/strap members (P6); the
+    // fallback cannot (no tank member to hang them off). Never silent
+    // (B20 closing round): the level states exactly what is not modeled.
+    if (plumbing.fixtures.some((f) => f.kind === 'water-heater' && f.meta?.schematic === true)) {
+      warnings.push(
+        'Water-heater safety hardware not modeled on the schematic (room-category) path — T&P valve + discharge, drain pan, seismic strapping per P2803/P2801; place real fixtures or verify at install',
+      )
+    }
     // WH / water-entry overrides forced into an RO → same explicit warning
     // (the pipe legs already flag, but the service POINT must too).
     const roChecks = [

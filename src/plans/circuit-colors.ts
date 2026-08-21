@@ -30,7 +30,14 @@ export function plumbingPipeColor(sourceId: string): string | null {
   if (sourceId.startsWith('cold-') || sourceId.startsWith('conn-cold-')) {
     return PLUMBING_COLORS.cold
   }
-  if (sourceId.startsWith('hot-') || sourceId.startsWith('conn-hot-')) {
+  // The WH T&P discharge carries TANK-HOT water — it joins the hot supply
+  // family (B20 closing round: a null tone resurrected the LOD-200
+  // 'supply / DWV pipe' legend row on every water-heater sheet).
+  if (
+    sourceId.startsWith('hot-') ||
+    sourceId.startsWith('conn-hot-') ||
+    sourceId.startsWith('wh-tp-')
+  ) {
     return PLUMBING_COLORS.hot
   }
   if (sourceId.startsWith('dwv-')) return PLUMBING_COLORS.dwv

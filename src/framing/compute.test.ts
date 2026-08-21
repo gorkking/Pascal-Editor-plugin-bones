@@ -782,3 +782,67 @@ describe('dedupeColinearWalls — duplicate openings merge into the kept twin (v
     expect(walls).toContain(b)
   })
 })
+
+describe('computeLevel — schematic (fallback) water heater warns (P6, never silent)', () => {
+  // B20 closing round, attack 6: the room-category fallback WH is a bare
+  // fixture — no tank member, so no T&P/pan/strap members can exist. The
+  // LEVEL must say so; the placed path (real hardware members) must not.
+  const scene = (withPlacedToilet: boolean): Record<string, Record<string, unknown>> => {
+    const wall = (id: string, start: [number, number], end: [number, number]) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      thickness: 0.114,
+      height: 2.5,
+      frontSide: 'exterior',
+      backSide: 'interior',
+      children: [],
+    })
+    return {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: wall('w_s', [0, 0], [8, 0]),
+      w_e: wall('w_e', [8, 0], [8, 6]),
+      w_n: wall('w_n', [8, 6], [0, 6]),
+      w_w: wall('w_w', [0, 6], [0, 0]),
+      z_bath: {
+        id: 'z_bath',
+        type: 'zone',
+        parentId: 'level_1',
+        name: 'Bathroom',
+        polygon: [[5, 0], [8, 0], [8, 4], [5, 4]],
+      },
+      ...(withPlacedToilet
+        ? {
+            fx_wc: {
+              id: 'fx_wc',
+              type: 'item',
+              parentId: 'level_1',
+              asset: { id: 'toilet' },
+              position: [7.5, 0, 0.5],
+              rotation: [0, 0, 0],
+            },
+          }
+        : {}),
+    }
+  }
+  const WH_SCHEMATIC_WARNING_KEY = 'Water-heater safety hardware not modeled'
+
+  test('fallback compose → the level warning prints and the fixture says schematic', () => {
+    const result = computeLevel(scene(false), makeConfig({ showPlumbing: true }))
+    expect(result.warnings.some((w) => w.includes(WH_SCHEMATIC_WARNING_KEY))).toBe(true)
+    const wh = result.fixtures.find((f) => f.kind === 'water-heater')
+    expect(wh?.label).toContain('schematic')
+    // the fallback truly has no hardware members — the warning is honest
+    expect(result.members.some((m) => m.sourceId.startsWith('wh-'))).toBe(false)
+  })
+
+  test('placed compose → real hardware members ship and the warning is absent', () => {
+    const result = computeLevel(scene(true), makeConfig({ showPlumbing: true }))
+    expect(result.warnings.some((w) => w.includes(WH_SCHEMATIC_WARNING_KEY))).toBe(false)
+    expect(result.members.some((m) => m.sourceId === 'wh-tp-valve')).toBe(true)
+    const wh = result.fixtures.find((f) => f.kind === 'water-heater')
+    expect(wh?.label).not.toContain('schematic')
+  })
+})

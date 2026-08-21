@@ -1240,11 +1240,15 @@ function placedPlumbing(
   /** The vent point serving a trap: its wall's re-vent riser when that
    * wall carries one, else the stack (which IS the vent when the carrier
    * stands on the stack wall bay — the loop below skips the redundant
-   * riser). Islands have NO modeled vent — the stack is the nearest one. */
-  const ventNodeFor = (a: Anchored): Pt => {
+   * riser). Islands have NO modeled vent — the stack is the nearest one.
+   * `kind` names the measured target so a flag on a vent-less wall STATES
+   * what it measured to (skeptic attack 3: never crash, never vague). */
+  const ventNodeFor = (a: Anchored): { at: Pt; kind: string } => {
     const carrier = ventWalls.get(a.anchor.wall.id)
-    if (carrier && !a.island && manhattanDist(carrier.plan, stackAt) >= 0.3) return carrier.node
-    return stackNode
+    if (carrier && !a.island && manhattanDist(carrier.plan, stackAt) >= 0.3) {
+      return { at: carrier.node, kind: "its wall's re-vent" }
+    }
+    return { at: stackNode, kind: 'the stack vent' }
   }
 
   // ---- per fixture: stub-out + P-trap + trap arm + DFU-sized branch ----
@@ -1308,9 +1312,18 @@ function placedPlumbing(
         ? `OPENING: ${KIND_LABEL[a.f.kind]} sits in a door/window rough opening — its trap riser crosses the RO; move the fixture`
         : undefined
       // A drop pinched between concrete bands (unclampable corner) emits
-      // SLEEVED — the label is what the drainage SAT gate exempts, and
-      // what the paper prints (P2603.4, F3 residuals).
+      // SLEEVED — the label is what the drainage SAT gate exempts, and a
+      // FLAG carries it onto the schedules block (P4): the riser is
+      // VERTICAL so the sheets' tick layer never draws it — a label alone
+      // was paper-invisible (examiner gap, closing round).
       const dropSleeveNote = a.dropSleeved ? ' — sleeved where it crosses concrete (P2603.4)' : ''
+      const sleeveFlag = a.dropSleeved
+        ? `SLEEVE: ${KIND_LABEL[a.f.kind]} trap drop is pinched between concrete footings — sleeved through the pour (P2603.4); coordinate the sleeve before placement`
+        : undefined
+      const crowdFlag = crowd
+        ? `CLEARANCE: ${KIND_LABEL[crowd.kind]} sits within 30" of the WC centerline (P2705.1)`
+        : undefined
+      const dropFlags = [roFlag, crowdFlag, sleeveFlag].filter(Boolean).join(' | ')
       riser(
         members,
         {
@@ -1319,11 +1332,7 @@ function placedPlumbing(
           role: 'pipe-run',
           sourceId: `dwv-trap-${a.f.id}`,
           label: `${a.f.drainIn}" P-trap + drop — ${KIND_LABEL[a.f.kind]} (P3201)${dropSleeveNote}`,
-          flag:
-            roFlag ??
-            (crowd
-              ? `CLEARANCE: ${KIND_LABEL[crowd.kind]} sits within 30" of the WC centerline (P2705.1)`
-              : undefined),
+          flag: dropFlags.length > 0 ? dropFlags : undefined,
         },
         a.dropAt,
         DRAIN_CONN_Y[a.f.kind],
@@ -1337,13 +1346,14 @@ function placedPlumbing(
       // IS the vent — islands' nearest vent is always the stack). WCs are
       // exempt in the IRC; flagged anyway when clearly unroutable.
       const limit = trapArmMax(a.f.drainIn)
-      const weirToVent = armPlan + manhattanDist(a.node, ventNodeFor(a))
+      const vent = ventNodeFor(a)
+      const weirToVent = armPlan + manhattanDist(a.node, vent.at)
       const islandFlag = a.island
         ? `ISLAND VENT: ${KIND_LABEL[a.f.kind]} is an island fixture — island venting required (P3112), not modeled; verify loop vent/AAV with the AHJ`
         : undefined
       const armFlag =
         weirToVent > limit
-          ? `TRAP ARM: ${KIND_LABEL[a.f.kind]} trap weir sits ${round1ft(weirToVent)} ft from its vent — exceeds ${toFeet(limit).toFixed(0)} ft for a ${a.f.drainIn}" arm (Table P3105.1); vent closer to the trap`
+          ? `TRAP ARM: ${KIND_LABEL[a.f.kind]} trap weir sits ${round1ft(weirToVent)} ft from ${vent.kind} — exceeds ${toFeet(limit).toFixed(0)} ft for a ${a.f.drainIn}" arm (Table P3105.1); vent closer to the trap`
           : undefined
       const ventFlags = [islandFlag, armFlag].filter(Boolean).join(' | ')
       leg(
@@ -1527,7 +1537,11 @@ function placedPlumbing(
   } else if (rooms.some((r) => pointInPolygon(facePoint(whWall, -1, whU), r.polygon))) {
     side = -1
   }
-  const whOff = tank ? 0.35 : whWall.thickness / 2 + 0.13
+  // Tank anchor measures from the FINISHED FACE, not the centerline — the
+  // old 0.35-from-centerline put the pan edge AT the centerline (6 cm into
+  // the studs) and the stand through the plate band (examiner, closing
+  // round): face + pan overhang (5 cm) + 2 cm gap + tank half-depth (0.3).
+  const whOff = tank ? whWall.thickness / 2 + 0.05 + 0.02 + 0.3 : whWall.thickness / 2 + 0.13
   const nx = -whWall.dir[1] * side
   const nz = whWall.dir[0] * side
   const whPlan: Pt = [whWallPlan[0] + nx * whOff, whWallPlan[1] + nz * whOff]
@@ -2209,13 +2223,19 @@ function roomPlumbing(
   const whAt: Pt =
     overridePlanPoint(walls, overrides?.waterHeater) ??
     (whRoom ? polygonCentroid(whRoom.polygon) : [stackAt[0] + 0.6, stackAt[1] + 0.6])
+  // The fallback WH is a SCHEMATIC placeholder — no tank member, so no
+  // T&P/pan/strap members can hang off it. Say so on the fixture AND via
+  // meta so computeLevel surfaces a level warning (never-silent doctrine —
+  // closing-round attack 6: a bare 'Water heater' fixture shipped with
+  // zero hardware and zero warning).
   fixtures.push({
     system: 'plumbing',
     kind: 'water-heater',
     position: [whAt[0], overrides?.waterHeater?.heightAff ?? 0.6, whAt[1]],
     rotationY: 0,
     sourceId: whRoom?.id ?? stackRoom.id,
-    label: 'Water heater',
+    label: 'Water heater (schematic — safety hardware not modeled)',
+    meta: { schematic: true },
   })
 
   if (fab) {

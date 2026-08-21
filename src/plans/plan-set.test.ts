@@ -2527,3 +2527,27 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     }
   })
 })
+
+describe('MEP sheet — WH T&P discharge tone (B20 closing round)', () => {
+  test('a placed-path WH sheet never resurrects the generic LOD-200 pipe row', () => {
+    // Pre-fix plumbingPipeColor('wh-tp-…') was null → the 'supply / DWV
+    // pipe' fallback legend row printed on every water-heater sheet.
+    const pipe = (sourceId: string, z: number): Member =>
+      member({
+        system: 'plumbing',
+        role: 'pipe-run',
+        size: undefined,
+        material: 'copper',
+        dims: [2, 0.02, 0.02],
+        position: [2, 0.4, z],
+        sourceId,
+      })
+    const members = [pipe('cold-lav', 0.5), pipe('wh-tp-discharge', 1.0)]
+    const mep = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Plumbing'))
+    expect(mep).toBeDefined()
+    const svg = mep?.svg ?? ''
+    expect(svg).not.toContain('supply / DWV pipe')
+    // the discharge reads as the hot family — and the row is in the legend
+    expect(svg).toContain('supply — hot water')
+  })
+})

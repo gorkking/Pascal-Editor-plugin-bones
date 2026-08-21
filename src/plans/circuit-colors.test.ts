@@ -87,3 +87,13 @@ describe('circuit colors (checklist E3)', () => {
     expect(circuitColor('WAT-1')).toBe('#b0723d')
   })
 })
+
+describe('plumbing pipe colors — WH T&P discharge (B20 closing round)', () => {
+  test('wh-tp-* joins the hot supply family — a null tone resurrected the LOD-200 legend row', () => {
+    const { plumbingPipeColor, PLUMBING_COLORS } =
+      require('./circuit-colors') as typeof import('./circuit-colors')
+    expect(plumbingPipeColor('wh-tp-discharge')).toBe(PLUMBING_COLORS.hot)
+    // the room-category fallback ids stay null (their single-tint contract)
+    expect(plumbingPipeColor('r_bath')).toBeNull()
+  })
+})
