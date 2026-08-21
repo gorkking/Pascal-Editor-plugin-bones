@@ -87,6 +87,28 @@ AND a gate — a checklist line without a test is a wish.
   sentinel never collides) — the {position}+reconciler conversion
   stays for MCP/legacy writes. Plugin-side #694 own-wall gate +
   one-entry session gated in src/wall-mount/*.test.ts.
+- **E6 Life-safety alarms are complete, on ONE circuit, and their
+  interconnect is pullable cable.** Placement (IRC R314.3/R315.3): every
+  bedroom alarms; the outside-sleeping-area alarm NEVER silently drops —
+  a missing hallway falls back to a bedroom-ADJACENT room (polygon
+  adjacency, garage/bathroom last) and an impossible proxy is a LEVEL
+  WARNING; every story with rooms carries at least one alarm
+  (R314.3(3)); a level with an attached garage + bedrooms places a
+  `co-alarm` outside the sleeping area (R315.3 — the fuel-appliance
+  condition rides the same garage trigger as the plumbing tank-WH
+  assumption). Circuits (R314.4 / NEC 210.12): EVERY smoke/CO alarm rides
+  the single `SD-1` branch (`ALARM_CIRCUIT`), marked `interconnected` —
+  alarms scattered across two breakers cannot be interconnected. Wiring:
+  the SD chain past the panel feed is 14/3-labeled and walkably
+  CONTINUOUS through every alarm box (E2-style union-find scoped to the
+  interconnect members); threeWay switch groups get a 14/3 traveler chain
+  box-to-box (NEC 210.70/404.2); the takeoff books 14/3 as its own NM-B
+  SKU (it used to book as phantom 14/2 lf).
+  Origin: LOD-400 audit BATCH 13 (2026-08-20), confirmed defects (a)+(b).
+  Gate: `src/engines/electrical.alarms.test.ts` (proxy census + warning,
+  per-story pin on a two-storey scene, CO presence/absence matrix,
+  one-circuit pin, 14/3 interconnect walk, traveler continuity, takeoff
+  row split).
 
 ## S — Structure
 

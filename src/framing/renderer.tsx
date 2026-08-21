@@ -125,6 +125,7 @@ const FIXTURE_COLORS: Record<string, string> = {
   switch: '#7fb3e0',
   light: '#f5e08a',
   'smoke-alarm': '#e06c6c',
+  'co-alarm': '#e0a34f',
   panel: '#8f8f8f',
 }
 

@@ -165,6 +165,8 @@ export type FixtureKind =
   | 'switch'
   | 'light'
   | 'smoke-alarm'
+  /** CO alarm — IRC R315.3 (attached garage / fuel-fired appliance). */
+  | 'co-alarm'
   | 'panel'
   | 'stub-out'
   | 'vent-stack'

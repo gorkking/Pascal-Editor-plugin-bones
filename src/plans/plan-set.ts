@@ -128,6 +128,7 @@ const FIXTURE_TAG: Record<string, string> = {
   switch: 'S',
   light: 'L',
   'smoke-alarm': 'SD',
+  'co-alarm': 'CM', // carbon monoxide — 'CO' is taken by cleanout
   panel: 'P',
   'exhaust-fan': 'EF',
   thermostat: 'T',
@@ -1260,6 +1261,7 @@ function planSheet(
       S: 'switch',
       L: 'light',
       SD: 'smoke alarm',
+      CM: 'CO alarm (R315.3)',
       CU: 'AC condenser (outdoor unit)',
       P: 'panel',
       EF: 'exhaust fan',

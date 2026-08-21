@@ -729,7 +729,9 @@ function computeLevelUncached(
 
   let devices: DerivedDevice[] = []
   if (config.showElectrical) {
-    const derived = layoutElectrical(activeWalls, activeRooms, services)
+    // B13a: layout-level warnings (un-placeable R314.3(2)/R315.3 alarms)
+    // surface with the level warnings — never a silent drop.
+    const derived = layoutElectrical(activeWalls, activeRooms, services, warnings)
     // Movable outlets (Q7): moved `bones:device` nodes override the derived
     // receptacle/switch spots — code-aware (RO snap-out, stud rule +
     // blocking, height clamps, spacing advisory). Unmoved nodes are ignored
