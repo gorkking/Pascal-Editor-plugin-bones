@@ -132,7 +132,7 @@ function XraySection({
         onClick={() =>
           // One coherent activation (user round 2026-08-20): the framing
           // node + every service point in ONE undo entry, walls to Low
-          // once, X-ray vision on by default — all scoped to this click.
+          // once, viewMode 'xray' by default — all scoped to this click.
           activateXray(
             useScene as unknown as SceneLike,
             activeLevelId,

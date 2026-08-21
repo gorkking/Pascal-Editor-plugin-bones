@@ -4,7 +4,7 @@ import { probeSlabsFor } from '../framing/compute'
 import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
 import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
-import { buildServicePointNodes, placedServiceTypes } from './place'
+import { buildServicePointNodes, placedServiceTypes, planServiceSeeding } from './place'
 import { ServiceNode } from './schema'
 
 /**
@@ -268,5 +268,74 @@ describe('placedServiceTypes', () => {
     }
     const types = placedServiceTypes(nodes, 'level_1')
     expect([...types]).toEqual(['sewer-exit'])
+  })
+})
+
+/**
+ * ONE-SHOT seeding planner (user round 2026-08-20: automatic service points,
+ * no button) — the auto-heal contract the FramingRenderer's reconcile batch
+ * applies to scenes whose X-ray predates automation. The `servicesSeeded`
+ * latch is the no-resurrection guarantee.
+ */
+describe('planServiceSeeding', () => {
+  const framing = (servicesSeeded?: boolean) => ({
+    id: 'bonesframing_1',
+    ...(servicesSeeded === undefined ? {} : { servicesSeeded }),
+  })
+
+  test('unseeded level with no service nodes: seeds every type + latches, same batch', () => {
+    const plan = planServiceSeeding(scene(), 'level_1', framing())
+    expect(plan.create.map((n) => n.serviceType).sort()).toEqual([
+      'electric-meter',
+      'heat-pump',
+      'panel',
+      'power-entry',
+      'sewer-exit',
+      'thermostat',
+      'water-entry',
+      'water-heater',
+    ])
+    expect(plan.update).toEqual([
+      { id: 'bonesframing_1', data: { servicesSeeded: true } },
+    ])
+  })
+
+  test('latched: NOTHING is created — a user-deleted service point stays deleted', () => {
+    const nodes = scene()
+    // seed once, apply, latch
+    const first = planServiceSeeding(nodes, 'level_1', framing())
+    for (const n of first.create) {
+      nodes[n.id] = { ...n, parentId: 'level_1' } as unknown as Record<string, unknown>
+    }
+    // the user deliberately deletes the heat pump
+    const hp = first.create.find((n) => n.serviceType === 'heat-pump')
+    delete nodes[String(hp?.id)]
+    const again = planServiceSeeding(nodes, 'level_1', framing(true))
+    expect(again.create).toHaveLength(0)
+    expect(again.update).toHaveLength(0)
+    // …even if EVERY service node is gone, the latch holds
+    const wiped = planServiceSeeding(scene(), 'level_1', framing(true))
+    expect(wiped.create).toHaveLength(0)
+    expect(wiped.update).toHaveLength(0)
+  })
+
+  test('unlatched level that already carries service nodes: ADOPT — latch only, no gap-filling', () => {
+    const nodes = scene()
+    const panel = ServiceNode.parse({ serviceType: 'panel', wallId: 'w_s', wallT: 0.4 })
+    nodes[panel.id] = { ...panel, parentId: 'level_1' } as unknown as Record<string, unknown>
+    const plan = planServiceSeeding(nodes, 'level_1', framing())
+    expect(plan.create).toHaveLength(0) // a pre-automation arrangement is the user's
+    expect(plan.update).toEqual([
+      { id: 'bonesframing_1', data: { servicesSeeded: true } },
+    ])
+  })
+
+  test('nothing placeable yet (wall-less level): no creates AND no latch — retries later', () => {
+    const bare: Record<string, Record<string, unknown>> = {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+    }
+    const plan = planServiceSeeding(bare, 'level_1', framing())
+    expect(plan.create).toHaveLength(0)
+    expect(plan.update).toHaveLength(0)
   })
 })
