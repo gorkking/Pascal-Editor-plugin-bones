@@ -517,6 +517,8 @@ function planSheet(
   // the marker cite overprinted the exit SLEEVE cite — text knew bubbles
   // and pipes but never other text).
   const textRects: { x: number; y: number; hw: number; hh: number }[] = []
+  // ticks printed on this sheet — the legend's standing tick row keys off it
+  let sleeveTickCount = 0
   const textClearOfTexts = (cx2: number, cy2: number, hw2: number, hh2: number, pad = 4): boolean =>
     textRects.every(
       (r) => Math.abs(r.x - cx2) >= r.hw + hw2 + pad || Math.abs(r.y - cy2) >= r.hh + hh2 + pad,
@@ -698,7 +700,13 @@ function planSheet(
     const concrete = members.filter(
       (m) => m.system === 'foundation' && (m.role === 'footing' || m.role === 'stemwall'),
     )
-    const marks: { x: number; y: number; ang: number; sourceId: string }[] = []
+    const marks: {
+      x: number
+      y: number
+      ang: number
+      sourceId: string
+      tickEntry?: { x: number; y: number }
+    }[] = []
     for (const s of sleevedLegs) {
       const sp = planSeg(s)
       const d1x = sp.b[0] - sp.a[0]
@@ -808,60 +816,77 @@ function planSheet(
       placed.push(tickEntry)
       k.x = kx
       k.y = ky
-      // the cite slides perpendicular/along the pipe until it fits the
-      // sheet and clears every bubble — a crowded crossing keeps only its
-      // glyph rather than overprinting
+      k.tickEntry = tickEntry
+      sleeveTickCount++
+    }
+
+    // ---- cite pass (round 4: JOINT placement, tightest crossing first —
+    // round 3's sequential order let cite 1 box its neighbour's tick and
+    // the frost census went 2→1). Every cite still honors the round-2/3
+    // rules: own tick exempted from DISTANCE but never OVERLAPPED, own
+    // run ridable, other texts + pipes + bubbles hard. A crossing whose
+    // search exhausts stays UNCITED — the legend's standing tick row
+    // (added whenever any tick prints) keeps the bare glyph
+    // self-describing. ----
+    const citeSpotsFor = (k: (typeof marks)[number]): [number, number][] => {
       const nx2 = -Math.sin(k.ang)
       const ny2 = Math.cos(k.ang)
       const ax2 = Math.cos(k.ang)
       const ay2 = Math.sin(k.ang)
-      // near ring first, then wider rings (small rooms cluster their
-      // bubbles right on top of the crossing — powder-room compose).
-      // Candidates near the sheet edge CLAMP inboard instead of dropping
-      // (seam round 2: the courtyard EXIT cite died on the sheet test —
-      // every centered spot at x+width/2 ran past the margin).
+      // near ring first, then wider rings; edge-near candidates CLAMP
+      // inboard instead of dropping (seam round 2: the courtyard EXIT
+      // cite died purely on the sheet test).
       const clampCite = ([sx, sy]: [number, number]): [number, number] => {
         const lo = MARGIN + 3 + sleeveW / 2
         const hi = W - MARGIN - 3 - sleeveW / 2
         return [Math.max(lo, Math.min(hi, sx)), sy]
       }
-      const spots: [number, number][] = [14, 26, 38, 50].flatMap((r) => [
+      return [14, 26, 38, 50].flatMap((r) => [
         clampCite([k.x + nx2 * r, k.y + ny2 * r]),
         clampCite([k.x - nx2 * r, k.y - ny2 * r]),
         clampCite([k.x + ax2 * (r + 12), k.y + ay2 * (r + 12)]),
         clampCite([k.x - ax2 * (r + 12), k.y - ay2 * (r + 12)]),
       ])
-      // seam round 2 (census FLAG): the cite exempts its OWN tick (it sat
-      // in placed[] 14 px away and killed every near-ring spot) and its
-      // OWN pipe run — it may ride the leg it annotates; other texts are
-      // hard obstacles (text-over-text was FAIL 1).
-      // seam round 3 (R2): the exemption relaxes DISTANCE only — the cite
-      // rect must never OVERLAP the tick's bars (on vertical legs the
-      // ring-14 perpendicular spot CONTAINED the tick: |dx|=14 < width/2,
-      // dy=0 — ghost notches under both frost cites). Adjacency stays
-      // legal; containment does not.
+    }
+    const citeSpotOk = (
+      k: (typeof marks)[number],
+      [tx, ty]: [number, number],
+      withTexts: boolean,
+    ): boolean => {
       const ownTickRect: PipeObstacle = {
-        x: kx,
-        y: ky,
+        x: k.x,
+        y: k.y,
         ang: k.ang,
         hl: 3.5, // bar pair at ±2.5 along + stroke
         hw: 6.8, // bar half-span 6 + stroke
         sourceId: '__own-tick',
       }
-      const spot = spots.find(
-        ([tx, ty]) =>
-          tx - sleeveW / 2 > MARGIN &&
-          tx + sleeveW / 2 < W - MARGIN &&
-          ty > MARGIN + 10 &&
-          ty < H - MARGIN &&
-          !placed.some(
-            (q) => q !== tickEntry && Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12,
-          ) &&
-          !textHitsPipe(tx, ty, sleeveW / 2, 5, ownTickRect, 2) &&
-          textClearOfPipes(tx, ty, sleeveW / 2, 5, 2, k.sourceId) &&
-          textClearOfTexts(tx, ty, sleeveW / 2, 5),
+      return (
+        tx - sleeveW / 2 > MARGIN &&
+        tx + sleeveW / 2 < W - MARGIN &&
+        ty > MARGIN + 10 &&
+        ty < H - MARGIN &&
+        !placed.some(
+          (q) =>
+            q !== k.tickEntry && Math.abs(q.x - tx) < sleeveW / 2 + 9 && Math.abs(q.y - ty) < 12,
+        ) &&
+        !textHitsPipe(tx, ty, sleeveW / 2, 5, ownTickRect, 2) &&
+        textClearOfPipes(tx, ty, sleeveW / 2, 5, 2, k.sourceId) &&
+        (!withTexts || textClearOfTexts(tx, ty, sleeveW / 2, 5))
       )
-      if (!spot) continue
+    }
+    // crowding = how many spots survive the NON-text tests (texts are not
+    // placed yet) — the tightest crossing picks first
+    const citeOrder = marks
+      .map((k) => ({ k, options: citeSpotsFor(k).filter((s) => citeSpotOk(k, s, false)).length }))
+      .sort((a, b) => a.options - b.options)
+    for (const { k } of citeOrder) {
+      const spot = citeSpotsFor(k).find((s) => citeSpotOk(k, s, true))
+      if (!spot) {
+        // honest floor: bare tick + the standing legend row
+        shapes.push(`<!-- sleeve-cite dropped (crowded): ${k.sourceId} -->`)
+        continue
+      }
       shapes.push(
         `<text x="${spot[0].toFixed(1)}" y="${(spot[1] + 3).toFixed(1)}" font-size="8" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="${DWV_FLOW_ARROW}" stroke="#fff" stroke-width="2" paint-order="stroke">${SLEEVE_TXT}</text>`,
       )
@@ -897,6 +922,10 @@ function planSheet(
           const py = a.y + dy * t + dx * n
           if (placed.some((q) => Math.hypot(q.x - px, q.y - py) < 12)) continue
           if (!clearOfPipes(px, py, radius, a.sourceId)) continue
+          // round 4 F1: arrows were the one glyph family still blind to
+          // TEXT rects — the converged interior ticks evicted an arrow
+          // into the kitchen cite. 6 px keeps the glyph body clear.
+          if (!textRects.every((r) => Math.abs(r.x - px) >= r.hw + 6 || Math.abs(r.y - py) >= r.hh + 6)) continue
           spot = { x: px, y: py }
           break
         }
@@ -1172,6 +1201,9 @@ function planSheet(
       // half-truth once the return path prints its own tone (round 2).
       'duct-run': 'duct — supply air',
       'water-heater': 'water heater',
+      // buff bodies were unlegended on WH-less sheets, and 2 of 3 buff
+      // rects on the demo were the condenser (round 4 F3)
+      equipment: 'equipment body (AHU / CU)',
     }
     for (const role of Object.keys(NAMES)) {
       // The base 'duct' row covers SUPPLY runs only; return-air duct (B19c)
@@ -1209,6 +1241,9 @@ function planSheet(
       for (const note of [
         'DWV SLOPE 1/4 IN/FT (1/8 AT 3 IN+)',
         'ARROWS POINT TO SEWER (P3005.3)',
+        // whenever any tick printed, the glyph is self-describing even
+        // when a crowded crossing keeps no cite (round 4 F2)
+        ...(sleeveTickCount > 0 ? ['TICKS = SLEEVED CROSSING (P2603.4)'] : []),
       ]) {
         const y = MARGIN + 14 + row * 14
         legendLines.push(
