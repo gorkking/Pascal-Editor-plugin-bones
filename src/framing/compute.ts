@@ -609,12 +609,24 @@ function computeLevelUncached(
   if (config.showFloor) {
     if (isGroundLevel) {
       // Ground floors are slab-on-grade here — the FOUNDATION owns that
-      // geometry. Say so instead of silently doing nothing (quality A4:
-      // the toggle looked dead), and call out rooms with no slab at all.
+      // geometry, and since B17 it actually BUILDS it (slab field members +
+      // vapor retarder, buildFoundation). Say so instead of silently doing
+      // nothing (quality A4: the toggle looked dead), and call out rooms
+      // with no slab at all. Gate: the warning names geometry that exists
+      // (compute.multistorey.test.ts B17).
       if (slabs.length === 0) {
         warnings.push('No floor slabs on this level — rooms have no floor to derive')
+      } else if (config.showFoundation) {
+        warnings.push(
+          'Ground floor is slab-on-grade — the Foundation system draws the slab field, vapor retarder and footings',
+        )
       } else {
-        warnings.push('Ground floor is slab-on-grade — see Foundation for the slab and footings')
+        // Foundation toggled OFF: the pointed-at geometry is not in this
+        // result — the wording must not promise members that aren't drawn
+        // (skeptic rider, B17 round 1; pinned in compute.multistorey B17).
+        warnings.push(
+          'Ground floor is slab-on-grade — enable Foundation to see the slab field, vapor retarder and footings',
+        )
       }
     } else {
       // Host floor-to-floor is baseY delta (resolveLevelFloorToFloorHeight),

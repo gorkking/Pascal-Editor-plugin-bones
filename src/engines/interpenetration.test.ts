@@ -135,14 +135,12 @@ const ALLOWED: ReadonlySet<string> = new Set(
     // 'anchor-bolt × bottom-plate' class (LOD-400 audit B5).
     ['anchor-bolt', 'bottom-plate'],
     ['anchor-bolt', 'stemwall'],
-    ['anchor-bolt', 'slab-edge'],
     ['anchor-bolt', 'footing'],
     ['anchor-bolt', 'bond-beam'],
     ['anchor-bolt', 'plate-washer'],
     ['plate-washer', 'mudsill'],
     ['hold-down', 'mudsill'],
     ['hold-down', 'stemwall'],
-    ['hold-down', 'slab-edge'],
     ['hold-down', 'stud'],
     ['hold-down', 'king-stud'],
     ['hold-down', 'anchor-bolt'],
@@ -155,7 +153,6 @@ const ALLOWED: ReadonlySet<string> = new Set(
     ['rebar', 'lintel'],
     ['rebar', 'footing'],
     ['rebar', 'stemwall'],
-    ['rebar', 'slab-edge'],
     // Mixed-wall seam bolts embed 7" into the grouted bond beam (R403.1.6)
     // exactly where its horizontal bars run — a J-bolt sits beside/around
     // the bar inside the grout (tie-wired in practice). Thin walls carry a
@@ -683,6 +680,26 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(buildFoundation(rectWalls(), [slab(rect(6, 4))], spec400))).toEqual([])
   })
 
+  test('foundation: slab-on-grade field with a stair hole — carved, SAT-clean (B17)', () => {
+    // The field + vapor retarder tile around the opening AND around every
+    // stemwall/interior-footing band; the composed pour may not overlap
+    // itself, the perimeter kit, or reach into the hole.
+    const members = buildFoundation(
+      rectWalls(),
+      [slab(rect(6, 4), { holes: [[[2, 1.2], [3.2, 1.2], [3.2, 2.8], [2, 2.8]]] })],
+      spec400,
+    )
+    const field = members.filter((m) => m.role === 'slab')
+    expect(field.length).toBeGreaterThan(0)
+    expect(violations(members)).toEqual([])
+    for (const m of field) {
+      const [hx, hz] = [m.dims[0] / 2, m.dims[2] / 2]
+      const ox = Math.min(m.position[0] + hx, 3.2) - Math.max(m.position[0] - hx, 2)
+      const oz = Math.min(m.position[2] + hz, 2.8) - Math.max(m.position[2] - hz, 1.2)
+      expect(Math.min(ox, oz)).toBeLessThanOrEqual(1e-6)
+    }
+  })
+
   test('slab-on-grade compose: anchor bolts clamp the PT sole plate — design intent, never a clash (B5)', () => {
     // Foundation + ground-level walls composed in one SAT pass: the bolts
     // rise through the wall engine's bottom plate — the (PT, R317.1) sole
@@ -710,6 +727,30 @@ describe('interpenetration gate — structural members never share volume', () =
       wall({ id: 'w_b', start: [4 + c, c], end: [4 + c, 5] }),
     ]
     expect(violations(buildFoundation(chamfered, [], spec400))).toEqual([])
+  })
+
+  test('foundation: 45° chamfered plan WITH the slab field — axis-aligned strips clear the oblique stemwall (B17)', () => {
+    // The slab strips are axis-aligned boxes; the chamfer stemwall is a 45°
+    // band. The carve is a conservative box per strip — the composed SAT
+    // proves no strip reaches into the oblique pour.
+    const c = 2 * Math.SQRT1_2
+    const plan = [
+      wall({ id: 'w_a', start: [0, 0], end: [4, 0] }),
+      wall({ id: 'w_c', start: [4, 0], end: [4 + c, c] }),
+      wall({ id: 'w_b', start: [4 + c, c], end: [4 + c, 5] }),
+      wall({ id: 'w_n', start: [4 + c, 5], end: [0, 5] }),
+      wall({ id: 'w_w', start: [0, 5], end: [0, 0] }),
+    ]
+    const poly: [number, number][] = [
+      [0, 0],
+      [4, 0],
+      [4 + c, c],
+      [4 + c, 5],
+      [0, 5],
+    ]
+    const members = buildFoundation(plan, [slab(poly)], spec400)
+    expect(members.some((m) => m.role === 'slab')).toBe(true)
+    expect(violations(members)).toEqual([])
   })
 
   test('foundation: Y-junction — three runs sharing one endpoint (round-12)', () => {

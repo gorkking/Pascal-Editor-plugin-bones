@@ -48,7 +48,13 @@ export type MemberRole =
   | 'mudsill'
   | 'stemwall'
   | 'footing'
-  | 'slab-edge'
+  /** Slab-on-grade field strip (R506.1 3-1/2" concrete floor) — LOD-400 B17.
+   * Replaces the never-emitted 'slab-edge' role (the stemwall detail made a
+   * turned-down edge redundant; the dead role let the takeoff map a pour
+   * nothing built). */
+  | 'slab'
+  /** 6-mil polyethylene membrane under the slab field (R506.2.3). */
+  | 'vapor-retarder'
   | 'anchor-bolt'
   | 'hold-down'
   // cmu

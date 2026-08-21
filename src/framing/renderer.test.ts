@@ -13,7 +13,7 @@ const ROLES: MemberRole[] = [
   'bottom-plate', 'top-plate', 'cap-plate', 'stud', 'king-stud', 'trimmer', 'header',
   'sill', 'cripple', 'blocking', 'joist', 'rim-joist', 'girder', 'post', 'rafter',
   'ridge', 'hip', 'valley', 'ceiling-joist', 'collar-tie', 'mudsill', 'stemwall',
-  'footing', 'slab-edge', 'anchor-bolt', 'hold-down', 'block', 'lintel', 'bond-beam',
+  'footing', 'slab', 'vapor-retarder', 'anchor-bolt', 'hold-down', 'block', 'lintel', 'bond-beam',
   'pipe-run', 'vent-stack', 'duct-run', 'wire-run', 'rebar', 'hanger', 'plate-washer',
   'jack-rafter', 'outlooker', 'fascia', 'fire-blocking', 'backing',
 ]

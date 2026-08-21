@@ -811,3 +811,115 @@ describe('upper-storey plumbing truth (skeptic S2, feat/underfloor-dwv)', () => 
     ).toBe(true)
   })
 })
+
+describe('LOD-400 B17: slab-on-grade booked == built, ground storeys only', () => {
+  test('baseline census: the ground level BUILDS the slab field + vapor retarder and BOOKS both', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('INTL'))
+    const field = result.members.filter((m) => m.role === 'slab')
+    const membrane = result.members.filter((m) => m.role === 'vapor-retarder')
+    expect(field.length).toBeGreaterThan(0)
+    expect(membrane.length).toBe(field.length)
+    for (const m of [...field, ...membrane]) expect(m.system).toBe('foundation')
+    // S4 parity: the yd³ row is the member volume, the sqft row the member
+    // area at the stated +10% lap factor — booked == built.
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    const round1 = (n: number) => Math.round(n * 10) / 10
+    const vol = field.reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
+    const slabRow = rows.find(
+      (r) => r.item === 'Concrete' && r.detail === 'slab field (3-1/2" slab-on-grade, R506.1)',
+    )
+    expect(slabRow?.quantity).toBe(Math.max(0.1, round1(vol * 1.30795)))
+    const area = membrane.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+    const vaporRow = rows.find((r) => r.item === 'Vapor retarder 6-mil poly')
+    expect(vaporRow?.quantity).toBe(round1((area * 1.1) / 0.09290304))
+    // …and the biggest pour on the job is no longer a phantom: the field
+    // outweighs footings + stemwalls combined (the B17 defect shape).
+    const pourOf = (detail: string) =>
+      rows.find((r) => r.item === 'Concrete' && r.detail === detail)?.quantity ?? 0
+    expect(slabRow?.quantity ?? 0).toBeGreaterThan(pourOf('footings') + pourOf('stemwalls'))
+  })
+
+  test('the slab-on-grade warning names geometry that EXISTS in the same result', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('INTL'))
+    const warning = result.warnings.find((w) => w.startsWith('Ground floor is slab-on-grade'))
+    // the promise: "the Foundation system draws the slab field…"
+    expect(warning).toContain('Foundation')
+    expect(warning).toContain('slab field')
+    expect(warning).toContain('vapor retarder')
+    // …and the pointed-at geometry is real, in the SAME compute result
+    expect(result.members.some((m) => m.role === 'slab')).toBe(true)
+    expect(result.members.some((m) => m.role === 'vapor-retarder')).toBe(true)
+  })
+
+  test('upper storeys NEVER grow a ground slab: deck framing yes, slab field no', () => {
+    const nodes = twoStoreyScene()
+    nodes.slab_up_b17 = {
+      id: 'slab_up_b17',
+      type: 'slab',
+      parentId: 'lvl1',
+      polygon: [
+        [0, 0],
+        [8, 0],
+        [8, 5],
+        [0, 5],
+      ],
+      holes: [],
+      elevation: 0.05,
+      thickness: 0.1,
+    }
+    const node = bones('bonesframing_up_b17', 'lvl1')
+    nodes.bonesframing_up_b17 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    expect(result.members.filter((m) => m.role === 'slab')).toHaveLength(0)
+    expect(result.members.filter((m) => m.role === 'vapor-retarder')).toHaveLength(0)
+    // the storey floor is the JOIST platform + deck, not a pour
+    expect(result.members.some((m) => m.role === 'joist')).toBe(true)
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(
+      rows.some((r) => r.item === 'Concrete' && r.detail.includes('slab field')),
+    ).toBe(false)
+    expect(rows.some((r) => r.item === 'Vapor retarder 6-mil poly')).toBe(false)
+  })
+
+  test('showFoundation OFF: the warning stops promising members and names the toggle instead', () => {
+    // Skeptic rider (round 1): with Foundation off, the old wording pointed
+    // at geometry that is NOT in the result. The pointer clause is gated.
+    const nodes = baselineScene()
+    const node = FramingNode.parse({
+      ...(baselineConfig('INTL') as unknown as Record<string, unknown>),
+      id: 'bonesframing_nofnd',
+      showFoundation: false,
+    }) as FramingNode
+    nodes.bonesframing_nofnd = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    expect(result.members.filter((m) => m.role === 'slab')).toHaveLength(0)
+    expect(result.members.filter((m) => m.role === 'vapor-retarder')).toHaveLength(0)
+    const warning = result.warnings.find((w) => w.startsWith('Ground floor is slab-on-grade'))
+    expect(warning).toContain('enable Foundation')
+    expect(warning).not.toContain('draws')
+  })
+
+  test('ground storey of the two-storey scene builds the field once a slab exists', () => {
+    const nodes = twoStoreyScene()
+    nodes.slab_gnd_b17 = {
+      id: 'slab_gnd_b17',
+      type: 'slab',
+      parentId: 'lvl0',
+      polygon: [
+        [0, 0],
+        [8, 0],
+        [8, 5],
+        [0, 5],
+      ],
+      holes: [],
+      elevation: 0.05,
+      thickness: 0.1,
+    }
+    const node = bones('bonesframing_gnd_b17', 'lvl0')
+    nodes.bonesframing_gnd_b17 = node as unknown as Record<string, unknown>
+    const result = computeLevel(nodes, node)
+    const field = result.members.filter((m) => m.role === 'slab')
+    expect(field.length).toBeGreaterThan(0)
+    for (const m of field) expect(m.sourceId).toBe('slab_gnd_b17')
+  })
+})

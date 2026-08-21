@@ -1380,6 +1380,191 @@ describe('examiner round-5 — floor sheet legibility + legend box geometry', ()
   })
 })
 
+describe('B17 — foundation sheet: slab field is the translucent UNDER-layer', () => {
+  const foundationMembers = () => [
+    member({
+      system: 'foundation',
+      role: 'footing',
+      size: undefined,
+      material: 'concrete',
+      dims: [6, 0.2, 0.4],
+      position: [3, -0.2, 0],
+      label: 'Footing 16"×8"',
+    }),
+    member({
+      system: 'foundation',
+      role: 'stemwall',
+      size: undefined,
+      material: 'concrete',
+      dims: [6, 0.1, 0.2],
+      position: [3, -0.05, 0],
+      label: 'Stemwall 8"',
+    }),
+    member({
+      system: 'foundation',
+      role: 'anchor-bolt',
+      size: undefined,
+      material: 'steel',
+      dims: [0.016, 0.254, 0.016],
+      position: [1, -0.05, 0],
+      label: '5/8" anchor bolt',
+    }),
+    member({
+      system: 'foundation',
+      role: 'slab',
+      size: undefined,
+      material: 'concrete',
+      dims: [5.8, 0.0889, 1.1],
+      position: [3, -0.044, 1],
+      label: 'Slab-on-grade 3-1/2" (R506.1)',
+    }),
+    member({
+      system: 'foundation',
+      role: 'vapor-retarder',
+      size: undefined,
+      material: 'pvc',
+      dims: [5.8, 0.00015, 1.1],
+      position: [3, -0.089, 1],
+      label: '6-mil vapor retarder under slab (R506.2.3)',
+    }),
+  ]
+  const sheet = () =>
+    buildPlanSet(foundationMembers(), [], {
+      projectName: 'p',
+      levelName: 'l',
+      jurisdiction: 'FL',
+      date: 'd',
+    }).find((s) => s.title === 'Foundation plan')?.svg ?? ''
+
+  test('the slab strip prints FIRST and translucent — footing/stemwall linework stays on top', () => {
+    const svg = sheet()
+    const slabIdx = svg.indexOf('fill-opacity="0.35"')
+    // the mitered footing/stemwall runs are stroke paths…
+    const strokeIdx = svg.indexOf('stroke-linejoin="miter"')
+    // …and the bolt prints as a filled hardware dot
+    const boltIdx = svg.indexOf('<circle')
+    expect(slabIdx).toBeGreaterThan(-1)
+    expect(strokeIdx).toBeGreaterThan(-1)
+    expect(boltIdx).toBeGreaterThan(-1)
+    expect(slabIdx).toBeLessThan(strokeIdx) // slab is the UNDER-layer (deck pattern)
+    expect(slabIdx).toBeLessThan(boltIdx)
+  })
+
+  test('the vapor retarder never overprints the slab — it rides the legend instead', () => {
+    const svg = sheet()
+    // exactly ONE translucent field rect (the membrane is coincident under
+    // the slab; drawing both would double the opacity to no information)
+    expect([...svg.matchAll(/fill-opacity="0\.35"/g)]).toHaveLength(1)
+    expect(svg).toContain('slab-on-grade, drawn translucent')
+    expect(svg).toContain('base course')
+    expect(svg).toContain('vapor retarder under slab (R506.2.3)')
+  })
+})
+
+describe('B17 round 2 — plate-like members stroke at their TRUE thickness on side views', () => {
+  // Examiner round-1 FAIL: slab strips parallel to the section cut printed
+  // as dashed bands stroke-width = PLAN width (up to 1.20 m at 1:75, ~13×
+  // the 3-1/2" pour), straddling grade into the stud bottoms, with the
+  // coincident vapor retarder printing an identical twin band 2.3 px lower;
+  // same ribbons on all four elevations + the cover iso. Root: memberAxis
+  // took the second-largest dim — right for sticks, wrong for plate-like
+  // horizontals whose vertical dim is the smallest.
+  const PPM = 96 / 0.0254
+  const SLAB_T = 0.0889
+  const parallelStrip = () =>
+    member({
+      system: 'foundation',
+      role: 'slab',
+      size: undefined,
+      material: 'concrete',
+      dims: [1.1, SLAB_T, 5.8], // long axis along Z — parallel to the cut plane
+      position: [3, -SLAB_T / 2, 2.5],
+      label: 'Slab-on-grade 3-1/2" (R506.1)',
+    })
+  const crossingStrip = () =>
+    member({
+      system: 'foundation',
+      role: 'slab',
+      size: undefined,
+      material: 'concrete',
+      dims: [5.8, SLAB_T, 1.1], // long axis along X — CROSSES the cut plane
+      position: [3, -SLAB_T / 2, 1],
+      label: 'Slab-on-grade 3-1/2" (R506.1)',
+    })
+  const membrane = () =>
+    member({
+      system: 'foundation',
+      role: 'vapor-retarder',
+      size: undefined,
+      material: 'pvc',
+      dims: [5.8, 0.00015, 1.1],
+      position: [3, -SLAB_T - 0.000075, 1],
+      label: '6-mil vapor retarder under slab (R506.2.3)',
+    })
+  const sheets = () =>
+    buildPlanSet([parallelStrip(), crossingStrip(), membrane()], [], {
+      projectName: 'p',
+      levelName: 'l',
+      jurisdiction: 'FL',
+      date: 'd',
+    })
+  const ratioOf = (svg: string): number => Number(/scale 1:(\d+)/.exec(svg)?.[1] ?? 0)
+  const foundationStrokes = (svg: string): number[] =>
+    [...svg.matchAll(/stroke="#8b8f96" stroke-width="([\d.]+)"/g)].map((m2) => Number(m2[1]))
+
+  test('section: a slab strip PARALLEL to the cut strokes at 0.0889 m × scale, not its plan width', () => {
+    const svg = sheets().find((s) => s.title.startsWith('Section'))?.svg ?? ''
+    const ratio = ratioOf(svg)
+    expect(ratio).toBeGreaterThan(0)
+    const scale = PPM / ratio
+    const expected = Number(Math.max(0.7, SLAB_T * scale).toFixed(1))
+    const strokes = foundationStrokes(svg)
+    expect(strokes.length).toBeGreaterThan(0)
+    // every foundation LINE is either the true 3-1/2" band or the clamped
+    // membrane hairline — the old plan-width class (≥ 1.1 m × scale) is dead
+    for (const w of strokes) {
+      expect([expected, 0.7]).toContain(w)
+      expect(w).toBeLessThan(1.1 * scale - 1)
+    }
+    expect(strokes).toContain(expected) // non-vacuous: the thin band prints
+  })
+
+  test('section: the CROSSING strip still cuts as a dark rect — true width × true 3-1/2" height (unchanged)', () => {
+    const svg = sheets().find((s) => s.title.startsWith('Section'))?.svg ?? ''
+    const scale = PPM / ratioOf(svg)
+    const rects = [...svg.matchAll(/<rect x="[\d.-]+" y="[\d.-]+" width="([\d.]+)" height="([\d.]+)" fill="#222"/g)]
+    expect(rects.length).toBeGreaterThanOrEqual(1)
+    const slabRect = rects.find(
+      (r) => Math.abs(Number(r[1]) - 1.1 * scale) < 2 && Math.abs(Number(r[2]) - SLAB_T * scale) < 2,
+    )
+    expect(slabRect).toBeDefined()
+  })
+
+  test('elevations + cover iso: no ribbon bands — every foundation stroke ≤ the true thickness', () => {
+    const all = sheets()
+    for (const title of ['South elevation', 'East elevation']) {
+      const svg = all.find((s) => s.title.startsWith(title))?.svg ?? ''
+      const ratio = ratioOf(svg)
+      expect(ratio).toBeGreaterThan(0)
+      const scale = PPM / ratio
+      const strokes = foundationStrokes(svg)
+      expect(strokes.length).toBeGreaterThan(0) // non-vacuous
+      for (const w of strokes) expect(w).toBeLessThanOrEqual(SLAB_T * scale + 0.1)
+    }
+    // The cover iso prints no scale ratio — pin it on the FIXTURE: the old
+    // plan-width class drew these strips as ≥ 20 px gray ribbons (examiner
+    // measured 45.2/25.0/20.5 px); the true 3-1/2" thickness lands well
+    // under 10 px at any ratio the 5.8 m fixture can fit at.
+    const coverSvg = all.find((s) => s.title === 'Cover')?.svg ?? ''
+    const strokes = foundationStrokes(coverSvg)
+    expect(strokes.length).toBeGreaterThan(0)
+    for (const w of strokes) expect(w).toBeLessThan(10)
+    // the membrane is the deliberate 0.7 px min-clamp hairline (stated in
+    // memberSegs): visually distinct from the pour, never a twin band
+    expect(strokes).toContain(0.7)
+  })
+})
+
 describe('round-6 — flags print VERBATIM (no ellipsis), cross-level lift is a DELTA', () => {
   test('a 297-char composed flag and the S10 span flag print whole; no … anywhere', () => {
     const flags = [

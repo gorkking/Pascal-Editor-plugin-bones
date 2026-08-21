@@ -4,8 +4,10 @@
  *
  *   continuous footing (IRC R403.1) · stemwall up to the plate line ·
  *   anchor bolts at code spacing (R403.1.6) · seismic hold-downs at wall
- *   ends when the jurisdiction demands them · a subtle thickened slab edge
- *   when the level has slabs.
+ *   ends when the jurisdiction demands them · the SLAB-ON-GRADE FIELD
+ *   itself (R506.1 3-1/2" concrete over a 6-mil vapor retarder, R506.2.3)
+ *   when the level has slabs — LOD-400 B17: the biggest pour on the job
+ *   used to be a phantom the compute warning pointed at.
  *
  * LOD 350 (detail !== '200') adds:
  *   corner continuity — footing/stemwall runs extended past shared corners
@@ -31,6 +33,7 @@
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, SlabSlice, WallSlice } from '../core/types'
 import { formatIn, inches } from '../core/units'
+import { intersectIntervals, polygonSpans, subtractInterval } from './floor-framing'
 
 const EPS = 1e-6
 
@@ -51,8 +54,19 @@ const BOLT_EMBEDMENT = inches(7)
 const HOLD_DOWN_SIDE = inches(3)
 const HOLD_DOWN_HEIGHT = inches(12)
 
-/** Monolithic slab thickened-edge depth (R403.1.3.1 turned-down edge). */
-const SLAB_EDGE_DEPTH = inches(12)
+/** R506.1: minimum 3-1/2" concrete floor slab-on-grade. */
+const SLAB_THICKNESS = inches(3.5)
+/** R506.2.3: 6-mil (0.006") polyethylene vapor retarder under the slab. */
+const VAPOR_RETARDER_THICKNESS = inches(0.006)
+/**
+ * Slab-field tiling pitch: the renderer instances BOXES, not polygons, so
+ * the field tiles as strips exactly like the subfloor deck (the proven
+ * pattern — B3). 1.2 m ≈ a 4-ft module; fidelity of the hole/band carves
+ * vs member count.
+ */
+const SLAB_STRIP_PITCH = 1.2
+/** Slivers thinner than this are not poured as separate strips. */
+const MIN_STRIP = inches(2)
 
 /** #4 rebar: 0.5" nominal diameter, modeled as a 0.5" square bar. */
 const REBAR_SIDE = inches(0.5)
@@ -262,6 +276,12 @@ export function buildFoundation(
   const hasSlab = slabs.length > 0
   const fabDetail = spec.detail !== '200' // LOD 350 gate
   const lod400 = spec.detail === '400'
+  // Plan rectangles the slab field must pour AGAINST, never through: every
+  // foundation element whose volume reaches into the slab's vertical band
+  // (stemwalls top at y=0 always; interior thickened footings too; the
+  // perimeter footing only on shallow specs). Collected from the ACTUAL
+  // emitted runs (incl. corner extensions) so the carve matches the pour.
+  const carveBands: CarveBand[] = []
 
   // Corner continuity only pairs EXTERIOR straight walls — the ones that
   // actually own perimeter runs below.
@@ -307,6 +327,13 @@ export function buildFoundation(
         sourceId: wall.id,
         label,
       })
+    }
+
+    /** Plan band of an emitted run (wall-local u extent → world endpoints). */
+    const bandOf = (centerU: number, runLen: number, width: number): CarveBand => {
+      const a = place(centerU - runLen / 2, 0)
+      const b = place(centerU + runLen / 2, 0)
+      return { a: [a[0], a[2]], b: [b[0], b[2]], w: width }
     }
 
     /**
@@ -390,6 +417,9 @@ export function buildFoundation(
         'concrete',
         `Interior thickened footing ${formatIn(spec.footingWidth)}×${formatIn(INTERIOR_FOOTING_DEPTH)}`,
       )
+      // The thickened section IS slab concrete poured monolithically — the
+      // field strips stop at its faces (booked once, drawn once).
+      carveBands.push(bandOf(iCenter, iLen, spec.footingWidth))
       // Rebar rides "every footing run" — including interior thickened ones.
       emitFootingBars(iCenter, iLen, -INTERIOR_FOOTING_DEPTH, spec.footingWidth)
       continue
@@ -422,6 +452,13 @@ export function buildFoundation(
       'concrete',
       `Footing ${formatIn(spec.footingWidth)}×${formatIn(FOOTING_HEIGHT)}`,
     )
+    // Shallow specs (footing top inside the slab's vertical band, e.g. the
+    // 8"-frost minimum where footing top = y 0) put the FOOTING where the
+    // slab would pour — carve the field around it. Default frost depths
+    // keep the footing top below the slab bottom: no band, slab runs over.
+    if (-spec.footingDepth + FOOTING_HEIGHT > -SLAB_THICKNESS + EPS) {
+      carveBands.push(bandOf(runCenterU, runLen, spec.footingWidth))
+    }
 
     // ---- footing rebar (LOD 350) ----
     if (fabDetail) {
@@ -448,6 +485,9 @@ export function buildFoundation(
         'concrete',
         `Stemwall ${formatIn(spec.stemwallThickness)}`,
       )
+      // The slab pours AGAINST the stemwall (R403.1) — the field strips
+      // stop at its faces; anchor bolts/hold-downs live inside this band.
+      carveBands.push(bandOf(stemRun.center, stemRun.len, spec.stemwallThickness))
 
       // ---- stemwall vertical rebar (LOD 350) ----
       // R403.1.3.2 / SDC practice: #4 verticals tying footing to stemwall,
@@ -555,5 +595,241 @@ export function buildFoundation(
     // (round-10 interpenetration gate).
   }
 
+  // ---- slab-on-grade field + vapor retarder (LOD-400 B17) ----
+  // The ground slab is REAL geometry now: an R506.1 3-1/2" concrete field
+  // over a 6-mil vapor retarder (R506.2.3), tiled as strips (the subfloor
+  // deck's box pattern), stair/utility holes carved, and the field carved
+  // around every foundation element sharing its vertical band (see
+  // carveBands). y = 0 — the plate line — is the walking surface: the PT
+  // sole plate bears directly on this slab (R317.1(2), B5).
+  // ASSUMPTION (advisory on every strip): the 4" base course + compacted
+  // fill below the retarder are NOT modeled (R506.2.2) — the scene carries
+  // no grade/terrain data; the takeoff books the labeled slab + membrane.
+  if (hasSlab) {
+    for (const slab of slabs) emitSlabField(slab, carveBands, members)
+  }
+
   return members
+}
+
+// ---------------------------------------------------------------------------
+// Slab-on-grade field (B17)
+// ---------------------------------------------------------------------------
+
+/**
+ * Plan rectangle occupied by a foundation element that shares the slab's
+ * vertical band — centerline a→b, full width `w`. The slab field pours
+ * against these, never through them.
+ */
+type CarveBand = {
+  a: readonly [number, number]
+  b: readonly [number, number]
+  w: number
+}
+
+/** Axis-aligned bounds of a plan polygon. */
+function planBounds(polygon: readonly (readonly [number, number])[]): {
+  minX: number
+  maxX: number
+  minZ: number
+  maxZ: number
+} {
+  let minX = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let minZ = Number.POSITIVE_INFINITY
+  let maxZ = Number.NEGATIVE_INFINITY
+  for (const [x, z] of polygon) {
+    minX = Math.min(minX, x)
+    maxX = Math.max(maxX, x)
+    minZ = Math.min(minZ, z)
+    maxZ = Math.max(maxZ, z)
+  }
+  return { minX, maxX, minZ, maxZ }
+}
+
+/** Cross-axis extent of a carve band's rectangle (strip-splitting cuts). */
+function bandCrossExtent(band: CarveBand, runAxis: 'x' | 'z'): [number, number] | null {
+  const [ax, az] = band.a
+  const [bx, bz] = band.b
+  const dx = bx - ax
+  const dz = bz - az
+  const len = Math.hypot(dx, dz)
+  if (len < EPS) return null
+  const nx = (-dz / len) * (band.w / 2)
+  const nz = (dx / len) * (band.w / 2)
+  const crosses = [
+    runAxis === 'x' ? az + nz : ax + nx,
+    runAxis === 'x' ? bz + nz : bx + nx,
+    runAxis === 'x' ? bz - nz : bx - nx,
+    runAxis === 'x' ? az - nz : ax - nx,
+  ]
+  return [Math.min(...crosses), Math.max(...crosses)]
+}
+
+/**
+ * Run-axis interval a carve band occupies WITHIN one strip's cross band
+ * [lo, hi] — the band rectangle clipped to the two half-planes
+ * (Sutherland–Hodgman), then its run extent. Null when the band misses the
+ * strip. The extent is a conservative box carve: an oblique band removes
+ * its full clipped reach across the strip (slight under-pour beside skewed
+ * walls, never concrete inside a stemwall — the deck's hole-carve stance).
+ */
+function bandRunInterval(
+  band: CarveBand,
+  runAxis: 'x' | 'z',
+  lo: number,
+  hi: number,
+): [number, number] | null {
+  const [ax, az] = band.a
+  const [bx, bz] = band.b
+  const dx = bx - ax
+  const dz = bz - az
+  const len = Math.hypot(dx, dz)
+  if (len < EPS) return null
+  const nx = (-dz / len) * (band.w / 2)
+  const nz = (dx / len) * (band.w / 2)
+  let pts: [number, number][] = [
+    [ax + nx, az + nz],
+    [bx + nx, bz + nz],
+    [bx - nx, bz - nz],
+    [ax - nx, az - nz],
+  ]
+  const cross = (p: readonly [number, number]): number => (runAxis === 'x' ? p[1] : p[0])
+  const run = (p: readonly [number, number]): number => (runAxis === 'x' ? p[0] : p[1])
+  const clip = (input: [number, number][], inside: (v: number) => boolean, at: number) => {
+    const out: [number, number][] = []
+    for (let i = 0; i < input.length; i++) {
+      const p = input[i] as [number, number]
+      const q = input[(i + 1) % input.length] as [number, number]
+      const pin = inside(cross(p))
+      const qin = inside(cross(q))
+      if (pin) out.push(p)
+      if (pin !== qin) {
+        const t = (at - cross(p)) / (cross(q) - cross(p))
+        out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t])
+      }
+    }
+    return out
+  }
+  pts = clip(pts, (v) => v >= lo - EPS, lo)
+  if (pts.length === 0) return null
+  pts = clip(pts, (v) => v <= hi + EPS, hi)
+  if (pts.length === 0) return null
+  // A band TOUCHING the strip at its boundary clips to a degenerate edge —
+  // zero cross reach into the strip must carve nothing (the strip-splitting
+  // cuts put band edges exactly on strip edges by construction).
+  const crossVals = pts.map(cross)
+  if (Math.max(...crossVals) - Math.min(...crossVals) < 1e-4) return null
+  const runs = pts.map(run)
+  const cut: [number, number] = [Math.min(...runs), Math.max(...runs)]
+  return cut[1] - cut[0] > EPS ? cut : null
+}
+
+/**
+ * Tile one slab's field: strips run along the LONG plan axis at
+ * SLAB_STRIP_PITCH across the short one, each strip's spans sampled at the
+ * centerline AND both edges (the deck pattern — centerline-only sampling
+ * overhangs L-notch voids), holes carved by bounding box, carve bands
+ * subtracted. Every surviving span emits ONE concrete slab strip (top at
+ * y = 0) and ONE vapor-retarder strip directly under it — the membrane
+ * mirrors the field 1:1, so member-derived areas agree by construction
+ * (checklist S4).
+ */
+function emitSlabField(slab: SlabSlice, bands: CarveBand[], members: Member[]): void {
+  const polygon = slab.polygon
+  if (polygon.length < 3) return
+  const box = planBounds(polygon)
+  const spanX = box.maxX - box.minX
+  const spanZ = box.maxZ - box.minZ
+  if (spanX < MIN_STRIP || spanZ < MIN_STRIP) return
+  const runAxis: 'x' | 'z' = spanX >= spanZ ? 'x' : 'z'
+  const crossStart = runAxis === 'x' ? box.minZ : box.minX
+  const crossLen = runAxis === 'x' ? spanZ : spanX
+  // Strip edges: the uniform pitch grid UNION every carve band's / hole's
+  // cross extent. Without the extra cuts, a band PARALLEL to the run axis
+  // (the south stemwall under an east-west strip) carved the whole strip —
+  // a 1.1 m dead lane along every wall for a 4" band (first compose lost
+  // 32% of the field). Splitting at the band edges makes the axis-parallel
+  // carve exact; oblique bands stay conservatively boxed per (thinner) strip.
+  const cuts: number[] = []
+  const stripCount = Math.max(1, Math.ceil(crossLen / SLAB_STRIP_PITCH))
+  for (let i = 0; i <= stripCount; i++) cuts.push(crossStart + (crossLen * i) / stripCount)
+  const addCut = (v: number) => {
+    if (v > crossStart + EPS && v < crossStart + crossLen - EPS) cuts.push(v)
+  }
+  for (const band of bands) {
+    const ext = bandCrossExtent(band, runAxis)
+    if (ext) {
+      addCut(ext[0])
+      addCut(ext[1])
+    }
+  }
+  for (const hole of slab.holes) {
+    if (hole.length < 3) continue
+    const hb = planBounds(hole)
+    addCut(runAxis === 'x' ? hb.minZ : hb.minX)
+    addCut(runAxis === 'x' ? hb.maxZ : hb.maxX)
+  }
+  cuts.sort((a, b) => a - b)
+  for (let i = 0; i + 1 < cuts.length; i++) {
+    const lo = cuts[i] as number
+    const hi = cuts[i + 1] as number
+    if (hi - lo < 0.002) continue // duplicate / hairline breakpoints
+    const c = (lo + hi) / 2
+    let spans = intersectIntervals(
+      intersectIntervals(
+        polygonSpans(polygon, runAxis, c),
+        polygonSpans(polygon, runAxis, Math.min(lo + 0.001, c)),
+      ),
+      polygonSpans(polygon, runAxis, Math.max(hi - 0.001, c)),
+    )
+    // Holes carve by bounding box — conservative: a strip band touching the
+    // hole loses the hole's full run extent (slight under-pour, never
+    // concrete inside a stair/utility opening).
+    for (const hole of slab.holes) {
+      if (hole.length < 3) continue
+      const hb = planBounds(hole)
+      const [hLo, hHi] = runAxis === 'x' ? [hb.minZ, hb.maxZ] : [hb.minX, hb.maxX]
+      const [hRunLo, hRunHi] = runAxis === 'x' ? [hb.minX, hb.maxX] : [hb.minZ, hb.maxZ]
+      if (hHi - hLo < EPS || hRunHi - hRunLo < EPS) continue // degenerate sliver
+      if (hi > hLo + EPS && lo < hHi - EPS) spans = subtractInterval(spans, [hRunLo, hRunHi])
+    }
+    for (const band of bands) {
+      const cut = bandRunInterval(band, runAxis, lo, hi)
+      if (cut) spans = subtractInterval(spans, cut)
+    }
+    const width = hi - lo
+    if (width < MIN_STRIP) continue
+    for (const [s, e] of spans) {
+      const len = e - s
+      if (len < MIN_STRIP) continue
+      const pos = (y: number): [number, number, number] =>
+        runAxis === 'x' ? [(s + e) / 2, y, c] : [c, y, (s + e) / 2]
+      const dimsFor = (t: number): [number, number, number] =>
+        runAxis === 'x' ? [len, t, width] : [width, t, len]
+      members.push({
+        system: 'foundation',
+        role: 'slab',
+        dims: dimsFor(SLAB_THICKNESS),
+        length: Math.max(len, width),
+        position: pos(-SLAB_THICKNESS / 2),
+        rotation: [0, 0, 0],
+        material: 'concrete',
+        sourceId: slab.id,
+        label: 'Slab-on-grade 3-1/2" (R506.1)',
+        advisory: 'bears on 4" base course + compacted fill — not modeled (R506.2.2)',
+      })
+      members.push({
+        system: 'foundation',
+        role: 'vapor-retarder',
+        dims: dimsFor(VAPOR_RETARDER_THICKNESS),
+        length: Math.max(len, width),
+        position: pos(-SLAB_THICKNESS - VAPOR_RETARDER_THICKNESS / 2),
+        rotation: [0, 0, 0],
+        material: 'pvc',
+        sourceId: slab.id,
+        label: '6-mil vapor retarder under slab (R506.2.3)',
+      })
+    }
+  }
 }

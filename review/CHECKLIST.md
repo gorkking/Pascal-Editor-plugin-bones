@@ -126,7 +126,14 @@ AND a gate — a checklist line without a test is a wish.
   count, never a suppressed one. CMU walls contribute ZERO gypsum area —
   the layer engine never sees masonry, so the gross drywall path skips
   non-framed walls (the ghost drywall on CMU scenes is dead; mixed walls
-  follow the CMU layer treatment whole-wall, v1).
+  follow the CMU layer treatment whole-wall, v1). The slab-on-grade FIELD
+  is member-truth too (B17): the foundation engine BUILDS the R506.1
+  3-1/2" slab strips + the 6-mil vapor retarder under them, and the
+  takeoff derives the 'slab field' yd³ row from the member volumes and
+  the vapor-retarder sqft row from the member areas (stated +10% lap
+  factor) — no members, no rows; upper storeys grow deck framing, never
+  a pour. The 4" base course is an assumption LABEL on the slab members
+  (R506.2.2), never invented geometry or a phantom row.
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
   framed exterior/CMU and the takeoff booked sheathing the layer engine never
@@ -134,9 +141,13 @@ AND a gate — a checklist line without a test is a wish.
   (`extractWalls` hasLowerStorey). Double-booking: LOD-400 audit B4
   (2026-08-20).
   Gates: `src/framing/compute.multistorey.test.ts` (takeoff/member
-  consistency) + `src/engines/takeoff.test.ts` ('one row per material'
-  describe: one-row pin, fastener-basis pin, LOD-200 fallback, CMU scene
-  books no drywall)
+  consistency + the B17 describe: baseline slab census, yd³/sqft parity,
+  warning-names-real-geometry pin, upper-storey exclusion) +
+  `src/engines/takeoff.test.ts` ('one row per material' describe: one-row
+  pin, fastener-basis pin, LOD-200 fallback, CMU scene books no drywall;
+  B17 describe: slab-field/vapor rows == member geometry exactly) +
+  `src/engines/foundation.test.ts` B17 describe (field/membrane geometry,
+  holes carved, carve bands)
 - **S5 A mixed CMU/framed wall seams on a whole course and tops out at its
   architectural height.** The override `{ construction: 'cmu', cmuHeightM }`
   splits the wall at `snapCmuHeight` (8" module, R606 coursing): bond beam as
