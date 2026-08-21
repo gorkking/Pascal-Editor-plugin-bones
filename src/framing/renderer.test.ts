@@ -269,6 +269,41 @@ describe('below-floor stratum classification (basement mode, round 2026-08-20)',
       isBelowFloor({ ...base, system: 'hvac', role: 'slab', material: 'concrete', dims: [0.9, 0.08, 0.9], position: [5, 0.04, 5] }),
     ).toBe(false)
   })
+  test('B12 GES joins the buried convention via the y-extent rule: rods + buried GEC below-floor, wall wires above', () => {
+    // driven ground rod — 8 ft of copper-clad, top below grade
+    expect(
+      isBelowFloor({
+        ...base,
+        system: 'electrical',
+        role: 'ground-rod',
+        material: 'copper',
+        dims: [0.016, 2.4384, 0.016],
+        position: [1, -0.05 - 2.4384 / 2, 0],
+      }),
+    ).toBe(true)
+    // buried GEC rod-to-rod leg at rod-top depth
+    expect(
+      isBelowFloor({
+        ...base,
+        system: 'electrical',
+        role: 'wire-run',
+        material: 'copper',
+        dims: [1.83, 0.014, 0.014],
+        position: [1, -0.05, 0],
+      }),
+    ).toBe(true)
+    // the same conductor strapped up the wall — above
+    expect(
+      isBelowFloor({
+        ...base,
+        system: 'electrical',
+        role: 'wire-run',
+        material: 'copper',
+        dims: [1.83, 0.014, 0.014],
+        position: [1, 0.45, 0],
+      }),
+    ).toBe(false)
+  })
 })
 
 describe('view modes — per-stratum treatment (round 2026-08-20 tri-state)', () => {

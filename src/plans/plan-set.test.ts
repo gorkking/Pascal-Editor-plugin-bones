@@ -596,6 +596,33 @@ describe('round-3 fixCheck2 — EM symbol, SE legend row, notes wrap', () => {
     expect(svg).toContain('GEN-1 — 15A/14AWG')
   })
 
+  test('GES legend rows (B12): named like the takeoff, never the dash pattern', () => {
+    const { circuitColor } = require('./circuit-colors') as typeof import('./circuit-colors')
+    const wire = (sourceId: string, label: string, z: number) =>
+      member({
+        system: 'electrical',
+        role: 'wire-run',
+        size: undefined,
+        material: 'copper',
+        dims: [1.8, 0.014, 0.014],
+        label,
+        sourceId,
+        position: [2, 0.005, z],
+      })
+    const members = [
+      wire('GES-1', 'GEC 8 AWG Cu — grounding electrode conductor (NEC 250.66) — grade run to rod 1', 1),
+      wire('GES-2', 'Water-pipe bond 8 AWG Cu — metal water service (NEC 250.104(A))', 2),
+    ]
+    const elec = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Electrical'))
+    const svg = elec?.svg ?? ''
+    expect(svg).toContain('GEC bare Cu — meter → ground rods (NEC 250.66)')
+    expect(svg).toContain('Water-pipe bond — metal water service (NEC 250.104)')
+    expect(svg).not.toContain('—A/—AWG · grounding electrode')
+    // and both swatches carry the shared 3D/paper family colors (E3)
+    expect(svg).toContain(circuitColor('GES-1'))
+    expect(svg).toContain(circuitColor('GES-2'))
+  })
+
   test('characteristics notes line WRAPS at the column width — the tail never clips', () => {
     const characteristics: BuildingCharacteristics = {
       floorAreaM2: 40,

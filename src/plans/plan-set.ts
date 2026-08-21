@@ -108,7 +108,8 @@ const PLAN_SHEETS: {
     key: 'electrical',
     title: 'Electrical rough-in plan',
     systems: ['electrical'],
-    fill: { 'wire-run': '#d7a43c', default: '#d7a43c' },
+    // ground rods print bare-copper (B12 — below grade, dot-scale in plan)
+    fill: { 'wire-run': '#d7a43c', 'ground-rod': '#b0723d', default: '#d7a43c' },
   },
   {
     key: 'mep',
@@ -1337,11 +1338,16 @@ function planSheet(
       const awg = sample?.meta?.gaugeAwg ?? '—'
       // The SE cable is not a branch circuit — it has no breaker/gauge meta,
       // so the generic row printed '— —A/—AWG · service-entrance' (round-3
-      // fixCheck2). Name it like the takeoff books it.
+      // fixCheck2). Name it like the takeoff books it. The GES conductors
+      // (B12) are breaker-less the same way — named rows, never dashes.
       const text =
         circuit === 'service-entrance'
           ? 'SE cable 2 AWG Cu — street → meter → panel (NEC 230)'
-          : `${circuit} — ${amps}A/${awg}AWG · ${circuitZoneHint(circuit)}`
+          : circuit === 'GES-1'
+            ? 'GEC bare Cu — meter → ground rods (NEC 250.66)'
+            : circuit === 'GES-2'
+              ? 'Water-pipe bond — metal water service (NEC 250.104)'
+              : `${circuit} — ${amps}A/${awg}AWG · ${circuitZoneHint(circuit)}`
       legendLines.push(
         `<rect x="${colX + 2}" y="${y - 8}" width="10" height="10" fill="${circuitColor(circuit)}" stroke="#444" stroke-width="0.5"/>` +
           `<text x="${colX + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(text)}</text>`,

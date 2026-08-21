@@ -26,6 +26,8 @@ describe('circuit colors (checklist E3)', () => {
       ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
       ...Array.from({ length: 3 }, (_, i) => `AC-${i + 1}`),
       'SD-1', // B13 smoke/CO alarm circuit
+      'GES-1', // B12 grounding electrode conductor
+      'GES-2', // B12 water-pipe bond
     ]
     const colors = ids.map(circuitColor)
     expect(new Set(colors).size).toBe(ids.length)
@@ -73,6 +75,8 @@ describe('circuit colors (checklist E3)', () => {
       ...Array.from({ length: 8 }, (_, i) => `GEN-${i + 1}`),
       ...Array.from({ length: 3 }, (_, i) => `AC-${i + 1}`),
       'SD-1', // B13 — the alarm circuit joins the real-id floor
+      'GES-1', // B12 — GEC + water bond join the real-id floor: the
+      'GES-2', // deep/pale copper-green stops (worst pair 61.7 at land)
     ]
     const colors = ids.map(circuitColor)
     for (let i = 0; i < colors.length; i++) {
