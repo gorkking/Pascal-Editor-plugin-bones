@@ -606,8 +606,16 @@ export function computeTakeoff(
       tally.lf += toFeet(m.length)
       pipeTallies.set(key, tally)
     } else if (m.role === 'duct-run') {
-      const w = Math.round(m.dims[2] / 0.0254)
-      const h = Math.round(m.dims[1] / 0.0254)
+      // TRUE section sides: VERTICAL runs (risers/boots/drops — ductDrop
+      // dims [w, length, h]) carry their LENGTH in dims[1]; reading dims[1]
+      // as a side booked FICTITIOUS tin ('Duct 8×71"', 'Return duct 14×79"'
+      // — round-2 finding 4 / examiner C5; the supply analog is fixed here
+      // as a rider). Horizontals keep their W×H (max×min) exactly as before.
+      const vertical = m.dims[1] > m.dims[0]
+      const sA = Math.round((vertical ? m.dims[0] : m.dims[2]) / 0.0254)
+      const sB = Math.round((vertical ? m.dims[2] : m.dims[1]) / 0.0254)
+      const w = Math.max(sA, sB)
+      const h = Math.min(sA, sB)
       // Trunks are rectangular sheet metal by the hvac naming contract
       // ('Trunk…' label prefix) — a trunk stepped down to the square 8×8
       // minimum is still square duct, not 8" round (round-10 finding).
@@ -683,8 +691,15 @@ export function computeTakeoff(
       chain.legs += 1
       fittingChains.set(key, chain)
     } else if (m.role === 'duct-run') {
-      const w = Math.round(m.dims[2] / 0.0254)
-      const h = Math.round(m.dims[1] / 0.0254)
+      // Same true-section derivation as the lf rows (verticals carry their
+      // length in dims[1]); riser/boot chains merge with their horizontal
+      // runs now — the riser-to-feed and branch-to-boot elbows are real
+      // fittings the old fictitious-section keys kept apart.
+      const vertical = m.dims[1] > m.dims[0]
+      const sA = Math.round((vertical ? m.dims[0] : m.dims[2]) / 0.0254)
+      const sB = Math.round((vertical ? m.dims[2] : m.dims[1]) / 0.0254)
+      const w = Math.max(sA, sB)
+      const h = Math.min(sA, sB)
       // Return-side bends book under their own item (same mirror as the lf
       // rows above).
       const isReturn = m.label?.startsWith('Return') === true

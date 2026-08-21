@@ -467,7 +467,7 @@ describe('B19c — closable rooms carry the transfer-path assumption label', () 
       wall('w_mid', [6, 0], [6, 8], false),
       wall('w_split', [6, 4], [14, 4], false),
     ]
-    const { fixtures } = layoutHvac(walls, rooms)
+    const { members, fixtures } = layoutHvac(walls, rooms)
     const regs = byKind(fixtures, 'register')
     const bed = regs.find((r) => r.sourceId === 'r_bed') as Fixture
     expect(bed.label).toContain('door undercut / jumper duct assumed (M1602.2)')
@@ -475,6 +475,16 @@ describe('B19c — closable rooms carry the transfer-path assumption label', () 
     const living = regs.find((r) => r.sourceId === 'r_living') as Fixture
     expect(living.label).not.toContain('door undercut')
     expect(living.meta?.transferAirAssumed).toBeUndefined()
+    // …and the assumption reaches PAPER (examiner round 2: labels never
+    // typeset): the closable room's boot carries the flag, the takeoff
+    // aggregates it into ONE Flags row.
+    const FLAG = 'door undercut / jumper duct assumed — M1602.2'
+    const flaggedBoots = members.filter((m) => m.flag === FLAG)
+    expect(flaggedBoots.map((m) => m.sourceId)).toEqual(['r_bed'])
+    const rows = computeTakeoff(members, fixtures)
+    const flagRow = rows.find((r) => r.section === 'Flags' && r.detail === FLAG)
+    expect(flagRow?.quantity).toBe(1)
+    expect(flagRow?.unit).toBe('ea')
   })
 
   test('the grille room itself never carries the label (it feeds the return directly)', () => {
@@ -513,5 +523,25 @@ describe('B19c — takeoff books return duct rows equal to the drawn members', (
       .filter((m) => m.role === 'duct-run' && !m.label?.startsWith('Return'))
       .reduce((s, m) => s + toFeet(m.length), 0)
     expect(supplyDuct.reduce((s, r) => s + r.quantity, 0)).toBeCloseTo(supplyDrawn, 0)
+  })
+
+  test('vertical duct rows book their TRUE section, never length-as-a-side (round-2 F4)', () => {
+    const { walls, rooms } = plan('hallway')
+    const { members, fixtures } = layoutHvac(walls, rooms)
+    const rows = computeTakeoff(members, fixtures)
+    // the whole return chain (riser + legs + drop) books under ONE section
+    const returnRows = rows.filter((r) => r.item.startsWith('Return duct') && r.unit === 'lf')
+    expect(returnRows.map((r) => r.item)).toEqual(['Return duct 14×8"'])
+    // no HVAC duct row prints a member LENGTH as a section side — every
+    // rectangular side stays within the real tin sections (≤ 14")
+    for (const r of rows.filter((x) => x.section === 'HVAC' && x.item.includes('×'))) {
+      const m = r.item.match(/(\d+)×(\d+)"/) as RegExpMatchArray
+      expect(Math.max(Number(m[1]), Number(m[2]))).toBeLessThanOrEqual(14)
+    }
+    // the supply riser (vertical, dims [14", len, 8"]) merged into the
+    // rectangular trunk row instead of a fictitious 'Duct 8×NN"' row
+    expect(
+      rows.some((r) => r.section === 'HVAC' && /^Duct 8×\d+"$/.test(r.item) && !r.item.endsWith('8×8"')),
+    ).toBe(false)
   })
 })

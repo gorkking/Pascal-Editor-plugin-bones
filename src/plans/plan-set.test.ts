@@ -229,9 +229,9 @@ describe('MEP sheet — return duct prints in its own tone + legend row (B19c / 
     // both tones drawn…
     expect(svg).toContain(`fill="${DUCT_COLORS.return}"`)
     expect(svg).toContain(`fill="${DUCT_COLORS.supply}"`)
-    // …and both named in the legend (P2)
+    // …and both named in the legend (P2) — the base row says which air path
     expect(svg).toContain('duct — return air')
-    expect(svg).toContain('>duct</text>')
+    expect(svg).toContain('>duct — supply air</text>')
   })
 
   test('supply-only sheet shows no return legend row (and vice versa)', () => {
@@ -242,7 +242,7 @@ describe('MEP sheet — return duct prints in its own tone + legend row (B19c / 
     const rsvg = returnOnly?.svg ?? ''
     expect(rsvg).toContain('duct — return air')
     // the base supply swatch never prints for tin the sheet doesn't draw
-    expect(rsvg).not.toContain('>duct</text>')
+    expect(rsvg).not.toContain('>duct — supply air</text>')
     expect(rsvg).not.toContain(`fill="${DUCT_COLORS.supply}"`)
   })
 })

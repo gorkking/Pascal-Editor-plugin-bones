@@ -1079,7 +1079,7 @@ export function layoutHvac(
   }
   // Branches leave the trunk at right angles to each register (still in the
   // attic), then a drop boot carries the air through the CEILING plane.
-  for (const { room, at, cfm } of registers) {
+  for (const { room, at, cfm, transferAssumed } of registers) {
     const branch = duct(
       onAxis(u(at)),
       at,
@@ -1099,7 +1099,14 @@ export function layoutHvac(
       room.id,
       'Supply boot 6" — ceiling drop (M1601)',
     )
-    if (boot) members.push(boot)
+    if (boot) {
+      // The transfer-path assumption must reach PAPER (examiner round 2:
+      // register labels never typeset) — the boot carries it as a member
+      // flag, which the takeoff aggregates into ONE Flags row ('N ea') and
+      // the schedules flag block prints (P4).
+      if (transferAssumed) boot.flag = 'door undercut / jumper duct assumed — M1602.2'
+      members.push(boot)
+    }
   }
 
   // ---- RETURN trunk: central grille → return plane → air handler ----

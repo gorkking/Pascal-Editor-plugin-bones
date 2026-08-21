@@ -616,7 +616,9 @@ function planSheet(
     }
     const NAMES: Record<string, string> = {
       'vent-stack': 'vent stack',
-      'duct-run': 'duct',
+      // The base duct row covers SUPPLY tin only — a bare 'duct' was a
+      // half-truth once the return path prints its own tone (round 2).
+      'duct-run': 'duct — supply air',
       'water-heater': 'water heater',
     }
     for (const role of Object.keys(NAMES)) {

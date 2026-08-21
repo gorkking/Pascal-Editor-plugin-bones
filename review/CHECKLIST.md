@@ -329,20 +329,37 @@ AND a gate — a checklist line without a test is a wish.
   supply-trunk section (schematic mirror; label honesty over invented cfm),
   labels prefixed 'Return', sourceId `return-trunk` — connects the grille to
   the air handler as continuous duct (riser → plane legs → drop offset 0.5 m
-  from the supply riser), on the same attic/soffit plane M1 governs. Rooms a
-  DOOR can close off carry the transfer-path assumption on their supply
-  register ('door undercut / jumper duct assumed (M1602.2)' +
-  `meta.transferAirAssumed`) — v1 never invents jumper-duct geometry; the
-  grille room itself stays label-free. The takeoff books return duct on its
-  own `Return duct W×H"` lf/fitting rows equal to the drawn lengths (never
-  blended into supply rows), and the MEP sheet prints return runs in the
-  darker return duct tone with a 'duct — return air' legend row (thermostat
-  auto-spot targets the REAL grille).
+  from the supply riser). The return path NEVER shares tin with the supply
+  system (round-2 blocker): horizontal legs ride their own plane one section
+  height + gap off the supply plane (up in the attic, down in a soffit) and
+  every return vertical clears the whole supply plan footprint
+  (`supplySpineOf` — the one axis/register computation both the trunk
+  emission and the keep-out model consume). Compromised placements are LOUD,
+  never silent: a drop ring with no clear candidate takes the
+  least-intrusion spot + 'return drop cannot clear walls in <room> — verify
+  routing'; a compromised grille (`clear: false`, register ≥ 0.5 m floor
+  holds on every fallback pass) warns 'return grille cannot fully clear the
+  supply ducts in <room>'. Rooms a DOOR can close off carry the
+  transfer-path assumption on their supply register ('door undercut /
+  jumper duct assumed (M1602.2)' + `meta.transferAirAssumed`) AND on paper —
+  the room's supply boot carries the member flag 'door undercut / jumper
+  duct assumed — M1602.2', aggregated to one Flags row — v1 never invents
+  jumper-duct geometry; the grille room itself stays label-free. The takeoff
+  books return duct on its own `Return duct W×H"` lf/fitting rows equal to
+  the drawn lengths (never blended into supply rows) and every duct row
+  prints its TRUE section — verticals never book their length as a side
+  (the supply `Duct 8×NN"` analog died with the same fix). The MEP sheet
+  prints return runs in the darker return duct tone with 'duct — supply
+  air' / 'duct — return air' legend rows (thermostat auto-spot targets the
+  REAL grille).
   Origin: LOD-400 wave-2 audit B19 (a)+(c) BLOCKER (2026-08-20): AH + open
   return modeled INSIDE the garage silently; return air arrived by magic.
+  Round 2 (2026-08-21): return×supply interpenetration blocker + silent
+  fallbacks + fictitious vertical sections.
   Gates: `src/engines/hvac.return.test.ts` (placement, warning, grille
-  exclusion, E2-style return continuity, transfer labels, takeoff mirror),
-  `src/plans/plan-set.test.ts` (return tone + legend row).
+  exclusion, E2-style return continuity, duct-vs-duct SAT + plane pins,
+  loud-fallback closet plan, transfer labels + Flags row, takeoff mirror +
+  true sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
 
 ## P — Plans (the exported document)
 
