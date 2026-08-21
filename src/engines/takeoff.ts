@@ -824,11 +824,13 @@ export function computeTakeoff(
     (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
   ).length
   const ceilingBoxes = fixtures.filter(
-    (f) => f.kind === 'light' || f.kind === 'smoke-alarm',
+    // B13 examiner flag 2: 'co-alarm' is a ceiling device too — its box was
+    // unbooked (8 boxes for 9 ceiling devices on the compose scene).
+    (f) => f.kind === 'light' || f.kind === 'smoke-alarm' || f.kind === 'co-alarm',
   ).length
   const panelCans = fixtures.filter((f) => f.kind === 'panel').length
   if (gangBoxes > 0) push('Electrical', 'Device boxes (1-gang)', 'receptacles + switches', gangBoxes, 'pcs')
-  if (ceilingBoxes > 0) push('Electrical', 'Ceiling boxes', 'lights + smoke alarms', ceilingBoxes, 'pcs')
+  if (ceilingBoxes > 0) push('Electrical', 'Ceiling boxes', 'lights + smoke/CO alarms', ceilingBoxes, 'pcs')
   if (panelCans > 0) push('Electrical', 'Panel cans', 'load center enclosures', panelCans, 'pcs')
 
   // ---- Electrical circuits (panel schedule) ----

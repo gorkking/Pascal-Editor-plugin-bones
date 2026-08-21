@@ -1929,22 +1929,38 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   // A threeWay group's switches control ONE light from multiple entries —
   // that takes a 14/3 traveler cable BETWEEN the switch boxes in addition
   // to the switch legs above. threeWay-flagged pairs used to get no
-  // traveler at all (B13b). Groups key on meta.threeWayRoom (assignCircuits);
-  // the chain runs box → own stud bay → traveler plane along the walls →
-  // partner's bay → partner box, deterministically ordered by deviceId.
+  // traveler at all (B13b). The chain runs box → own stud bay → traveler
+  // plane along the walls → partner's bay → partner box, deterministically
+  // ordered by deviceId.
+  // TRAVELER PREDICATE (B13 round 3, examiner flag 3): a chain links
+  // switches that (1) share the threeWay room (meta.threeWayRoom),
+  // (2) share the BRANCH CIRCUIT — a real 3-way pair shares its circuit by
+  // definition; a duplicate overlapping zone used to weld one door's
+  // opposite-face switches (LTG-1 × LTG-2) into a cross-circuit 'traveler'
+  // boring 0.07 m through the wall — and (3) mount at DISTINCT openings:
+  // the -p/-m face twins of one door are two different rooms' controls,
+  // never a pair (one switch per wall+opening deviceId key survives).
   const travelerGroups = new Map<string, Fixture[]>()
   for (const f of fixtures) {
     if (f.kind !== 'switch' || f.meta?.threeWay !== true) continue
-    const key = String(f.meta?.threeWayRoom ?? f.sourceId)
+    if (typeof f.meta?.circuit !== 'string') continue
+    const key = `${String(f.meta?.threeWayRoom ?? f.sourceId)}|${f.meta.circuit}`
     const list = travelerGroups.get(key) ?? []
     list.push(f)
     travelerGroups.set(key, list)
   }
   for (const [, group] of [...travelerGroups.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-    if (group.length < 2) continue
-    const chain = [...group].sort((a, b) =>
+    // predicate (3): one switch per opening — the face twins dedupe
+    // (lowest deviceId wins, keeping the chain order deterministic)
+    const byOpening = new Map<string, Fixture>()
+    for (const s of [...group].sort((a, b) =>
       String(a.meta?.deviceId ?? '').localeCompare(String(b.meta?.deviceId ?? '')),
-    )
+    )) {
+      const openingKey = String(s.meta?.deviceId ?? s.sourceId).replace(/-(p|m)$/, '')
+      if (!byOpening.has(openingKey)) byOpening.set(openingKey, s)
+    }
+    const chain = [...byOpening.values()]
+    if (chain.length < 2) continue
     const circuit = String(chain[0]?.meta?.circuit ?? 'LTG-1')
     const gauge = Number(chain[0]?.meta?.gaugeAwg ?? 14)
     for (let i = 0; i + 1 < chain.length; i++) {

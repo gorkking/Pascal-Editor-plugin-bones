@@ -110,15 +110,22 @@ AND a gate — a checklist line without a test is a wish.
   requires interconnection across the dwelling; verify the cross-storey
   chain' (single-storey scenes stay warning-free; room-less roof levels
   don't count). threeWay switch groups get a 14/3 traveler chain
-  box-to-box (NEC 210.70/404.2); the takeoff books 14/3 as its own NM-B
-  SKU (it used to book as phantom 14/2 lf).
+  box-to-box (NEC 210.70/404.2) under the TRAVELER PREDICATE (round 3):
+  same threeWay room AND same branch circuit AND distinct openings (one
+  switch per wall+opening deviceId key — a door's -p/-m face twins are
+  two rooms' controls, never a pair; a duplicate overlapping zone once
+  welded a cross-circuit LTG-1×LTG-2 'traveler' boring 0.07 m through
+  the wall). The takeoff books 14/3 as its own NM-B SKU (it used to book
+  as phantom 14/2 lf) and the ceiling-box census counts lights + smoke +
+  CO alarms exactly.
   Origin: LOD-400 audit BATCH 13 (2026-08-20), confirmed defects (a)+(b);
   cross-storey honesty + nudge clamp = round-2 skeptic driver/advisory.
   Gate: `src/engines/electrical.alarms.test.ts` (proxy census + warning,
   per-story pin on a two-storey scene, CO presence/absence matrix,
   one-circuit pin, 14/3 interconnect walk, traveler continuity, takeoff
   row split, 3-storey cross-storey warning matrix + scoped labels,
-  corridor nudge-clamp repro).
+  corridor nudge-clamp repro, duplicate-zone/face-twin traveler
+  exhibits + legitimate-pair keep, ceiling-box census).
 
 ## S — Structure
 

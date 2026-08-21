@@ -705,3 +705,105 @@ describe('B13 r2 — centroid nudges never leave the host polygon', () => {
     expect(alarms[0]?.position[2]).toBeCloseTo(2, 6)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Round 3 — examiner flags 2 + 3
+// ---------------------------------------------------------------------------
+
+describe('B13 r3 — ceiling-box census counts CO alarms (examiner flag 2)', () => {
+  test('Ceiling boxes == lights + smoke alarms + CO alarms, exactly', () => {
+    const rooms = [
+      room('bedroom', [[0, 0], [4, 0], [4, 8], [0, 8]]),
+      room('hallway', [[4, 0], [8, 0], [8, 8], [4, 8]], { id: 'room_hall' }),
+      room('garage', [[8, 0], [12, 0], [12, 8], [8, 8]], { id: 'room_garage' }),
+    ]
+    const fixtures = layoutElectrical(shellWalls(), rooms, undefined, [])
+    const ceilingDevices = fixtures.filter(
+      (f) => f.kind === 'light' || f.kind === 'smoke-alarm' || f.kind === 'co-alarm',
+    ).length
+    expect(ofKind(fixtures, 'co-alarm')).toHaveLength(1) // non-vacuous: a CO box is in play
+    const rows = computeTakeoff([], fixtures)
+    const boxes = rows.find((r) => r.item === 'Ceiling boxes')
+    // pre-fix: the filter omitted 'co-alarm' → 8 boxes booked for 9 devices
+    expect(boxes?.quantity).toBe(ceilingDevices)
+  })
+})
+
+describe('B13 r3 — traveler predicate (examiner flag 3): same circuit, distinct openings', () => {
+  // One divider door, big rooms on each side (each > 1200 VA → own LTG
+  // circuit), plus a DUPLICATE overlapping zone spanning both. The dup zone
+  // contains the door's two opposite-face switches → the 3-way stamping
+  // marks them threeWay with threeWayRoom = the dup zone, while their
+  // circuits differ (each stands in its own real room). Pre-fix the
+  // traveler pass welded them into a cross-circuit 14/3 boring 0.07 m
+  // through the wall — no electrician would draw that.
+  const exhibitWalls = (): WallSlice[] => [
+    makeWall({ id: 'w_s', start: [0, 0], end: [16, 0] }),
+    makeWall({ id: 'w_e', start: [16, 0], end: [16, 8] }),
+    makeWall({ id: 'w_n', start: [16, 8], end: [0, 8] }),
+    makeWall({ id: 'w_w', start: [0, 8], end: [0, 0] }),
+    makeWall({ id: 'w_div', start: [8, 0], end: [8, 8], exterior: false, openings: [door(4, 'door_mid')] }),
+  ]
+
+  test('duplicate-zone exhibit → ZERO cross-circuit travelers (zero travelers at all)', () => {
+    const rooms = [
+      room('other', [[0, 0], [8, 0], [8, 8], [0, 8]], { id: 'room_a', name: 'A' }),
+      room('other', [[8, 0], [16, 0], [16, 8], [8, 8]], { id: 'room_b', name: 'B' }),
+      // the duplicate zone, listed last so circuit tagging resolves the
+      // real rooms first (rooms.find order)
+      room('other', [[0, 0], [16, 0], [16, 8], [0, 8]], { id: 'room_dup', name: 'Dup' }),
+    ]
+    const fixtures = layoutElectrical(exhibitWalls(), rooms)
+    // the exhibit is real: the dup zone DID stamp the opposite-face pair…
+    const stamped = fixtures.filter(
+      (f) => f.kind === 'switch' && f.meta?.threeWayRoom === 'room_dup',
+    )
+    expect(stamped.length).toBeGreaterThanOrEqual(2)
+    // …across two circuits
+    expect(new Set(stamped.map((s) => s.meta?.circuit)).size).toBeGreaterThan(1)
+    const members = routeWiring(fixtures, exhibitWalls())
+    const travelers = members.filter((m) => m.label?.includes('3-way travelers'))
+    expect(travelers).toHaveLength(0)
+  })
+
+  test('face twins on ONE circuit (single spanning zone) → still no traveler through the wall', () => {
+    // Only the spanning zone exists → both face switches stand in it and
+    // share its circuit — predicate (2) alone would keep the phantom; the
+    // distinct-openings rule (3) kills it: -p/-m twins of one door are two
+    // rooms' controls, never a pair.
+    const rooms = [room('other', [[0, 0], [16, 0], [16, 8], [0, 8]], { id: 'room_span', name: 'Span' })]
+    const fixtures = layoutElectrical(exhibitWalls(), rooms)
+    const twins = fixtures.filter(
+      (f) => f.kind === 'switch' && String(f.meta?.deviceId ?? '').includes('door_mid'),
+    )
+    expect(twins).toHaveLength(2)
+    expect(new Set(twins.map((s) => s.meta?.circuit)).size).toBe(1) // same circuit
+    expect(twins.every((s) => s.meta?.threeWay === true)).toBe(true) // stamped
+    const members = routeWiring(fixtures, exhibitWalls())
+    expect(members.some((m) => m.label?.includes('3-way travelers'))).toBe(false)
+  })
+
+  test('a legitimate same-circuit pair (two doors, one room) KEEPS its chain', () => {
+    const walls = [
+      makeWall({ id: 'w_south', start: [0, 0], end: [8, 0], openings: [door(1.5, 'door_front')] }),
+      makeWall({ id: 'w_div', start: [3.5, 0], end: [3.5, 4], exterior: false, openings: [door(2, 'door_side')] }),
+      makeWall({ id: 'w_east', start: [8, 0], end: [8, 4] }),
+      makeWall({ id: 'w_north', start: [8, 4], end: [0, 4] }),
+      makeWall({ id: 'w_west', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms = [
+      room('other', [[0, 0], [3.5, 0], [3.5, 4], [0, 4]], { id: 'room_l', name: 'living' }),
+      room('other', [[3.5, 0], [8, 0], [8, 4], [3.5, 4]], { id: 'room_d' }),
+    ]
+    const fixtures = layoutElectrical(walls, rooms)
+    const members = routeWiring(fixtures, walls)
+    const travelers = members.filter((m) => m.label?.includes('3-way travelers'))
+    expect(travelers.length).toBeGreaterThan(0)
+    // and they stay single-circuit — the pair's own
+    const pair = fixtures.filter(
+      (f) => f.kind === 'switch' && f.meta?.threeWay === true && f.meta?.threeWayRoom === 'room_l',
+    )
+    expect(new Set(pair.map((s) => s.meta?.circuit)).size).toBe(1)
+    for (const t of travelers) expect(t.sourceId).toBe(String(pair[0]?.meta?.circuit))
+  })
+})
