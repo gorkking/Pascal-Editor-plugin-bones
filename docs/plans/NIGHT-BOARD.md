@@ -1,4 +1,27 @@
-# Bones night board — NIGHT-7 SHIPPED TO PROD 2026-08-21 (~08:30)
+# Bones board — DAY-8 (2026-08-21) — full backlog go ("all these are great ideas, please work on implementing them")
+
+## DAY-8 PLAN — wave structure by file ownership
+IN FLIGHT (UX, from the morning's 6 asks): feat/xray-activation-ux
+(A walls-low default, B service auto-place + button removal, C no
+sidebar duplication, D off=finished-house w/ visible fixtures,
+E OFF/X-RAY/BASEMENT tri-state modes, systems on by default);
+feat/wall-node-move-parity (outlets/boxes/service points move like
+windows — hover, cross, wall-slide, one undo).
+WAVE 1 (launched, disjoint files): B13 alarms truth (electrical.ts);
+B20 plumbing safety (plumbing.ts); B6 roof sheathing+underlayment
+(roof-framing.ts, MUST add the B4 system filter to takeoff
+suppression gates); B18 anchorage truth (foundation.ts+cmu.ts);
+B21d door/window schedule sheet (plan-set.ts).
+WAVE 2 (queued behind same-file merges): B12 GES (after B13),
+B14 receptacle coverage (LAST electrical — baseline reset, E5),
+B7 hip thrust (after B6), B8 roof closures (after B7), B9 bracing,
+B10 uplift (after B8), B11 snow headers, B21e waste factors,
+lineset×dryer-duct bore, F3 trap-drop residuals.
+Loop rules unchanged: skeptic+examiner per batch, gates same commit,
+detached worktrees ONLY (two incidents), inline gate fallback on
+agent stalls, ship batches as they accumulate green.
+
+# NIGHT-7 SHIPPED TO PROD 2026-08-21 (~08:30)
 
 ## SHIP RECORD: private-editor #388 → b9688fd7
 Chain: plugin 3022fc0d (1054 tests; ecadea5 code + docs) → editor #698
