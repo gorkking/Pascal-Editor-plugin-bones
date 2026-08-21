@@ -644,6 +644,9 @@ function ExportPlansButton({
           // the stamp must say what was actually composed (wave-2 audit:
           // a Generic export shipped paper claiming LOD 400)
           detail: framingNode.detail,
+          // openings feed the door/window schedule sheet (B21d) — live
+          // memo references, never mutated
+          walls: result.walls,
           // storey lifts RELATIVE to the owner level — owner members draw
           // level-local, so absolute elevations put an upper-storey owner's
           // roof a full storey too high on elevations/section (round-6)
