@@ -1,12 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
-import type { Fixture, Member, RoomSlice, SlabSlice, WallSlice } from '../core/types'
-import { feet, inches } from '../core/units'
+import type { Fixture, Member, OpeningSlice, RoomSlice, SlabSlice, WallSlice } from '../core/types'
+import { feet, formatFtIn, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { buildFoundation } from '../engines/foundation'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
-import { buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
+import { frameWalls } from '../engines/wall-framing'
+import { assignOpeningMarks, buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
   system: 'floor-framing',
@@ -2525,5 +2526,268 @@ describe('glyph layer vs pipe rects (post-merge seam round)', () => {
     for (const r of whBoxes) {
       expect(textHits(cxT, ty, wTxt / 2, 5, r)).toBe(false)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B21d: door + window SCHEDULE — openings were framed to fabrication
+// level but never tabulated (no schedule sheet anywhere in the set, no
+// out-of-scope label). Gates: schedule census == openings in the scene,
+// marks unique + deterministic (wall order + u), RO/header cells byte-match
+// the FRAMED members, engineered rows say by-supplier, flags print verbatim,
+// wall-plan mark bubbles present + de-collided (placed[] registry incl. the
+// A-A bubbles), a 40-opening scene paginates with contiguous numbering, an
+// opening-less scene emits no sheet, and paper without the option stays
+// byte-equal to pre-B21d.
+// ---------------------------------------------------------------------------
+
+describe('door + window schedule (LOD-400 B21d)', () => {
+  const spec400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const opening = (
+    id: string,
+    kind: OpeningSlice['kind'],
+    u: number,
+    width: number,
+    height: number,
+    sillHeight: number,
+    roughWidth: number,
+    roughHeight: number,
+  ): OpeningSlice => ({ id, kind, u, width, height, sillHeight, roughWidth, roughHeight })
+  const bwall = (
+    id: string,
+    s: [number, number],
+    e: [number, number],
+    openings: OpeningSlice[],
+    thickness = 0.114,
+  ): WallSlice => {
+    const dx = e[0] - s[0]
+    const dz = e[1] - s[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start: s,
+      end: e,
+      length,
+      dir: [dx / length, dz / length],
+      thickness,
+      height: 2.5,
+      exterior: true,
+      openings,
+      curved: false,
+    }
+  }
+  /** The composed exhibit: 4-wall shell + a floating tall-door wall. */
+  const scene = (): { walls: WallSlice[]; members: Member[] } => {
+    const walls = [
+      bwall('w_s', [0, 0], [8, 0], [
+        opening('d1', 'door', 2, 0.914, 2.032, 0, 0.965, 2.083),
+        opening('n1', 'window', 5, 1.219, 1.219, 0.914, 1.27, 1.27),
+      ]),
+      bwall('w_e', [8, 0], [8, 6], [opening('n2', 'window', 3, 0.61, 0.61, 1.2, 0.66, 0.66)]),
+      // 16-ft garage door — past the prescriptive header span (engineered)
+      bwall('w_n', [8, 6], [0, 6], [opening('d2', 'door', 4, 4.877, 2.134, 0, 4.928, 2.185)]),
+      bwall('w_w', [0, 6], [0, 0], []),
+      // tall door crowds the plates → the composed header-depth flag fires
+      bwall('w_t', [0, 9], [8, 9], [opening('d3', 'door', 4, 0.914, 2.38, 0, 0.965, 2.43)]),
+    ]
+    return { walls, members: frameWalls(walls, spec400) }
+  }
+  const unesc = (t: string): string =>
+    t
+      .replaceAll('&quot;', '"')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&amp;', '&')
+  /** Mark cells: bold #222 at the MARK column (x=48). */
+  const parseMarks = (svg: string): { mark: string; y: number }[] =>
+    [...svg.matchAll(
+      /<text x="48" y="(\d+)" font-size="10" font-weight="bold"[^>]*fill="#222">([DW]\d+)<\/text>/g,
+    )].map((m) => ({ mark: m[2] as string, y: Number(m[1]) }))
+  /** Read one non-bold cell at (x, y). */
+  const cellAt = (svg: string, x: number, y: number): string | null => {
+    const m = svg.match(
+      new RegExp(`<text x="${x}" y="${y}" font-size="10" font-family[^>]*>([^<]*)</text>`),
+    )
+    return m ? unesc(m[1] as string) : null
+  }
+  /** All rendered text contents, joined (flag verbatim-print checks). */
+  const allText = (svg: string): string =>
+    [...svg.matchAll(/>([^<>]+)<\/text>/g)].map((m) => unesc(m[1] as string)).join(' ')
+  const schedSheetsOf = (sheets: { title: string; svg: string }[]) =>
+    sheets.filter((s) => s.title.startsWith('Door + window schedule'))
+  /** Wall-plan mark bubbles (r=8 white circles with the mark text). */
+  const parseBubbles = (svg: string): { x: number; y: number; mark: string }[] =>
+    [...svg.matchAll(
+      /<g transform="translate\((-?[\d.]+) (-?[\d.]+)\)"><circle r="8"[^/]*\/><text[^>]*>([DW]\d+)<\/text>/g,
+    )].map((m) => ({ x: Number(m[1]), y: Number(m[2]), mark: m[3] as string }))
+  const memberUOn = (m: Member, wall: WallSlice): number =>
+    (m.position[0] - wall.start[0]) * wall.dir[0] + (m.position[2] - wall.start[1]) * wall.dir[1]
+
+  test('census: one row per opening, marks by wall order + u, cells byte-match the framed members', () => {
+    const { walls, members } = scene()
+    const sheets = buildPlanSet(members, [], { walls })
+    const titles = sheets.map((s) => s.title)
+    expect(titles).toContain('Door + window schedule')
+    // print order: after the drawings it cross-references, before the takeoff
+    expect(titles.indexOf('Door + window schedule')).toBeGreaterThan(
+      titles.indexOf('Section A-A (transverse)'),
+    )
+    expect(titles.indexOf('Door + window schedule')).toBeLessThan(
+      titles.indexOf('Schedules + takeoff'),
+    )
+    // the cover index lists it
+    expect(sheets[0]?.svg ?? '').toContain('Door + window schedule')
+    const svg = schedSheetsOf(sheets)[0]?.svg ?? ''
+    const rows = parseMarks(svg)
+    // census == openings in the scene; deterministic traversal order
+    expect(rows.map((r) => r.mark)).toEqual(['D1', 'W1', 'W2', 'D2', 'D3'])
+    expect(new Set(rows.map((r) => r.mark)).size).toBe(5)
+    const rowY = new Map(rows.map((r) => [r.mark, r.y]))
+    // D1: door row — nominal + RO cells are the OpeningSlice values verbatim
+    const yD1 = rowY.get('D1') as number
+    expect(cellAt(svg, 92, yD1)).toBe('door')
+    expect(cellAt(svg, 152, yD1)).toBe(`${formatFtIn(0.914)} × ${formatFtIn(2.032)}`)
+    expect(cellAt(svg, 302, yD1)).toBe(`${formatFtIn(0.965)} × ${formatFtIn(2.083)}`)
+    expect(cellAt(svg, 452, yD1)).toBe('—') // doors carry no sill
+    expect(cellAt(svg, 700, yD1)).toBe('w_s')
+    // header cell reads the FRAMED member back (byte-match, never re-derived)
+    const wS = walls[0] as WallSlice
+    const d1Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_s' && Math.abs(memberUOn(m, wS) - 2) < 0.5,
+    ) as Member
+    expect(d1Header).toBeDefined()
+    expect(cellAt(svg, 522, yD1)).toBe(d1Header.size as string)
+    // W1: window row — sill AFF prints; header byte-matches its member too
+    const yW1 = rowY.get('W1') as number
+    expect(cellAt(svg, 92, yW1)).toBe('window')
+    expect(cellAt(svg, 452, yW1)).toBe(formatFtIn(0.914))
+    const w1Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_s' && Math.abs(memberUOn(m, wS) - 5) < 0.5,
+    ) as Member
+    expect(cellAt(svg, 522, yW1)).toBe(w1Header.size as string)
+    // D2: the 16-ft opening framed an ENGINEERED header — the row says
+    // by-supplier, never the drawn placeholder stick
+    const d2Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_n',
+    ) as Member
+    expect(d2Header.material).toBe('engineered')
+    expect(cellAt(svg, 522, rowY.get('D2') as number)).toBe('ENGINEERED (by supplier)')
+    // D3: the tall door's composed header flag prints VERBATIM (P4) — the
+    // member's own flag string, wrap-reassembled from the sheet text
+    const d3Header = members.find(
+      (m) => m.role === 'header' && m.sourceId === 'w_t',
+    ) as Member
+    expect(d3Header.flag).toBeDefined()
+    expect(d3Header.flag).toContain('does not fit between the RO and the plates')
+    expect(allText(svg)).toContain(d3Header.flag as string)
+  })
+
+  test('marks + schedule deterministic across recomputes', () => {
+    const a = scene()
+    const b = scene()
+    expect(assignOpeningMarks(a.walls).map((m) => [m.mark, m.opening.id])).toEqual(
+      assignOpeningMarks(b.walls).map((m) => [m.mark, m.opening.id]),
+    )
+    const sa = buildPlanSet(a.members, [], { walls: a.walls })
+    const sb = buildPlanSet(b.members, [], { walls: b.walls })
+    expect(schedSheetsOf(sa).map((s) => s.svg)).toEqual(schedSheetsOf(sb).map((s) => s.svg))
+    const wallA = sa.find((s) => s.title === 'Wall framing plan')?.svg
+    const wallB = sb.find((s) => s.title === 'Wall framing plan')?.svg
+    expect(wallA).toBe(wallB as string)
+  })
+
+  test('wall framing plan prints one de-collided mark bubble per opening', () => {
+    const { walls, members } = scene()
+    const sheets = buildPlanSet(members, [], { walls })
+    const svg = sheets.find((s) => s.title === 'Wall framing plan')?.svg ?? ''
+    const bubbles = parseBubbles(svg)
+    expect(new Set(bubbles.map((b) => b.mark))).toEqual(new Set(['D1', 'D2', 'D3', 'W1', 'W2']))
+    expect(bubbles.length).toBe(5)
+    // clearances like the glyph gates: bubbles pairwise apart…
+    for (let i = 0; i < bubbles.length; i++) {
+      for (let j = i + 1; j < bubbles.length; j++) {
+        const bi = bubbles[i] as { x: number; y: number }
+        const bj = bubbles[j] as { x: number; y: number }
+        expect(Math.hypot(bi.x - bj.x, bi.y - bj.y)).toBeGreaterThanOrEqual(15)
+      }
+    }
+    // …and clear of the A-A section bubbles (registered in placed[])
+    const aBubbles = [...svg.matchAll(/<circle cx="([\d.]+)" cy="([\d.]+)" r="10"/g)].map(
+      (m) => [Number(m[1]), Number(m[2])] as [number, number],
+    )
+    expect(aBubbles.length).toBe(2)
+    for (const b of bubbles) {
+      for (const [ax, ay] of aBubbles) {
+        expect(Math.hypot(b.x - ax, b.y - ay)).toBeGreaterThanOrEqual(15)
+      }
+    }
+    // no crowded fallback fired on this scene
+    expect(svg).not.toContain('opening-mark crowded')
+    // the symbol is keyed in the sheet legend (P2)
+    expect(svg).toContain('opening mark — see door + window schedule')
+  })
+
+  test('40-opening stress scene splits sheets cleanly, numbering contiguous', () => {
+    const walls: WallSlice[] = []
+    for (let i = 0; i < 5; i++) {
+      const os: OpeningSlice[] = []
+      for (let k = 0; k < 8; k++) {
+        os.push(opening(`o${i}_${k}`, 'window', 2 + k * 5, 1.219, 1.219, 0.9, 1.27, 1.27))
+      }
+      walls.push(bwall(`w${i}`, [0, i * 3], [40, i * 3], os))
+    }
+    const members = frameWalls(walls, spec400)
+    const sheets = buildPlanSet(members, [], { walls })
+    const sched = schedSheetsOf(sheets)
+    expect(sched.length).toBeGreaterThanOrEqual(2)
+    // page titles carry (p/N) and the global SHEET numbers run consecutive
+    for (const [p, s] of sched.entries()) {
+      expect(s.title).toBe(`Door + window schedule (${p + 1}/${sched.length})`)
+    }
+    const sheetNos = sched.map((s) => Number(s.svg.match(/SHEET (\d+)\//)?.[1]))
+    for (let i = 1; i < sheetNos.length; i++) {
+      expect(sheetNos[i]).toBe((sheetNos[i - 1] as number) + 1)
+    }
+    // every mark W1…W40 exactly once across the pages; each page repeats the
+    // column header and keeps rows above the title block
+    const all = sched.map((s) => s.svg).join('')
+    for (let i = 1; i <= 40; i++) {
+      expect([...all.matchAll(new RegExp(`>W${i}</text>`, 'g'))].length).toBe(1)
+    }
+    for (const s of sched) {
+      expect(s.svg).toContain('>MARK</text>')
+      for (const { y } of parseMarks(s.svg)) {
+        expect(y).toBeLessThan(816 - 76 - 8)
+      }
+    }
+    // census on paper == openings in the scene
+    expect(sched.reduce((n, s) => n + parseMarks(s.svg).length, 0)).toBe(40)
+    // the wall plan carries all 40 bubbles, pairwise de-collided
+    const wallSvg = sheets.find((s) => s.title === 'Wall framing plan')?.svg ?? ''
+    const bubbles = parseBubbles(wallSvg)
+    expect(bubbles.length).toBe(40)
+    for (let i = 0; i < bubbles.length; i++) {
+      for (let j = i + 1; j < bubbles.length; j++) {
+        const bi = bubbles[i] as { x: number; y: number }
+        const bj = bubbles[j] as { x: number; y: number }
+        expect(Math.hypot(bi.x - bj.x, bi.y - bj.y)).toBeGreaterThanOrEqual(15)
+      }
+    }
+  })
+
+  test('opening-less scene emits no schedule sheet; paper without the option stays byte-equal', () => {
+    const bare = [bwall('w_a', [0, 0], [6, 0], []), bwall('w_b', [0, 3], [6, 3], [])]
+    const members = frameWalls(bare, spec400)
+    const withWalls = buildPlanSet(members, [], { walls: bare })
+    const without = buildPlanSet(members, [], {})
+    expect(withWalls.map((s) => s.title)).not.toContain('Door + window schedule')
+    // zero openings → the option is inert: sheets byte-equal
+    expect(withWalls.map((s) => s.svg)).toEqual(without.map((s) => s.svg))
+    // and a scene WITH openings but WITHOUT the option = pre-B21d paper:
+    // no schedule sheet, no bubbles (old callers unchanged)
+    const { members: m2 } = scene()
+    const legacy = buildPlanSet(m2, [], {})
+    expect(legacy.map((s) => s.title)).not.toContain('Door + window schedule')
+    expect(parseBubbles(legacy.find((s) => s.title === 'Wall framing plan')?.svg ?? '')).toEqual([])
   })
 })

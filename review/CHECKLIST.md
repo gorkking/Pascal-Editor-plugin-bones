@@ -440,6 +440,27 @@ AND a gate — a checklist line without a test is a wish.
   ratio scale, north arrow.** Gate: `plan-set.test.ts` pins
 - **P4 Engine warnings print verbatim in the schedules flag block** — a
   silent drop of a warning is a lie on paper.
+- **P6 Every opening is SCHEDULED and cross-referenced.** When the caller
+  passes the wall model (`PlanSetOptions.walls` = compute's deduped active
+  walls), the set carries a 'Door + window schedule' sheet with ONE row per
+  opening — census equals the scene's OpeningSlices, marks D1…/W1… assigned
+  deterministically by wall order + ascending u (an unchanged scene
+  reproduces identical marks). The RO cell prints the engine's
+  roughWidth/roughHeight verbatim and the HEADER cell reads the FRAMED
+  member back (size verbatim; material 'engineered' prints
+  'ENGINEERED (by supplier)', never the drawn placeholder stick; CMU
+  lintels print 'precast lintel'); window sills print AFF; every flag
+  riding the opening's head/sill members prints WHOLE (wrapRow — P4
+  applies). Each mark also prints on the wall framing plan as a small
+  bubble de-collided through the placed[] registry (A-A section bubbles
+  included) with a legend row keying the symbol (P2). Long sets paginate
+  with (p/N) titles and contiguous SHEET numbers; zero openings → no
+  sheet; callers that don't pass walls get paper byte-equal to pre-B21d.
+  Origin: LOD-400 wave-2 audit B21(d) — openings framed to fabrication
+  level but never tabulated, no out-of-scope label.
+  Gate: `src/plans/plan-set.test.ts` 'door + window schedule (LOD-400
+  B21d)' describe (census/byte-match/determinism/bubble clearances/
+  40-opening pagination/byte-equal fallback).
 
 ## P — Plumbing
 

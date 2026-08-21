@@ -70,6 +70,11 @@ export type ComputeResult = {
    * anchors) — what the `bones:device` reconciler mirrors into nodes.
    * Empty when electrical is off. */
   devices: DerivedDevice[]
+  /** Deduped ACTIVE walls the engines framed ('skip' overrides excluded,
+   * S8 merged openings included) — the OpeningSlices the plan set's
+   * door/window schedule tabulates (LOD-400 B21d). Openings live on the
+   * wall model and are not recoverable from members. */
+  walls: WallSlice[]
 }
 
 /**
@@ -390,6 +395,7 @@ function computeLevelUncached(
       characteristics: null,
       duplicateOf: {},
       devices: [],
+      walls: [],
     }
   }
 
@@ -938,5 +944,6 @@ function computeLevelUncached(
     characteristics,
     duplicateOf: Object.fromEntries(duplicateOf),
     devices,
+    walls: activeWalls,
   }
 }

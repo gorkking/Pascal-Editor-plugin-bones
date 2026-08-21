@@ -10,7 +10,7 @@
  * plugin dependency-free while producing a real, shareable plan set.
  */
 
-import type { Fixture, Member } from '../core/types'
+import type { Fixture, Member, OpeningSlice, WallSlice } from '../core/types'
 import { formatFtIn } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { computeTakeoff } from '../engines/takeoff'
@@ -49,6 +49,15 @@ export type PlanSetOptions = {
   /** Whole-building metrics — printed as a compact block on the schedules
    * sheet (above the flags on the last page). */
   characteristics?: BuildingCharacteristics
+  /** Wall slices (id + plan geometry + OpeningSlices) for the door/window
+   * SCHEDULE sheet and the wall-plan opening-mark bubbles (LOD-400 B21d).
+   * Openings live on the WALL MODEL, not the members, so the caller passes
+   * the same deduped ACTIVE walls the engines framed — compute's
+   * `result.walls` (S8 merged openings included, 'skip' walls excluded).
+   * Absent → no schedule sheet, no marks (paper byte-equal to pre-B21d).
+   * TODO(B21d panel wiring — sibling pilot owns panel.tsx): the
+   * ExportPlansButton hookup is the one-liner `walls: result.walls`. */
+  walls?: WallSlice[]
 }
 
 // Sheet canvas (landscape letter at 96dpi: 11in × 8.5in).
@@ -1388,6 +1397,16 @@ function planSheet(
       `<text x="${MARGIN + 4}" y="${y}" font-size="10" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`STUDS @ ${opts.studSpacingIn}" O.C. U.N.O.`)}</text>`,
     )
   }
+  // Opening-mark legend row (P2: the B21d mark bubbles are a symbol — the
+  // sheet must key it) — only when marks actually print.
+  if (def.key === 'wall' && opts.walls?.some((w2) => w2.openings.length > 0)) {
+    const y = MARGIN + 14 + legendLines.length * 14
+    legendLines.push(
+      `<circle cx="${MARGIN + 7}" cy="${y - 3}" r="6" fill="#fff" stroke="#222" stroke-width="1"/>` +
+        `<text x="${MARGIN + 7}" y="${y - 0.5}" font-size="6" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#222">D1</text>` +
+        `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">opening mark — see door + window schedule</text>`,
+    )
+  }
   // Rafter-spacing note (round-3 C4 carried item): stated from the dominant
   // rafter gap when derivable, spec spacing + VERIFY otherwise.
   if (def.key === 'roof') {
@@ -1427,6 +1446,61 @@ function planSheet(
         `<text x="${cx.toFixed(1)}" y="${(y + 3.5).toFixed(1)}" font-size="10" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#222">A</text>`
       shapes.push(
         `<line x1="${cx.toFixed(1)}" y1="${(y0 + 10).toFixed(1)}" x2="${cx.toFixed(1)}" y2="${(y1 - 10).toFixed(1)}" stroke="#222" stroke-width="1.2" stroke-dasharray="9 4"/>${bubble(y0)}${bubble(y1)}`,
+      )
+      // the A bubbles join the placed[] registry so the opening marks below
+      // (and any later glyph) de-collide against them like device bubbles
+      placed.push({ x: cx, y: y0 }, { x: cx, y: y1 })
+    }
+  }
+  // Opening-mark bubbles (LOD-400 B21d): every scheduled door/window mark
+  // prints NEXT TO its opening on the wall framing plan — small section-mark
+  // style bubbles so the schedule cross-references the drawing. Candidates
+  // start perpendicular off the wall centerline (clear of the header/sill
+  // linework) and walk the same (t, n) grid the sleeve ticks use; placed[]
+  // is the obstacle registry (A-A bubbles registered above). A spot that
+  // cannot fully clear takes the least-crowded candidate + an SVG comment —
+  // the crowded-drop convention, but a MARK must always print (a schedule
+  // row without its plan bubble is a dangling reference).
+  if (def.key === 'wall' && opts.walls) {
+    for (const mk of assignOpeningMarks(opts.walls)) {
+      const ox = mk.wall.start[0] + mk.wall.dir[0] * mk.opening.u
+      const oz = mk.wall.start[1] + mk.wall.dir[1] * mk.opening.u
+      const ax = X(ox)
+      const ay = Z(oz)
+      // screen-space wall direction (Z flips no axes here — plan X/Z map
+      // linearly) and its perpendicular
+      const dxs = mk.wall.dir[0]
+      const dys = mk.wall.dir[1]
+      const cands: [number, number][] = []
+      for (const n of [14, -14, 24, -24]) cands.push([0, n])
+      for (const t of [14, -14, 26, -26]) {
+        for (const n of [14, -14]) cands.push([t, n])
+      }
+      for (const n of [34, -34, 44, -44]) cands.push([0, n])
+      let best: { x: number; y: number; gap: number } | null = null
+      for (const [t, n] of cands) {
+        const px = ax + dxs * t - dys * n
+        const py = ay + dys * t + dxs * n
+        if (px < MARGIN + 12 || px > W - MARGIN - 12) continue
+        if (py < MARGIN + 12 || py > H - TITLE_H - 24) continue
+        const gap = placed.reduce(
+          (m2, q) => Math.min(m2, Math.hypot(q.x - px, q.y - py)),
+          Number.POSITIVE_INFINITY,
+        )
+        if (gap >= 18) {
+          best = { x: px, y: py, gap }
+          break
+        }
+        if (!best || gap > best.gap) best = { x: px, y: py, gap }
+      }
+      const bx = best?.x ?? ax
+      const by = best?.y ?? ay
+      if (!best || best.gap < 18) {
+        shapes.push(`<!-- opening-mark crowded: ${mk.mark} gap=${(best?.gap ?? 0).toFixed(1)} -->`)
+      }
+      placed.push({ x: bx, y: by })
+      shapes.push(
+        `<g transform="translate(${bx.toFixed(1)} ${by.toFixed(1)})"><circle r="8" fill="#fff" stroke="#222" stroke-width="1.2"/><text y="2.5" font-size="7" font-weight="bold" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(mk.mark)}</text></g>`,
       )
     }
   }
@@ -2252,6 +2326,254 @@ function schedulesSheets(
   return sheets
 }
 
+// ---------------------------------------------------------------------------
+// Door + window schedule (LOD-400 B21d): openings are framed to fabrication
+// level but were never TABULATED — every real plan set schedules its doors
+// and windows. One row per opening: deterministic mark (D1/D2… W1/W2… by
+// wall order + u), nominal size, ROUGH OPENING (the engine's roughWidth/
+// roughHeight, verbatim), sill AFF (windows), header size read back from the
+// FRAMED members (engineered headers say by-supplier), the host wall id, and
+// every flag riding that opening's members — printed whole via wrapRow.
+// The marks ALSO print on the wall framing plan as small bubbles (device-tag
+// machinery + placed[] de-collision) so the schedule cross-references the
+// drawing.
+// ---------------------------------------------------------------------------
+
+export type OpeningMark = { mark: string; wall: WallSlice; opening: OpeningSlice }
+
+/**
+ * Deterministic mark assignment: walls in the order the caller passed them
+ * (compute's extraction order — stable per scene), openings within a wall by
+ * ascending u. Doors count D1…Dn, windows W1…Wn, so an unchanged scene
+ * reproduces identical marks on every recompute.
+ */
+export function assignOpeningMarks(walls: WallSlice[]): OpeningMark[] {
+  const out: OpeningMark[] = []
+  let d = 0
+  let w = 0
+  for (const wall of walls) {
+    const sorted = [...wall.openings].sort((a, b) => a.u - b.u)
+    for (const opening of sorted) {
+      out.push({
+        mark: opening.kind === 'door' ? `D${++d}` : `W${++w}`,
+        wall,
+        opening,
+      })
+    }
+  }
+  return out
+}
+
+/** Along-wall coordinate of a member's center (plan projection onto dir). */
+function memberU(m: Member, wall: WallSlice): number {
+  return (
+    (m.position[0] - wall.start[0]) * wall.dir[0] +
+    (m.position[2] - wall.start[1]) * wall.dir[1]
+  )
+}
+
+type OpeningRowInfo = { headerText: string; flags: string[] }
+
+/**
+ * Join one opening to ITS framed members via wall id + u: headers (framed
+ * walls) and precast lintels (CMU walls) both carry sourceId = wall.id, so
+ * the nearest-unclaimed head member within the RO's reach is the opening's.
+ * The header cell reads the MEMBER back (never re-derives): size verbatim,
+ * material 'engineered' → 'ENGINEERED (by supplier)'. Flags are collected
+ * from the matched head member AND the window's rough sill — composed flag
+ * strings stay verbatim (P4: a dropped warning is a lie on paper).
+ */
+function openingRowInfo(
+  marks: OpeningMark[],
+  members: Member[],
+): Map<OpeningMark, OpeningRowInfo> {
+  const out = new Map<OpeningMark, OpeningRowInfo>()
+  const byWall = new Map<string, { heads: Member[]; sills: Member[] }>()
+  for (const m of members) {
+    if (m.system !== 'wall-framing') continue
+    if (m.role !== 'header' && m.role !== 'lintel' && m.role !== 'sill') continue
+    const rec = byWall.get(m.sourceId) ?? { heads: [], sills: [] }
+    if (m.role === 'sill') rec.sills.push(m)
+    else rec.heads.push(m)
+    byWall.set(m.sourceId, rec)
+  }
+  const claimed = new Set<Member>()
+  for (const mk of marks) {
+    const rec = byWall.get(mk.wall.id)
+    const reach = Math.max(1.0, mk.opening.roughWidth) // RO-clamp slides count
+    const nearest = (pool: Member[]): Member | null => {
+      let best: Member | null = null
+      let bestD = Number.POSITIVE_INFINITY
+      for (const m of pool) {
+        if (claimed.has(m)) continue
+        const d = Math.abs(memberU(m, mk.wall) - mk.opening.u)
+        if (d < bestD) {
+          bestD = d
+          best = m
+        }
+      }
+      return best !== null && bestD <= reach ? best : null
+    }
+    const head = rec ? nearest(rec.heads) : null
+    if (head) claimed.add(head)
+    const sill = mk.opening.kind === 'window' && rec ? nearest(rec.sills) : null
+    if (sill) claimed.add(sill)
+    const headerText = !head
+      ? '—'
+      : head.material === 'engineered'
+        ? 'ENGINEERED (by supplier)'
+        : head.role === 'lintel'
+          ? 'precast lintel'
+          : (head.size ?? '—')
+    const flags = [
+      ...new Set(
+        [head?.flag, sill?.flag].filter((f): f is string => f !== undefined && f.length > 0),
+      ),
+    ]
+    out.set(mk, { headerText, flags })
+  }
+  return out
+}
+
+/** Schedule table column x positions (full-width single table). */
+const SCHED_COLS = {
+  mark: MARGIN,
+  type: MARGIN + 44,
+  nominal: MARGIN + 104,
+  ro: MARGIN + 254,
+  sill: MARGIN + 404,
+  header: MARGIN + 474,
+  wall: MARGIN + 652,
+} as const
+/** Wall-id column width in characters (~6 px/char at 10 px). */
+const SCHED_WALL_CHARS = 48
+
+/**
+ * The 'Door + window schedule' sheet(s). One table row per opening; a row's
+ * flags print whole underneath in red (wrapRow — verbatim at any length,
+ * never split across sheets mid-group). Paginates like the takeoff: groups
+ * fill pages top-down, titles carry (p/N), the global SHEET n/N patch in
+ * buildPlanSet keeps set numbering contiguous. Zero openings (or no walls
+ * passed — old callers) → no sheet.
+ */
+function openingScheduleSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
+  const walls = opts.walls
+  if (!walls) return []
+  const marks = assignOpeningMarks(walls)
+  if (marks.length === 0) return []
+  const info = openingRowInfo(marks, members)
+  const lineH = 15
+  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
+  // word-boundary wrap, mirroring schedulesSheets (no ellipsis, ever)
+  const wrap = (text: string, max: number): string[] => {
+    const lines: string[] = []
+    let rest = text
+    while (rest.length > max) {
+      const cut = rest.lastIndexOf(' ', max)
+      const at = cut > 24 ? cut : max
+      lines.push(rest.slice(0, at))
+      rest = rest.slice(at).trim()
+    }
+    if (rest.length > 0 || lines.length === 0) lines.push(rest)
+    return lines
+  }
+  const FONT = 'font-family="Helvetica, Arial, sans-serif"'
+  type Line = { svgAt: (y: number) => string }
+  type Group = Line[]
+  const groups: Group[] = marks.map((mk) => {
+    const o = mk.opening
+    const row = info.get(mk) as OpeningRowInfo
+    const wallLines = wrap(mk.wall.id, SCHED_WALL_CHARS)
+    const cells: [number, string, boolean][] = [
+      [SCHED_COLS.mark, mk.mark, true],
+      [SCHED_COLS.type, o.kind, false],
+      [SCHED_COLS.nominal, `${formatFtIn(o.width)} × ${formatFtIn(o.height)}`, false],
+      [SCHED_COLS.ro, `${formatFtIn(o.roughWidth)} × ${formatFtIn(o.roughHeight)}`, false],
+      [SCHED_COLS.sill, o.kind === 'window' ? formatFtIn(o.sillHeight) : '—', false],
+      [SCHED_COLS.header, row.headerText, false],
+      [SCHED_COLS.wall, wallLines[0] as string, false],
+    ]
+    const lines: Line[] = [
+      {
+        svgAt: (y) =>
+          cells
+            .map(
+              ([x, text, bold]) =>
+                `<text x="${x}" y="${y}" font-size="10"${bold ? ' font-weight="bold"' : ''} ${FONT} fill="#222">${esc(text)}</text>`,
+            )
+            .join(''),
+      },
+    ]
+    for (const cont of wallLines.slice(1)) {
+      lines.push({
+        svgAt: (y) =>
+          `<text x="${SCHED_COLS.wall}" y="${y}" font-size="10" ${FONT} fill="#222">${esc(cont)}</text>`,
+      })
+    }
+    for (const flag of row.flags) {
+      for (const [k, text] of wrap(`⚑ ${flag}`, 150).entries()) {
+        lines.push({
+          svgAt: (y) =>
+            `<text x="${MARGIN + 24 + (k > 0 ? 12 : 0)}" y="${y}" font-size="9.5" ${FONT} fill="#a03015">${esc(text)}</text>`,
+        })
+      }
+    }
+    return lines
+  })
+  // header rows per page: column titles + rule = 2 lines
+  const capacity = maxLines - 2
+  const pages: Group[][] = []
+  let cur: Group[] = []
+  let used = 0
+  for (const g of groups) {
+    if (used > 0 && used + g.length > capacity) {
+      pages.push(cur)
+      cur = []
+      used = 0
+    }
+    cur.push(g)
+    used += g.length
+  }
+  if (cur.length > 0) pages.push(cur)
+  const sheets: PlanSheet[] = []
+  const doorCount = marks.filter((m) => m.opening.kind === 'door').length
+  for (const [p, page] of pages.entries()) {
+    const title =
+      pages.length > 1
+        ? `Door + window schedule (${p + 1}/${pages.length})`
+        : 'Door + window schedule'
+    const headY = MARGIN + 24
+    const head = [
+      ['MARK', SCHED_COLS.mark],
+      ['TYPE', SCHED_COLS.type],
+      ['NOMINAL W × H', SCHED_COLS.nominal],
+      ['ROUGH OPENING W × H', SCHED_COLS.ro],
+      ['SILL AFF', SCHED_COLS.sill],
+      ['HEADER', SCHED_COLS.header],
+      ['WALL', SCHED_COLS.wall],
+    ]
+      .map(
+        ([label, x]) =>
+          `<text x="${x}" y="${headY}" font-size="10" font-weight="bold" ${FONT} fill="#111">${esc(label as string)}</text>`,
+      )
+      .join('')
+    const rule = `<line x1="${MARGIN}" y1="${headY + 5}" x2="${W - MARGIN}" y2="${headY + 5}" stroke="#222" stroke-width="0.8"/>`
+    const body: string[] = []
+    let line = 2
+    for (const g of page) {
+      for (const l of g) {
+        body.push(l.svgAt(MARGIN + 24 + line * lineH))
+        line++
+      }
+    }
+    sheets.push({
+      title,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" ${FONT} fill="#111">Door + window schedule${pages.length > 1 ? ` — sheet ${p + 1} of ${pages.length}` : ''} · ${doorCount} door${doorCount === 1 ? '' : 's'} / ${marks.length - doorCount} window${marks.length - doorCount === 1 ? '' : 's'} · RO + header from framed members · marks on the wall framing plan</text>${head}${rule}${body.join('')}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
+    })
+  }
+  return sheets
+}
+
 /** Every sheet the current level's members can support, in print order. */
 /**
  * Storey lift map for cross-level members, RELATIVE to the owner level:
@@ -2286,6 +2608,9 @@ export function buildPlanSet(
   sheets.push(...elevationSheets(members, opts))
   const section = sectionSheet(members, opts)
   if (section) sheets.push(section)
+  // Door + window schedule (B21d) — before the takeoff schedules, after the
+  // drawings it cross-references. No walls passed / zero openings → no sheet.
+  sheets.push(...openingScheduleSheets(members, opts))
   // The roof-coverage flag prints on the roof sheet AND joins the schedules
   // flag block (opts.warnings handling) so it survives a text-only read.
   const roofWarn = roofCoverageWarning(members)
