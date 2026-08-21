@@ -1,4 +1,12 @@
-# Bones night board — NIGHT-7 (2026-08-20 → 21) — all-nighter, loop as usual
+# Bones night board — NIGHT-7 SHIPPED TO PROD 2026-08-21 (~08:30)
+
+## SHIP RECORD: private-editor #388 → b9688fd7
+Chain: plugin 3022fc0d (1054 tests; ecadea5 code + docs) → editor #698
+pin onto main w/ #697 → private-editor community pin + submodule @
+8408cb88, all E2E green. 3D visual APPROVE (numeric evidence).
+Morning review: docs/morning-review-2026-08-21.txt.
+
+# NIGHT-7 (2026-08-20 → 21) — archive
 
 ## ~06:30 state — ALL night-7 work merged (ecadea5, 1054 tests)
 MERGED tonight: F3 DWV (4 rounds) + F1 line-set (4) + B17 slab (2) +

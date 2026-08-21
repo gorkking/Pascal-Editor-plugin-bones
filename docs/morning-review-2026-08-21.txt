@@ -1,9 +1,13 @@
 NIGHT-7 MORNING REVIEW — 2026-08-21
 ====================================
-STATUS AT WRITING: all work merged to plugin master (1054 tests, up
-from 950); host F2 merged to editor main. Pre-ship 3D visual round in
-flight; ship chain follows on its APPROVE. (This file updates with
-the prod sha when the chain completes.)
+SHIPPED TO PROD: private-editor b9688fd7 (editor 8408cb88 carrying
+#697 selection + #698 pin; plugin 3022fc0d, 1054 tests). Pre-ship 3D
+visual round: APPROVE — all six checks with instance-level numeric
+evidence (line-set lateral verified to the millimeter, DWV slopes
+monotonic to one exit, exploded strata clean). Two host-level notes
+for a headed spot-check: door leaf slide-drag is inert in BOTH modes
+(pre-existing; the MOVE flow works), and the hover glow was invisible
+under the headless WebGL fallback — eyeball it on real GPU.
 
 YOUR 3 FEEDBACKS — ALL DELIVERED
 ---------------------------------
