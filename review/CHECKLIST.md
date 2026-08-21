@@ -126,6 +126,33 @@ AND a gate — a checklist line without a test is a wish.
   row split, 3-storey cross-storey warning matrix + scoped labels,
   corridor nudge-clamp repro, duplicate-zone/face-twin traveler
   exhibits + legitimate-pair keep, ceiling-box census).
+- **E7 Every service chain carries its grounding electrode system.**
+  A meter + panel imply the GES (NEC 250.50 — every build orders it):
+  TWO driven 5/8" × 8 ft rods below grade AT the meter, exactly 6 ft
+  apart, tops strictly below grade (250.52(A)(5), 250.53(A)(2)/(B)/(G));
+  a CONTINUOUS GEC meter → rod 1 → rod 2 (250.53(C)) sized from the
+  service rating (250.66 — `gecSizeAwg`; a missing rating books 8 AWG
+  labeled 'assumed 100 A service'); an intersystem bonding termination
+  at the meter (250.94); and the metal-water-pipe bond (250.104(A))
+  panel → water entry along the walls at its own service plane. The
+  bond target is the CROSS-TRADE seam: the waterEntry service override
+  (authoritative), else plumbing's own water-meter auto-spot mirrored
+  in compute (`placeMeterSpot` — placed-path parity gated: the bond
+  ends ON the water-meter fixture). No visible water entry (fallback
+  plumbing models no meter; plumbing off) = the intersystem member is
+  LABELED 'water-pipe bond not modeled' AND the level warns — NEVER
+  silent. GEC grade runs stay at/below the grade line (above the
+  stemwall top — nothing bores the foundation; E4-legal as buried);
+  rods stand off the footing projection. The rows mirror the members:
+  rods pcs, clamps pcs (rod count + water clamp), GEC lf, bonding
+  jumper lf, termination pcs — GEC/bond lf NEVER book as NM-B. The
+  GES lands identically in all 51 jurisdictions (universal NEC).
+  Origin: LOD-400 audit BATCH 12 (wave-1 confirmed: regex for
+  ground/rod/electrode/GEC over composed members = zero).
+  Gate: `src/engines/electrical.ges.test.ts` (census + 6-ft/8-ft/
+  below-grade pins, E2-style GEC + bond continuity, E4 legality of
+  bond legs, no-meter subset zero, takeoff parity matrix, 51-state
+  sweep, water-meter parity, override + warn/label matrix).
 
 ## S — Structure
 

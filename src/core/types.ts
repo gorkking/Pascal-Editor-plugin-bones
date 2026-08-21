@@ -66,6 +66,9 @@ export type MemberRole =
   | 'vent-stack'
   | 'duct-run'
   | 'wire-run'
+  /** Driven grounding electrode (5/8" × 8 ft copper-clad rod, NEC
+   * 250.52(A)(5)) — the grounding electrode system (LOD-400 B12). */
+  | 'ground-rod'
   /** Water-heater body (tank cylinder approximated as a box, or tankless cabinet). */
   | 'water-heater'
   /** MEP equipment bodies that aren't pipe/duct (heat-pump outdoor unit + its pad). */

@@ -1743,7 +1743,11 @@ function emitWallPathWith(
  * every leg past the panel feed is 14/3-labeled (IRC R314.4) — and every
  * threeWay switch group gets a 14/3 traveler chain (NEC 210.70/404.2).
  */
-export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Member[] {
+export function routeWiring(
+  fixtures: Fixture[],
+  walls: WallSlice[] = [],
+  context: ServiceCableContext = {},
+): Member[] {
   const members: Member[] = []
   const panel = fixtures.find((f) => f.kind === 'panel')
   if (!panel) return members
@@ -1980,7 +1984,7 @@ export function routeWiring(fixtures: Fixture[], walls: WallSlice[] = []): Membe
   }
 
   // ---- service entrance: street lateral → METER → panel feed ----
-  members.push(...routeServiceCable(fixtures, walls, graph))
+  members.push(...routeServiceCable(fixtures, walls, graph, context))
 
   return members
 }
@@ -1994,6 +1998,56 @@ const STREET_EDGE_MARGIN = 4
 /** The meter→panel feed's service plane along the walls — one step above
  * the branch circuits' 8 stapled drill planes, inside the RO-cleared zone. */
 const SERVICE_FEED_Y = WIRE_RUN_Y + 9 * 0.012
+
+// ---- grounding electrode system (LOD-400 B12, NEC 250) ---------------------
+
+/** NEC 250.52(A)(5): driven rod electrode — 8 ft, 5/8" copper-clad steel. */
+const GROUND_ROD_LENGTH = feet(8)
+const GROUND_ROD_DIAMETER = 0.016
+/** NEC 250.53(A)(2)/(B): the supplemental rod stands ≥ 6 ft from the first. */
+const GROUND_ROD_SPACING = feet(6)
+/** Rod top driven below grade (250.53(G) — flush or below). */
+const GROUND_ROD_TOP_Y = -0.05
+/** The GEC runs along the grade line to the rods: above the stemwall top
+ * (y=0 — a below-grade run at the meter's plan point would bore the
+ * stemwall), below the E4 living band (≤ 0.01 reads as buried). */
+const GES_GRADE_Y = 0.005
+/** Rods stand off the foundation face — clear of the stemwall (8", half =
+ * 0.102 m) AND the footing projection (16", half = 0.203 m). */
+const GROUND_ROD_STANDOFF = 0.45
+/** Bare GEC / bonding jumper drawn thinner than the SE cable. */
+const GES_SECTION = 0.014
+/** The water-pipe bond's wall plane — one step above the meter→panel feed
+ * (its own plane: the two share wall legs on panel-adjacent runs). */
+const GES_BOND_Y = WIRE_RUN_Y + 10 * 0.012
+
+/**
+ * NEC 250.66 GEC size from the service rating, via the service-entrance
+ * conductor the rating implies (100 A → 4 AWG Cu SE → 8 AWG GEC; 150/175 A
+ * → 1/1-0 → 6; 200 A → 2/0 → 4). Rod electrodes alone would cap at 6 AWG
+ * (250.66(A)) but the same conductor also bonds the water pipe (250.104
+ * sizes off Table 250.102(C)(1) — same numbers here), so the full size is
+ * booked. Exported for the takeoff/legend gates.
+ */
+export function gecSizeAwg(serviceAmps: number): number {
+  if (serviceAmps <= 125) return 8
+  if (serviceAmps <= 175) return 6
+  if (serviceAmps <= 200) return 4
+  return 2
+}
+
+/**
+ * Cross-trade context for the service chain (B12): the metal water service
+ * entry point the NEC 250.104 bond targets. Compute resolves it from the
+ * waterEntry service override (authoritative) or the plumbing engine's own
+ * auto-spot (`placeMeterSpot` — mirrored deterministically, plumbing runs
+ * after electrical). Absent/null = no water entry visible — the bond is
+ * skipped and the assumption is LABELED on the intersystem bonding
+ * termination member, never silent.
+ */
+export type ServiceCableContext = {
+  waterEntry?: readonly [number, number, number] | null
+}
 
 /**
  * True when the straight segment a→b passes through any rough opening's
@@ -2068,6 +2122,7 @@ export function routeServiceCable(
   fixtures: Fixture[],
   walls: WallSlice[],
   graph: Map<string, Junction[]> = buildWallGraph(walls),
+  context: ServiceCableContext = {},
 ): Member[] {
   const members: Member[] = []
   const meter = fixtures.find((f) => f.kind === 'electric-meter')
@@ -2175,5 +2230,173 @@ export function routeServiceCable(
     heavy([px, SERVICE_LATERAL_Y, mz], [px, SERVICE_LATERAL_Y, pz], fnote)
     heavy([px, SERVICE_LATERAL_Y, pz], [px, py, pz], fnote)
   }
+
+  // ---- grounding electrode system (LOD-400 B12, NEC 250.50) ----
+  // Every service orders one; none was modeled — a regex over composed
+  // members for ground/rod/electrode/GEC found ZERO (wave-1 confirmed),
+  // conspicuous next to the fabrication-level chain above. Emitted here so
+  // the SAME meter anchor drives it: a moved electric-meter node re-anchors
+  // rods + GEC with the rest of the chain (checklist A4).
+  const ratedAmps =
+    typeof panel.meta?.minServiceAmps === 'number' ? panel.meta.minServiceAmps : null
+  const gecAwg = gecSizeAwg(ratedAmps ?? 100)
+  const ampNote = ratedAmps === null ? ' (assumed 100 A service)' : ''
+  const gesWire = (
+    sourceId: string,
+    from: readonly [number, number, number],
+    to: readonly [number, number, number],
+    label: string,
+  ): void => {
+    const dx = to[0] - from[0]
+    const dy = to[1] - from[1]
+    const dz = to[2] - from[2]
+    const len = Math.hypot(dx, dy, dz)
+    if (len < 0.02) return
+    const vertical = Math.abs(dy) > Math.hypot(dx, dz)
+    members.push({
+      system: 'electrical',
+      role: 'wire-run',
+      dims: vertical ? [GES_SECTION, len, GES_SECTION] : [len, GES_SECTION, GES_SECTION],
+      length: len,
+      position: [(from[0] + to[0]) / 2, (from[1] + to[1]) / 2, (from[2] + to[2]) / 2],
+      rotation: [0, vertical ? 0 : Math.atan2(-dz, dx), 0],
+      material: 'copper',
+      sourceId,
+      label,
+    })
+  }
+  /** Straight leg that can't detour: ⚠-flag it when it crosses an RO box. */
+  const gesFlagged = (
+    sourceId: string,
+    from: readonly [number, number, number],
+    to: readonly [number, number, number],
+    label: string,
+  ): void =>
+    gesWire(
+      sourceId,
+      from,
+      to,
+      segmentCrossesRo(walls, from, to) ? `${label} (⚠ crosses rough opening — verify)` : label,
+    )
+
+  // Rod spots: out the meter wall's exterior normal (the vector wall
+  // centerline → meter mount), standing off the foundation; the pair runs
+  // along the wall axis. Degenerate scenes (no wall anchor) fall back to
+  // the street direction — the rods stay at the meter either way.
+  const normalized = (v: readonly [number, number]): [number, number] | null => {
+    const l = Math.hypot(v[0], v[1])
+    return l > 1e-6 ? [v[0] / l, v[1] / l] : null
+  }
+  const meterPlanAnchor = meterAnchor ? wallPlan(meterAnchor) : null
+  const outN =
+    (meterPlanAnchor ? normalized([mx - meterPlanAnchor[0], mz - meterPlanAnchor[1]]) : null) ??
+    normalized([street[0] - mx, street[1] - mz]) ??
+    ([0, -1] as [number, number])
+  const rodAxis: readonly [number, number] = meterAnchor
+    ? meterAnchor.wall.dir
+    : [-outN[1], outN[0]]
+  const rod1: readonly [number, number] = [
+    mx + outN[0] * GROUND_ROD_STANDOFF,
+    mz + outN[1] * GROUND_ROD_STANDOFF,
+  ]
+  const rod2: readonly [number, number] = [
+    rod1[0] + rodAxis[0] * GROUND_ROD_SPACING,
+    rod1[1] + rodAxis[1] * GROUND_ROD_SPACING,
+  ]
+  ;[rod1, rod2].forEach(([rx, rz], i) => {
+    members.push({
+      system: 'electrical',
+      role: 'ground-rod',
+      dims: [GROUND_ROD_DIAMETER, GROUND_ROD_LENGTH, GROUND_ROD_DIAMETER],
+      length: GROUND_ROD_LENGTH,
+      position: [rx, GROUND_ROD_TOP_Y - GROUND_ROD_LENGTH / 2, rz],
+      rotation: [0, 0, 0],
+      material: 'copper',
+      sourceId: `ges-rod-${i + 1}`,
+      label:
+        i === 0
+          ? 'Ground rod 1 — 5/8" × 8 ft copper-clad, driven, top below grade (NEC 250.52(A)(5))'
+          : 'Ground rod 2 — supplemental, ≥ 6 ft from rod 1 (NEC 250.53(A)(2)/(B))',
+    })
+  })
+
+  // GEC: meter → down the exterior face to the grade line → out to rod 1 →
+  // drop onto the rod → one CONTINUOUS run to rod 2 (250.53(C) — the
+  // rod-to-rod jumper is the same unbroken conductor). The grade-line run
+  // sits above the stemwall top (y=0) so nothing bores the foundation.
+  const gecLabel = `GEC ${gecAwg} AWG Cu — grounding electrode conductor (NEC 250.66)${ampNote}`
+  gesFlagged('GES-1', [mx, my, mz], [mx, GES_GRADE_Y, mz], `${gecLabel} — meter → grade`)
+  gesWire(
+    'GES-1',
+    [mx, GES_GRADE_Y, mz],
+    [rod1[0], GES_GRADE_Y, rod1[1]],
+    `${gecLabel} — grade run to rod 1`,
+  )
+  gesWire(
+    'GES-1',
+    [rod1[0], GES_GRADE_Y, rod1[1]],
+    [rod1[0], GROUND_ROD_TOP_Y, rod1[1]],
+    `${gecLabel} — drop to rod 1`,
+  )
+  gesWire(
+    'GES-1',
+    [rod1[0], GROUND_ROD_TOP_Y, rod1[1]],
+    [rod2[0], GROUND_ROD_TOP_Y, rod2[1]],
+    `${gecLabel} — rod 1 → rod 2, continuous (NEC 250.53(C))`,
+  )
+
+  // Water-pipe bond (250.104(A)): panel → wall legs at the bond plane →
+  // down at the water entry bay → the pipe clamp. Entry point from the
+  // cross-trade context (override or the plumbing auto-spot mirror);
+  // unknown = skip + LABEL the assumption on the termination below.
+  const waterEntry = context.waterEntry ?? null
+  if (waterEntry) {
+    const [wx, wy, wz] = waterEntry
+    const bondLabel = `Water-pipe bond ${gecAwg} AWG Cu — metal water service (NEC 250.104(A))${ampNote}`
+    const waterAnchor = nearestWallPoint(walls, [wx, wz], wy + 0.25)
+    const bondEmit: SegmentEmitter = (a, b, note = '') =>
+      gesWire('GES-2', a, b, `${bondLabel}${note}`)
+    const bondRouted =
+      panelAnchor !== null &&
+      waterAnchor !== null &&
+      wallPath(graph, panelAnchor, waterAnchor) !== null
+    if (bondRouted && panelAnchor && waterAnchor) {
+      const pb = wallPlan(panelAnchor)
+      const wa = wallPlan(waterAnchor)
+      gesFlagged('GES-2', [px, py, pz], [pb[0], py, pb[1]], `${bondLabel} — panel bridge`)
+      gesWire('GES-2', [pb[0], py, pb[1]], [pb[0], GES_BOND_Y, pb[1]], bondLabel)
+      emitWallPathWith(bondEmit, graph, panelAnchor, waterAnchor, GES_BOND_Y)
+      gesWire('GES-2', [wa[0], GES_BOND_Y, wa[1]], [wa[0], wy, wa[1]], bondLabel)
+      gesFlagged('GES-2', [wa[0], wy, wa[1]], [wx, wy, wz], `${bondLabel} — pipe clamp`)
+    } else {
+      // Disconnected islands / degenerate scenes: buried legs (NEC 300.5
+      // convention, same as the feed fallback) — never living-height air.
+      const bnote = `${bondLabel} (⚠ buried crossing — no wall path)`
+      gesWire('GES-2', [px, py, pz], [px, SERVICE_LATERAL_Y, pz], bnote)
+      gesWire('GES-2', [px, SERVICE_LATERAL_Y, pz], [wx, SERVICE_LATERAL_Y, pz], bnote)
+      gesWire('GES-2', [wx, SERVICE_LATERAL_Y, pz], [wx, SERVICE_LATERAL_Y, wz], bnote)
+      gesWire('GES-2', [wx, SERVICE_LATERAL_Y, wz], [wx, wy, wz], bnote)
+    }
+  }
+
+  // Intersystem bonding termination (250.94): the ≥3-terminal block at the
+  // service equipment — mounted just below the meter socket. When no water
+  // entry is visible, IT carries the assumption label (never silent).
+  members.push({
+    system: 'electrical',
+    role: 'equipment',
+    dims: [0.1, 0.08, 0.04],
+    length: 0.1,
+    position: [mx, Math.max(0.3, my - 0.45), mz],
+    rotation: [0, meter.rotationY, 0],
+    material: 'steel',
+    sourceId: 'ges-ibt',
+    label: `Intersystem bonding termination — ≥3 terminals at the service (NEC 250.94)${
+      waterEntry
+        ? ''
+        : '; ⚠ water-pipe bond not modeled — no water service entry visible (NEC 250.104)'
+    }`,
+  })
+
   return members
 }

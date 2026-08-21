@@ -43,11 +43,12 @@ import {
   openingSpans,
   overrideWallPoint,
   routeWiring,
+  wallPlan,
 } from '../engines/electrical'
 import { deriveWallDevices, type DerivedDevice } from '../device/derive'
 import { extractDeviceOverrides } from '../device/overrides'
 import { flagLinesetTradeCrossings, layoutHvac } from '../engines/hvac'
-import { layoutPlumbing } from '../engines/plumbing'
+import { layoutPlumbing, placeMeterSpot } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
@@ -845,7 +846,40 @@ function computeLevelUncached(
       if (warn) warnings.push(warn)
     }
     // LOD 400: homerun + branch wiring following the walls to the panel.
-    if (spec.detail === '400') members.push(...routeWiring(electrical, activeWalls))
+    if (spec.detail === '400') {
+      // B12 GES cross-trade seam: the NEC 250.104 water-pipe bond targets
+      // the SAME entry point plumbing will use — the waterEntry service
+      // node override (authoritative), else plumbing's OWN water-meter
+      // auto-spot (`placeMeterSpot`) mirrored deterministically (plumbing
+      // runs after electrical; the placed path emits its water-meter
+      // fixture exactly there — parity gated). The room-category FALLBACK
+      // plumbing models no water meter at all, so a fallback-path scene
+      // has no entry to bond to: the engine LABELS the assumption on the
+      // intersystem termination member and the level warns — never silent.
+      const forcedEntry = overrideWallPoint(activeWalls, services.waterEntry)
+      const plumbingModelsMeter =
+        config.showPlumbing && extractPlacedFixtures(nodes, levelId).length > 0
+      const entrySpot = forcedEntry
+        ? {
+            wall: forcedEntry.wall,
+            u: forcedEntry.u,
+            heightAff: services.waterEntry?.heightAff ?? 0.3,
+          }
+        : plumbingModelsMeter
+          ? placeMeterSpot(activeWalls)
+          : null
+      let waterEntry: readonly [number, number, number] | null = null
+      if (entrySpot) {
+        const plan = wallPlan({ wall: entrySpot.wall, u: entrySpot.u })
+        waterEntry = [plan[0], entrySpot.heightAff, plan[1]]
+      } else if (panelFx && meterFx) {
+        // Warn only where the GES actually lands (meter + panel = service).
+        warnings.push(
+          'water-pipe bond (NEC 250.104) not modeled — no water service entry visible; bond the metal water line at its entry',
+        )
+      }
+      members.push(...routeWiring(electrical, activeWalls, { waterEntry }))
+    }
   }
 
   if (config.showPlumbing) {

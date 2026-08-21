@@ -599,6 +599,13 @@ export function computeTakeoff(
   // Service-entrance cable (street → meter → panel) is SE/USE conductor, not
   // NM-B — booked on its own line, never under a phantom NM gauge.
   let seCableLf = 0
+  // Grounding electrode system (B12): GEC + water-pipe bond are bare/green
+  // Cu conductors, never NM-B lf. Gauge read from the member labels — the
+  // engine sizes them from the service rating (NEC 250.66), same precedent
+  // as the NM-B conductor-count key below.
+  let gecLf = 0
+  let bondLf = 0
+  let gesAwg: string | null = null
   // Refrigerant line-sets are soft-copper suction/liquid pairs, not cut
   // plumbing pipe — booked by SIZE on their own rows (suction ¾" + liquid
   // ⅜") plus the suction line's insulation sleeve lf, never under the
@@ -614,6 +621,12 @@ export function computeTakeoff(
       seCableLf += toFeet(m.length)
     } else if (m.role === 'wire-run' && m.sourceId.startsWith('ac-whip-')) {
       acWhips.add(m.sourceId)
+    } else if (m.role === 'wire-run' && m.sourceId === 'GES-1') {
+      gecLf += toFeet(m.length)
+      gesAwg ??= m.label?.match(/GEC (\d+) AWG/)?.[1] ?? null
+    } else if (m.role === 'wire-run' && m.sourceId === 'GES-2') {
+      bondLf += toFeet(m.length)
+      gesAwg ??= m.label?.match(/bond (\d+) AWG/)?.[1] ?? null
     } else if (m.role === 'wire-run') {
       // NM-B keys on gauge AND conductor count: 14/3 (alarm interconnect +
       // 3-way travelers, B13b) is a different SKU than 14/2 — the old
@@ -753,6 +766,57 @@ export function computeTakeoff(
   }
   if (seCableLf > 0) {
     push('Electrical', 'SE cable 2 AWG Cu', 'street → meter → panel (NEC 230)', round1(seCableLf), 'lf')
+  }
+  // ---- grounding electrode system (B12): rows mirror the members 1:1 ----
+  const groundRods = members.filter((m) => m.role === 'ground-rod').length
+  if (groundRods > 0) {
+    push(
+      'Electrical',
+      'Ground rods 5/8" × 8 ft',
+      'copper-clad, driven below grade, 6 ft apart (NEC 250.52(A)(5) / 250.53)',
+      groundRods,
+      'pcs',
+    )
+  }
+  // One acorn clamp per rod + the water-pipe bond clamp when the bond is
+  // modeled (NEC 250.70 listed connections).
+  const groundClamps = groundRods + (bondLf > 0 ? 1 : 0)
+  if (groundClamps > 0) {
+    push(
+      'Electrical',
+      'Ground clamps',
+      'acorn clamp per rod + water-pipe clamp (NEC 250.70)',
+      groundClamps,
+      'pcs',
+    )
+  }
+  if (gecLf > 0) {
+    push(
+      'Electrical',
+      `GEC ${gesAwg ?? '8'} AWG bare Cu`,
+      'grounding electrode conductor, meter → rods (NEC 250.66)',
+      round1(gecLf),
+      'lf',
+    )
+  }
+  if (bondLf > 0) {
+    push(
+      'Electrical',
+      `Bonding jumper ${gesAwg ?? '8'} AWG Cu`,
+      'panel → metal water service entry (NEC 250.104(A))',
+      round1(bondLf),
+      'lf',
+    )
+  }
+  const intersystemTerminations = members.filter((m) => m.sourceId === 'ges-ibt').length
+  if (intersystemTerminations > 0) {
+    push(
+      'Electrical',
+      'Intersystem bonding termination',
+      'at the service equipment (NEC 250.94)',
+      intersystemTerminations,
+      'pcs',
+    )
   }
 
   // ---- MEP fittings (LOD 400): elbows at each bend, boots, collars ----
