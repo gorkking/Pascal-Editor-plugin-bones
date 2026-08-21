@@ -77,6 +77,16 @@ export const serviceDefinition: ServiceDefinition = {
 
   renderer: { kind: 'parametric', module: () => import('./renderer') },
 
+  // Window-parity move (wall-mount move tool, shared with bones:device):
+  // wall-mounted types slide along the wall surface (#689 hidden-wall hold,
+  // #694 own-wall gate, live overrides → engines re-route live) and commit
+  // ONE tracked anchor write; floor types (heat pump pad, sewer exit) get
+  // the equivalent grid-snapped planar ground drag from the same component.
+  // `capabilities.movable` stays for the Move-cross / Ctrl-drag gates and
+  // the 2D fallback; `affordanceTools` rides Record<string, unknown> (newer
+  // host contract than the pinned core types, like parentFrame).
+  affordanceTools: { move: () => import('../wall-mount/move-tool') },
+
   presentation: {
     label: 'Service point',
     description:
