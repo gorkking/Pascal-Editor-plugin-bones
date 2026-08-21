@@ -797,3 +797,136 @@ describe('cross-trade — line-set vs the plumbing plane', () => {
     expect(pairHits(suction, liquid)).toBe(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// 8. Closing round — F1 flag composition, F2 acute-corner miter
+// ---------------------------------------------------------------------------
+
+describe('closing round — flag composition + acute corners', () => {
+  test('F1: a LONG run boring the stack carries BOTH the length advisory AND the crossing flag (composed, never masked)', () => {
+    // 40×10, stack on the south wall, heat pump at the far end: the run is
+    // >15 m so the mfr-length advisory rides EVERY leg — the old pass
+    // skipped flagged members, so the stack bore was SILENT on paper.
+    const { walls, rooms } = shell(40, 10)
+    const placed = [pf('wc', 'toilet', [5.2, 0.6]), pf('lav', 'lavatory', [6.0, 0.6])]
+    const plumbing = layoutPlumbing(walls, rooms, LOD400, placed)
+    const hvac = layoutHvac(
+      walls, rooms, LOD400,
+      { heatPump: { position: [39, 0, -0.75] } },
+      { stateCode: 'MN' },
+    )
+    const combined = [...plumbing.members, ...hvac.members]
+    flagLinesetTradeCrossings(combined)
+    const lineset = combined.filter(
+      (m) => m.system === 'hvac' && m.sourceId.startsWith('lineset-'),
+    )
+    const pipes = combined.filter(
+      (m) => m.system === 'plumbing' && (m.role === 'pipe-run' || m.role === 'vent-stack'),
+    )
+    // pre-conditions: genuinely long + the stack IS bored
+    const suctionLen = lineset
+      .filter((m) => m.sourceId === 'lineset-suction-1')
+      .reduce((s, m) => s + m.length, 0)
+    expect(suctionLen).toBeGreaterThan(15)
+    const stack = pipes.filter((m) => m.role === 'vent-stack')
+    expect(stack.length).toBeGreaterThan(0)
+    let stackBores = 0
+    let unflaggedHits = 0
+    for (const ls of lineset) {
+      for (const p of pipes) {
+        if (!obbHit(ls, p)) continue
+        if (!ls.flag) unflaggedHits++
+        if (p.role === 'vent-stack') {
+          stackBores++
+          // COMPOSED, both classes present, ' | ' join (B1 convention)
+          expect(ls.flag).toContain('verify manufacturer max line-set length')
+          expect(ls.flag).toContain('⚠ line-set crosses DWV stack — coordinate trades')
+          expect(ls.flag).toContain(' | ')
+        }
+      }
+    }
+    expect(stackBores).toBeGreaterThan(0)
+    expect(unflaggedHits).toBe(0)
+  })
+
+  test('F2: a 150° wedge corner miters the lateral closed — chains connect, pair clean, legs stay in their walls', () => {
+    // The per-member lateral opens 2·lat·sin(Δyaw/2) at junctions — fine
+    // at 90° (< the 6 cm continuity tolerance) but 150° opened 6.8 cm and
+    // BROKE chainConnects (a regression vs the centerline route). The
+    // miter extends both legs to the shifted lines' intersection: exact
+    // closure, the fitting geometry a real pipe pair gets.
+    const walls = [
+      wall('w_a', [0, 0], [12, 0], true),
+      wall('w_b', [12, 0], [-0.12, 7.0], true),
+    ]
+    const rooms = [
+      room('r_laundry', 'Laundry', 'laundry', [[0.2, 5.2], [1.8, 5.2], [1.8, 6.6], [0.2, 6.6]]),
+      room('r_wedge', 'Wedge', 'other', [[0, 0], [12, 0], [0.5, 4.5]]),
+    ]
+    const out = layoutHvac(walls, rooms, DEFAULT_SPEC, { heatPump: { position: [6, 0, -0.7] } })
+    const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    // oblique walls: the axis-aligned twin/AABB helpers don't apply here —
+    // pair the runs directly and SAT them with the full 15-axis obbHit
+    const suction = runOf(out.members, 'lineset-suction-1')
+    const liquid = runOf(out.members, 'lineset-liquid-1')
+    expect(suction.length).toBeGreaterThan(0)
+    expect(suction.length).toBe(liquid.length)
+    // BOTH chains close condenser → air handler (master parity restored)
+    for (const legs of [suction, liquid]) {
+      expect(
+        chainConnects(
+          legs,
+          [unit.position[0], unit.position[2]],
+          [handler.position[0], handler.position[2]],
+        ),
+      ).toBe(true)
+    }
+    // the junction itself closes EXACTLY (miter, not tolerance luck)
+    const inWallLegs = suction.filter((m) => {
+      if (!(m.dims[0] === m.length)) return false
+      const mid: [number, number] = [m.position[0], m.position[2]]
+      return walls.some((w) => {
+        const t = (mid[0] - w.start[0]) * w.dir[0] + (mid[1] - w.start[1]) * w.dir[1]
+        const q: [number, number] = [w.start[0] + w.dir[0] * t, w.start[1] + w.dir[1] * t]
+        return Math.hypot(q[0] - mid[0], q[1] - mid[1]) < 0.06
+      })
+    })
+    expect(inWallLegs.length).toBe(2)
+    const ends = (m: Member): [number, number][] => {
+      const yaw = m.rotation[1]
+      const hx = (m.dims[0] / 2) * Math.cos(yaw)
+      const hz = -(m.dims[0] / 2) * Math.sin(yaw)
+      return [
+        [m.position[0] - hx, m.position[2] - hz],
+        [m.position[0] + hx, m.position[2] + hz],
+      ]
+    }
+    let junctionGap = Number.POSITIVE_INFINITY
+    for (const a of ends(inWallLegs[0] as Member)) {
+      for (const b of ends(inWallLegs[1] as Member)) {
+        junctionGap = Math.min(junctionGap, Math.hypot(a[0] - b[0], a[1] - b[1]))
+      }
+    }
+    expect(junctionGap).toBeLessThan(1e-6)
+    // the mitered legs (extension included) stay inside their wall bodies:
+    // every endpoint ≤ halfT off its nearest wall CENTERLINE LINE
+    for (const m of inWallLegs) {
+      for (const e of ends(m)) {
+        const off = Math.min(
+          ...walls.map((w) => {
+            const t = (e[0] - w.start[0]) * w.dir[0] + (e[1] - w.start[1]) * w.dir[1]
+            const q: [number, number] = [w.start[0] + w.dir[0] * t, w.start[1] + w.dir[1] * t]
+            return Math.hypot(q[0] - e[0], q[1] - e[1])
+          }),
+        )
+        expect(off).toBeLessThanOrEqual(0.1 + 1e-9)
+      }
+    }
+    let hits = 0
+    for (const sm of suction) {
+      for (const lm of liquid) if (obbHit(sm, lm)) hits++
+    }
+    expect(hits).toBe(0)
+  })
+})

@@ -258,7 +258,7 @@
       "linesetHeightM": 0.4,
       "linesetMaxLenAdvisoryM": 15,
       "linesetLateralM": 0.035,
-      "linesetLateralNote": "Cross-trade lateral: the pair rides 3.5 cm off the wall centerline (across-wall) so it never shares the plumbing plane (supply risers + DWV stack stand on the centerline; night-5 D2 trade-skin convention). Thin walls clamp the offset so the suction riser stays inside the wall body — clamped runs carry a coordination flag.",
+      "linesetLateralNote": "Cross-trade lateral: the pair rides 3.5 cm off the wall centerline (across-wall) so it never shares the plumbing plane (supply risers + DWV stack stand on the centerline; night-5 D2 trade-skin convention). Thin walls clamp the offset so the OUTBOARD suction riser (the liquid riser rolls back toward the plumbing plane) keeps its full section inside the wall body — clamped runs carry a coordination flag.",
       "linesetNote": "Refrigerant line-set per unit: suction 3/4 in (19 mm, insulated — the COLD line) + liquid 3/8 in (9.5 mm, warm) as a parallel pair, through ONE exterior-wall penetration at ~0.4 m (clear of ROs), then wall-following to the indoor air handler coil (M1411). Runs over ~15 m carry a 'verify manufacturer max line-set length / oil return' advisory — typical residential mfr charts top out 15-30 m; the manufacturer's line-set table governs.",
       "disconnectAboveUnitM": 0.3,
       "disconnectNote": "NEC 440.14: disconnecting means within sight of the unit — wall-mounted beside each condenser; the dedicated branch circuit is routed separately."

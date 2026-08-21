@@ -339,8 +339,15 @@ AND a gate — a checklist line without a test is a wish.
   the pair rides a 3.5 cm LATERAL off the wall centerline — plumbing owns
   that plane (supply risers + the DWV stack stand on it; post-merge seam
   round: 24 OBB hits from sharing it) — clamped on thin walls so the
-  suction riser stays inside the wall body (clamped runs carry a
-  'clamped in a thin wall' coordination flag). Residual crossings that
+  OUTBOARD pipe keeps its full section inside the wall body (the SUCTION
+  riser rolls outboard of the lateral plane and is the binding surface;
+  the LIQUID riser rolls back toward the plumbing plane); clamped runs
+  carry a 'clamped in a thin wall' coordination flag. Adjoining legs
+  MITER at junctions (extend/trim to the shifted lines' intersection —
+  the fitting a real pair gets), so acute corners stay endpoint-closed;
+  near-reversals bridge instead. Crossing flags COMPOSE with ' | ' onto
+  whatever honesty a member already carries (a >15 m advisory never
+  masks a stack bore). Residual crossings that
   geometry cannot dodge (a 3" stack fills the cavity wider than any
   lateral) get a '⚠ line-set crosses DWV stack — coordinate trades' /
   '… crosses plumbing …' flag from compute's post-both-engines scan

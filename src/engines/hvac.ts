@@ -1182,6 +1182,97 @@ export function layoutHvac(
             // back to the penetration wall's axis
             return Math.atan2(-penWall.dir[1], penWall.dir[0])
           }
+          // ACUTE-CORNER MITER (closing round F2): the per-member lateral
+          // opens a junction gap of 2·lat·sin(Δyaw/2) between adjoining
+          // legs — a right angle stays inside the continuity tolerance,
+          // but a sharper turn (>~118°) BREAKS the chain (150° wedge
+          // repro: 6.8 cm gap, a delta regression vs the centerline
+          // route). Real pipes get a FITTING at the corner: extend (or
+          // trim, on inner corners) each adjoining leg along its own axis
+          // to the shifted lines' MITER point — exact closure at every
+          // junction, both pipes identically. A near-reversal whose miter
+          // would run past the cap gets a short closing BRIDGE instead
+          // (the same jumper convention routePipe uses at the centerline).
+          const MITER_CAP = 0.15
+          const ext = new Map<number, { minus: number; plus: number }>()
+          const bridges: { a: Pt; b: Pt }[] = []
+          const planAxisOf = (m: Member): Pt => [
+            Math.cos(m.rotation[1]),
+            -Math.sin(m.rotation[1]),
+          ]
+          const endsAt = (m: Member): [Pt, Pt] => {
+            const ax = planAxisOf(m)
+            return [
+              [m.position[0] - (ax[0] * m.dims[0]) / 2, m.position[2] - (ax[1] * m.dims[0]) / 2],
+              [m.position[0] + (ax[0] * m.dims[0]) / 2, m.position[2] + (ax[1] * m.dims[0]) / 2],
+            ]
+          }
+          for (let i = 0; i + 1 < ref.length; i++) {
+            const h1 = ref[i] as Member
+            const h2 = ref[i + 1] as Member
+            if (isVertical(h1) || isVertical(h2)) continue
+            if (Math.abs(h1.position[1] - h2.position[1]) > 1e-6) continue
+            const e1 = endsAt(h1)
+            const e2 = endsAt(h2)
+            // facing endpoints — the closest pair (they met at the shared
+            // junction before the lateral; jumpers bridged anything wider)
+            let best: [number, number] = [0, 0]
+            let bestD = Number.POSITIVE_INFINITY
+            for (const a of [0, 1] as const) {
+              for (const b of [0, 1] as const) {
+                const d = Math.hypot(
+                  (e2[b] as Pt)[0] - (e1[a] as Pt)[0],
+                  (e2[b] as Pt)[1] - (e1[a] as Pt)[1],
+                )
+                if (d < bestD) {
+                  bestD = d
+                  best = [a, b]
+                }
+              }
+            }
+            if (bestD > 0.03) continue // not a shared junction
+            const fA = e1[best[0]] as Pt
+            const fB = e2[best[1]] as Pt
+            const axA = planAxisOf(h1)
+            const axB = planAxisOf(h2)
+            // outward unit at the junction (from the member interior out)
+            const u1: Pt = best[0] === 1 ? axA : [-axA[0], -axA[1]]
+            const u2: Pt = best[1] === 1 ? axB : [-axB[0], -axB[1]]
+            const pA: Pt = [Math.sin(h1.rotation[1]), Math.cos(h1.rotation[1])]
+            const pB: Pt = [Math.sin(h2.rotation[1]), Math.cos(h2.rotation[1])]
+            const E1: Pt = [fA[0] + lateral * pA[0], fA[1] + lateral * pA[1]]
+            const E2: Pt = [fB[0] + lateral * pB[0], fB[1] + lateral * pB[1]]
+            const gap = Math.hypot(E2[0] - E1[0], E2[1] - E1[1])
+            if (gap < 0.005) continue // colinear legs — already closed
+            // E1 + t1·u1 == E2 + t2·u2 (Cramer)
+            const det = u2[0] * u1[1] - u1[0] * u2[1]
+            const dx = E2[0] - E1[0]
+            const dz = E2[1] - E1[1]
+            const t1 = det !== 0 ? (u2[0] * dz - u2[1] * dx) / det : Number.NaN
+            const t2 = det !== 0 ? (u1[0] * dz - u1[1] * dx) / det : Number.NaN
+            const trimCap1 = -(h1.dims[0] - 0.02)
+            const trimCap2 = -(h2.dims[0] - 0.02)
+            if (
+              !Number.isFinite(t1) ||
+              !Number.isFinite(t2) ||
+              Math.abs(t1) > MITER_CAP ||
+              Math.abs(t2) > MITER_CAP ||
+              t1 < trimCap1 ||
+              t2 < trimCap2
+            ) {
+              // parallel / near-reversal — bridge the shifted endpoints
+              bridges.push({ a: E1, b: E2 })
+              continue
+            }
+            const g1 = ext.get(i) ?? { minus: 0, plus: 0 }
+            if (best[0] === 1) g1.plus += t1
+            else g1.minus += t1
+            ext.set(i, g1)
+            const g2 = ext.get(i + 1) ?? { minus: 0, plus: 0 }
+            if (best[1] === 1) g2.plus += t2
+            else g2.minus += t2
+            ext.set(i + 1, g2)
+          }
           for (const pipe of pipes) {
             const shift = pipe.y - LINESET_Y
             for (const [a, b] of [
@@ -1218,21 +1309,38 @@ export function layoutHvac(
               const vertical = isVertical(m)
               const acrossYaw = vertical ? rollYawAt(i) : m.rotation[1]
               const across = vertical ? lateral + shift : lateral
+              // corner miter (F2): the junction extensions are shared plan
+              // geometry — identical for both pipes, so the twins hold
+              const e = !vertical ? ext.get(i) : undefined
+              const len = vertical ? m.dims[1] : m.dims[0] + (e ? e.minus + e.plus : 0)
+              const ax = planAxisOf(m)
+              const slide = e ? (e.plus - e.minus) / 2 : 0
               const clone: Member = {
                 ...m,
-                dims: vertical
-                  ? [pipe.dia, m.dims[1], pipe.dia]
-                  : [m.dims[0], pipe.dia, pipe.dia],
+                dims: vertical ? [pipe.dia, len, pipe.dia] : [len, pipe.dia, pipe.dia],
+                length: vertical ? m.length : len,
                 position: [
-                  m.position[0] + across * Math.sin(acrossYaw),
+                  m.position[0] + across * Math.sin(acrossYaw) + ax[0] * slide,
                   m.position[1] + shift,
-                  m.position[2] + across * Math.cos(acrossYaw),
+                  m.position[2] + across * Math.cos(acrossYaw) + ax[1] * slide,
                 ],
                 sourceId: pipe.sourceId,
                 label: (m.label ?? REF_LABEL).replace(REF_LABEL, pipe.label),
               }
               if (lateralClamped && !clone.flag) clone.flag = LINESET_THIN_WALL_FLAG
               runMembers.push(clone)
+            }
+            // near-reversal corners: a short closing bridge per pipe (the
+            // centerline jumper convention, shifted with the run)
+            for (const br of bridges) {
+              const seg = duct(
+                br.a, br.b, pipe.y, pipe.dia, pipe.dia, pipe.sourceId,
+                pipe.label, 'copper', 'pipe-run', 0.005,
+              )
+              if (seg) {
+                if (lateralClamped && !seg.flag) seg.flag = LINESET_THIN_WALL_FLAG
+                runMembers.push(seg)
+              }
             }
             // coil stub: wall anchor → the air handler
             const ap = wallPlan(ahAnchor)
@@ -1439,8 +1547,9 @@ export function flagLinesetTradeCrossings(members: Member[]): void {
     const r = (p.dims[0] + p.dims[1] + p.dims[2]) / 2 + 0.05
     return { p, r }
   })
+  const STACK_FLAG = '⚠ line-set crosses DWV stack — coordinate trades'
+  const PIPE_FLAG = '⚠ line-set crosses plumbing — coordinate trades'
   for (const ls of lineset) {
-    if (ls.flag) continue // already honest (RO / air-run / thin-wall / >15 m)
     const vertical = ls.rotation[1] === 0 && ls.dims[1] === ls.length
     const half = ls.length / 2
     const yaw = ls.rotation[1]
@@ -1449,15 +1558,18 @@ export function flagLinesetTradeCrossings(members: Member[]): void {
       : [Math.cos(yaw), 0, -Math.sin(yaw)]
     const radius = Math.max(ls.dims[vertical ? 0 : 1], ls.dims[2]) / 2
     const steps = Math.max(1, Math.ceil(ls.length / TRADE_SAMPLE_STEP))
-    let hit: Member | null = null
+    const classes = new Set<string>()
     for (const { p, r } of bounds) {
+      const cls =
+        p.role === 'vent-stack' || p.sourceId.startsWith('dwv-') ? STACK_FLAG : PIPE_FLAG
+      if (classes.has(cls)) continue
       const dc = Math.hypot(
         p.position[0] - ls.position[0],
         p.position[1] - ls.position[1],
         p.position[2] - ls.position[2],
       )
       if (dc > r + half + radius) continue
-      for (let i = 0; i <= steps && !hit; i++) {
+      for (let i = 0; i <= steps; i++) {
         const t = -half + (ls.length * i) / steps
         const q: [number, number, number] = [
           ls.position[0] + axis[0] * t,
@@ -1470,16 +1582,21 @@ export function flagLinesetTradeCrossings(members: Member[]): void {
           Math.abs(ly) <= p.dims[1] / 2 + radius + TRADE_SKIN &&
           Math.abs(lz) <= p.dims[2] / 2 + radius + TRADE_SKIN
         ) {
-          hit = p
+          classes.add(cls)
+          break
         }
       }
-      if (hit) break
+      if (classes.size === 2) break
     }
-    if (hit) {
-      ls.flag =
-        hit.role === 'vent-stack' || hit.sourceId.startsWith('dwv-')
-          ? '⚠ line-set crosses DWV stack — coordinate trades'
-          : '⚠ line-set crosses plumbing — coordinate trades'
+    // COMPOSE (the B1 ' | ' convention): the crossing classes APPEND to
+    // whatever honesty the member already carries. Skipping flagged
+    // members MASKED real bores — the >15 m advisory rides EVERY leg of a
+    // long run, so a long run through the 3\" stack never said so
+    // (closing round F1); a member crossing BOTH supply and stack kept
+    // only the first class. Never overwrite, never skip, never duplicate.
+    for (const cls of [STACK_FLAG, PIPE_FLAG]) {
+      if (!classes.has(cls) || ls.flag?.includes(cls)) continue
+      ls.flag = ls.flag ? `${ls.flag} | ${cls}` : cls
     }
   }
 }
