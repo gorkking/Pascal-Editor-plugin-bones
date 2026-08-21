@@ -11,7 +11,7 @@
  */
 
 import type { Fixture, Member, OpeningSlice, WallSlice } from '../core/types'
-import { formatFtIn } from '../core/units'
+import { formatFtIn, inches } from '../core/units'
 import type { BuildingCharacteristics } from '../engines/characteristics'
 import { computeTakeoff } from '../engines/takeoff'
 import {
@@ -2044,6 +2044,11 @@ function schedulesSheets(
   members: Member[],
   fixtures: Fixture[],
   opts: PlanSetOptions,
+  /** Small door/window schedule table FOLDED onto page 0 (examiner round-1
+   * judgment: a ≤18-line table on a dedicated sheet reads ~80% empty). The
+   * table occupies the top of the first page full-width; both takeoff
+   * columns start below it and every capacity figure accounts for it. */
+  fold: OpeningTable | null = null,
 ): PlanSheet[] {
   // Flags render as their own ⚑ list — the 'Flags · FLAG — 1 ea' rows
   // read as nonsense in the grid (quality C5).
@@ -2084,7 +2089,11 @@ function schedulesSheets(
     const detail = r.detail && r.detail !== 'linear feet' ? ` (${r.detail})` : ''
     return wrapRow(`${r.section} · ${r.item} — ${r.quantity} ${r.unit}${detail}`)
   })
-  const perSheetLines = 2 * (maxLines - 1)
+  // Fold block height on page 0 (table lines + one spacer line): page 0's
+  // BOTH columns start below it, so every per-page capacity is indexed.
+  const foldTop = fold ? fold.lines + 1 : 0
+  const fullColCapAt = (p: number): number => maxLines - 1 - (p === 0 ? foldTop : 0)
+  const perSheetLinesAt = (p: number): number => 2 * fullColCapAt(p)
   // The flag block bottom-anchors on the LAST page — shrink that page's
   // line capacity so a full column never runs under the red list
   // (quality round-3: row 41 and the flags overprinted at y≈673). EVERY
@@ -2162,15 +2171,17 @@ function schedulesSheets(
   // the blocks before any page is added. The old 2×(shrunk-cap) math
   // halved BOTH columns and shipped ~2/3-empty takeoff sheets.
   const reserve = (flagRows > 0 ? flagRows + 1 : 0) + (charLines > 0 ? charLines + 1 : 0)
-  const fullColCap = maxLines - 1
-  const reservedColCap = Math.max(4, maxLines - reserve) - 1
-  const lastPageCap = fullColCap + reservedColCap
+  const reservedColCapAt = (p: number): number =>
+    Math.max(4, maxLines - (p === 0 ? foldTop : 0) - reserve) - 1
+  const lastPageCapAt = (p: number): number => fullColCapAt(p) + reservedColCapAt(p)
   const totalLines = wrapped.reduce((sum, w) => sum + w.length, 0)
-  let pages = 1
-  if (totalLines > lastPageCap) {
-    pages = 2
-    while ((pages - 1) * perSheetLines + lastPageCap < totalLines) pages++
+  const capacityFor = (n: number): number => {
+    let cap = 0
+    for (let p = 0; p < n - 1; p++) cap += perSheetLinesAt(p)
+    return cap + lastPageCapAt(n - 1)
   }
+  let pages = 1
+  while (capacityFor(pages) < totalLines) pages++
   // Even distribution: filling early pages to 100% left a near-blank
   // flags-only sheet at the end (blueprint P1) — every page carries its
   // line share; the last stays under its flag-shrunk cap (page count grows
@@ -2181,7 +2192,7 @@ function schedulesSheets(
     let cursor = 0
     let linesLeft = totalLines
     for (let p = 0; p < pages - 1; p++) {
-      const share = Math.min(perSheetLines, Math.max(2, Math.ceil(linesLeft / (pages - p))))
+      const share = Math.min(perSheetLinesAt(p), Math.max(2, Math.ceil(linesLeft / (pages - p))))
       const take: number[] = []
       let used = 0
       while (cursor < rows.length && used + (wrapped[cursor] as string[]).length <= share) {
@@ -2200,7 +2211,7 @@ function schedulesSheets(
       cursor++
     }
     placements.push(rest)
-    if (restLines <= lastPageCap) break
+    if (restLines <= lastPageCapAt(pages - 1)) break
     pages++
   }
   // Never ship a nearly-empty trailing sheet (round-3 P1: three ~2/3-empty
@@ -2211,8 +2222,8 @@ function schedulesSheets(
   while (placements.length > 1) {
     const last = placements[placements.length - 1] as number[]
     const prev = placements[placements.length - 2] as number[]
-    if (linesOf(last) >= 0.3 * perSheetLines) break
-    if (linesOf(prev) + linesOf(last) > lastPageCap) break
+    if (linesOf(last) >= 0.3 * perSheetLinesAt(placements.length - 1)) break
+    if (linesOf(prev) + linesOf(last) > lastPageCapAt(placements.length - 2)) break
     placements.splice(placements.length - 2, 2, [...prev, ...last])
   }
   pages = placements.length
@@ -2224,10 +2235,12 @@ function schedulesSheets(
     const colTarget =
       page === pages - 1
         ? Math.min(
-            fullColCap,
-            Math.max(Math.ceil(pageLineCount / 2), pageLineCount - reservedColCap),
+            fullColCapAt(page),
+            Math.max(Math.ceil(pageLineCount / 2), pageLineCount - reservedColCapAt(page)),
           )
         : Math.ceil(pageLineCount / 2)
+    // page 0's rows start BELOW the folded schedule table (both columns)
+    const lineOff = page === 0 ? foldTop : 0
     const cells: string[] = []
     let col = 0
     let line = 0
@@ -2239,7 +2252,7 @@ function schedulesSheets(
       }
       for (const [k, text] of rowLines.entries()) {
         const x = MARGIN + col * colW + (k > 0 ? 14 : 0)
-        const y = MARGIN + 24 + line * lineH
+        const y = MARGIN + 24 + (lineOff + line) * lineH
         cells.push(
           `<text x="${x}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#222">${esc(text)}</text>`,
         )
@@ -2277,10 +2290,28 @@ function schedulesSheets(
         ),
       ].join('')
     }
+    // Folded door/window schedule (page 0 only): heading names BOTH blocks,
+    // the table renders full-width at the top, rows flow below (lineOff).
+    let foldText = ''
+    if (page === 0 && fold) {
+      const parts = [fold.headAt(MARGIN + 24)]
+      let fl = 2
+      for (const g of fold.groups) {
+        for (const l of g) {
+          parts.push(l.svgAt(MARGIN + 24 + fl * lineH))
+          fl++
+        }
+      }
+      foldText = parts.join('')
+    }
+    const heading =
+      page === 0 && fold
+        ? `Door + window schedule (${fold.summary}) · Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}`
+        : `Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}`
     const title = pages > 1 ? `Schedules + takeoff (${page + 1}/${pages})` : 'Schedules + takeoff'
     sheets.push({
       title,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">Material takeoff${pages > 1 ? ` — sheet ${page + 1} of ${pages}` : ''}</text>${cells.join('')}${charText}${flagText}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" font-family="Helvetica, Arial, sans-serif" fill="#111">${esc(heading)}</text>${foldText}${cells.join('')}${charText}${flagText}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
     })
   }
   // Overflow flags — whole groups, two columns, top-down, paginated.
@@ -2342,16 +2373,22 @@ function schedulesSheets(
 export type OpeningMark = { mark: string; wall: WallSlice; opening: OpeningSlice }
 
 /**
- * Deterministic mark assignment: walls in the order the caller passed them
- * (compute's extraction order — stable per scene), openings within a wall by
- * ascending u. Doors count D1…Dn, windows W1…Wn, so an unchanged scene
- * reproduces identical marks on every recompute.
+ * Deterministic mark assignment: walls ordered by length DESC (mirrors the
+ * dedupe's presentation order — the front door on the longest wall reads
+ * D1) with the wall ID as a CONTENT tiebreaker, then openings within a wall
+ * by ascending u. Doors count D1…Dn, windows W1…Wn. The tiebreaker is the
+ * skeptic-F2 fix: equal-length walls (every rectangular room ties) used to
+ * ride node insertion order — not a host contract — and marks flipped
+ * D1↔D2 across rebuilds. Caller order no longer matters at all.
  */
 export function assignOpeningMarks(walls: WallSlice[]): OpeningMark[] {
+  const ordered = [...walls].sort(
+    (a, b) => b.length - a.length || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  )
   const out: OpeningMark[] = []
   let d = 0
   let w = 0
-  for (const wall of walls) {
+  for (const wall of ordered) {
     const sorted = [...wall.openings].sort((a, b) => a.u - b.u)
     for (const opening of sorted) {
       out.push({
@@ -2374,62 +2411,124 @@ function memberU(m: Member, wall: WallSlice): number {
 
 type OpeningRowInfo = { headerText: string; flags: string[] }
 
+/** cmu.ts skips the precast lintel when less than MIN_PIECE (2") remains
+ * under the bond beam — the standard tie-beam-over-door detail: the beam IS
+ * the lintel. Member bottoms sit half a 3/8" mortar joint above the nominal
+ * course line (the emit shrink), so the paper test adds that back. */
+const BB_AS_LINTEL_TOL = inches(2) + inches(0.375) / 2
+
 /**
  * Join one opening to ITS framed members via wall id + u: headers (framed
- * walls) and precast lintels (CMU walls) both carry sourceId = wall.id, so
- * the nearest-unclaimed head member within the RO's reach is the opening's.
+ * walls) and precast lintels (CMU walls) both carry sourceId = wall.id.
+ * TWO-PHASE GLOBAL CLAIM (skeptic F1: greedy nearest-in-mark-order STOLE —
+ * an RO clamp slid a 16-ft garage header past its neighbor window, D1
+ * printed the window's 4x6 and every ENGINEERED flag vanished from paper):
+ * phase 1 claims by SPAN CONTAINMENT — a head member whose center-u falls
+ * inside an opening's drawn RO span belongs to that opening (overlap ties
+ * resolve by distance, globally sorted); phase 2 assigns the leftovers
+ * (members the clamp slid outside every span) by global distance order
+ * within reach. Sills claim the same way (windows only).
  * The header cell reads the MEMBER back (never re-derives): size verbatim,
- * material 'engineered' → 'ENGINEERED (by supplier)'. Flags are collected
- * from the matched head member AND the window's rough sill — composed flag
- * strings stay verbatim (P4: a dropped warning is a lie on paper).
+ * material 'engineered' → 'ENGINEERED (by supplier)', CMU lintels
+ * 'precast lintel'; an opening whose head lands within MIN_PIECE of the
+ * bond beam framed NO lintel by design — the cell says 'bond beam as
+ * lintel' instead of a dishonest '—' (skeptic F4). Flags come from the
+ * matched head + sill members verbatim (P4); a flag the wall's NON-opening
+ * members also carry is WALL-scoped (the S7 compression aggregate) and
+ * prints prefixed 'wall <id>:' so it never reads opening-scoped.
  */
 function openingRowInfo(
   marks: OpeningMark[],
   members: Member[],
 ): Map<OpeningMark, OpeningRowInfo> {
   const out = new Map<OpeningMark, OpeningRowInfo>()
-  const byWall = new Map<string, { heads: Member[]; sills: Member[] }>()
+  type WallRec = {
+    heads: Member[]
+    sills: Member[]
+    bondBeams: Member[]
+    wallFlags: Set<string>
+  }
+  const byWall = new Map<string, WallRec>()
   for (const m of members) {
     if (m.system !== 'wall-framing') continue
-    if (m.role !== 'header' && m.role !== 'lintel' && m.role !== 'sill') continue
-    const rec = byWall.get(m.sourceId) ?? { heads: [], sills: [] }
-    if (m.role === 'sill') rec.sills.push(m)
-    else rec.heads.push(m)
+    const rec =
+      byWall.get(m.sourceId) ??
+      { heads: [], sills: [], bondBeams: [], wallFlags: new Set<string>() }
+    if (m.role === 'header' || m.role === 'lintel') rec.heads.push(m)
+    else if (m.role === 'sill') rec.sills.push(m)
+    else {
+      if (m.role === 'bond-beam') rec.bondBeams.push(m)
+      // flags riding non-opening members are wall-scoped by construction
+      if (m.flag) rec.wallFlags.add(m.flag)
+    }
     byWall.set(m.sourceId, rec)
   }
-  const claimed = new Set<Member>()
+  const markIdx = new Map(marks.map((mk, i) => [mk, i]))
+  const assign = (
+    poolOf: (rec: WallRec) => Member[],
+    eligible: (mk: OpeningMark) => boolean,
+  ): Map<OpeningMark, Member> => {
+    const into = new Map<OpeningMark, Member>()
+    type Pair = { mk: OpeningMark; m: Member; d: number; contained: boolean }
+    const pairs: Pair[] = []
+    for (const mk of marks) {
+      if (!eligible(mk)) continue
+      const rec = byWall.get(mk.wall.id)
+      if (!rec) continue
+      const reach = Math.max(1.0, mk.opening.roughWidth) // RO-clamp slides count
+      for (const m of poolOf(rec)) {
+        const d = Math.abs(memberU(m, mk.wall) - mk.opening.u)
+        const contained = d <= mk.opening.roughWidth / 2 + 0.01
+        if (contained || d <= reach) pairs.push({ mk, m, d, contained })
+      }
+    }
+    const claimed = new Set<Member>()
+    const runPhase = (phase: Pair[]): void => {
+      // deterministic total order: distance, then mark order, then member plan spot
+      phase.sort(
+        (a, b) =>
+          a.d - b.d ||
+          (markIdx.get(a.mk) as number) - (markIdx.get(b.mk) as number) ||
+          a.m.position[0] - b.m.position[0] ||
+          a.m.position[2] - b.m.position[2],
+      )
+      for (const p of phase) {
+        if (into.has(p.mk) || claimed.has(p.m)) continue
+        into.set(p.mk, p.m)
+        claimed.add(p.m)
+      }
+    }
+    runPhase(pairs.filter((p) => p.contained))
+    runPhase(pairs.filter((p) => !p.contained))
+    return into
+  }
+  const headOf = assign((rec) => rec.heads, () => true)
+  const sillOf = assign((rec) => rec.sills, (mk) => mk.opening.kind === 'window')
   for (const mk of marks) {
     const rec = byWall.get(mk.wall.id)
-    const reach = Math.max(1.0, mk.opening.roughWidth) // RO-clamp slides count
-    const nearest = (pool: Member[]): Member | null => {
-      let best: Member | null = null
-      let bestD = Number.POSITIVE_INFINITY
-      for (const m of pool) {
-        if (claimed.has(m)) continue
-        const d = Math.abs(memberU(m, mk.wall) - mk.opening.u)
-        if (d < bestD) {
-          bestD = d
-          best = m
-        }
-      }
-      return best !== null && bestD <= reach ? best : null
-    }
-    const head = rec ? nearest(rec.heads) : null
-    if (head) claimed.add(head)
-    const sill = mk.opening.kind === 'window' && rec ? nearest(rec.sills) : null
-    if (sill) claimed.add(sill)
-    const headerText = !head
-      ? '—'
-      : head.material === 'engineered'
+    const head = headOf.get(mk) ?? null
+    const sill = sillOf.get(mk) ?? null
+    // bond-beam-as-lintel detection: no head member AND the RO head reaches
+    // within MIN_PIECE of the (full-run) bond beam's underside
+    const roTop = mk.opening.sillHeight + mk.opening.roughHeight
+    const bbBottom = Math.min(
+      Number.POSITIVE_INFINITY,
+      ...(rec?.bondBeams.map((b) => b.position[1] - b.dims[1] / 2) ?? []),
+    )
+    const headerText = head
+      ? head.material === 'engineered'
         ? 'ENGINEERED (by supplier)'
         : head.role === 'lintel'
           ? 'precast lintel'
           : (head.size ?? '—')
+      : bbBottom - roTop < BB_AS_LINTEL_TOL
+        ? 'bond beam as lintel'
+        : '—'
     const flags = [
       ...new Set(
         [head?.flag, sill?.flag].filter((f): f is string => f !== undefined && f.length > 0),
       ),
-    ]
+    ].map((f) => (rec?.wallFlags.has(f) ? `wall ${mk.wall.id}: ${f}` : f))
     out.set(mk, { headerText, flags })
   }
   return out
@@ -2448,22 +2547,32 @@ const SCHED_COLS = {
 /** Wall-id column width in characters (~6 px/char at 10 px). */
 const SCHED_WALL_CHARS = 48
 
-/**
- * The 'Door + window schedule' sheet(s). One table row per opening; a row's
- * flags print whole underneath in red (wrapRow — verbatim at any length,
- * never split across sheets mid-group). Paginates like the takeoff: groups
- * fill pages top-down, titles carry (p/N), the global SHEET n/N patch in
- * buildPlanSet keeps set numbering contiguous. Zero openings (or no walls
- * passed — old callers) → no sheet.
- */
-function openingScheduleSheets(members: Member[], opts: PlanSetOptions): PlanSheet[] {
+/** One renderable table line (y decided by the host layout). */
+type SchedLine = { svgAt: (y: number) => string }
+
+/** The composed schedule table, layout-independent: the dedicated sheet
+ * paginates it; small tables FOLD into the Schedules + takeoff sheet. */
+type OpeningTable = {
+  groups: SchedLine[][]
+  /** Total table lines: 2 header lines (column titles + gap) + row lines. */
+  lines: number
+  /** Column titles + rule, rendered with the header baseline at `y`. */
+  headAt: (y: number) => string
+  /** e.g. '3 doors / 2 windows'. */
+  summary: string
+}
+
+/** Tables at or under this many lines fold into the Schedules + takeoff
+ * sheet (examiner round-1 judgment: a 5-opening dedicated sheet reads ~80%
+ * empty); bigger tables keep their dedicated sheet(s). */
+const SCHEDULE_FOLD_MAX_LINES = 18
+
+function buildOpeningTable(members: Member[], opts: PlanSetOptions): OpeningTable | null {
   const walls = opts.walls
-  if (!walls) return []
+  if (!walls) return null
   const marks = assignOpeningMarks(walls)
-  if (marks.length === 0) return []
+  if (marks.length === 0) return null
   const info = openingRowInfo(marks, members)
-  const lineH = 15
-  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
   // word-boundary wrap, mirroring schedulesSheets (no ellipsis, ever)
   const wrap = (text: string, max: number): string[] => {
     const lines: string[] = []
@@ -2478,7 +2587,7 @@ function openingScheduleSheets(members: Member[], opts: PlanSetOptions): PlanShe
     return lines
   }
   const FONT = 'font-family="Helvetica, Arial, sans-serif"'
-  type Line = { svgAt: (y: number) => string }
+  type Line = SchedLine
   type Group = Line[]
   const groups: Group[] = marks.map((mk) => {
     const o = mk.opening
@@ -2520,30 +2629,10 @@ function openingScheduleSheets(members: Member[], opts: PlanSetOptions): PlanShe
     }
     return lines
   })
-  // header rows per page: column titles + rule = 2 lines
-  const capacity = maxLines - 2
-  const pages: Group[][] = []
-  let cur: Group[] = []
-  let used = 0
-  for (const g of groups) {
-    if (used > 0 && used + g.length > capacity) {
-      pages.push(cur)
-      cur = []
-      used = 0
-    }
-    cur.push(g)
-    used += g.length
-  }
-  if (cur.length > 0) pages.push(cur)
-  const sheets: PlanSheet[] = []
   const doorCount = marks.filter((m) => m.opening.kind === 'door').length
-  for (const [p, page] of pages.entries()) {
-    const title =
-      pages.length > 1
-        ? `Door + window schedule (${p + 1}/${pages.length})`
-        : 'Door + window schedule'
-    const headY = MARGIN + 24
-    const head = [
+  const summary = `${doorCount} door${doorCount === 1 ? '' : 's'} / ${marks.length - doorCount} window${marks.length - doorCount === 1 ? '' : 's'}`
+  const headAt = (y: number): string =>
+    [
       ['MARK', SCHED_COLS.mark],
       ['TYPE', SCHED_COLS.type],
       ['NOMINAL W × H', SCHED_COLS.nominal],
@@ -2554,10 +2643,50 @@ function openingScheduleSheets(members: Member[], opts: PlanSetOptions): PlanShe
     ]
       .map(
         ([label, x]) =>
-          `<text x="${x}" y="${headY}" font-size="10" font-weight="bold" ${FONT} fill="#111">${esc(label as string)}</text>`,
+          `<text x="${x}" y="${y}" font-size="10" font-weight="bold" ${FONT} fill="#111">${esc(label as string)}</text>`,
       )
-      .join('')
-    const rule = `<line x1="${MARGIN}" y1="${headY + 5}" x2="${W - MARGIN}" y2="${headY + 5}" stroke="#222" stroke-width="0.8"/>`
+      .join('') +
+    `<line x1="${MARGIN}" y1="${y + 5}" x2="${W - MARGIN}" y2="${y + 5}" stroke="#222" stroke-width="0.8"/>`
+  return {
+    groups,
+    lines: 2 + groups.reduce((n, g) => n + g.length, 0),
+    headAt,
+    summary,
+  }
+}
+
+/**
+ * The DEDICATED 'Door + window schedule' sheet(s) — tables past the fold
+ * threshold. One table row-group per opening (flags print whole underneath
+ * in red, never split across sheets mid-group); groups fill pages top-down,
+ * titles carry (p/N), the global SHEET n/N patch in buildPlanSet keeps set
+ * numbering contiguous.
+ */
+function openingScheduleSheets(table: OpeningTable, opts: PlanSetOptions): PlanSheet[] {
+  const lineH = 15
+  const maxLines = Math.floor((H - 2 * MARGIN - TITLE_H - 24) / lineH)
+  const FONT = 'font-family="Helvetica, Arial, sans-serif"'
+  // header rows per page: column titles + rule = 2 lines
+  const capacity = maxLines - 2
+  const pages: SchedLine[][][] = []
+  let cur: SchedLine[][] = []
+  let used = 0
+  for (const g of table.groups) {
+    if (used > 0 && used + g.length > capacity) {
+      pages.push(cur)
+      cur = []
+      used = 0
+    }
+    cur.push(g)
+    used += g.length
+  }
+  if (cur.length > 0) pages.push(cur)
+  const sheets: PlanSheet[] = []
+  for (const [p, page] of pages.entries()) {
+    const title =
+      pages.length > 1
+        ? `Door + window schedule (${p + 1}/${pages.length})`
+        : 'Door + window schedule'
     const body: string[] = []
     let line = 2
     for (const g of page) {
@@ -2568,7 +2697,7 @@ function openingScheduleSheets(members: Member[], opts: PlanSetOptions): PlanShe
     }
     sheets.push({
       title,
-      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" ${FONT} fill="#111">Door + window schedule${pages.length > 1 ? ` — sheet ${p + 1} of ${pages.length}` : ''} · ${doorCount} door${doorCount === 1 ? '' : 's'} / ${marks.length - doorCount} window${marks.length - doorCount === 1 ? '' : 's'} · RO + header from framed members · marks on the wall framing plan</text>${head}${rule}${body.join('')}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
+      svg: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}"><rect width="${W}" height="${H}" fill="#fff"/><text x="${MARGIN}" y="${MARGIN + 4}" font-size="13" font-weight="bold" ${FONT} fill="#111">Door + window schedule${pages.length > 1 ? ` — sheet ${p + 1} of ${pages.length}` : ''} · ${table.summary} · RO + header from framed members · marks on the wall framing plan</text>${table.headAt(MARGIN + 24)}${body.join('')}${chrome(title, opts, 40, '', { scaleBar: false })}</svg>`,
     })
   }
   return sheets
@@ -2608,16 +2737,26 @@ export function buildPlanSet(
   sheets.push(...elevationSheets(members, opts))
   const section = sectionSheet(members, opts)
   if (section) sheets.push(section)
-  // Door + window schedule (B21d) — before the takeoff schedules, after the
-  // drawings it cross-references. No walls passed / zero openings → no sheet.
-  sheets.push(...openingScheduleSheets(members, opts))
   // The roof-coverage flag prints on the roof sheet AND joins the schedules
   // flag block (opts.warnings handling) so it survives a text-only read.
   const roofWarn = roofCoverageWarning(members)
   const schedOpts = roofWarn
     ? { ...opts, warnings: [...(opts.warnings ?? []), roofWarn] }
     : opts
-  sheets.push(...schedulesSheets(members, fixtures, schedOpts))
+  // Door + window schedule (B21d) — no walls passed / zero openings → none.
+  // Small tables FOLD into the Schedules + takeoff sheet (examiner round-1);
+  // bigger ones get dedicated sheet(s) before the takeoff, after the
+  // drawings they cross-reference. A foldable table with NO takeoff sheet
+  // to host it (zero takeoff rows) falls back to the dedicated sheet — the
+  // schedule must never vanish.
+  const openingTable = buildOpeningTable(members, opts)
+  const foldTable =
+    openingTable !== null && openingTable.lines <= SCHEDULE_FOLD_MAX_LINES ? openingTable : null
+  const takeoffSheets = schedulesSheets(members, fixtures, schedOpts, foldTable)
+  if (openingTable && (foldTable === null || takeoffSheets.length === 0)) {
+    sheets.push(...openingScheduleSheets(openingTable, opts))
+  }
+  sheets.push(...takeoffSheets)
   const cover = coverSheet(members, opts, sheets.map((sh) => sh.title))
   if (cover) sheets.unshift(cover)
   // SHEET n/N in every title block (blueprint C6) — patch the placeholder

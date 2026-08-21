@@ -442,25 +442,41 @@ AND a gate — a checklist line without a test is a wish.
   silent drop of a warning is a lie on paper.
 - **P6 Every opening is SCHEDULED and cross-referenced.** When the caller
   passes the wall model (`PlanSetOptions.walls` = compute's deduped active
-  walls), the set carries a 'Door + window schedule' sheet with ONE row per
+  walls), the set carries a door + window schedule with ONE row per
   opening — census equals the scene's OpeningSlices, marks D1…/W1… assigned
-  deterministically by wall order + ascending u (an unchanged scene
-  reproduces identical marks). The RO cell prints the engine's
-  roughWidth/roughHeight verbatim and the HEADER cell reads the FRAMED
-  member back (size verbatim; material 'engineered' prints
-  'ENGINEERED (by supplier)', never the drawn placeholder stick; CMU
-  lintels print 'precast lintel'); window sills print AFF; every flag
-  riding the opening's head/sill members prints WHOLE (wrapRow — P4
-  applies). Each mark also prints on the wall framing plan as a small
-  bubble de-collided through the placed[] registry (A-A section bubbles
-  included) with a legend row keying the symbol (P2). Long sets paginate
-  with (p/N) titles and contiguous SHEET numbers; zero openings → no
-  sheet; callers that don't pass walls get paper byte-equal to pre-B21d.
+  deterministically by wall order (length desc with the wall ID as a
+  CONTENT tiebreaker — equal-length walls must never ride node insertion
+  order, round-2 F2) + ascending u, so an unchanged scene reproduces
+  identical marks. Tables at ≤18 lines FOLD onto the Schedules + takeoff
+  sheet (round-1 examiner: a 5-opening dedicated sheet reads ~80% empty;
+  both takeoff columns start below the folded table, capacities indexed);
+  bigger tables keep dedicated sheet(s) with (p/N) titles and contiguous
+  SHEET numbers. The RO cell prints the engine's roughWidth/roughHeight
+  verbatim and the HEADER cell reads the FRAMED member back, claimed by
+  RO-SPAN CONTAINMENT first and global distance order second — a
+  clamp-slid header must never STEAL a neighbor's stick (round-2 F1
+  blocker: D1 printed the window's 4x6 over a 16-ft opening and every
+  ENGINEERED flag vanished from paper). Size verbatim; material
+  'engineered' prints 'ENGINEERED (by supplier)', never the drawn
+  placeholder stick; CMU lintels print 'precast lintel'; an opening whose
+  head lands within MIN_PIECE of the bond beam (the FL tie-beam detail —
+  cmu.ts frames NO lintel by design) prints 'bond beam as lintel', never
+  a dishonest '—'. Window sills print AFF; every flag riding the opening's
+  head/sill members prints WHOLE (wrapRow — P4 applies), and a flag the
+  wall's non-opening members also carry is WALL-scoped (the S7 compression
+  aggregate) and prints prefixed 'wall <id>:' so it never reads
+  opening-scoped. Each mark also prints on the wall framing plan as a
+  small bubble de-collided through the placed[] registry (A-A section
+  bubbles included) with a legend row keying the symbol (P2). Zero
+  openings → no schedule; callers that don't pass walls get paper
+  byte-equal to pre-B21d.
   Origin: LOD-400 wave-2 audit B21(d) — openings framed to fabrication
   level but never tabulated, no out-of-scope label.
-  Gate: `src/plans/plan-set.test.ts` 'door + window schedule (LOD-400
-  B21d)' describe (census/byte-match/determinism/bubble clearances/
-  40-opening pagination/byte-equal fallback).
+  Gates: `src/plans/plan-set.test.ts` 'door + window schedule (LOD-400
+  B21d)' describe (census/byte-match/determinism/F1 steal exhibit/F2 tie
+  shuffle/CMU-through-computeLevel incl. the bond-beam cell/wall-scoped
+  flag prefix/fold-vs-dedicated/bubble clearances/40-opening pagination/
+  byte-equal fallback).
 
 ## P — Plumbing
 

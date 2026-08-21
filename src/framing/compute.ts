@@ -73,7 +73,9 @@ export type ComputeResult = {
   /** Deduped ACTIVE walls the engines framed ('skip' overrides excluded,
    * S8 merged openings included) — the OpeningSlices the plan set's
    * door/window schedule tabulates (LOD-400 B21d). Openings live on the
-   * wall model and are not recoverable from members. */
+   * wall model and are not recoverable from members. LIVE memo references
+   * (the same objects the cached result and the engines hold) — do not
+   * mutate. */
   walls: WallSlice[]
 }
 
