@@ -448,10 +448,17 @@ AND a gate — a checklist line without a test is a wish.
   CONTENT tiebreaker — equal-length walls must never ride node insertion
   order, round-2 F2) + ascending u, so an unchanged scene reproduces
   identical marks. Tables at ≤18 lines FOLD onto the Schedules + takeoff
-  sheet (round-1 examiner: a 5-opening dedicated sheet reads ~80% empty;
-  both takeoff columns start below the folded table, capacities indexed);
-  bigger tables keep dedicated sheet(s) with (p/N) titles and contiguous
-  SHEET numbers. The RO cell prints the engine's roughWidth/roughHeight
+  sheet (round-1 examiner: a 5-opening dedicated sheet reads ~80% empty):
+  both takeoff columns start below the folded table and EVERY capacity is
+  page-indexed — including the FLAG BUDGET when a one-page takeoff puts
+  the bottom-anchored flag/characteristics blocks on the fold's own page
+  (closing round: the un-indexed budget let a 45-warning block climb INTO
+  the fold table while the 4-row floor clamped takeoff rows into the flag
+  band); a page 0 that cannot host fold + blocks + the 4-row takeoff
+  floor REJECTS the fold back to the dedicated sheet — the schedule never
+  overprints and never vanishes. Bigger tables keep dedicated sheet(s)
+  with (p/N) titles and contiguous SHEET numbers; multi-page takeoffs
+  anchor the blocks on the LAST page under the unchanged budget. The RO cell prints the engine's roughWidth/roughHeight
   verbatim and the HEADER cell reads the FRAMED member back, claimed by
   RO-SPAN CONTAINMENT first and global distance order second — a
   clamp-slid header must never STEAL a neighbor's stick (round-2 F1
@@ -475,7 +482,9 @@ AND a gate — a checklist line without a test is a wish.
   Gates: `src/plans/plan-set.test.ts` 'door + window schedule (LOD-400
   B21d)' describe (census/byte-match/determinism/F1 steal exhibit/F2 tie
   shuffle/CMU-through-computeLevel incl. the bond-beam cell/wall-scoped
-  flag prefix/fold-vs-dedicated/bubble clearances/40-opening pagination/
+  flag prefix/fold-vs-dedicated/fold×flags overprint (one-page corrected
+  budget + multi-page untouched budget + reject hatch)/bubble clearances/
+  40-opening pagination/
   byte-equal fallback).
 
 ## P — Plumbing

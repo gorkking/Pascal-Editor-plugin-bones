@@ -2946,4 +2946,158 @@ describe('door + window schedule (LOD-400 B21d)', () => {
     expect(legacy.map((s) => s.title)).not.toContain('Door + window schedule')
     expect(parseBubbles(legacy.find((s) => s.title === 'Wall framing plan')?.svg ?? '')).toEqual([])
   })
+
+  // ---- closing round: fold × flags (the quality-round-3 overprint class).
+  // The row capacities were page-indexed but the flag BUDGET was not: with
+  // a one-page takeoff the fold and the bottom-anchored blocks share page 0
+  // and the flag block climbed INTO the fold table while the 4-row floor
+  // clamped takeoff rows into the flag band. ----
+
+  /** 3 walls × 5 windows = a 17-line foldable table, flag-free rows. */
+  const foldScene = (): { walls: WallSlice[]; members: Member[] } => {
+    const walls: WallSlice[] = []
+    for (let i = 0; i < 3; i++) {
+      const os: OpeningSlice[] = []
+      for (let k = 0; k < 5; k++) {
+        os.push(opening(`f${i}_${k}`, 'window', 2 + k * 3, 1.219, 1.219, 0.9, 1.27, 1.27))
+      }
+      walls.push(bwall(`wf${i}`, [0, i * 4], [16, i * 4], os))
+    }
+    return { walls, members: frameWalls(walls, spec400) }
+  }
+  const warns45 = (): string[] =>
+    Array.from({ length: 45 }, (_, i) => `advisory w${i + 1} — verify`)
+  /** Kept-flag lines on a schedules sheet (second column, red). */
+  const flagYsOf = (svg: string): number[] =>
+    [...svg.matchAll(/<text x="(?:528|540)" y="([\d.]+)"[^>]*fill="#a03015"/g)].map((m) =>
+      Number(m[1]),
+    )
+  /** Takeoff/table body texts (non-bold #222 10px) with their column x. */
+  const bodyTextsOf = (svg: string): { x: number; y: number }[] =>
+    [...svg.matchAll(/<text x="(\d+)" y="(\d+)" font-size="10" font-family[^>]*fill="#222">/g)].map(
+      (m) => ({ x: Number(m[1]), y: Number(m[2]) }),
+    )
+
+  test('closing round: fold + one-page takeoff + 45 warnings — flag budget is fold-indexed, zero overprint', () => {
+    const { walls, members } = foldScene()
+    const sheets = buildPlanSet(members, [], { walls, warnings: warns45() })
+    // the corrected budget fits (41 − foldTop 18 − reserve 18 = 5): fold retained
+    expect(sheets.map((s) => s.title)).not.toContain('Door + window schedule')
+    const schedSheets = sheets.filter((s) => s.title.startsWith('Schedules + takeoff'))
+    expect(schedSheets.length).toBe(1) // the defect's premise: ONE takeoff page
+    const svg = (schedSheets[0] as { svg: string }).svg
+    expect(svg).toContain('>MARK</text>')
+    const markYs = parseMarks(svg).map((r) => r.y)
+    expect(markYs.length).toBe(15)
+    const tableBottom = Math.max(...markYs)
+    const flagYs = flagYsOf(svg)
+    expect(flagYs.length).toBeGreaterThan(0)
+    const flagTop = Math.min(...flagYs)
+    // THE DEFECT: the block climbed to y≈258 across table rows at 102..312.
+    // Now the flag top sits BELOW the fold bottom with a clear band…
+    expect(flagTop).toBeGreaterThan(tableBottom + 10)
+    // …takeoff rows sit between the two, and the second column NEVER runs
+    // into the flag band (the old 4-row-floor clamp put 3 rows inside it)
+    const rows = bodyTextsOf(svg).filter((t) => t.y > tableBottom)
+    expect(rows.length).toBeGreaterThan(0)
+    for (const t of rows) {
+      if (t.x >= 500) expect(t.y).toBeLessThan(flagTop - 10)
+    }
+    // every one of the 45 warnings still prints exactly once — kept block +
+    // pointer + continuation sheets (P4: nothing truncates, nothing hides)
+    expect(svg).toContain('more flag')
+    expect(sheets.some((s) => s.title.startsWith('Flags (continued'))).toBe(true)
+    const all = sheets.map((s) => s.svg).join('')
+    for (let i = 1; i <= 45; i++) {
+      expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
+    }
+  })
+
+  test('closing round: fold + MULTI-page takeoff + 45 warnings stays green — flags land on the last page, budget untouched', () => {
+    const { walls, members } = foldScene()
+    // bulk floor framing drives the takeoff past one page: 10 sizes ×
+    // 7 stock-length buckets of joists (+ bd-ft rows) ≈ 80+ rows
+    const sizes = ['2x4', '2x6', '2x8', '2x10', '2x12', '4x4', '4x6', '4x8', '4x10', '4x12'] as const
+    const bulk: Member[] = []
+    for (const size of sizes) {
+      for (const L of [2, 2.6, 3.2, 3.9, 4.5, 5.2, 5.8]) {
+        bulk.push(
+          member({
+            role: 'joist',
+            size,
+            dims: [L, 0.235, 0.038],
+            length: L,
+            sourceId: `bulk_${size}_${L}`,
+          }),
+        )
+      }
+    }
+    const sheets = buildPlanSet([...members, ...bulk], [], { walls, warnings: warns45() })
+    expect(sheets.map((s) => s.title)).not.toContain('Door + window schedule')
+    const schedSheets = sheets.filter((s) => s.title.startsWith('Schedules + takeoff'))
+    expect(schedSheets.length).toBeGreaterThanOrEqual(2) // the stack's premise
+    // fold on page 0 ONLY, census intact, takeoff rows below the table
+    const first = (schedSheets[0] as { svg: string }).svg
+    expect(first).toContain('>MARK</text>')
+    const markYSet = new Set(parseMarks(first).map((r) => r.y))
+    expect(markYSet.size).toBe(15)
+    const tableBottom = Math.max(...markYSet)
+    for (const t of bodyTextsOf(first)) {
+      expect(markYSet.has(t.y) || t.y > tableBottom).toBe(true)
+    }
+    // flags never print on the fold page — they bottom-anchor on the LAST
+    // page, where no fold lives, so the UNCORRECTED budget still applies
+    // (34 kept + pointer = 35 lines) and the second column stays clear
+    expect(first).not.toContain('#a03015')
+    const last = (schedSheets[schedSheets.length - 1] as { svg: string }).svg
+    expect(last).not.toContain('>MARK</text>')
+    const lastFlagYs = flagYsOf(last)
+    expect(lastFlagYs.length).toBe(35)
+    const lastFlagTop = Math.min(...lastFlagYs)
+    for (const t of bodyTextsOf(last)) {
+      if (t.x >= 500) expect(t.y).toBeLessThan(lastFlagTop - 10)
+    }
+    // all 45 warnings print exactly once across the set
+    const all = sheets.map((s) => s.svg).join('')
+    for (let i = 1; i <= 45; i++) {
+      expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
+    }
+  })
+
+  test('closing round: a page 0 that cannot host fold + blocks REJECTS the fold — dedicated fallback, never overprint', () => {
+    // characteristics add ~6 reserve lines: corrected reserve 19 →
+    // 41 − foldTop 18 − 19 = 4 < 5 (the 4-row floor would clamp takeoff
+    // rows into the flag band) → the escape hatch fires
+    const chars: BuildingCharacteristics = {
+      floorAreaM2: 40,
+      volumeM3: 108,
+      envelopeAreaM2: 61.4,
+      windowCount: 15,
+      windowAreaM2: 22.3,
+      doorCount: 0,
+      insulation: { climateZone: '2A', wallR: 13, citation: '2021 IECC Table R402.1.3' },
+      uaWPerK: 30.1,
+      designHeatLossW: 662,
+      coolingTonsEstimate: 0.9,
+      notes: [],
+    }
+    const { walls, members } = foldScene()
+    const sheets = buildPlanSet(members, [], {
+      walls,
+      warnings: warns45(),
+      characteristics: chars,
+    })
+    // the schedule falls back to its DEDICATED sheet (never vanishes)…
+    expect(sheets.map((s) => s.title)).toContain('Door + window schedule')
+    expect(parseMarks(tableSvgOf(sheets)).length).toBe(15)
+    // …and the schedules sheet keeps NO fold — blocks own the bottom
+    const sched = sheets.find((s) => s.title.startsWith('Schedules + takeoff'))
+    expect(sched?.svg ?? '').not.toContain('>MARK</text>')
+    expect(sched?.svg ?? '').toContain('BUILDING CHARACTERISTICS')
+    // every warning still prints exactly once
+    const all = sheets.map((s) => s.svg).join('')
+    for (let i = 1; i <= 45; i++) {
+      expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
+    }
+  })
 })

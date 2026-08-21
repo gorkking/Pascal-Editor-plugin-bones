@@ -2047,13 +2047,16 @@ function schedulesSheets(
   /** Small door/window schedule table FOLDED onto page 0 (examiner round-1
    * judgment: a ≤18-line table on a dedicated sheet reads ~80% empty). The
    * table occupies the top of the first page full-width; both takeoff
-   * columns start below it and every capacity figure accounts for it. */
+   * columns start below it and every capacity figure — INCLUDING the flag
+   * budget when the blocks share page 0 — accounts for it. A fold the page
+   * cannot host alongside the bottom blocks is REJECTED (`folded: false`)
+   * and the caller keeps the dedicated schedule sheet. */
   fold: OpeningTable | null = null,
-): PlanSheet[] {
+): { sheets: PlanSheet[]; folded: boolean } {
   // Flags render as their own ⚑ list — the 'Flags · FLAG — 1 ea' rows
   // read as nonsense in the grid (quality C5).
   const rows = computeTakeoff(members, fixtures).filter((r) => r.section !== 'Flags')
-  if (rows.length === 0) return []
+  if (rows.length === 0) return { sheets: [], folded: false }
   const flags = [
     ...new Set([
       ...members.filter((m) => m.flag).map((m) => m.flag as string),
@@ -2136,33 +2139,37 @@ function schedulesSheets(
   // at ~40+ lines — silently INVISIBLE flags, the worst P4 failure mode.
   // Whole flags spill to dedicated continuation sheets; a one-line pointer
   // stays on the schedules sheet. Wrapped flags never split mid-group.
-  const colCapForFlags = maxLines - 1
   const charNeed0 = charBlockLines.length > 0 ? charBlockLines.length + 1 : 0
-  const flagBudget = Math.max(0, colCapForFlags - charNeed0 - 1 - 4) // 4-row takeoff floor
-  const keptGroups: { text: string; indent: boolean }[][] = []
-  const spiltGroups: { text: string; indent: boolean }[][] = []
-  {
+  type FlagLine = { text: string; indent: boolean }
+  const splitFlags = (
+    colCapForFlags: number,
+  ): { flagLines: FlagLine[]; spiltGroups: FlagLine[][] } => {
+    const flagBudget = Math.max(0, colCapForFlags - charNeed0 - 1 - 4) // 4-row takeoff floor
+    const keptGroups: FlagLine[][] = []
+    const spilt: FlagLine[][] = []
     let used = 0
     const totalFlagLines = flagGroups.reduce((s, g) => s + g.length, 0)
     for (const g of flagGroups) {
       // reserve one budget line for the pointer as soon as spilling is possible
       const pointerCost = totalFlagLines > flagBudget ? 1 : 0
-      if (spiltGroups.length === 0 && used + g.length <= flagBudget - pointerCost) {
+      if (spilt.length === 0 && used + g.length <= flagBudget - pointerCost) {
         keptGroups.push(g)
         used += g.length
       } else {
-        spiltGroups.push(g)
+        spilt.push(g)
       }
     }
+    const lines: FlagLine[] = keptGroups.flat()
+    if (spilt.length > 0) {
+      lines.push({
+        text: `⚑ + ${spilt.length} more flag${spilt.length > 1 ? 's' : ''} — see "Flags (continued)"`,
+        indent: false,
+      })
+    }
+    return { flagLines: lines, spiltGroups: spilt }
   }
-  const flagLines: { text: string; indent: boolean }[] = keptGroups.flat()
-  if (spiltGroups.length > 0) {
-    flagLines.push({
-      text: `⚑ + ${spiltGroups.length} more flag${spiltGroups.length > 1 ? 's' : ''} — see "Flags (continued)"`,
-      indent: false,
-    })
-  }
-  const flagRows = flagLines.length
+  let { flagLines, spiltGroups } = splitFlags(maxLines - 1)
+  let flagRows = flagLines.length
   // title + the block's real line count — reserved out of the last page too.
   const charLines = charBlockLines.length > 0 ? charBlockLines.length + 1 : 0
   // P1 balance (round-3 carried): the reserve consumes the SECOND column
@@ -2170,7 +2177,7 @@ function schedulesSheets(
   // column, the first column keeps its full height, and rows flow beside
   // the blocks before any page is added. The old 2×(shrunk-cap) math
   // halved BOTH columns and shipped ~2/3-empty takeoff sheets.
-  const reserve = (flagRows > 0 ? flagRows + 1 : 0) + (charLines > 0 ? charLines + 1 : 0)
+  let reserve = (flagRows > 0 ? flagRows + 1 : 0) + (charLines > 0 ? charLines + 1 : 0)
   const reservedColCapAt = (p: number): number =>
     Math.max(4, maxLines - (p === 0 ? foldTop : 0) - reserve) - 1
   const lastPageCapAt = (p: number): number => fullColCapAt(p) + reservedColCapAt(p)
@@ -2182,6 +2189,28 @@ function schedulesSheets(
   }
   let pages = 1
   while (capacityFor(pages) < totalLines) pages++
+  // FOLD × FLAGS (closing round): the row capacities are page-indexed but
+  // the flag BUDGET was not — with a ONE-page takeoff the fold and the
+  // bottom-anchored blocks share page 0, and the un-indexed budget let the
+  // flag block climb INTO the fold table (45-warning scene: flag top at
+  // y≈258 across table rows at 102..312) while reservedColCapAt's 4-row
+  // floor clamped takeoff rows into the flag band. When the blocks land on
+  // page 0, RE-SPLIT the flags against the fold-reduced column and
+  // re-derive the reserve; page count can only stay 1 (the reserve
+  // shrinks). If even then the fold + blocks + the 4-row floor exceed the
+  // page (the Math.max floor would bite → forced overprint), the fold is
+  // REJECTED — the caller keeps the dedicated schedule sheet instead (the
+  // schedule never overprints; both mechanisms already exist).
+  if (fold && pages === 1 && reserve > 0) {
+    ;({ flagLines, spiltGroups } = splitFlags(maxLines - 1 - foldTop))
+    flagRows = flagLines.length
+    reserve = (flagRows > 0 ? flagRows + 1 : 0) + (charLines > 0 ? charLines + 1 : 0)
+    if (maxLines - foldTop - reserve < 5) {
+      return schedulesSheets(members, fixtures, opts, null)
+    }
+    pages = 1
+    while (capacityFor(pages) < totalLines) pages++
+  }
   // Even distribution: filling early pages to 100% left a near-blank
   // flags-only sheet at the end (blueprint P1) — every page carries its
   // line share; the last stays under its flag-shrunk cap (page count grows
@@ -2354,7 +2383,7 @@ function schedulesSheets(
       })
     }
   }
-  return sheets
+  return { sheets, folded: fold !== null }
 }
 
 // ---------------------------------------------------------------------------
@@ -2746,17 +2775,19 @@ export function buildPlanSet(
   // Door + window schedule (B21d) — no walls passed / zero openings → none.
   // Small tables FOLD into the Schedules + takeoff sheet (examiner round-1);
   // bigger ones get dedicated sheet(s) before the takeoff, after the
-  // drawings they cross-reference. A foldable table with NO takeoff sheet
-  // to host it (zero takeoff rows) falls back to the dedicated sheet — the
-  // schedule must never vanish.
+  // drawings they cross-reference. A foldable table the schedules sheet
+  // cannot host — zero takeoff rows, OR page 0 can't fit the fold beside
+  // the bottom-anchored flag/characteristics blocks (closing-round hatch) —
+  // falls back to the dedicated sheet: the schedule never vanishes and
+  // never overprints.
   const openingTable = buildOpeningTable(members, opts)
   const foldTable =
     openingTable !== null && openingTable.lines <= SCHEDULE_FOLD_MAX_LINES ? openingTable : null
-  const takeoffSheets = schedulesSheets(members, fixtures, schedOpts, foldTable)
-  if (openingTable && (foldTable === null || takeoffSheets.length === 0)) {
+  const takeoff = schedulesSheets(members, fixtures, schedOpts, foldTable)
+  if (openingTable && !takeoff.folded) {
     sheets.push(...openingScheduleSheets(openingTable, opts))
   }
-  sheets.push(...takeoffSheets)
+  sheets.push(...takeoff.sheets)
   const cover = coverSheet(members, opts, sheets.map((sh) => sh.title))
   if (cover) sheets.unshift(cover)
   // SHEET n/N in every title block (blueprint C6) — patch the placeholder
