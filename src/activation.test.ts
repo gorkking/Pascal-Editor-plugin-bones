@@ -9,7 +9,7 @@ import {
   type ViewerLike,
 } from './activation'
 import { effectiveViewMode, FramingNode } from './framing/schema'
-import { planServiceSeeding } from './service/place'
+import { buildServicePointNodes, planServiceSeeding } from './service/place'
 import { SERVICE_TYPES } from './service/schema'
 import { useBonesStore } from './store'
 
@@ -126,6 +126,20 @@ describe('activateXray — one click, one undo entry, walls Low once', () => {
       .sort()
     expect(types).toEqual([...SERVICE_TYPES].sort())
     for (const c of creates) expect(c.parentId).toBe('level_1')
+
+    // Position parity: the click seeds the exact nodes the pure planner
+    // builds — engine auto anchors, byte for byte (A4: creation alone never
+    // moves anything; place.test.ts pins the planner against the engines).
+    const expected = buildServicePointNodes(scene(), 'level_1')
+    const strip = (n: Record<string, unknown>) => {
+      const { id: _id, ...rest } = n
+      return rest
+    }
+    const byType = (a: Record<string, unknown>, b: Record<string, unknown>) =>
+      String(a.serviceType).localeCompare(String(b.serviceType))
+    expect(created.slice(1).map(strip).sort(byType)).toEqual(
+      expected.map((n) => strip(n as unknown as Record<string, unknown>)).sort(byType),
+    )
 
     // activation defaults: X-ray vision ON, seeding latched, MEP on
     expect(framing.viewMode).toBe('xray')
