@@ -55,6 +55,7 @@ const ALL_FIXTURE_KINDS = {
   switch: 1,
   light: 1,
   'smoke-alarm': 1,
+  'co-alarm': 1,
   panel: 1,
   'stub-out': 1,
   'vent-stack': 1,

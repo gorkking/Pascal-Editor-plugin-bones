@@ -170,6 +170,7 @@ const SURFACE_FIXTURE_KINDS: ReadonlySet<Fixture['kind']> = new Set([
   'switch',
   'light',
   'smoke-alarm',
+  'co-alarm', // B13: a CO alarm is a visible ceiling device like a smoke alarm
   'panel',
   'thermostat',
   'register',
