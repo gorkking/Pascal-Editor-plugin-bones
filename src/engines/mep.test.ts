@@ -566,7 +566,7 @@ describe('hvac — Manhattan trunk, cfm, step-down, exhaust (round-1 gaps)', () 
     expect(ret.label).not.toContain('UNDERSIZED')
   })
 
-  test('LOD 400 adds condensate, lineset, and an exterior condenser pad', () => {
+  test('LOD 400 adds condensate; the condenser row + lineset ship at EVERY LOD', () => {
     const at400 = layoutHvac(xwalls, rooms, { ...DEFAULT_SPEC, detail: '400' })
     const pipeRuns = byRole(at400.members, 'pipe-run')
     expect(pipeRuns.some((p) => p.label?.includes('Condensate'))).toBe(true)
@@ -577,8 +577,10 @@ describe('hvac — Manhattan trunk, cfm, step-down, exhaust (round-1 gaps)', () 
     const [px, , pz] = condenser?.position ?? [0, 0, 0]
     const inside = px > 0 && px < 10 && pz > 0 && pz < 8
     expect(inside).toBe(false)
-    // none of that at 300
-    expect(byRole(members, 'pipe-run').some((p) => p.sourceId.startsWith('lineset-'))).toBe(false)
+    // 300 keeps the outdoor unit + lineset (condenser-always: an AH never
+    // ships without its outdoor unit) — only the condensate stays 400 scope
+    expect(byRole(members, 'pipe-run').some((p) => p.sourceId.startsWith('lineset-'))).toBe(true)
+    expect(byRole(members, 'pipe-run').some((p) => p.label?.includes('Condensate'))).toBe(false)
   })
 
   test('garages are excluded from conditioned tonnage', () => {

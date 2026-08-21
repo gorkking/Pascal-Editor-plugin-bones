@@ -37,9 +37,12 @@
  *  - bath exhaust fans (M1505) and a laundry dryer vent (M1502) run to
  *    exterior terminations BELOW the plate band (through a stud bay);
  *  - a thermostat mounts on an interior wall near the return (52" AFF);
- *  - LOD 400 — or a heat-pump service node at any LOD — adds the condensate
- *    drain to the exterior and the OUTDOOR AC CONDENSER ROW (night-4 user
- *    ask): N units sized from conditioned area at a climate-zone divisor
+ *  - the OUTDOOR AC CONDENSER ROW ships at EVERY LOD the air handler does
+ *    (condenser-always fix — user report 'sometimes the HVAC does not add
+ *    the outside heat pump': the row was LOD-400-gated while the AH + full
+ *    duct network emitted at 200/300 with zero words; LOD 400 alone still
+ *    adds the condensate drain): N units sized from conditioned area at a
+ *    climate-zone divisor
  *    (zones 1-2 ≈ 1 ton/450 sqft, 3-4 ≈ 550, 5+ ≈ 650 — an ASSUMPTION,
  *    Manual J/S govern), one condenser per ≤ 5 tons. Each unit gets a 4"
  *    concrete pad + cabinet outside an exterior wall (≥ 0.3 m off the face,
@@ -54,11 +57,12 @@
  *    routed separately). A run longer than ~15 m carries a 'verify
  *    manufacturer max line-set length / oil return' advisory (mfr specs
  *    govern). The heat-pump service node still wins unit #1's
- *    position verbatim (checklist A4) and the row re-anchors to it.
- *    NOTE: the climate-zone divisor keys off `context.stateCode` — the
- *    one-line compute.ts hookup (`stateCode: code`) is deferred while
- *    src/framing/* is frozen for parallel tracks; absent it, the mid band
- *    (550) applies.
+ *    position verbatim (checklist A4) and the row re-anchors to it. A
+ *    footprint with NO straight exterior wall anchors the row at the
+ *    least-bad spot near the AH instead of skipping — warned and every
+ *    pad/cabinet '⚠ verify condenser placement' flagged, never silent.
+ *    The climate-zone divisor keys off `context.stateCode` (compute.ts
+ *    passes `stateCode: code`); unknown/INTL codes take the mid band (550).
  */
 
 import mepRules from '../../data/mep-rules.json'
@@ -194,6 +198,9 @@ function composeFlag(existing: string | undefined, add: string): string {
 }
 /** Disconnect box center above the unit top, on the wall face (NEC 440.14). */
 const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
+/** Pad + cabinet flag when the row anchors WITHOUT an exterior wall (the
+ * least-bad fallback — condenser-always fix): never a silent guess. */
+const COND_VERIFY_FLAG = '⚠ verify condenser placement — no exterior wall anchors the row'
 /**
  * Worst-case exterior assembly beyond the wall FACE the pad must clear:
  * brick veneer's 4.625" assembly offset (1" airspace + 3.625" wythe,
@@ -1443,10 +1450,16 @@ export function layoutHvac(
     }
   }
 
-  // ---- LOD 400 (or a heat-pump service node at ANY LOD): condensate drain
-  // + outdoor unit on its pad + refrigerant lineset through the wall ----
+  // ---- outdoor unit on its pad + refrigerant lineset through the wall —
+  // at EVERY LOD the air handler ships (condenser-always fix): the old
+  // `detail === '400' || hpPlan` gate emitted the AH + the whole duct
+  // network at LOD 200/300 with NO outdoor unit and NO warning — the
+  // 'sometimes the HVAC does not add the outside heat pump' user report.
+  // A heat pump HEATS too, so no climate/size ever justifies zero units
+  // (condenserPlan floors at 1 unit / 1.5 tons). Only the condensate drain
+  // stays LOD-400 scope. ----
   const hpPlan = overridePlanPoint(walls, overrides?.heatPump)
-  if (spec.detail === '400' || hpPlan) {
+  {
     const exit = nearestExteriorExit(walls, equipAt)?.at
     if (spec.detail === '400' && exit) {
       // Condensate falls 1/8" per foot toward the exterior (M1411.3.1) —
@@ -1482,8 +1495,32 @@ export function layoutHvac(
     // the whole row), else unit #1 takes the auto pad spot; units 2..N step
     // along the same exterior wall. Sizing is a labeled ASSUMPTION
     // (1 ton per 450/550/650 sqft by climate-zone band — Manual J/S govern).
-    const anchor = hpPlan ?? placeHeatPumpSpot(walls, rooms)
-    if (anchor) {
+    let anchor = hpPlan ?? placeHeatPumpSpot(walls, rooms)
+    // CONTRACT (never silent): placeHeatPumpSpot fails only when the level
+    // has no straight EXTERIOR wall (hosts marking both wall faces
+    // 'interior', all-curved shells). Skipping here used to drop the whole
+    // outdoor block with zero words while the AH + ducts emitted. Fall back
+    // to the least-bad spot — just outside the nearest straight wall (away
+    // from the AH), else beside the AH — condenserRow's no-exterior branch
+    // warns, and every pad/cabinet carries the ⚠ verify flag below.
+    let anchorFallback = false
+    if (!anchor) {
+      anchorFallback = true
+      const near = nearestWallPoint(walls, equipAt, Number.POSITIVE_INFINITY)
+      if (near) {
+        const p = wallPointAt(near.wall, near.u)
+        const dx = p[0] - equipAt[0]
+        const dz = p[1] - equipAt[1]
+        const d = Math.hypot(dx, dz)
+        anchor =
+          d > 1e-6
+            ? [p[0] + (dx / d) * PAD_OFFSET, p[1] + (dz / d) * PAD_OFFSET]
+            : [p[0] + PAD_OFFSET, p[1]]
+      } else {
+        anchor = [equipAt[0] + PAD_OFFSET, equipAt[1]]
+      }
+    }
+    {
       const plan = condenserPlan(areaM2, context?.stateCode)
       const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt)
       warnings.push(...row.warnings)
@@ -1533,6 +1570,7 @@ export function layoutHvac(
           material: 'concrete',
           sourceId: equipRoom.id,
           label: 'Condenser pad 4" — concrete (per mfr clearance + IRC M1403)',
+          ...(anchorFallback ? { flag: COND_VERIFY_FLAG } : {}),
         })
         members.push({
           system: 'hvac',
@@ -1544,6 +1582,7 @@ export function layoutHvac(
           material: 'steel',
           sourceId: equipRoom.id,
           label: `AC condenser #${n} — ${plan.unitTons} tons outdoor unit`,
+          ...(anchorFallback ? { flag: COND_VERIFY_FLAG } : {}),
         })
         fixtures.push({
           system: 'hvac',
@@ -1975,6 +2014,14 @@ export function layoutHvac(
           )
           if (run) members.push(run)
         }
+      }
+      // Disconnect + whip mount on the row wall's FACE — a rowless install
+      // (no exterior wall) has nowhere to hang them. One loud line (NEC
+      // 440.14), never a silent omission (condenser-always contract).
+      if (!row.wall) {
+        warnings.push(
+          'AC disconnect + whip not mounted — no exterior wall face for the box (NEC 440.14) — verify',
+        )
       }
     }
   }
