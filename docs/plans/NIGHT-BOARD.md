@@ -1,3 +1,20 @@
+# DAY-9 SHIPPED TO PROD 2026-08-22 (evening)
+
+## SHIP RECORD: private-editor #395 → 67fbe97e
+Chain: plugin 1cac1bb (1591 tests; 4 morning feedbacks) → editor #707
+(7c6c77d7) → private-editor #395, all CI green first pass, Vercel
+prod SUCCESS. Pre-ship visual: SHIP 4/4 on the starter template.
+The four fixes: starter-template condenser (exterior election root
+cause: slab-less zoned scenes; 'outdoor' room category; honest
+conditioned figures; R314 open-air warning — 5 rounds, 22 gates);
+sidebar warnings drawer + grouping; Basement→Subfloor; selected-wall
+open cut (night-4 exemption retired). Queued from the rounds:
+head-noun classifier tie-break, Terrazza/it, substring traps
+(Kindergarden/Vineyard), electrical outdoor-zone residual family
+(garden light + alarm float), room-coverage slab warning for outdoor
+zones, wall-chip Full reset on fresh sessions (host, click-scoped
+contract nuance).
+
 # NIGHT-8 SHIPPED TO PROD 2026-08-22 (~15:28 UTC)
 
 ## SHIP RECORD: private-editor #394 → 8112e5f7
