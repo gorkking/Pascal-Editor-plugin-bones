@@ -1119,6 +1119,39 @@ AND a gate — a checklist line without a test is a wish.
   names why (placement fallback carries '⚠ verify condenser placement';
   unmounted disconnect warns per NEC 440.14). Gate: hvac.condensers
   'condenser-always' describe incl. the 1500-compose invariant matrix.
+  CONDENSER-HONESTY (2026-08-22 prod report #2, "I don't see the heat
+  pump"): three never-silent contracts on top of condenser-always.
+  (1) SILENT-EMPTY MEP LEVELS: HVAC + plumbing derive from rooms, so a
+  level whose zones can't feed them composes ZERO hvac/plumbing output
+  while framing/electrical render fine — compute now warns, keyed off the
+  ACTUAL compose (a system that emitted anything is not silent; a
+  toggled-off system is not missing hardware, B9c), naming ONLY the
+  silent system(s): 'no indoor zones on this level — <systems> derived
+  from rooms; draw zones here or X-ray the storey that has them' (no
+  zones at all / building-parented zones / wrong storey / roof levels),
+  'all zones on this level are outdoor — no conditioned space to serve'
+  (the day-9 outdoor-category delta that honestly-but-silently removed a
+  previously-drawn unit), 'no habitable rooms on this level
+  (garage/hallway zones only)…'. (2) UPPER-STOREY FACADE HEIGHT: each
+  level mints its condenser at LEVEL-LOCAL grade, so an upper-storey
+  X-ray draws the outdoor unit at facade height — the level states
+  'condenser for this storey drawn at its floor elevation — grade
+  mounting not modeled; verify' (once per storey; the levelId remount is
+  queued on the board — fixtures can't cross-mount today). (3) HEAT-PUMP
+  MIS-DRAG: the service node stays A4-verbatim but a moved point inside
+  an indoor zone warns naming the room ('heat-pump point is inside
+  <room> — the outdoor unit belongs outside…'; a wall-band guard keeps
+  wallId/wallT centerline anchors silent), and a point beyond the NEC
+  210.63 25 ft service reach (7.62 m — the code's own 'serviceable from
+  the dwelling' radius; the 15 m line-set advisory is a run-LENGTH class
+  and would bless a 13 m yard drag) from every exterior wall warns with
+  the distance + basis. Auto placement and legitimate near-wall
+  overrides stay silent. All three ride result.warnings into the panel
+  drawer + plan-set flags block.
+  Gates: `src/framing/compute.mep-honesty.test.ts` (F1 classes incl. the
+  ||→&& mutant killer + single-toggle grammar pins, F2 storey gates,
+  plan-set flags reach) + `src/engines/hvac.condensers.test.ts`
+  'heat-pump override honesty' describe (mutation-checked both ways).
 - **M3 Return air is modeled, and never taken from a garage.** The air
   handler prefers CONDITIONED service space (laundry/utility > closet-named
   rooms > hallway); the garage is a last resort that fires a loud warning

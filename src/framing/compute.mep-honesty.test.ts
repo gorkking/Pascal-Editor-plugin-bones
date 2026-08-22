@@ -195,6 +195,43 @@ describe('F1: silent-empty HVAC/plumbing levels warn (hunt 7a-7d, 4b/4c, roof le
     expect(roof.warnings.some((w) => FLOOR_ELEV_RE.test(w))).toBe(false)
   })
 
+  test('mutant killer: ONE silent system still warns — placed toilet composes plumbing, HVAC alone is named', () => {
+    // Round-1 skeptic: degrading `hvacSilent || plumbingSilent` to `&&`
+    // survived the whole suite — the single-system-silent arm was unpinned.
+    // With zero zones but a PLACED toilet the plumbing engine composes real
+    // members while HVAC stays empty: the warning must still fire, name
+    // HVAC only, and never claim the plumbing that IS drawn.
+    const nodes: Nodes = {}
+    shellLevel(nodes, 'lvl0', 0)
+    nodes.toilet1 = {
+      id: 'toilet1',
+      type: 'item',
+      parentId: 'lvl0',
+      asset: { id: 'toilet' },
+      position: [9, 0, 4],
+      rotation: [0, 0, 0],
+    }
+    const result = computeLevel(nodes, bones('lvl0'))
+    // non-vacuous: plumbing genuinely composed from the placed fixture
+    expect(result.members.some((m) => m.system === 'plumbing')).toBe(true)
+    const warning = result.warnings.find((w) => NO_ZONES_RE.test(w))
+    expect(warning).toContain('HVAC is derived from rooms')
+    expect(warning).not.toContain('plumbing')
+  })
+
+  test('single-toggle grammar: the warning names ONLY the system that is on', () => {
+    const nodes: Nodes = {}
+    shellLevel(nodes, 'lvl0', 0)
+    const plumbingOnly = computeLevel(nodes, bones('lvl0', { showHvac: false }))
+    const pw = plumbingOnly.warnings.find((w) => NO_ZONES_RE.test(w))
+    expect(pw).toContain('plumbing is derived from rooms')
+    expect(pw).not.toContain('HVAC')
+    const hvacOnly = computeLevel(nodes, bones('lvl0', { showPlumbing: false }))
+    const hw = hvacOnly.warnings.find((w) => NO_ZONES_RE.test(w))
+    expect(hw).toContain('HVAC is derived from rooms')
+    expect(hw).not.toContain('plumbing')
+  })
+
   test('toggle honesty: MEP toggled OFF is not missing hardware — no warning', () => {
     const nodes: Nodes = {}
     shellLevel(nodes, 'lvl0', 0)
