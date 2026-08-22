@@ -350,6 +350,11 @@ export function frameWall(
     // material 'engineered' routes it to the takeoff's by-supplier line
     // (verify night-6 PARTIAL: the buy list booked a full 4x12 + 48 bd-ft
     // for a member the flag itself says must be replaced).
+    // Heavy-snow bands size from Table R602.7(1)'s snow columns (LOD-400
+    // B11), which also key on BUILDING WIDTH — the spec doesn't carry it,
+    // so every band-sized header states the assumption on its label
+    // (label, never a guess; unset in the low-snow band → byte-equal).
+    const headerAssumption = spec.headerAssumption ? ` — ${spec.headerAssumption}` : ''
     emit(
       'header',
       headerSize,
@@ -358,8 +363,8 @@ export function frameWall(
       headerY,
       headerLength,
       engineered
-        ? `Engineered header over ${opening.kind} (drawn as ${headerSize} — size by supplier)`
-        : `Header ${headerSize} over ${opening.kind}`,
+        ? `Engineered header over ${opening.kind} (drawn as ${headerSize} — size by supplier)${headerAssumption}`
+        : `Header ${headerSize} over ${opening.kind}${headerAssumption}`,
       headerFlagParts.length > 0 ? headerFlagParts.join(' | ') : undefined,
       engineered ? 'engineered' : undefined,
     )

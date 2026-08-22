@@ -876,3 +876,162 @@ describe('CS-PF first-of-two-storeys minimum (Figure R602.10.6.4): 24" under a s
     expect(king?.flag).toContain('wall garage_front:')
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B11: header rules by ground-snow band — Table R602.7(1)
+// ---------------------------------------------------------------------------
+
+import { headerBandForSnow } from '../core/spec'
+import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
+
+describe('LOD-400 B11: heavy-snow headers deepen per Table R602.7(1); low snow stays byte-equal', () => {
+  // One wall per RO span so opening frames never interact; wall long and
+  // tall enough that no clamp/depth machinery fires — the header size is
+  // the ONLY variable under test.
+  const winAt = (roIn: number): OpeningSlice => ({
+    id: `win_${roIn}`,
+    kind: 'window',
+    u: 3,
+    width: inches(roIn) - T,
+    height: 1.0,
+    sillHeight: 0.9,
+    roughWidth: inches(roIn),
+    roughHeight: 1.0 + T,
+  })
+  const wallWith = (roIn: number): WallSlice =>
+    makeWall({
+      id: `w_${roIn}`,
+      start: [0, 0],
+      end: [6, 0],
+      height: 2.7,
+      thickness: 0.114, // textbook 2x4 partition — no compression aggregate flag
+      openings: [winAt(roIn)],
+    })
+  const headerOf = (roIn: number, spec = DEFAULT_SPEC): Member => {
+    const h = frameWall(wallWith(roIn), spec).find((m) => m.role === 'header')
+    expect(h).toBeDefined()
+    return h as Member
+  }
+  const VT = applyJurisdiction(DEFAULT_SPEC, profileFor('VT')) // 60 psf → 70-psf column
+  const MN = applyJurisdiction(DEFAULT_SPEC, profileFor('MN')) // 50 psf → 50-psf column
+  const INTL = applyJurisdiction(DEFAULT_SPEC, profileFor('INTL')) // 30 psf → default
+
+  test('VT ≠ INTL — the deepening enumerated exactly per opening span', () => {
+    // [roIn, INTL size, VT size] — VT deepens one table step exactly where
+    // the 70-psf column's shorter spans bite (4x8 cap 60"→53", 4x10 84"→63")
+    const matrix: [number, string, string][] = [
+      [22, '4x4', '4x4'],
+      [30, '4x6', '4x6'],
+      [53, '4x8', '4x8'], // boundary: 70-band 4x8 cap is EXACTLY 4-5 (53")
+      [56, '4x8', '4x10'],
+      [60, '4x8', '4x10'],
+      [66, '4x10', '4x12'],
+      [80, '4x10', '4x12'],
+      [90, '4x12', '4x12'],
+    ]
+    for (const [roIn, intlSize, vtSize] of matrix) {
+      expect(headerOf(roIn, INTL).size, `INTL @ ${roIn}"`).toBe(intlSize as never)
+      expect(headerOf(roIn, VT).size, `VT @ ${roIn}"`).toBe(vtSize as never)
+    }
+    // MN (50-psf column): only the 4x10 step moved (84" → 71")
+    expect(headerOf(56, MN).size).toBe('4x8')
+    expect(headerOf(66, MN).size).toBe('4x10')
+    expect(headerOf(80, MN).size).toBe('4x12')
+  })
+
+  test('deepened headers stay geometrically honest — full depth of their own size, no flags', () => {
+    const h = headerOf(56, VT) // 4x10 where INTL draws 4x8
+    const hw = LUMBER_CROSS_SECTIONS[h.size as keyof typeof LUMBER_CROSS_SECTIONS][1]
+    expect(h.dims[1]).toBeCloseTo(hw, 6)
+    expect(h.flag).toBeUndefined()
+  })
+
+  test('round 2 (skeptic): past-cap spans are ENGINEERED — never a silent lumber 4x12 affirming the table', () => {
+    // The 70-psf column's 2-2x12 cell ends at 6-2 (74"); 50-psf at 6-11
+    // (83"). Round 1 let every span in (74", 120") frame a plain lumber
+    // 4x12 whose label AFFIRMED the table outside its domain — the band
+    // now caps engineeredHeaderSpan at its terminal cell, so those spans
+    // route to the supplier/flag path.
+    for (const roIn of [76, 90, 110]) {
+      const h = headerOf(roIn, VT)
+      expect(h.material, `VT @ ${roIn}"`).toBe('engineered')
+      expect(h.flag, `VT @ ${roIn}"`).toContain('ENGINEERED BEAM REQUIRED')
+      expect(h.label, `VT @ ${roIn}"`).toContain('size by supplier')
+      // the SAME spans at INTL keep their pre-B11 lumber 4x12 (the
+      // low-band terminal gap is pre-existing and out of B11 scope —
+      // low-snow output must stay byte-equal)
+      const li = headerOf(roIn, INTL)
+      expect(li.material, `INTL @ ${roIn}"`).toBe('lumber')
+      expect(li.flag, `INTL @ ${roIn}"`).toBeUndefined()
+    }
+    // the band boundaries stay PRESCRIPTIVE — 74"/83" ARE the code cells
+    const vt74 = headerOf(74, VT)
+    expect(vt74.size).toBe('4x12')
+    expect(vt74.material).toBe('lumber')
+    expect(vt74.flag).toBeUndefined()
+    expect(vt74.label).toContain('Table R602.7(1)') // in-domain claim stands
+    const mn83 = headerOf(83, MN)
+    expect(mn83.size).toBe('4x12')
+    expect(mn83.material).toBe('lumber')
+    expect(mn83.flag).toBeUndefined()
+    expect(headerOf(84, MN).material).toBe('engineered')
+    expect(headerOf(84, INTL).material).toBe('lumber')
+  })
+
+  test('the label pin: band-sized headers state the R602.7(1) building-width assumption; INTL headers do not', () => {
+    const vtHeader = headerOf(56, VT)
+    expect(vtHeader.label).toBe(
+      'Header 4x10 over window — sized per Table R602.7(1) @ 70 psf ground snow — ≤ 24 ft building width, roof-and-ceiling loading assumed',
+    )
+    const mnHeader = headerOf(56, MN)
+    expect(mnHeader.label).toContain('@ 50 psf ground snow')
+    // low-snow: the exact pre-B11 label, nothing appended
+    expect(headerOf(56, INTL).label).toBe('Header 4x8 over window')
+    expect(headerOf(56).label).toBe('Header 4x8 over window') // raw DEFAULT_SPEC too
+  })
+
+  test('the assumption rides ENGINEERED headers too (the size still came from the band rules)', () => {
+    const wide = makeWall({
+      id: 'w_wide',
+      start: [0, 0],
+      end: [8, 0],
+      openings: [door(4, 3.4, 2.1)], // > engineeredHeaderSpan
+    })
+    const vtWide = frameWall(wide, VT).find((m) => m.role === 'header')
+    expect(vtWide?.material).toBe('engineered')
+    expect(vtWide?.label).toContain('size by supplier')
+    expect(vtWide?.label).toContain('Table R602.7(1)')
+    const intlWide = frameWall(wide, INTL).find((m) => m.role === 'header')
+    expect(intlWide?.label).not.toContain('Table R602.7(1)')
+  })
+
+  test('low-snow jurisdictions are member-byte-equal to the raw default spec (the INTL pin)', () => {
+    for (const code of ['INTL', 'TX', 'CA', 'FL'] as const) {
+      const applied = applyJurisdiction(DEFAULT_SPEC, profileFor(code))
+      for (const roIn of [22, 30, 56, 66, 80, 90]) {
+        const wall = wallWith(roIn)
+        // wall-framing consumes headerRules + headerAssumption only from
+        // the jurisdiction delta — pin the whole member list byte-equal
+        const specNeutral = {
+          ...DEFAULT_SPEC,
+          headerRules: applied.headerRules,
+          headerAssumption: applied.headerAssumption,
+          engineeredHeaderSpan: applied.engineeredHeaderSpan, // round 2: the cap is part of the delta
+        }
+        expect(JSON.parse(JSON.stringify(frameWall(wall, specNeutral)))).toEqual(
+          JSON.parse(JSON.stringify(frameWall(wall, DEFAULT_SPEC))),
+        )
+      }
+    }
+  })
+
+  test('band selection is pure data — headerBandForSnow at the profile loads mirrors applyJurisdiction', () => {
+    for (const code of ['VT', 'MN', 'NY', 'TX'] as const) {
+      const profile = profileFor(code)
+      const spec = applyJurisdiction(DEFAULT_SPEC, profile)
+      const band = headerBandForSnow(profile.groundSnowLoadPsf)
+      expect(spec.headerRules).toBe(band.rules)
+      expect(spec.headerAssumption).toBe(band.assumption as never)
+    }
+  })
+})
