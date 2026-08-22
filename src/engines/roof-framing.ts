@@ -1724,7 +1724,18 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   const upperFlag = slopeRafterFlag(spec, upperRun, upperLen2)
 
   const xs = layout(-roof.width / 2, roof.width / 2, spec.rafterSpacing, halfT)
+  // B8d rake port (the frameGable dropped-gable detail): flat outlookers lay
+  // OVER the two gable-end rafters — those drop by the outlooker thickness
+  // along each PLANE's own normal (vertically olT/cosθ resp. olT/cosφ) so
+  // the ladder passes. The audit gambrel cantilevered `overhang` past its
+  // ends with no rake framing at all.
+  const [olT, olW] = LUMBER_CROSS_SECTIONS['2x4']
+  const hasRake = spec.detail !== '200' && roof.overhang >= MIN_RAKE_OVERHANG
+  const dropped = new Set(hasRake ? [xs[0], xs[xs.length - 1]] : [])
+  const cosPhi = Math.cos(phi)
   for (const x of xs) {
+    const dropLower = dropped.has(x) ? olT / cosT : 0
+    const dropUpper = dropped.has(x) ? olT / cosPhi : 0
     for (const side of [1, -1] as const) {
       const tipZ = side * (run + roof.overhang * cosT)
       const tipY = eaveY - roof.overhang * Math.sin(theta)
@@ -1732,7 +1743,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         'rafter',
         spec.rafterSize,
         [lowerLen2, rd, t],
-        [x, (tipY + lowerTopY) / 2, (tipZ + side * lowerTopZ) / 2],
+        [x, (tipY + lowerTopY) / 2 - dropLower, (tipZ + side * lowerTopZ) / 2],
         (side * Math.PI) / 2,
         theta,
         lowerLen2,
@@ -1745,7 +1756,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         'rafter',
         spec.rafterSize,
         [upperLen2, rd, t],
-        [x, (upperLoY + upperHiY) / 2, (side * (upperLoZ + upperHiZ)) / 2],
+        [x, (upperLoY + upperHiY) / 2 - dropUpper, (side * (upperLoZ + upperHiZ)) / 2],
         (side * Math.PI) / 2,
         phi,
         upperLen2,
@@ -1758,48 +1769,155 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
     }
   }
 
+  // ---- rake framing: barge rafters + outlookers over the gambrel ends ----
+  // frameGable's hasRake rake-ladder block, ported per PLANE (B8d): a barge
+  // pair carries each rake edge (steep lower + shallow upper), held by flat
+  // 2x4 outlookers laid over the dropped end rafters. Ladders span the
+  // FIRST INTERIOR rafter's inner face to the barge's inner face, derived
+  // from the ACTUAL xs positions (the gable round-14 convention).
+  if (hasRake) {
+    for (const sx of [1, -1] as const) {
+      const ordered = sx === 1 ? [...xs].sort((a, b) => a - b) : [...xs].sort((a, b) => b - a)
+      const inner = ordered[ordered.length - 2] ?? ordered[ordered.length - 1] ?? 0
+      const bargeX = sx * (roof.width / 2 + roof.overhang)
+      const innerFace = inner + sx * halfT
+      const outerFace = bargeX - sx * halfT
+      const olLen = Math.abs(outerFace - innerFace)
+      const olCx = (innerFace + outerFace) / 2
+      const upOl = rd / 2 - olT / 2
+      for (const side of [1, -1] as const) {
+        const tipZ = side * (run + roof.overhang * cosT)
+        const tipY = eaveY - roof.overhang * Math.sin(theta)
+        // barge rafters, both planes, at the rake line (undropped — the
+        // ladder passes over the dropped END rafters, never the barges)
+        emit(
+          'rafter',
+          spec.rafterSize,
+          [lowerLen2, rd, t],
+          [bargeX, (tipY + lowerTopY) / 2, (tipZ + side * lowerTopZ) / 2],
+          (side * Math.PI) / 2,
+          theta,
+          lowerLen2,
+          'lumber',
+          `Barge rafter ${spec.rafterSize} (rake)${splicedNote(spec, lowerLen2, 'outlooker bearings')}`,
+        )
+        emit(
+          'rafter',
+          spec.rafterSize,
+          [upperLen2, rd, t],
+          [bargeX, (upperLoY + upperHiY) / 2, (side * (upperLoZ + upperHiZ)) / 2],
+          (side * Math.PI) / 2,
+          phi,
+          upperLen2,
+          'lumber',
+          `Barge rafter ${spec.rafterSize} (rake)${splicedNote(spec, upperLen2, 'outlooker bearings')}`,
+        )
+        // outlookers ladder each plane at 4' o.c. — flat 2x4 rolled INTO its
+        // plane, hanging half a thickness under the sheathing plane (the
+        // gable convention); upper plane ridge → break, lower break → eave.
+        for (let z = OUTLOOKER_SPACING / 2; z < breakZ - EPS; z += OUTLOOKER_SPACING) {
+          const y = ridgeY - z * tanPhi + upOl * cosPhi
+          const zc = side * z + side * upOl * Math.sin(phi)
+          emit('outlooker', '2x4', [olLen, olT, olW], [olCx, y, zc], 0, 0, olLen, 'lumber', 'Outlooker 2x4 flat @ 4ft (rake)', side * phi)
+        }
+        for (let z = breakZ + OUTLOOKER_SPACING / 2; z < run - EPS; z += OUTLOOKER_SPACING) {
+          const y = breakY - (z - breakZ) * tan + upOl * cosT
+          const zc = side * z + side * upOl * Math.sin(theta)
+          emit('outlooker', '2x4', [olLen, olT, olW], [olCx, y, zc], 0, 0, olLen, 'lumber', 'Outlooker 2x4 flat @ 4ft (rake)', side * theta)
+        }
+      }
+    }
+  }
+
   // ---- deck on all four planes (B6): lower steep + upper shallow per side.
   // The centerline planes extrapolate to the break (breakZ, breakY) and the
   // ridge apex (0, ridgeY); at the convex kink the normal offsets open a
-  // gap exactly like the ridge vent gap.
+  // gap exactly like the ridge vent gap. B8d retired the old F4 rake-metal
+  // deck flag: the rake ladder + rake drip edge are REAL members now, and
+  // the deck widens past the barges exactly like the gable's (a tiny
+  // overhang below MIN_RAKE_OVERHANG follows the gable convention — the
+  // sheathing cantilevers, no ladder, no rake drip, no flag).
   for (const side of [1, -1] as const) {
-    // F4: gambrel gable ends carry no rake framing (B8d) and so no rake
-    // drip either — stated on paper via the deck flag at 400.
-    const gambrelRakeFlag =
-      spec.detail === '400'
-        ? 'gambrel rake: rake framing + rake drip edge not modeled at LOD 400 — rides with the R802 rake-ladder follow-up (B8d)'
-        : undefined
     deckPlane(emit, spec, {
       theta,
       side,
       alongXAxis: true,
-      u0: -roof.width / 2,
-      u1: roof.width / 2,
+      u0: hasRake ? -(roof.width / 2 + roof.overhang) : -roof.width / 2,
+      u1: hasRake ? roof.width / 2 + roof.overhang : roof.width / 2,
       zTop: breakZ + deckGap(theta),
       zBot: run + roof.overhang * cosT - deckGap(theta),
       yTop: breakY - deckGap(theta) * tan,
       rafterDepth: rd,
-      flag: gambrelRakeFlag,
     })
     deckPlane(emit, spec, {
       theta: phi,
       side,
       alongXAxis: true,
-      u0: -roof.width / 2,
-      u1: roof.width / 2,
+      u0: hasRake ? -(roof.width / 2 + roof.overhang) : -roof.width / 2,
+      u1: hasRake ? roof.width / 2 + roof.overhang : roof.width / 2,
       zTop: deckGap(phi),
       zBot: breakZ - deckGap(phi),
       yTop: ridgeY - deckGap(phi) * tanPhi,
       rafterDepth: rd,
-      flag: gambrelRakeFlag,
     })
   }
+
+  // ceiling-joist stations, HOISTED — the break struts below bear on them
+  // (same math + order as the old inline loop: byte-equal joists).
+  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  const cjFlag = ceilingJoistFlag(spec, roof.depth)
+  // B6: end boxes inscribe inside the field clip to the STEEP lower plane
+  // (the gable convention above) — the deck rides the rafter tops.
+  const cjClip =
+    spec.detail === '200' || tan <= EPS
+      ? 0
+      : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
+  const cjLen = roof.depth - 2 * cjClip
+  const cjStations: number[] =
+    cjLen < 0.3
+      ? []
+      : layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2).map((x0) => {
+          // sister BESIDE a coincident rafter plane, toward the center (round-14)
+          const clash = xs.find((rx) => Math.abs(rx - x0) < halfT + cjT / 2 - EPS)
+          return clash === undefined ? x0 : clash + (clash >= 0 ? -1 : 1) * (halfT + cjT / 2)
+        })
 
   // ridge + a purlin under each kink (the classic gambrel joint support)
   const ridgeSize = ridgeSizeFor(spec.rafterSize)
   const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
   const ridgeLen = roof.width + 2 * roof.overhang
   emit('ridge', ridgeSize, [ridgeLen, rdd, rt], [0, ridgeY - rdd / 2, 0], 0, 0, ridgeLen, 'lumber', `Ridge ${ridgeSize}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`)
+
+  // B8d: R802.5.1 — the break purlins carried EVERY rafter joint with ZERO
+  // struts. 2x4 struts ≤ 4 ft o.c. drop from the purlin underside to the
+  // ceiling joists (the only modeled bearing below — the gable purlin-fix
+  // convention: stations SNAP onto real joist lines, no floating struts,
+  // labeled as the assumption). When no joist bearing exists (degenerate
+  // break too low for a real strut, or no joists at all) the purlin FLAGS
+  // instead of bearing on air — members preferred, honesty as fallback.
+  const [sT, sW] = LUMBER_CROSS_SECTIONS[STRUT_SIZE]
+  const strutTop = breakY - rdd // purlin underside
+  const strutBot = eaveY + cjD // ceiling-joist top face
+  const strutLen = strutTop - strutBot
+  const strutStations = new Set<number>()
+  if (spec.detail !== '200' && strutLen >= inches(3) && cjStations.length > 0) {
+    for (
+      let sx = -roof.width / 2 + t / 2 + STRUT_SPACING / 2;
+      sx < roof.width / 2 - t / 2;
+      sx += STRUT_SPACING
+    ) {
+      let best = cjStations[0] ?? sx
+      for (const cj of cjStations) if (Math.abs(cj - sx) < Math.abs(best - sx)) best = cj
+      if (best >= -roof.width / 2 + t / 2 - EPS && best <= roof.width / 2 - t / 2 + EPS) {
+        strutStations.add(best)
+      }
+    }
+  }
+  const strutsLand = strutStations.size > 0
+  const breakPurlinFlag =
+    spec.detail === '200' || strutsLand
+      ? undefined
+      : 'gambrel break purlin unsupported — 2x4 struts ≤ 4 ft o.c. to bearing required (R802.5.1); no modeled joist bearing below — verify support detail'
   for (const side of [1, -1] as const) {
     emit(
       'ridge',
@@ -1810,25 +1928,31 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
       0,
       roof.width,
       'lumber',
-      `Purlin ${ridgeSize} @ gambrel break${splicedNote(spec, roof.width, 'rafter joints — verify strut support (R802.5.1)')}`,
+      `Purlin ${ridgeSize} @ gambrel break${
+        strutsLand
+          ? splicedNote(spec, roof.width, 'struts')
+          : splicedNote(spec, roof.width, 'rafter joints — verify strut support (R802.5.1)')
+      }`,
+      undefined,
+      breakPurlinFlag,
     )
+    for (const sx of strutStations) {
+      emit(
+        'post',
+        STRUT_SIZE,
+        [sT, strutLen, sW],
+        [sx, (strutTop + strutBot) / 2, side * breakZ],
+        0,
+        0,
+        strutLen,
+        'lumber',
+        `Purlin strut ${STRUT_SIZE} @ ≤4 ft o.c. — bears on ceiling joists (assumed bearing, R802.5.1)`,
+      )
+    }
   }
 
   // ceiling joists at the eave + collar ties in the upper third
-  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
-  const cjFlag = ceilingJoistFlag(spec, roof.depth)
-  // B6: end boxes inscribe inside the field clip to the STEEP lower plane
-  // (the gable convention above) — the deck rides the rafter tops.
-  const cjClip =
-    spec.detail === '200' || tan <= EPS
-      ? 0
-      : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
-  const cjLen = roof.depth - 2 * cjClip
-  for (const x0 of layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2)) {
-    if (cjLen < 0.3) break
-    // sister BESIDE a coincident rafter plane, toward the center (round-14)
-    const clash = xs.find((rx) => Math.abs(rx - x0) < halfT + cjT / 2 - EPS)
-    const x = clash === undefined ? x0 : clash + (clash >= 0 ? -1 : 1) * (halfT + cjT / 2)
+  for (const x of cjStations) {
     emit('ceiling-joist', spec.ceilingJoistSize, [cjLen, cjD, cjT], [x, eaveY + cjD / 2, 0], -Math.PI / 2, 0, cjLen, 'lumber', `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2), ends clipped to the roof slope' : ''}`, undefined, cjFlag)
   }
   const collarY = eaveY + (2 / 3) * activeRh
@@ -1851,6 +1975,43 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
     const fasciaY = eaveY - roof.overhang * Math.sin(theta) + fD / 2
     for (const side of [1, -1] as const) {
       fasciaPair(emit, true, ridgeLen, 0, side * (run + roof.overhang * cosT), fasciaY, splicedNote(spec, ridgeLen, 'rafter tails (scarf joints)'))
+    }
+    // B8d: rake drip edge rides the deck edge over each barge, both planes —
+    // plumb-lifted to the deck TOP plane (+2 mm seam), outer edge flush with
+    // the barge's outer face (the gable F1b convention: rake metal never
+    // grows the plan envelope). This lands the metal the retired F4 deck
+    // flag used to confess about.
+    if (hasRake) {
+      const dripUp = (plane: number) => (rd / 2 + ROOF_DECK_T + DRIP_T / 2) / Math.cos(plane) + 0.002
+      for (const sx of [1, -1] as const) {
+        const dripX = sx * (roof.width / 2 + roof.overhang + t / 2 - DRIP_W / 2)
+        for (const side of [1, -1] as const) {
+          const tipZ = side * (run + roof.overhang * cosT)
+          const tipY = eaveY - roof.overhang * Math.sin(theta)
+          emit(
+            'drip-edge',
+            undefined,
+            [lowerLen2, DRIP_T, DRIP_W],
+            [dripX, (tipY + lowerTopY) / 2 + dripUp(theta), (tipZ + side * lowerTopZ) / 2],
+            (side * Math.PI) / 2,
+            theta,
+            lowerLen2,
+            'steel',
+            'Drip edge — rake (R905.2.8.5)',
+          )
+          emit(
+            'drip-edge',
+            undefined,
+            [upperLen2, DRIP_T, DRIP_W],
+            [dripX, (upperLoY + upperHiY) / 2 + dripUp(phi), (side * (upperLoZ + upperHiZ)) / 2],
+            (side * Math.PI) / 2,
+            phi,
+            upperLen2,
+            'steel',
+            'Drip edge — rake (R905.2.8.5)',
+          )
+        }
+      }
     }
   }
 }

@@ -361,8 +361,9 @@ AND a gate — a checklist line without a test is a wish.
   the overlay-framing trim statement as a FLAG (it must PRINT — Flags
   rows/block, never a label-only aside). Stated trim gaps are flags too:
   SHED roofs model no fascia and therefore NO drip edge at 400 (deck
-  flag, count pinned at zero); gambrel rake metal rides with the B8d
-  rake-ladder follow-up (deck flag).
+  flag, count pinned at zero); the gambrel rake-metal flag RETIRED when
+  B8d landed the rake ladder + rake drip edge as real members (S16d —
+  the retirement is pinned).
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
   framed exterior/CMU and the takeoff booked sheathing the layer engine never
@@ -923,6 +924,24 @@ AND a gate — a checklist line without a test is a wish.
   LOD 200 makes no code claims (valleys aren't framed there either). Full
   hip-plane valley FRAMING stays out of scope — v1 is the printed warning.
   Members are untouched — the valley sha pin holds.
+  (d) The gambrel break purlins carry their R802.5.1 support: 2x4 struts
+  ≤ 4 ft o.c. drop from each purlin's underside to the ceiling joists
+  (stations SNAP onto real joist lines — the gable purlin-fix convention,
+  no floating struts, assumption labeled), the purlin's 400 splice note
+  names 'struts' as its bearing, and a break too low for a real strut
+  FLAGS the purlin ('gambrel break purlin unsupported … R802.5.1')
+  instead of bearing on air — members preferred, honesty as fallback;
+  struts are SHAPE geometry (table-independent, present on compact
+  gambrels — the compact byte-equal gate enumerates them). The gambrel
+  ends carry frameGable's rake ladder, ported per PLANE: dropped end
+  rafters (olT along each plane's normal), 8 barges (4 steep + 4
+  shallow), per-plane outlooker ladders off the ACTUAL xs positions, the
+  deck widened past the barges, and rake drip edge on all 8 rake runs at
+  400 — which RETIRES the B6 F4 rake-metal deck flag honestly (real
+  members, not stale prose; sub-MIN_RAKE_OVERHANG follows the gable
+  convention: sheathing cantilevers, no ladder, no flag). LOD 200 keeps
+  the schematic shape. INTENDED pin move: gambrel-400 repinned for B8d
+  alone; gable/shed/flat/valley/windy pins hold master bytes.
   Origin: LOD-400 audit BATCH 8 (2026-08-20) — frameGable accepted a plain
   ridge board at 2.5:12; frameFlat never called tieAt while shed tied both
   ends; a hip wing into a gable main framed straight through with no
@@ -935,11 +954,20 @@ AND a gate — a checklist line without a test is a wish.
   plate line + beside-a-joist placement, spansX orientation, free takeoff
   tie row, non-windy byte-equality; B8c describe: hip-wing audit exhibit
   zero-members + warning, served-pair silence, parallel/buried/eave-
-  mismatch matrix, abut/graze silence, cupola stacking, three-wing mix) +
+  mismatch matrix, abut/graze silence, cupola stacking, three-wing mix;
+  B8d describe: strut census/foot-on-joist/top-at-purlin/snap pins,
+  ≤4ft-o.c. spacing discipline, purlin splice-note + flag-free pin, rake
+  census with dropped-end deltas + roll pins, 8 rake-drip runs at barge
+  lengths + flush edge, 10° no-bearing fallback flag + Flags row, LOD-200
+  schematic pin, S4 2x4-row parity; F4-retirement pin in the B6 fix-round
+  describe; gambrel-400 INTENDED repin with per-shape enumeration) +
   `src/engines/interpenetration.test.ts` (B8b windy-flat compose matrix
-  incl. zero overhang, non-vacuous) +
+  incl. zero overhang, non-vacuous; B8d gambrel compose matrix 25/40/60°
+  + wide, struts/ladder/drip non-vacuous) +
   `src/framing/compute.multistorey.test.ts` (B8c describe: hip-wing scene
-  warns end-to-end + no valley members, LOD-200 silence).
+  warns end-to-end + no valley members, LOD-200 silence) +
+  `src/engines/roof-framing.spans.test.ts` (compact gambrel byte-equal
+  gate enumerates the break struts as shape geometry).
 
 ## M — Mechanical (HVAC)
 

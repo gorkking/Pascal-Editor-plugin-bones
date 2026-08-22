@@ -674,6 +674,29 @@ describe('interpenetration gate — structural members never share volume', () =
     }
   })
 
+  test('roof framing: B8d gambrel break struts + rake ladder compose SAT-clean (non-vacuous)', () => {
+    // Struts thread between joists (feet ON them), the purlin underside and
+    // the kink rafters; the rake ladder (barges + outlookers + rake drip)
+    // rides over the dropped end rafters under the widened deck — the exact
+    // classes the gate names: struts vs purlins/rafters, ladder vs deck/drip.
+    const cases: [string, Partial<RoofSegmentSlice>][] = [
+      ['gambrel40', { roofType: 'gambrel' }],
+      ['gambrel25', { roofType: 'gambrel', pitch: (25 * Math.PI) / 180 }],
+      ['gambrel60b8', { roofType: 'gambrel', pitch: (60 * Math.PI) / 180 }],
+      ['gambrelWide', { roofType: 'gambrel', width: 12, depth: 8 }],
+    ]
+    for (const [name, over] of cases) {
+      const members = frameRoofs([roofSeg(over)], [], spec400)
+      expect({
+        name,
+        struts: members.some((m) => m.role === 'post'),
+        ladder: members.some((m) => m.role === 'outlooker'),
+        rakeDrip: members.filter((m) => m.role === 'drip-edge' && m.label?.includes('rake')).length,
+        v: violations(members),
+      }).toEqual({ name, struts: true, ladder: true, rakeDrip: 8, v: [] })
+    }
+  })
+
   test('roof framing: mansard + dutch skirts inscribe at arris hips (round-14)', () => {
     for (const type of ['mansard', 'dutch'] as const) {
       expect({

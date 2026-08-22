@@ -295,7 +295,7 @@ describe('compact roofs stay byte-equal (blast radius gate)', () => {
   ]
 
   for (const [name, over] of compactCases) {
-    test(`${name}: tables-on output identical to tables-off; zero flags, zero purlins/struts`, () => {
+    test(`${name}: tables-on output identical to tables-off; zero flags, zero SPAN-FIX purlins/struts`, () => {
       const on = frameRoofs([seg(over)], [], DEFAULT_SPEC)
       const off = frameRoofs([seg(over)], [], noTables)
       expect(on).toEqual(off)
@@ -303,7 +303,18 @@ describe('compact roofs stay byte-equal (blast radius gate)', () => {
       expect(on.some((m) => m.label?.includes('Purlin ') && m.label?.includes('mid-span'))).toBe(
         false,
       )
-      expect(byRole(on, 'post')).toHaveLength(0)
+      // B8d: the gambrel's break struts are SHAPE geometry (the break purlin
+      // carries every rafter joint, R802.5.1 — table-independent, present on
+      // compact roofs too, and `on == off` above proves the independence).
+      // The SPAN-FIX machinery stays absent everywhere: posts on any other
+      // shape would be the mid-span purlin fix firing on a compact roof.
+      const posts = byRole(on, 'post')
+      if (name === 'gambrel') {
+        expect(posts.length).toBeGreaterThan(0)
+        for (const p of posts) expect(p.label).toContain('bears on ceiling joists')
+      } else {
+        expect(posts).toHaveLength(0)
+      }
     })
   }
 

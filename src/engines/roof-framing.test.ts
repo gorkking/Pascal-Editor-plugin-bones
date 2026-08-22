@@ -797,9 +797,11 @@ describe('LOD-400 B6a: roof deck panels per slope plane (R803.2)', () => {
     const upperRise = lowerRise / 0.6 - lowerRise // host default hr
     const phi = Math.atan2(upperRise, upperRun)
     const breakZ = upperRun
-    const lower =
-      roof.width * ((run + roof.overhang * Math.cos(theta) - breakZ) / Math.cos(theta))
-    const upper = roof.width * (breakZ / Math.cos(phi))
+    // B8d: the rake ladder is framed now — the deck widens past the barges
+    // exactly like the gable's (width + 2·overhang along the eave axis).
+    const deckW = roof.width + 2 * roof.overhang
+    const lower = deckW * ((run + roof.overhang * Math.cos(theta) - breakZ) / Math.cos(theta))
+    const upper = deckW * (breakZ / Math.cos(phi))
     const ratio = areaOf(members) / (2 * (lower + upper))
     expect(ratio).toBeGreaterThan(0.98) // kink/ridge/eave seams only
     expect(ratio).toBeLessThanOrEqual(1)
@@ -942,13 +944,15 @@ describe('LOD-400 B6c: drip edge members at eaves + rakes (R905.2.8.5)', () => {
     }
   })
 
-  test('per-shape counts: hip/mansard/dutch cap 4 fascia eaves, gambrel 2, flat 4 perimeter', () => {
+  test('per-shape counts: hip/mansard/dutch cap 4 fascia eaves, gambrel 2+8, flat 4 perimeter', () => {
     const count = (roofType: string) =>
       dripOf(frameRoofs([seg({ roofType, width: 10, depth: 8 })], [], at400)).length
     expect(count('hip')).toBe(4)
     expect(count('mansard')).toBe(4)
     expect(count('dutch')).toBe(4)
-    expect(count('gambrel')).toBe(2) // rakes unframed on gambrel ends (B8d) — stated
+    // B8d landed the gambrel rake ladder: 2 eave runs + 8 rake runs (2 ends
+    // × 2 sides × 2 planes) — the old '2, rakes unframed — stated' is retired
+    expect(count('gambrel')).toBe(10)
     expect(count('flat')).toBe(4)
   })
 
@@ -973,11 +977,18 @@ describe('B6 fix round: trim gaps are flagged members, not commit-message asides
     expect(deck[0]?.flag).toContain('R905.2.8.5')
   })
 
-  test('gambrel at 400: rake-metal gap flagged on the deck panels (B8d follow-up)', () => {
+  test('gambrel at 400: the F4 rake-metal flag is RETIRED — B8d landed the members it confessed about', () => {
+    // The flag said the gap 'rides with the R802 rake-ladder follow-up
+    // (B8d)'. B8d landed: barges + outlookers + rake drip are REAL members
+    // now, so the honest move is retirement, not stale prose (the
+    // gable/hip no-trim-gap convention below).
     const members = frameRoofs([seg({ roofType: 'gambrel' })], [], at400)
     const deck = members.filter((m) => m.role === 'sheathing')
     expect(deck.length).toBeGreaterThan(0)
-    for (const d of deck) expect(d.flag).toContain('rake framing + rake drip edge not modeled')
+    for (const d of deck) expect(d.flag ?? '').not.toContain('rake framing + rake drip edge not modeled')
+    // …because the metal exists (8 rake runs) and the ladder is framed
+    expect(members.filter((m) => m.role === 'drip-edge' && m.label?.includes('rake'))).toHaveLength(8)
+    expect(members.filter((m) => m.role === 'outlooker').length).toBeGreaterThan(0)
   })
 
   test('gable/hip at 400 carry NO trim-gap flag (their drip edge is real); 300 stays quiet everywhere', () => {
@@ -1392,6 +1403,16 @@ describe('B7 fix round: end-plane thrust statement prints (F1) + crown bearing h
 describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (hash pins)', () => {
   // sha256 of the framed member JSON, captured at master 779d70e — the B7
   // hip-family members must not perturb these shapes by a single byte.
+  // B8 INTENDED-CHANGE (per-shape enumeration, master 5d415e7):
+  //  - gambrel-400 REPINNED (B8d ONLY): break-purlin struts (R802.5.1) +
+  //    the ported rake ladder (dropped end rafters, barges, outlookers,
+  //    widened deck, rake drip) + the purlin splice-bearing note now names
+  //    'struts' + the retired F4 rake-metal deck flag. Recaptured at the
+  //    B8d change itself.
+  //  - EVERY other pin holds the master bytes: B8a flags only sub-3:12
+  //    gable ridges (the pinned scenes sit at 40°), B8b gates flat ties on
+  //    hurricaneTies (flat-400 is non-windy; gable-400-windy has no flat),
+  //    B8c emits WARNINGS, never members (the valley pin proves it).
   const hashOf = (members: Member[]): string =>
     createHash('sha256').update(JSON.stringify(members)).digest('hex').slice(0, 16)
   const PINS: [string, Partial<RoofSegmentSlice>, Partial<FramingSpec>, string][] = [
@@ -1405,7 +1426,7 @@ describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (
     ['shed-200', { roofType: 'shed' }, { detail: '200' }, '4da5818e22a231e4'],
     ['shed-big-400', { roofType: 'shed', depth: 8 }, { detail: '400' }, '0d54b38723e03603'],
     ['flat-400', { roofType: 'flat' }, { detail: '400' }, 'e5d74f2bb9f51fd1'],
-    ['gambrel-400', { roofType: 'gambrel' }, { detail: '400' }, '7001177e55d8903e'],
+    ['gambrel-400', { roofType: 'gambrel' }, { detail: '400' }, 'e4ec28401bfd49a8'],
   ]
 
   for (const [name, over, sp, pin] of PINS) {
@@ -1608,5 +1629,139 @@ describe('LOD-400 B8c: overlapping segment pairs the valley detector skips WARN'
     const warnings = detectUnframedRoofIntersections([major, gableWing, hipWing])
     expect(warnings).toHaveLength(1)
     expect(warnings[0]).toContain('roofseg_hipwing')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B8d: gambrel break struts (R802.5.1) + the ported rake ladder
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B8d: break purlins get their struts; gambrel ends get their rake', () => {
+  const IN = 0.0254
+  const T = 1.5 * IN
+  const RD = 5.5 * IN // 2x6 rafter/joist depth
+  const RDD = 7.25 * IN // 2x8 break-purlin depth
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const roof = seg({ roofType: 'gambrel' }) // 8 × 6 @ 40°, wr .5 / hr .6
+  const members = frameRoofs([roof], [], at400)
+  const theta = roof.pitch
+  const baseY = roof.position[1] + roof.wallHeight
+  const lowerRise = 1.5 * Math.tan(theta)
+  const breakY = baseY + lowerRise
+
+  test('strut census: 2x4 posts under BOTH break purlins, feet ON joists, tops at the purlin underside', () => {
+    const struts = byRole(members, 'post')
+    expect(struts.length).toBeGreaterThanOrEqual(10) // ≥5 per side @ ≤4ft over ~7.9 m
+    expect(struts.length % 2).toBe(0) // mirrored on ±breakZ
+    const cjXs = byRole(members, 'ceiling-joist').map((cj) => cj.position[0] as number)
+    const cjTop = baseY + RD
+    for (const s of struts) {
+      expect(s.size).toBe('2x4')
+      expect(Math.abs(s.position[2] as number)).toBeCloseTo(1.5, 6) // the kink plan line
+      // foot exactly on the joist top face, top at the purlin underside
+      expect((s.position[1] as number) - s.length / 2).toBeCloseTo(cjTop, 9)
+      expect((s.position[1] as number) + s.length / 2).toBeCloseTo(breakY - RDD, 9)
+      // snapped onto a real joist line (no floating struts)
+      expect(cjXs.some((x) => Math.abs(x - (s.position[0] as number)) < 1e-9)).toBe(true)
+      expect(s.label).toContain('R802.5.1')
+    }
+  })
+
+  test('struts stay within ≤4ft o.c. discipline (snap tolerance = one joist bay)', () => {
+    const xsOf = byRole(members, 'post')
+      .filter((s) => (s.position[2] as number) > 0)
+      .map((s) => s.position[0] as number)
+      .sort((a, b) => a - b)
+    expect(xsOf.length).toBeGreaterThanOrEqual(5)
+    for (let i = 1; i < xsOf.length; i++) {
+      expect((xsOf[i] as number) - (xsOf[i - 1] as number)).toBeLessThanOrEqual(1.2 + 16 * IN)
+    }
+  })
+
+  test('the 8 m break purlin names its splice bearing STRUTS at 400 (the gable purlin wording)', () => {
+    const purlins = byRole(members, 'ridge').filter((r) => r.label?.includes('gambrel break'))
+    expect(purlins).toHaveLength(2)
+    for (const p of purlins) {
+      expect(p.label).toContain('spliced over struts')
+      expect(p.label).not.toContain('verify strut support')
+      expect(p.flag).toBeUndefined()
+    }
+  })
+
+  test('rake port: 8 barges (4 steep + 4 shallow), outlookers rolled INTO their planes, dropped ends', () => {
+    const barges = byRole(members, 'rafter').filter((r) => r.label?.includes('Barge'))
+    expect(barges).toHaveLength(8)
+    const phi = Math.atan2(lowerRise / 0.6 - lowerRise, 1.5)
+    expect(barges.filter((b) => Math.abs((b.rotation[2] as number) - theta) < 1e-9)).toHaveLength(4)
+    expect(barges.filter((b) => Math.abs((b.rotation[2] as number) - phi) < 1e-9)).toHaveLength(4)
+    for (const b of barges) expect(Math.abs(b.position[0] as number)).toBeCloseTo(4.3, 6)
+    const outlookers = byRole(members, 'outlooker')
+    expect(outlookers.length).toBeGreaterThanOrEqual(8) // ≥1 per plane per end per side
+    for (const o of outlookers) {
+      const roll = Math.abs(o.rotation[0] ?? 0)
+      expect(Math.min(Math.abs(roll - theta), Math.abs(roll - phi))).toBeLessThan(1e-6)
+      expect(o.rotation[1]).toBeCloseTo(0, 6)
+    }
+    // dropped-gable detail per PLANE: the end rafters sit one outlooker
+    // thickness under their plane (vertically olT/cosθ resp. olT/cosφ)
+    const lowers = byRole(members, 'rafter').filter(
+      (r) => r.label?.includes('gambrel lower') && (r.position[2] as number) > 0,
+    )
+    const xsSorted = lowers.map((r) => r.position[0] as number).sort((a, b) => a - b)
+    const endX = xsSorted[0] as number
+    const midX = xsSorted[Math.floor(xsSorted.length / 2)] as number
+    const yOf = (x: number) => (lowers.find((r) => Math.abs((r.position[0] as number) - x) < 1e-9) as Member).position[1] as number
+    expect(yOf(midX) - yOf(endX)).toBeCloseTo(T / Math.cos(theta), 6)
+  })
+
+  test('rake drip edge rides the new rakes at 400: 8 runs, barge lengths, flush outer edge (F1b)', () => {
+    const rakes = members.filter((m) => m.role === 'drip-edge' && m.label?.includes('rake'))
+    expect(rakes).toHaveLength(8)
+    const bargeLens = new Set(
+      byRole(members, 'rafter')
+        .filter((r) => r.label?.includes('Barge'))
+        .map((b) => b.length.toFixed(9)),
+    )
+    for (const r of rakes) {
+      expect(bargeLens.has(r.length.toFixed(9))).toBe(true)
+      // outer edge flush with the barge outer face — never grows the envelope
+      expect(Math.abs(r.position[0] as number) + r.dims[2] / 2).toBeCloseTo(4.3 + T / 2, 6)
+    }
+  })
+
+  test('no-bearing fallback: a 10° break sits too low for struts — the purlin FLAGS instead (P4 prints)', () => {
+    const flat = frameRoofs([seg({ roofType: 'gambrel', pitch: (10 * Math.PI) / 180 })], [], at400)
+    expect(byRole(flat, 'post')).toHaveLength(0)
+    const purlins = byRole(flat, 'ridge').filter((r) => r.label?.includes('gambrel break'))
+    expect(purlins).toHaveLength(2)
+    for (const p of purlins) {
+      expect(p.flag).toContain('gambrel break purlin unsupported')
+      expect(p.flag).toContain('R802.5.1')
+    }
+    const rows = computeTakeoff(flat, [])
+    const row = rows.find((r) => r.section === 'Flags' && r.detail.includes('break purlin unsupported'))
+    expect(row?.quantity).toBe(2)
+  })
+
+  test('LOD 200 stays schematic: no struts, no rake ladder, no drip, no flags', () => {
+    const generic = frameRoofs([roof], [], { ...DEFAULT_SPEC, detail: '200' })
+    expect(byRole(generic, 'post')).toHaveLength(0)
+    expect(byRole(generic, 'outlooker')).toHaveLength(0)
+    expect(generic.some((m) => m.label?.includes('Barge'))).toBe(false)
+    expect(generic.some((m) => m.role === 'drip-edge')).toBe(false)
+    expect(generic.some((m) => m.flag)).toBe(false)
+  })
+
+  test('S4: struts + outlookers ride the existing Roof 2x4 pcs rows beside the collar ties', () => {
+    const rows = computeTakeoff(members, [])
+    const expected =
+      byRole(members, 'post').length +
+      byRole(members, 'outlooker').length +
+      byRole(members, 'collar-tie').length
+    const sum = rows
+      .filter((r) => r.section === 'Roof' && r.item === '2x4' && r.unit === 'pcs')
+      .reduce((s, r) => s + r.quantity, 0)
+    expect(expected).toBeGreaterThan(0)
+    expect(sum).toBe(expected)
   })
 })
