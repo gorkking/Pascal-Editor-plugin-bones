@@ -35,7 +35,7 @@
     "assumptions": {
       "speciesGrade": "No. 2 grade Douglas fir-larch, hem-fir, Southern pine or spruce-pine-fir (table gives one span for all four)",
       "groundSnowPsf": 30,
-      "groundSnowNote": "30 psf column also applies where ground snow < 30 psf and roof live load <= 20 psf (table footnote e). 50/70 psf columns exist in the code table but are not captured here.",
+      "groundSnowNote": "30 psf column also applies where ground snow < 30 psf and roof live load <= 20 psf (table footnote e). The 50/70 psf columns are captured for the roof-and-ceiling 2-ply rows only, under groundSnow50Psf/groundSnow70Psf (LOD-400 B11) - read from the same 2021 UpCodes chapter-6 export as the 30 psf block and matching it cell-for-cell on the shared column.",
       "buildingWidthsFt": [
         12,
         24,
@@ -388,6 +388,186 @@
           "spanFtIn": "5-7",
           "spanFt": 5.5,
           "jackStudsEachEnd": 3
+        }
+      }
+    },
+    "groundSnow50Psf": {
+      "codeRef": "IRC 2021 Table R602.7(1) - ground snow load 50 psf columns (roof-and-ceiling condition, 2-ply rows; UpCodes 2021 ch. 6 export)",
+      "roofAndCeiling": {
+        "2-2x4": {
+          "12": {
+            "spanFtIn": "3-5",
+            "spanFt": 3.4,
+            "jackStudsEachEnd": 1
+          },
+          "24": {
+            "spanFtIn": "2-7",
+            "spanFt": 2.5,
+            "jackStudsEachEnd": 1
+          },
+          "36": {
+            "spanFtIn": "2-2",
+            "spanFt": 2.1,
+            "jackStudsEachEnd": 1
+          }
+        },
+        "2-2x6": {
+          "12": {
+            "spanFtIn": "5-1",
+            "spanFt": 5.0,
+            "jackStudsEachEnd": 1
+          },
+          "24": {
+            "spanFtIn": "3-11",
+            "spanFt": 3.9,
+            "jackStudsEachEnd": 1
+          },
+          "36": {
+            "spanFtIn": "3-3",
+            "spanFt": 3.2,
+            "jackStudsEachEnd": 2
+          }
+        },
+        "2-2x8": {
+          "12": {
+            "spanFtIn": "6-5",
+            "spanFt": 6.4,
+            "jackStudsEachEnd": 1
+          },
+          "24": {
+            "spanFtIn": "5-0",
+            "spanFt": 5.0,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "4-2",
+            "spanFt": 4.1,
+            "jackStudsEachEnd": 2
+          }
+        },
+        "2-2x10": {
+          "12": {
+            "spanFtIn": "7-8",
+            "spanFt": 7.6,
+            "jackStudsEachEnd": 2
+          },
+          "24": {
+            "spanFtIn": "5-11",
+            "spanFt": 5.9,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "4-11",
+            "spanFt": 4.9,
+            "jackStudsEachEnd": 2
+          }
+        },
+        "2-2x12": {
+          "12": {
+            "spanFtIn": "9-0",
+            "spanFt": 9.0,
+            "jackStudsEachEnd": 2
+          },
+          "24": {
+            "spanFtIn": "6-11",
+            "spanFt": 6.9,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "5-10",
+            "spanFt": 5.8,
+            "jackStudsEachEnd": 2
+          }
+        }
+      }
+    },
+    "groundSnow70Psf": {
+      "codeRef": "IRC 2021 Table R602.7(1) - ground snow load 70 psf columns (roof-and-ceiling condition, 2-ply rows; UpCodes 2021 ch. 6 export)",
+      "roofAndCeiling": {
+        "2-2x4": {
+          "12": {
+            "spanFtIn": "3-0",
+            "spanFt": 3.0,
+            "jackStudsEachEnd": 1
+          },
+          "24": {
+            "spanFtIn": "2-4",
+            "spanFt": 2.3,
+            "jackStudsEachEnd": 1
+          },
+          "36": {
+            "spanFtIn": "2-0",
+            "spanFt": 2.0,
+            "jackStudsEachEnd": 1
+          }
+        },
+        "2-2x6": {
+          "12": {
+            "spanFtIn": "4-6",
+            "spanFt": 4.5,
+            "jackStudsEachEnd": 1
+          },
+          "24": {
+            "spanFtIn": "3-6",
+            "spanFt": 3.5,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "2-11",
+            "spanFt": 2.9,
+            "jackStudsEachEnd": 2
+          }
+        },
+        "2-2x8": {
+          "12": {
+            "spanFtIn": "5-9",
+            "spanFt": 5.7,
+            "jackStudsEachEnd": 1
+          },
+          "24": {
+            "spanFtIn": "4-5",
+            "spanFt": 4.4,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "3-9",
+            "spanFt": 3.7,
+            "jackStudsEachEnd": 2
+          }
+        },
+        "2-2x10": {
+          "12": {
+            "spanFtIn": "6-9",
+            "spanFt": 6.7,
+            "jackStudsEachEnd": 2
+          },
+          "24": {
+            "spanFtIn": "5-3",
+            "spanFt": 5.2,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "4-5",
+            "spanFt": 4.4,
+            "jackStudsEachEnd": 2
+          }
+        },
+        "2-2x12": {
+          "12": {
+            "spanFtIn": "8-0",
+            "spanFt": 8.0,
+            "jackStudsEachEnd": 2
+          },
+          "24": {
+            "spanFtIn": "6-2",
+            "spanFt": 6.1,
+            "jackStudsEachEnd": 2
+          },
+          "36": {
+            "spanFtIn": "5-2",
+            "spanFt": 5.1,
+            "jackStudsEachEnd": 3
+          }
         }
       }
     },

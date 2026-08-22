@@ -13,7 +13,12 @@
 
 import adoptionData from '../../data/jurisdictions-adoption.json'
 import climateData from '../../data/jurisdictions-climate.json'
-import { DEFAULT_SPEC, type FramingSpec, rafterSpansForSnow } from '../core/spec'
+import {
+  DEFAULT_SPEC,
+  type FramingSpec,
+  headerBandForSnow,
+  rafterSpansForSnow,
+} from '../core/spec'
 import { feet, inches } from '../core/units'
 
 export type JurisdictionProfile = {
@@ -124,6 +129,15 @@ export function applyJurisdiction(
   // (R802.4.1(1) low-snow / R802.4.1(5) at ≥ 50 psf) — the sizes and the
   // spans the roof engine checks against always move together.
   next.rafterSpans = rafterSpansForSnow(profile.groundSnowLoadPsf)
+  // Heavy snow deepens the prescriptive WALL headers too (LOD-400 B11):
+  // IRC Table R602.7(1) tabulates header spans by ground snow load
+  // (30/50/70 psf columns) AND building width; VT at 60 psf used to frame
+  // headers byte-equal to INTL. The band snaps UP to the governing column;
+  // width isn't in the spec, so the band carries an assumption the wall
+  // engine prints on every header it sizes (low-snow: none — byte-equal).
+  const headerBand = headerBandForSnow(profile.groundSnowLoadPsf)
+  next.headerRules = headerBand.rules
+  next.headerAssumption = headerBand.assumption
   return next
 }
 
