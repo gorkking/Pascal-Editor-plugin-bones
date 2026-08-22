@@ -202,6 +202,39 @@ AND a gate — a checklist line without a test is a wish.
   scans + deterministic flip-step pins + no-confession pins — all
   mutation-checked) + the GR/IB key pins in
   `src/plans/plan-set.test.ts`.
+- **E8 Receptacle coverage is complete beyond the 15" wall walk — and
+  honest where the scene can't carry it.** OUTDOOR (NEC 210.52(E),
+  210.8(A)(3), 406.9(A)/(B)): every scene with an exterior shell mounts
+  a front AND a back receptacle on EXTERIOR faces — front = the
+  street-nearest exterior wall via the SAME `streetEdgePoint` the
+  service lateral rides, back = the most nearly opposite wall farthest
+  from street — as the dedicated `receptacle-wr-gfci` kind (WR + GFCI +
+  extra-duty in-use cover in kind, meta AND label; own `EXT-1` 20 A
+  GFCI circuit, never AFCI; takeoff books WR boxes and covers as their
+  own rows, paper marks them `WR` with a legend line). A
+  single-exterior-wall scene doubles up on it and WARNS; a shell-less
+  scene warns — two required outlets never silently collapse or drop.
+  SINK RADIUS (210.8(A)(7)/(9)): any receptacle within 6 ft plan of a
+  PLACED kitchen-sink/lavatory/bathtub/shower flips to GFCI — measured
+  from the item center (no bowl-edge geometry; stated proxy), deviceId
+  untouched by the flip (the reconciler follows deviceKind). COUNTER
+  (210.52(C), hybrid-honest): a placed kitchen-sink pins its counter
+  wall → 44" AFF walk per layoutAlgorithmHints (first box ≤ 24" of
+  each run end, ≤ 48" o.c.), clipped to the kitchen polygon, broken by
+  door ROs, faucet zone kept clear; a sink-less kitchen zone WARNS per
+  kitchen instead of inventing casework; island sinks take the 2023
+  210.52(C)(2) label. BASIN (210.52(D)): a placed lav pins a GFCI box
+  within 3 ft at 40" AFF on the basin-side face; one box may serve two
+  basins; freestanding basins and >3 ft RO snap-outs warn, never
+  silent. Counter/basin boxes never count toward the 210.52(A)
+  floor-line spacing census (doNotCountTowardWallSpacing). All B14
+  boxes carry deterministic deviceIds (`-out-front/back`, `-ctr-<i>`,
+  `-basin-<lavId>`) and are movable `bones:device` nodes (E5 contract).
+  Origin: LOD-400 audit BATCH 14 (2026-08-21) — zero outdoor
+  receptacles ever, all kitchen/bath boxes at 15", the sink-GFCI test
+  skipped behind a stale 'once sink positions are extracted' comment.
+  Gate: `src/engines/electrical.receptacles.test.ts` (30 tests, all
+  four sub-invariants mutation-checked).
 
 ## S — Structure
 
