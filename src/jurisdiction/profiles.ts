@@ -122,6 +122,14 @@ export function applyJurisdiction(
   next.anchorBoltSpacing = profile.seismicHoldDowns ? feet(4) : feet(6)
   // High-wind coastal: rafter-to-plate ties.
   next.hurricaneTies = profile.hurricaneTies || profile.ultimateWindMph >= 130
+  // ≥ 130 mph the uplift path must CONTINUE down the wall to the foundation
+  // (R802.11, R301.2.1/WFCM — LOD-400 B10): stud-to-plate connectors,
+  // opening uplift straps, plate-to-foundation straps. The trigger is the
+  // data's own highWind overlay rule (wall-assemblies.json:
+  // 'ultimateWindMph >= 130 && flags.hurricaneTies') — the broader
+  // hurricaneTies set (sub-130 coastal states: TX/AL/GA/NY…) keeps its
+  // belt-and-braces roof ties with no wall-side claim, byte-equal walls.
+  next.highWindUplift = profile.hurricaneTies && profile.ultimateWindMph >= 130
   // Heavy snow bumps the default rafter one size (span tables shrink fast).
   if (profile.groundSnowLoadPsf >= 50) next.rafterSize = '2x8'
   if (profile.groundSnowLoadPsf >= 70) next.rafterSize = '2x10'

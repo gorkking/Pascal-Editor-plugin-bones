@@ -268,6 +268,17 @@ export type FramingSpec = {
   seismicHoldDowns: boolean
   /** High-wind → hurricane ties at rafter/plate. */
   hurricaneTies: boolean
+  /**
+   * ≥ 130 mph design wind (LOD-400 B10): the wall engine CONTINUES the
+   * uplift path the roof ties start — stud-to-plate connectors, header/king
+   * uplift straps at openings, plate-to-foundation straps (R802.11,
+   * R301.2.1/WFCM). Distinct from `hurricaneTies`, which is ALSO true for
+   * sub-130 coastal belt-and-braces states (TX/AL/GA/NY…) that get roof
+   * ties with no wall-side prescriptive-uplift claim — the trigger mirrors
+   * data/wall-assemblies.json's highWind overlay
+   * ('ultimateWindMph >= 130 && flags.hurricaneTies').
+   */
+  highWindUplift: boolean
   // ---- wall bracing (R602.10, LOD-400 B9) ----
   /**
    * Declared braced-wall METHOD. v1 ships CS-WSP only (continuous
@@ -306,6 +317,7 @@ export const DEFAULT_SPEC: FramingSpec = {
   anchorBoltEndDistance: inches(12),
   seismicHoldDowns: false,
   hurricaneTies: false,
+  highWindUplift: false,
   wallBracingMethod: 'CS-WSP',
 }
 
