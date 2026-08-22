@@ -1,4 +1,23 @@
-# Bones board — DAY-8 (2026-08-21) — full backlog go ("all these are great ideas, please work on implementing them")
+# Bones board — NIGHT-8 (2026-08-22) — "Performance, responsiveness. test cameras."
+
+## NIGHT-8 PLAN (Julien's sign-off asks + backlog continuation)
+1. BACKLOG: B9 merge (final skeptic in flight) → B11 snow headers;
+   B7 hip thrust (pilot building) → B8 roof closures → B10 uplift;
+   B21e waste factors when takeoff.ts quiets; queue residuals
+   (zone-twin dedupe, plan-set legend grammar for strap/HDU/GR,
+   square-hip SAT gate, yawed-section euler bands).
+2. PERFORMANCE + RESPONSIVENESS (new ask): profile the dev build —
+   X-ray activation latency, mode switching, member-heavy scenes
+   (master emits far more geometry than a week ago: deck+GES+recep),
+   reconcile batching, FPS during device moves. Findings → fix
+   pilots with the usual loop.
+3. CAMERAS (new ask): browser QA on camera flows — orbit/pan/zoom in
+   Normal/X-ray/Basement, transitions on level activation, exploded
+   strata, camera during MOVE drags. Evidence-based rounds.
+4. SHIP at dawn when loop-verified: repin dev 3002 → editor PR →
+   private-editor PR → prod; morning review file.
+
+# DAY-8 (2026-08-21) — full backlog go ("all these are great ideas, please work on implementing them")
 
 ## DAY-8 STATUS (~evening) — 7 merges on master (9ecf978, 1281 tests)
 MERGED today, in order: B13 alarms (8438485) → UX tri-state (89e64f0
