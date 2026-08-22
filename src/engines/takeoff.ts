@@ -208,6 +208,10 @@ const TIE_NAILS = fastening.hardware['hurricane-tie'].nailsPer
 const FIXTURE_ROWS: Record<FixtureKind, { item: string; detail: string }> = {
   receptacle: { item: 'Receptacles', detail: 'NEC 210.52 spacing' },
   'receptacle-gfci': { item: 'GFCI receptacles', detail: 'NEC 210.8 wet locations' },
+  'receptacle-wr-gfci': {
+    item: 'WR GFCI receptacles (outdoor)',
+    detail: 'NEC 210.52(E) + 406.9(A) weather-resistant',
+  },
   switch: { item: 'Switches', detail: 'wall controls' },
   light: { item: 'Lights', detail: 'ceiling/wall luminaires' },
   'smoke-alarm': { item: 'Smoke alarms', detail: 'IRC R314' },
@@ -231,6 +235,7 @@ const FIXTURE_ROWS: Record<FixtureKind, { item: string; detail: string }> = {
 const FIXTURE_ORDER: readonly FixtureKind[] = [
   'receptacle',
   'receptacle-gfci',
+  'receptacle-wr-gfci',
   'switch',
   'light',
   'smoke-alarm',
@@ -910,7 +915,11 @@ export function computeTakeoff(
 
   // ---- Electrical boxes by type (LOD 400) — derived from fixture kinds ----
   const gangBoxes = fixtures.filter(
-    (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
+    (f) =>
+      f.kind === 'receptacle' ||
+      f.kind === 'receptacle-gfci' ||
+      f.kind === 'receptacle-wr-gfci' ||
+      f.kind === 'switch',
   ).length
   const ceilingBoxes = fixtures.filter(
     // B13 examiner flag 2: 'co-alarm' is a ceiling device too — its box was
@@ -918,7 +927,12 @@ export function computeTakeoff(
     (f) => f.kind === 'light' || f.kind === 'smoke-alarm' || f.kind === 'co-alarm',
   ).length
   const panelCans = fixtures.filter((f) => f.kind === 'panel').length
+  // B14a: every outdoor WR receptacle wears an extra-duty while-in-use
+  // cover [NEC 406.9(B)(1)] — a real line item, booked 1:1 with the boxes.
+  const inUseCovers = fixtures.filter((f) => f.kind === 'receptacle-wr-gfci').length
   if (gangBoxes > 0) push('Electrical', 'Device boxes (1-gang)', 'receptacles + switches', gangBoxes, 'pcs')
+  if (inUseCovers > 0)
+    push('Electrical', 'In-use covers (extra-duty)', 'NEC 406.9(B) wet-location while-in-use', inUseCovers, 'pcs')
   if (ceilingBoxes > 0) push('Electrical', 'Ceiling boxes', 'lights + smoke/CO alarms', ceilingBoxes, 'pcs')
   if (panelCans > 0) push('Electrical', 'Panel cans', 'load center enclosures', panelCans, 'pcs')
 

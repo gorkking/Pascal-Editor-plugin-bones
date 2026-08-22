@@ -165,6 +165,10 @@ export type Member = {
 export type FixtureKind =
   | 'receptacle'
   | 'receptacle-gfci'
+  /** Outdoor weather-resistant GFCI receptacle with an in-use cover —
+   * NEC 210.52(E) front+back, 210.8(A)(3), 406.9(A)/(B). Its own kind so
+   * the takeoff and paper distinguish WR devices from interior GFCI. */
+  | 'receptacle-wr-gfci'
   | 'switch'
   | 'light'
   | 'smoke-alarm'

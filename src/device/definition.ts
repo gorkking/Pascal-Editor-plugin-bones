@@ -97,6 +97,6 @@ export const deviceDefinition: DeviceDefinition = {
 
   mcp: {
     description:
-      'Bones movable electrical device node (receptacle | receptacle-gfci | switch), reconciled 1:1 against the derived electrical layout by deviceId. wallId + wallT (0..1 along the wall) + heightAff anchor the box; editor drags slide it along the wall and commit wallT (position resets to [0,0,0]); a position written off the default outranks the wall anchor. Moving it away from its seed* fields makes it an engine override: the box snaps out of rough openings, mounts beside a stud (or books a blocking member), heights clamp to the legal band (receptacle 0.15-1.7 m, switch 0.9-2.0 m per NEC 404.8(A)), and the wiring re-routes. Delete the node to restore auto-placement.',
+      'Bones movable electrical device node (receptacle | receptacle-gfci | receptacle-wr-gfci | switch), reconciled 1:1 against the derived electrical layout by deviceId. wallId + wallT (0..1 along the wall) + heightAff anchor the box; editor drags slide it along the wall and commit wallT (position resets to [0,0,0]); a position written off the default outranks the wall anchor. Moving it away from its seed* fields makes it an engine override: the box snaps out of rough openings, mounts beside a stud (or books a blocking member), heights clamp to the legal band (receptacle 0.15-1.7 m, switch 0.9-2.0 m per NEC 404.8(A)), and the wiring re-routes. Delete the node to restore auto-placement.',
   },
 }

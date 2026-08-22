@@ -550,7 +550,9 @@ describe('count sanity — two-room plan (living + kitchen)', () => {
     expect(ofKind(fixtures, 'panel')).toHaveLength(1)
     // street→meter→panel chain: one meter on the exterior face by the panel
     expect(ofKind(fixtures, 'electric-meter')).toHaveLength(1)
-    expect(fixtures).toHaveLength(22)
+    // B14a: front + back outdoor WR GFCI receptacles (NEC 210.52(E))
+    expect(ofKind(fixtures, 'receptacle-wr-gfci')).toHaveLength(2)
+    expect(fixtures).toHaveLength(24)
   })
 
   test('exterior walls emit on the interior face only', () => {

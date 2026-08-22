@@ -136,6 +136,7 @@ const CONTEXT_SHEETS = new Set(['electrical', 'mep'])
 const FIXTURE_TAG: Record<string, string> = {
   receptacle: 'R',
   'receptacle-gfci': 'G',
+  'receptacle-wr-gfci': 'WR',
   switch: 'S',
   light: 'L',
   'smoke-alarm': 'SD',
@@ -1295,6 +1296,7 @@ function planSheet(
     const TAG_NAMES: Record<string, string> = {
       R: 'receptacle',
       G: 'GFCI receptacle',
+      WR: 'WR GFCI receptacle — outdoor, in-use cover (406.9(B))',
       S: 'switch',
       L: 'light',
       SD: 'smoke alarm',

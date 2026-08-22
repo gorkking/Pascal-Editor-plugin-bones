@@ -106,7 +106,12 @@ describe('deterministic device ids', () => {
     const fixtures = layoutElectrical(walls, rooms)
     for (const f of fixtures) {
       const hasId = typeof f.meta?.deviceId === 'string' && (f.meta?.deviceId as string).length > 0
-      if (f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch') {
+      if (
+        f.kind === 'receptacle' ||
+        f.kind === 'receptacle-gfci' ||
+        f.kind === 'receptacle-wr-gfci' ||
+        f.kind === 'switch'
+      ) {
         expect(hasId).toBe(true)
       } else {
         expect(hasId).toBe(false)

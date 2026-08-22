@@ -591,6 +591,9 @@ export function layoutElectrical(
   const meter = placeElectricMeter(walls, rooms, overrides?.electricMeter)
   if (meter) fixtures.push(meter)
 
+  // ---- outdoor receptacles: front + back WR GFCI (NEC 210.52(E), B14a) ----
+  fixtures.push(...placeOutdoorReceptacles(walls, rooms, meter, warnings))
+
   // ---- circuiting (NEC 210.11/210.12/220.12) + 3-way switching ----
   assignCircuits(fixtures, rooms)
 
@@ -847,6 +850,135 @@ function placeElectricMeter(
     sourceId: spot.wall.id,
     label: 'Electric meter — service entrance (NEC 230.66)',
   }
+}
+
+// ---------------------------------------------------------------------------
+// Outdoor receptacles (LOD-400 B14a, NEC 210.52(E))
+// ---------------------------------------------------------------------------
+
+/** 210.52(E)(1): outdoor receptacles mount no more than 6'6" above grade. */
+const OUTDOOR_MAX_AFF = feet(rules.receptacles.outdoorMaxAboveGradeFt)
+
+/** The exterior FACE of a wall — the opposite of its resolved interior face
+ * (no room data resolves a side → interior guess is +normal → use −). */
+function exteriorFaceOf(wall: WallSlice, rooms: RoomSlice[]): WallFace {
+  const inFace = interiorFaces(wall, rooms)[0] ?? faceOf(wall, 1)
+  return faceOf(wall, inFace.side === 1 ? -1 : 1)
+}
+
+/**
+ * NEC 210.52(E)(1): one receptacle at the FRONT and one at the BACK of every
+ * dwelling. Never modeled before B14 — `interiorFaces()` mounts devices on
+ * interior faces only, so the outdoor count was zero forever while
+ * rules.json booked `outdoorFrontAndBack`. Both boxes are weather-resistant
+ * GFCI behind an extra-duty in-use cover [210.8(A)(3), 406.9(A)/(B)] on
+ * their own 20 A exterior circuit.
+ *  - FRONT = the exterior wall whose OUTSIDE face midpoint is nearest the
+ *    street point — the same bbox+margin pick the service lateral rides
+ *    (`streetEdgePoint`, anchored at the meter when the scene has one), so
+ *    the lateral and the front receptacle agree on "street side".
+ *  - BACK = the most nearly opposite-facing exterior wall, farthest from the
+ *    street (ties by id); with no opposing wall, the farthest remaining
+ *    exterior wall. A single-exterior-wall scene mounts both on it, apart,
+ *    and WARNS — two required outlets never silently collapse to one.
+ * Boxes snap clear of rough openings box-edge-aware (`snapBoxClearOfRo`);
+ * the 15" interior mounting convention sits far under the 6'6" grade cap.
+ */
+function placeOutdoorReceptacles(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  meter: Fixture | null,
+  warnings?: string[],
+): Fixture[] {
+  const ext = walls.filter((w) => w.exterior && !w.curved && w.length >= 0.5)
+  if (ext.length === 0) {
+    // A scene with walls but no shell (partition-only drafts) has no
+    // "outdoors" to serve — say so instead of inventing a face.
+    if (walls.some((w) => !w.curved && w.length >= 0.5)) {
+      warnings?.push(
+        'no exterior wall — outdoor receptacles (NEC 210.52(E)) not placed; verify front/back coverage',
+      )
+    }
+    return []
+  }
+  // Street anchor: the meter (the service chain's own anchor), else the
+  // walls' bbox center — deterministic either way.
+  let anchor: Pt
+  if (meter) {
+    anchor = [meter.position[0], meter.position[2]]
+  } else {
+    let minX = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let minZ = Number.POSITIVE_INFINITY
+    let maxZ = Number.NEGATIVE_INFINITY
+    for (const w of walls) {
+      for (const p of [w.start, w.end]) {
+        minX = Math.min(minX, p[0])
+        maxX = Math.max(maxX, p[0])
+        minZ = Math.min(minZ, p[1])
+        maxZ = Math.max(maxZ, p[1])
+      }
+    }
+    anchor = [(minX + maxX) / 2, (minZ + maxZ) / 2]
+  }
+  const street = streetEdgePoint(walls, anchor)
+
+  const facing = new Map<string, WallFace>()
+  for (const w of ext) facing.set(w.id, exteriorFaceOf(w, rooms))
+  const distStreet = (w: WallSlice): number => {
+    const [x, z] = (facing.get(w.id) as WallFace).plan(w.length / 2)
+    return Math.hypot(x - street[0], z - street[1])
+  }
+  /** Outward plan normal of the wall's exterior face. */
+  const outNormal = (w: WallSlice): Pt => {
+    const side = (facing.get(w.id) as WallFace).side
+    return [-w.dir[1] * side, w.dir[0] * side]
+  }
+
+  const front = [...ext].sort(
+    (a, b) => distStreet(a) - distStreet(b) || a.id.localeCompare(b.id),
+  )[0] as WallSlice
+  const fn = outNormal(front)
+  const opposing = ext.filter(
+    (w) => w.id !== front.id && outNormal(w)[0] * fn[0] + outNormal(w)[1] * fn[1] < -0.5,
+  )
+  const backPool = opposing.length > 0 ? opposing : ext.filter((w) => w.id !== front.id)
+  const back = [...backPool].sort(
+    (a, b) => distStreet(b) - distStreet(a) || a.id.localeCompare(b.id),
+  )[0]
+
+  const out: Fixture[] = []
+  const mount = (wall: WallSlice, role: 'front' | 'back', u0: number): void => {
+    const aff = Math.min(RECEPTACLE_AFF, OUTDOOR_MAX_AFF)
+    const u = snapBoxClearOfRo(wall, u0, aff - DEVICE_BOX_HALF_H, aff + DEVICE_BOX_HALF_H)
+    const face = facing.get(wall.id) as WallFace
+    const [x, z] = face.plan(u)
+    out.push({
+      system: 'electrical',
+      kind: 'receptacle-wr-gfci',
+      position: [x, aff, z],
+      rotationY: face.rotationY,
+      sourceId: wall.id,
+      label: `Outdoor receptacle (${role}) — WR GFCI, in-use cover (NEC 210.52(E), 406.9(B))`,
+      meta: {
+        deviceId: `recep-${wall.id}-out-${role}`,
+        outdoor: role,
+        wr: true,
+        inUseCover: true,
+      },
+    })
+  }
+  if (back && back.id !== front.id) {
+    mount(front, 'front', front.length / 2)
+    mount(back, 'back', back.length / 2)
+  } else {
+    mount(front, 'front', front.length / 3)
+    mount(front, 'back', (2 * front.length) / 3)
+    warnings?.push(
+      'single exterior wall — front AND back outdoor receptacles (NEC 210.52(E)) share it; verify coverage',
+    )
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -1366,7 +1498,11 @@ export function assignCircuits(fixtures: Fixture[], rooms: RoomSlice[]): void {
   for (const fixture of fixtures) {
     const plan: Pt = [fixture.position[0], fixture.position[2]]
     const room = roomAt(plan)
-    if (fixture.kind === 'receptacle' || fixture.kind === 'receptacle-gfci') {
+    if (fixture.kind === 'receptacle-wr-gfci') {
+      // Outdoor receptacles ride ONE 20 A exterior circuit: GFCI per
+      // 210.8(A)(3); NOT AFCI — 210.12(A) lists interior areas only.
+      tag(fixture, 'EXT-1', 20, 12, RECEPTACLE_VA, { gfci: true })
+    } else if (fixture.kind === 'receptacle' || fixture.kind === 'receptacle-gfci') {
       switch (room?.category) {
         case 'kitchen':
           // both required SABCs get used — straps alternate 210.11(C)(1)
@@ -1462,10 +1598,14 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
     row.devices += 1
     row.va += Number(f.meta?.va ?? 0)
     row.afci = row.afci || f.meta?.afci === true
-    row.gfci = row.gfci || f.meta?.gfci === true || f.kind === 'receptacle-gfci'
+    row.gfci =
+      row.gfci ||
+      f.meta?.gfci === true ||
+      f.kind === 'receptacle-gfci' ||
+      f.kind === 'receptacle-wr-gfci'
     rows.set(circuit, row)
   }
-  const order = ['SA', 'BA', 'LA', 'GA', 'SD', 'GEN', 'LTG', 'AC']
+  const order = ['SA', 'BA', 'LA', 'GA', 'EXT', 'SD', 'GEN', 'LTG', 'AC']
   return [...rows.values()].sort((a, b) => {
     const pa = order.indexOf(a.circuit.split('-')[0] ?? '')
     const pb = order.indexOf(b.circuit.split('-')[0] ?? '')
@@ -1995,6 +2135,38 @@ const SERVICE_LATERAL_Y = -0.45
 const SERVICE_SECTION = 0.035
 /** Map-edge proxy: the street corridor runs this far outside the walls' bbox. */
 const STREET_EDGE_MARGIN = 4
+
+/**
+ * Nearest "street" point: the walls' plan bbox pushed out by the street
+ * margin, then the closest point on that ring to `anchor`. ONE definition of
+ * street-side for the whole electrical story: the service lateral
+ * (routeServiceCable, anchored at the meter) and the B14 outdoor-receptacle
+ * FRONT pick both ride it.
+ */
+export function streetEdgePoint(walls: WallSlice[], anchor: Pt): Pt {
+  const [ax, az] = anchor
+  let minX = ax
+  let maxX = ax
+  let minZ = az
+  let maxZ = az
+  for (const w of walls) {
+    for (const p of [w.start, w.end]) {
+      minX = Math.min(minX, p[0])
+      maxX = Math.max(maxX, p[0])
+      minZ = Math.min(minZ, p[1])
+      maxZ = Math.max(maxZ, p[1])
+    }
+  }
+  const edges: Pt[] = [
+    [minX - STREET_EDGE_MARGIN, az],
+    [maxX + STREET_EDGE_MARGIN, az],
+    [ax, minZ - STREET_EDGE_MARGIN],
+    [ax, maxZ + STREET_EDGE_MARGIN],
+  ]
+  return edges.reduce((best, e) =>
+    Math.hypot(e[0] - ax, e[1] - az) < Math.hypot(best[0] - ax, best[1] - az) ? e : best,
+  )
+}
 /** The meter→panel feed's service plane along the walls — one step above
  * the branch circuits' 8 stapled drill planes, inside the RO-cleared zone. */
 const SERVICE_FEED_Y = WIRE_RUN_Y + 9 * 0.012
@@ -2219,29 +2391,10 @@ export function routeServiceCable(
     )
 
   // Nearest map-edge point: the walls' plan bbox pushed out by the street
-  // margin, then the closest point on that ring to the meter.
-  let minX = meter.position[0]
-  let maxX = meter.position[0]
-  let minZ = meter.position[2]
-  let maxZ = meter.position[2]
-  for (const w of walls) {
-    for (const p of [w.start, w.end]) {
-      minX = Math.min(minX, p[0])
-      maxX = Math.max(maxX, p[0])
-      minZ = Math.min(minZ, p[1])
-      maxZ = Math.max(maxZ, p[1])
-    }
-  }
+  // margin, then the closest point on that ring to the meter (shared with
+  // the B14 outdoor-receptacle front pick — one definition of "street").
   const [mx, my, mz] = meter.position
-  const edges: [number, number][] = [
-    [minX - STREET_EDGE_MARGIN, mz],
-    [maxX + STREET_EDGE_MARGIN, mz],
-    [mx, minZ - STREET_EDGE_MARGIN],
-    [mx, maxZ + STREET_EDGE_MARGIN],
-  ]
-  const street = edges.reduce((best, e) =>
-    Math.hypot(e[0] - mx, e[1] - mz) < Math.hypot(best[0] - mx, best[1] - mz) ? e : best,
-  )
+  const street = streetEdgePoint(walls, [mx, mz])
 
   // Underground lateral (Manhattan), then the riser up into the socket —
   // sampled against the RO boxes (a meter dragged under full-height glazing

@@ -96,7 +96,11 @@ describe('computeLevel — device nodes end to end', () => {
   test('result.devices manifests every device fixture 1:1, unique ids', () => {
     const result = computeLevel(baselineScene(), config())
     const deviceFixtures = result.fixtures.filter(
-      (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
+      (f) =>
+        f.kind === 'receptacle' ||
+        f.kind === 'receptacle-gfci' ||
+        f.kind === 'receptacle-wr-gfci' ||
+        f.kind === 'switch',
     )
     expect(result.devices.length).toBe(deviceFixtures.length)
     const ids = result.devices.map((d) => d.deviceId)

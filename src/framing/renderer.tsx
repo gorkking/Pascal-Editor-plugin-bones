@@ -123,6 +123,7 @@ const FIXTURE_COLORS: Record<string, string> = {
   'exhaust-fan': '#9fb8c8',
   receptacle: '#f2b63d',
   'receptacle-gfci': '#e88f2a',
+  'receptacle-wr-gfci': '#c96a2e',
   switch: '#7fb3e0',
   light: '#f5e08a',
   'smoke-alarm': '#e06c6c',
@@ -167,6 +168,7 @@ export function isBelowFloor(member: Member): boolean {
 const SURFACE_FIXTURE_KINDS: ReadonlySet<Fixture['kind']> = new Set([
   'receptacle',
   'receptacle-gfci',
+  'receptacle-wr-gfci', // outdoor WR box behind its in-use cover IS the finished surface
   'switch',
   'light',
   'smoke-alarm',
