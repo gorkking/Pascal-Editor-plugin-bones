@@ -377,6 +377,12 @@ export function extractLevels(nodes: NodesRecord): LevelSlice[] {
 }
 
 const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
+  // Outdoor FIRST: an "outdoor kitchen" / "garden bath" is open air — the MEP
+  // engines must never duct/condition it, and the exterior-wall election must
+  // never count it as indoor floor coverage (starter-template 'Back garden'
+  // zone, 2026-08-22). 'terra(c|ss|z)' covers terrace/terrasse/terraza,
+  // 'balcon' covers balcony/balcon/balcón; 'lanai' is the FL porch.
+  [/garden|yard|patio|terra(c|ss|z)|deck|porch|balcon|lanai|pergola|jardin|outdoor|outside|exterior/i, 'outdoor'],
   [/kitchen|cuisine/i, 'kitchen'],
   [/bath|wc|toilet|powder|salle de bain/i, 'bathroom'],
   [/bed|chambre|master|primary/i, 'bedroom'],
