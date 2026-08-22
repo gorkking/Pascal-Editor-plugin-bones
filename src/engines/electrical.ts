@@ -2353,21 +2353,73 @@ export function routeServiceCable(
     mz + rodAxis[1] * GES_STRAP_OUT,
   ]
 
+  // The bond's routing decision + fallback strap points are needed BEFORE
+  // the rod scan (round-4 / r2 skeptic: the no-wall-path fallbacks bury
+  // MORE service conductors at lateral depth — invisible to the round-3
+  // scan, which hardcoded only the street lateral).
+  const waterEntry = context.waterEntry ?? null
+  const waterAnchor = waterEntry
+    ? nearestWallPoint(walls, [waterEntry[0], waterEntry[2]], waterEntry[1] + 0.25)
+    : null
+  const bondRouted =
+    waterEntry !== null &&
+    panelAnchor !== null &&
+    waterAnchor !== null &&
+    wallPath(graph, panelAnchor, waterAnchor) !== null
+  // Fallback strap points (bay-step along the anchor wall — the same
+  // GES_STRAP_OUT the routed branch uses; deterministic +x when a wall
+  // anchor is missing entirely): the fallback bond drop/rise must never
+  // share a plan point with the feed fallback's byte-identical rise
+  // (r2 EXHIBIT 2 — d = 0.0000 for ~1.9 m of vertical).
+  const panelStrapDir: PlanPt = panelAnchor ? panelAnchor.wall.dir : [1, 0]
+  const waterStrapDir: PlanPt = waterAnchor ? waterAnchor.wall.dir : [1, 0]
+  const panelStrap: PlanPt = [
+    px + panelStrapDir[0] * GES_STRAP_OUT,
+    pz + panelStrapDir[1] * GES_STRAP_OUT,
+  ]
+  const waterStrap: PlanPt | null = waterEntry
+    ? [
+        waterEntry[0] + waterStrapDir[0] * GES_STRAP_OUT,
+        waterEntry[2] + waterStrapDir[1] * GES_STRAP_OUT,
+      ]
+    : null
+
   // ---- rod spots are SCENE-AWARE (round-3 skeptic F1 + F3) ----
   // The default spot — out the meter wall beside the GEC strap — must
-  // clear (a) the buried SE street lateral, which approaches the meter
-  // along its own normal (rod 1 used to sit exactly ON that line and the
-  // lateral bored the full rod section on the DEFAULT scene), (b) every
-  // wall's below-grade foundation band, and (c) every room footprint (a
+  // clear (a) EVERY buried service conductor, (b) every wall's
+  // below-grade foundation band, and (c) every room footprint (a
   // concave L-plan put rod 2 INSIDE the wing). The buried rod-to-rod GEC
   // leg is scanned against the wall bands too (it bored the wing's
   // stemwall). Obstructed = the PAIR slides along the wall axis in
   // deterministic ± steps; unplaceable = keep the default and FLAG both
   // rods — never silent.
-  const lateralSegs: readonly [PlanPt, PlanPt][] = [
+  // The buried-conductor list (r2 EXHIBIT 1 closed): the street lateral
+  // (which approaches the meter along its own normal — rod 1 used to sit
+  // exactly ON that line), PLUS the no-wall-path FEED fallback's legs +
+  // panel rise (a detached-island panel put the buried feed 6 mm from a
+  // rod centerline while the scan looked only at the street), PLUS the
+  // bond fallback's post-strap legs when IT will fire — a cable cannot
+  // bore a rigid rod any more than the SE cable can. Verticals scan as
+  // degenerate point-segs (rods are vertical too — parallel pairs).
+  const lateralSegs: [PlanPt, PlanPt][] = [
     [[street[0], street[1]], [mx, street[1]]],
     [[mx, street[1]], [mx, mz]],
   ]
+  if (!routed) {
+    lateralSegs.push(
+      [[mx, mz], [px, mz]],
+      [[px, mz], [px, pz]],
+      [[px, pz], [px, pz]], // the feed fallback rise at the panel
+    )
+  }
+  if (waterEntry && waterStrap && !bondRouted) {
+    lateralSegs.push(
+      [panelStrap, panelStrap], // the bond fallback drop at the panel bay
+      [panelStrap, [waterStrap[0], panelStrap[1]]],
+      [[waterStrap[0], panelStrap[1]], waterStrap],
+      [waterStrap, waterStrap], // the bond fallback rise at the entry bay
+    )
+  }
   const rooms = context.rooms ?? []
   const rodPairAt = (slide: number): [PlanPt, PlanPt] => {
     const bx = strap[0] + outN[0] * GROUND_ROD_STANDOFF + rodAxis[0] * slide
@@ -2475,17 +2527,12 @@ export function routeServiceCable(
   // down at the water entry bay → the pipe clamp. Entry point from the
   // cross-trade context (override or the plumbing auto-spot mirror);
   // unknown = skip + LABEL the assumption on the termination below.
-  const waterEntry = context.waterEntry ?? null
+  // (waterEntry / waterAnchor / bondRouted hoisted above the rod scan.)
   if (waterEntry) {
     const [wx, wy, wz] = waterEntry
     const bondLabel = `Water-pipe bond ${gecAwg} AWG Cu — metal water service (NEC 250.104(A))${ampNote}`
-    const waterAnchor = nearestWallPoint(walls, [wx, wz], wy + 0.25)
     const bondEmit: SegmentEmitter = (a, b, note = '') =>
       gesWire('GES-2', a, b, `${bondLabel}${note}`)
-    const bondRouted =
-      panelAnchor !== null &&
-      waterAnchor !== null &&
-      wallPath(graph, panelAnchor, waterAnchor) !== null
     if (bondRouted && panelAnchor && waterAnchor) {
       const pb = wallPlan(panelAnchor)
       const wa = wallPlan(waterAnchor)
@@ -2520,11 +2567,40 @@ export function routeServiceCable(
     } else {
       // Disconnected islands / degenerate scenes: buried legs (NEC 300.5
       // convention, same as the feed fallback) — never living-height air.
+      // r2 skeptic EXHIBIT 2: the naive fallback drop at the panel was
+      // BYTE-IDENTICAL to the feed fallback's rise — ~1.9 m of 14 mm
+      // conductor coincident inside the 35 mm SE cable. Both ends now
+      // take the bay-step strap-out (panelStrap/waterStrap, hoisted), so
+      // the fallback drop/rise never share a plan point with the feed's;
+      // the rod scan above already saw these exact legs.
+      const ws = waterStrap as PlanPt
       const bnote = `${bondLabel} (⚠ buried crossing — no wall path)`
-      gesWire('GES-2', [px, py, pz], [px, SERVICE_LATERAL_Y, pz], bnote)
-      gesWire('GES-2', [px, SERVICE_LATERAL_Y, pz], [wx, SERVICE_LATERAL_Y, pz], bnote)
-      gesWire('GES-2', [wx, SERVICE_LATERAL_Y, pz], [wx, SERVICE_LATERAL_Y, wz], bnote)
-      gesWire('GES-2', [wx, SERVICE_LATERAL_Y, wz], [wx, wy, wz], bnote)
+      gesFlagged(
+        'GES-2',
+        [px, py, pz],
+        [panelStrap[0], py, panelStrap[1]],
+        `${bnote} — panel strap-out`,
+      )
+      gesWire(
+        'GES-2',
+        [panelStrap[0], py, panelStrap[1]],
+        [panelStrap[0], SERVICE_LATERAL_Y, panelStrap[1]],
+        bnote,
+      )
+      gesWire(
+        'GES-2',
+        [panelStrap[0], SERVICE_LATERAL_Y, panelStrap[1]],
+        [ws[0], SERVICE_LATERAL_Y, panelStrap[1]],
+        bnote,
+      )
+      gesWire(
+        'GES-2',
+        [ws[0], SERVICE_LATERAL_Y, panelStrap[1]],
+        [ws[0], SERVICE_LATERAL_Y, ws[1]],
+        bnote,
+      )
+      gesWire('GES-2', [ws[0], SERVICE_LATERAL_Y, ws[1]], [ws[0], wy, ws[1]], bnote)
+      gesFlagged('GES-2', [ws[0], wy, ws[1]], [wx, wy, wz], `${bnote} — pipe clamp`)
     }
   }
 

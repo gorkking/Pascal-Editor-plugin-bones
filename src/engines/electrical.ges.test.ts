@@ -708,3 +708,106 @@ describe('round-3 F4 — per-storey GES honesty (the E6 class)', () => {
     expect(gec?.label).toContain('250.58')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Round-4 (r2 skeptic) — the no-wall-path FALLBACK legs join the clearance
+// machinery: the round-3 scan/strap-outs only modeled the ROUTED chain
+// ---------------------------------------------------------------------------
+
+describe('round-4 (r2 skeptic) — fallback SE legs join the clearance machinery', () => {
+  /** Main 8×4 house + a detached wall 3 m south: the meter/panel wall
+   * graphs are disconnected, so the meter→panel feed takes the BURIED
+   * fallback (NEC 300.5) — legs the round-3 machinery never saw. */
+  const islandScene = (): { walls: WallSlice[]; rooms: RoomSlice[] } => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [8, 0] }),
+      makeWall({ id: 'w_e', start: [8, 0], end: [8, 4] }),
+      makeWall({ id: 'w_n', start: [8, 4], end: [0, 4] }),
+      makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+      makeWall({ id: 'w_isl', start: [2, -3], end: [6, -3] }),
+    ]
+    const rooms = [room('other', [[0, 0], [8, 0], [8, 4], [0, 4]], { id: 'room_main' })]
+    return { walls, rooms }
+  }
+  /** Meter mid-south (override, A4) + panel on the island near the naive
+   * rod-1 x — the r2 exhibit put the buried feed 6 mm from the rod
+   * centerline (0.0255 m required) with rodPairClear PASSING. */
+  const islandFixtures = (walls: WallSlice[], rooms: RoomSlice[]) =>
+    layoutElectrical(walls, rooms, {
+      electricMeter: { wallId: 'w_s', wallT: 0.5 },
+      panel: { wallId: 'w_isl', wallT: 0.52 },
+    })
+
+  test('EXHIBIT 1: the island-panel buried feed cannot bore a rod — the scan sees the fallback', () => {
+    const { walls, rooms } = islandScene()
+    const fixtures = islandFixtures(walls, rooms)
+    expect(fixtures.find((f) => f.kind === 'electric-meter')?.sourceId).toBe('w_s')
+    expect(fixtures.find((f) => f.kind === 'panel')?.sourceId).toBe('w_isl')
+    const members = routeWiring(fixtures, walls, { waterEntry: null, rooms })
+    const se = members.filter(
+      (m) => m.role === 'wire-run' && m.sourceId === 'service-entrance',
+    )
+    // the fallback really fired (non-vacuous)
+    expect(se.some((m) => m.label?.includes('buried crossing — no wall path'))).toBe(true)
+    const rods = rodsOf(members)
+    expect(rods.length).toBe(2)
+    for (const rod of rods) {
+      expect(rod.flag).toBeUndefined() // the pair SLID clear, not flagged
+      for (const cable of se) {
+        expect(
+          memberDist(rod, cable),
+          `${rod.sourceId} vs ${cable.label}`,
+        ).toBeGreaterThanOrEqual(0.035 / 2 + 0.016 / 2 + 0.001)
+      }
+    }
+    // still a legal pair: 6 ft apart + GEC-connected to the meter
+    const [r1, r2] = rods as [Member, Member]
+    expect(
+      Math.hypot(r2.position[0] - r1.position[0], r2.position[2] - r1.position[2]),
+    ).toBeCloseTo(feet(6), 5)
+    const gec = members.filter((m) => m.sourceId === 'GES-1')
+    const meterFx = fixtures.find((f) => f.kind === 'electric-meter')
+    for (const rod of rods) {
+      expect(connected(gec, new Vector3(...(meterFx?.position ?? [0, 0, 0])), rodTop(rod))).toBe(
+        true,
+      )
+    }
+  })
+
+  test('EXHIBIT 2: double fallback — the bond never runs INSIDE the SE cable (strapped fallback ends)', () => {
+    const { walls, rooms } = islandScene()
+    const fixtures = islandFixtures(walls, rooms)
+    const WATER: readonly [number, number, number] = [2, 0.3, 0] // mainland south wall
+    const members = routeWiring(fixtures, walls, { waterEntry: WATER, rooms })
+    const bond = members.filter((m) => m.sourceId === 'GES-2')
+    const se = members.filter(
+      (m) => m.role === 'wire-run' && m.sourceId === 'service-entrance',
+    )
+    // BOTH fallbacks fired (non-vacuous): the r2 exhibit had the bond
+    // fallback drop byte-identical to the feed fallback rise (d = 0.0000)
+    expect(bond.some((m) => m.label?.includes('buried crossing — no wall path'))).toBe(true)
+    expect(se.some((m) => m.label?.includes('buried crossing — no wall path'))).toBe(true)
+    const EMBED = (0.035 + 0.014) / 2
+    for (const g of bond) {
+      for (const cable of se) {
+        if (Math.abs(dirOf(g).dot(dirOf(cable))) < 0.9) continue // crossing
+        expect(
+          memberDist(g, cable),
+          `${g.label} vs ${cable.label}`,
+        ).toBeGreaterThanOrEqual(EMBED)
+      }
+    }
+    // continuity survives the strap-outs: panel → water entry, walkable
+    const panelFx = fixtures.find((f) => f.kind === 'panel')
+    expect(
+      connected(bond, new Vector3(...(panelFx?.position ?? [0, 0, 0])), new Vector3(...WATER)),
+    ).toBe(true)
+    // and no rod meets the bond's buried legs either (rigid rod, no
+    // crossing exemption)
+    for (const rod of rodsOf(members)) {
+      for (const g of bond) {
+        expect(memberDist(rod, g)).toBeGreaterThanOrEqual(0.014 / 2 + 0.016 / 2 + 0.001)
+      }
+    }
+  })
+})
