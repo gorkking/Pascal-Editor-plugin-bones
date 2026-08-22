@@ -540,6 +540,11 @@ export function computeTakeoff(
   const holdDowns = roleCount('hold-down')
   const plateWashers = roleCount('plate-washer')
   const hangers = roleCount('hanger')
+  // CS-PF portal straps (LOD-400 B9): counted by ROLE like every other
+  // hardware line — one member per strap, one pc per member. No nail
+  // poundage is invented for them: the CS-PF nail schedule is exactly what
+  // the member's advisory says v1 does not model.
+  const portalStraps = roleCount('strap')
   // Hurricane ties are the roof engine's steel blocking — role + material +
   // system, structural identification without parsing labels.
   const hurricaneTies = members.filter(
@@ -576,6 +581,15 @@ export function computeTakeoff(
   }
   if (holdDowns > 0) {
     push('Foundation', 'Hold-downs', 'braced wall ends (seismic)', holdDowns, 'pcs')
+  }
+  if (portalStraps > 0) {
+    push(
+      'Wall framing',
+      'Portal straps 1000 lb',
+      'header to jack, CS-PF (R602.10.6.4) — fasteners per manufacturer',
+      portalStraps,
+      'pcs',
+    )
   }
   if (hangers > 0) {
     push('Floor', 'Joist hangers', 'LUS-series @ girders/headers', hangers, 'pcs')

@@ -215,13 +215,23 @@ AND a gate — a checklist line without a test is a wish.
   LOD-400 B5: the foundation's bolts rise through the wall engine's bottom
   plate — the (PT, R317.1) SOLE PLATE they exist to clamp (R403.1.6) — so
   the pair is allow-listed as design intent and a foundation+walls compose
-  scenario pins it. KNOWN residual pre-existing classes (byte-identical to
-  the pre-night-4 baseline, queued on the board): tee-stem face layers ×
-  through-wall framing; anchor-bolt × STUD on slab-on-grade (the shank
-  tops out 3" above the slab — 1.5" above the plate — and can land inside
-  a grid stud's footprint; bolt-vs-stud layout nudging queued, surfaced by
-  the B5 compose scenario); framed partition tees into full-CMU through
-  walls (frameWalls never sees CMU walls for insets); stem layer×layer at
+  scenario pins it. The seismic kit's design-intent contacts joined the
+  allow-list with B9's SDC-D compose (the first seismic foundation ×
+  walls × layers scenario): hold-down × post (the HDU exists to clamp
+  the CS-PF portal post) and hold-down × bottom-plate (the HDU standoff
+  base bears on the sole plate at its anchor). KNOWN residual
+  pre-existing classes (byte-identical to the pre-night-4 baseline,
+  queued on the board): tee-stem face layers × through-wall framing;
+  anchor-bolt × STUD on slab-on-grade (the shank tops out 3" above the
+  slab — 1.5" above the plate — and can land inside a grid stud's
+  footprint; bolt-vs-stud layout nudging queued, surfaced by the B5
+  compose scenario) and its washer sibling plate-washer × STUD (the 3"
+  washer follows its bolt one-for-one under a grid stud's footprint;
+  named by the B9 seismic compose); corner drywall × hold-down (a layer
+  running to the through wall's face crosses the neighbor's HDU body at
+  the corner — the tee/corner layer-vs-hardware family, named by the B9
+  seismic compose); framed partition tees into full-CMU through walls
+  (frameWalls never sees CMU walls for insets); stem layer×layer at
   tees.
   Gate: `src/engines/interpenetration.test.ts` scenario matrix + the
   cavity-fit thickness sweep (8 thicknesses × 3 stud configs × batts)
@@ -514,6 +524,71 @@ AND a gate — a checklist line without a test is a wish.
   legend max on the garage-CA compose + RO-hop exclusion + legacy
   no-walls fallback, open cut-bar rect + caption key, pad rows per
   size).
+
+- **S13 Wall bracing is declared and cross-tied, never silently absent
+  (R602.10).** Every framed level at LOD 300+ identifies its braced wall
+  LINES from the exterior wall graph (dominant plan axis, walls within the
+  R602.10.1.1 4-ft offset on one line, deterministic X1…/Z1… labels by
+  ascending offset) and declares the METHOD from
+  `spec.wallBracingMethod` ('CS-WSP' — the continuously-sheathed assembly
+  the layer engine already builds on every exterior face) with ONE honest
+  per-line warning: R602.10 panel length/spacing NOT verified — the
+  required-bracing-amount and Table R602.10.5 panel-schedule math is v2,
+  and nothing claims compliance meanwhile. CMU walls brace as reinforced
+  masonry (cmu.ts) and stay out of the lines; LOD 200 makes no code
+  claims. GARAGE RETURNS: a wide opening (clear RO span ≥ 6 ft — where
+  R602.10.6.4's CS-PF header-span range starts, == DOUBLE_TRIMMER_SPAN)
+  whose return to the run end is under the 48" braced-panel minimum
+  (Table R602.10.5 WSP baseline) is NEVER framed as plain kings+trimmers
+  silently. SDC D+ (`spec.seismicHoldDowns`) builds the CS-PF portal set
+  when the return meets the Table R602.10.5 CS-PF minimum (16"/18"/20"
+  at 8/9/10-ft walls, snapped UP): hold-down end posts as DOUBLED studs
+  (role 'post', one beside the king stud, one beside the run-end stud;
+  grid studs yield by keep-out — contact allowed, overlap never; posts
+  slide off California backing studs, and a return too congested flags
+  instead of guessing) plus the 1000-lb header-to-jack strap (role
+  'strap', ~1.2 mm surface steel on the framing face under the 2 mm SAT
+  skin; its advisory names what v1 does not model — CS-PF nail schedule,
+  header continuation to the wall end). A return under the CS-PF minimum
+  flags '⚠ portal frame required — not modeled … engineered shear wall
+  required'; low-seismic jurisdictions flag the same returns (Table
+  R602.10.5 + R602.10.6.4 cites) instead of inventing hardware;
+  inter-opening piers say 'bracing between adjacent openings not
+  evaluated (v1)'. Bracing flags COMPOSE with the wall's aggregate
+  compression flag (B1 ' | ' convention). CROSS-REFERENCE (both
+  directions, ground level with walls + foundation both computed): a
+  foundation HDU with no framed vertical within 0.15 m (a corner HDU
+  matches the orthogonal wall's end stud — one corner assembly) flags
+  'hold-down has no framed post above'; a portal post with no HDU below
+  flags 'portal post has no foundation hold-down below' — the foundation
+  places HDUs at wall ENDS only, so the opening-side portal posts flag
+  BY DESIGN until per-panel hold-downs land. TAKEOFF (B4 convention):
+  'Portal straps 1000 lb' books by role count with no invented nail
+  poundage; posts ride the ordinary lumber rows; every bracing flag
+  aggregates on Flags. JURISDICTION TRUTH: the CA-vs-INTL STRUCTURAL
+  wall-member delta is EXACTLY the bracing content (portal hardware +
+  R602.10 flag parts + grid studs yielded to post keep-outs) — layers
+  legitimately differ by jurisdiction pre-B9 and are excluded; the
+  SDC-D set (AK/CA/HI/NV/OR/UT/WA today) builds hardware, every other
+  framed state flags, FL's CMU default builds neither, and no state
+  throws or stays silent on a 16-ft garage door.
+  Origin: LOD-400 audit B9, 2026-08-20 (CA SDC-D structural wall members
+  byte-identical to INTL; 16-ft garage door returns framed as plain
+  kings+trimmers — prescriptively a portal frame — with zero hardware
+  and zero label; the only bracing artifact repo-wide was the
+  foundation's honestly-labeled SDC-D hold-downs).
+  Gates: `src/engines/wall-bracing.test.ts` (line identification incl.
+  4-ft split + exclusions, warning pin, LOD-200 silence, CS-PF minimum
+  matrix, jurisdiction-truth describe with the enumerated CA-vs-INTL
+  delta, 51-state sweep, cross-reference describe both directions +
+  toggle honesty) + `src/engines/wall-framing.test.ts` (garage-returns
+  describe: portal census, contact matrix, surface-strap pin, INTL flag
+  pin, ⚠ too-narrow, 48"-panel no-op, out-of-scope, pier flag) +
+  `src/engines/interpenetration.test.ts` (SDC-D garage compose:
+  walls+layers strictly clean; +foundation inherits only the named
+  pre-existing classes) + `src/engines/takeoff.test.ts` (B9 describe:
+  strap-row parity, lumber piece delta == member delta, flag
+  aggregation, hold-down row parity).
 
 ## M — Mechanical (HVAC)
 

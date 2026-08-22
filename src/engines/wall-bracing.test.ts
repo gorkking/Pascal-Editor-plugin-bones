@@ -390,3 +390,62 @@ describe('hold-down cross-reference (B9c) — anchors tie to posts, both directi
     ).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// B9d: 51-state jurisdiction sweep — the SDC-D set gets the hardware,
+// everyone else gets honest flags; no state throws, no state is silent.
+// ---------------------------------------------------------------------------
+
+import { jurisdictionOptions, profileFor } from '../jurisdiction/profiles'
+
+describe('jurisdiction sweep — the 16-ft garage door answered in every state', () => {
+  test('SDC-D profiles build portals; the rest flag; all declare their lines', () => {
+    const seismicStates: string[] = []
+    const flagOnlyStates: string[] = []
+    for (const { code } of jurisdictionOptions()) {
+      const result = computeLevel(garageScene(), garageConfig(code))
+      const straps = result.members.filter((m) => m.role === 'strap')
+      const posts = result.members.filter(
+        (m) => m.role === 'post' && (m.label ?? '').includes('R602.10.6.4'),
+      )
+      const bracingFlags = result.members.filter((m) => (m.flag ?? '').includes('R602.10'))
+      if (profileFor(code).exteriorWallDefault === 'cmu') {
+        // FL: exterior walls default to CMU — masonry braces as reinforced
+        // masonry (cmu.ts), never CS-WSP: no framed lines, no portal kit.
+        expect(result.warnings.filter((w) => w.startsWith('braced wall line')), code).toEqual([])
+        expect([...straps, ...posts], code).toEqual([])
+        continue
+      }
+      // every framed state declares its braced wall lines (CS-WSP, not verified)
+      expect(
+        result.warnings.filter((w) => w.startsWith('braced wall line')),
+        code,
+      ).toHaveLength(4)
+      if (profileFor(code).seismicHoldDowns) {
+        seismicStates.push(code)
+        expect(straps, code).toHaveLength(2)
+        expect(posts, code).toHaveLength(4)
+        // the only bracing flags are the honest cross-ref ones (opening-side
+        // posts without foundation hold-downs) — never the ⚠ fallback here
+        expect(
+          bracingFlags.every((m) =>
+            (m.flag ?? '').includes('portal post has no foundation hold-down below'),
+          ),
+          code,
+        ).toBe(true)
+      } else {
+        flagOnlyStates.push(code)
+        expect(straps, code).toHaveLength(0)
+        expect(posts, code).toHaveLength(0)
+        // both kings carry the narrow-return flag — never silent
+        expect(
+          bracingFlags.filter((m) => (m.flag ?? '').includes('portal frame (R602.10.6.4)')),
+          code,
+        ).toHaveLength(2)
+      }
+    }
+    // the SDC-D set is exactly the seismicHoldDowns profiles (7 states today)
+    expect(seismicStates.sort()).toEqual(['AK', 'CA', 'HI', 'NV', 'OR', 'UT', 'WA'])
+    expect(flagOnlyStates.length).toBeGreaterThanOrEqual(43) // framed non-SDC-D states + DC + INTL (FL is CMU)
+  })
+})

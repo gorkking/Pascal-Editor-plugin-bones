@@ -1255,3 +1255,103 @@ describe('cavity-fit framing flags aggregate (night-4)', () => {
     expect(rows.filter((r) => r.section !== 'Flags').some((r) => r.item.includes('4.9') || r.detail.includes('4.9'))).toBe(false)
   })
 })
+
+describe('LOD-400 B9: portal hardware books member-derived (B4 convention)', () => {
+  const T9 = 0.0381
+  const garageWall = (): WallSlice => {
+    const len = 6.1
+    return {
+      id: 'garage_front',
+      start: [0, 0],
+      end: [len, 0],
+      length: len,
+      dir: [1, 0],
+      thickness: 0.15,
+      height: 2.5,
+      exterior: true,
+      curved: false,
+      openings: [
+        {
+          id: 'garage_door',
+          kind: 'door',
+          u: len / 2,
+          width: feet(16) - T9,
+          height: 2.13,
+          sillHeight: 0,
+          roughWidth: feet(16),
+          roughHeight: 2.13 + T9,
+        },
+      ],
+    }
+  }
+
+  test('Portal straps row == strap member count; absent when no portal frames', () => {
+    const seismic = frameWall(garageWall(), { ...DEFAULT_SPEC, seismicHoldDowns: true })
+    const rows = computeTakeoff(seismic, [])
+    const strapRow = rows.find((r) => r.item === 'Portal straps 1000 lb')
+    expect(strapRow?.quantity).toBe(seismic.filter((m) => m.role === 'strap').length)
+    expect(strapRow?.quantity).toBe(2)
+    expect(strapRow?.section).toBe('Wall framing')
+    expect(strapRow?.detail).toContain('R602.10.6.4')
+    // No portal frames → no phantom row (member-derived, never invented).
+    const intlRows = computeTakeoff(frameWall(garageWall(), DEFAULT_SPEC), [])
+    expect(intlRows.find((r) => r.item === 'Portal straps 1000 lb')).toBeUndefined()
+  })
+
+  test('portal hold-down posts ride the ordinary lumber rows: pcs delta == member delta', () => {
+    const seismic = frameWall(garageWall(), { ...DEFAULT_SPEC, seismicHoldDowns: true })
+    const intl = frameWall(garageWall(), DEFAULT_SPEC)
+    const pcs = (rows: TakeoffRow[]): number =>
+      rows
+        .filter((r) => r.section === 'Wall framing' && r.item === '2x6' && r.unit === 'pcs')
+        .reduce((sum, r) => sum + r.quantity, 0)
+    const sticks = (members: Member[]): number =>
+      members.filter((m) => m.size === '2x6' && m.material === 'lumber').length
+    // every 2x6 in this wall cuts from one stick, so piece deltas track
+    // member deltas exactly: +4 posts (no grid stud falls inside a post
+    // keep-out on this standalone wall — corner-inset scenes can yield one)
+    expect(pcs(computeTakeoff(seismic, [])) - pcs(computeTakeoff(intl, []))).toBe(
+      sticks(seismic) - sticks(intl),
+    )
+    expect(sticks(seismic) - sticks(intl)).toBe(4)
+  })
+
+  test('bracing flags surface on the Flags rows with counts (INTL narrow returns)', () => {
+    const rows = computeTakeoff(frameWall(garageWall(), DEFAULT_SPEC), [])
+    const flagRows = rows.filter(
+      (r) => r.section === 'Flags' && r.detail.includes('portal frame (R602.10.6.4)'),
+    )
+    expect(flagRows).toHaveLength(1) // symmetric returns share ONE exact string
+    expect(flagRows[0]?.quantity).toBe(2) // …aggregated across both kings
+  })
+
+  test('hold-down row stays member-derived when the foundation joins the compose', () => {
+    const seismicSpec = { ...DEFAULT_SPEC, detail: '400' as const, seismicHoldDowns: true }
+    const walls = [garageWall()]
+    const members = [
+      ...frameWalls(walls, seismicSpec, undefined, { slabBearing: true }),
+      ...buildFoundation(
+        walls,
+        [
+          {
+            id: 'slab_g',
+            polygon: [
+              [0, 0],
+              [6.1, 0],
+              [6.1, 4],
+              [0, 4],
+            ],
+            holes: [],
+            elevation: 0,
+            thickness: 0.2,
+          },
+        ],
+        seismicSpec,
+      ),
+    ]
+    const rows = computeTakeoff(members, [])
+    const hdRow = rows.find((r) => r.item === 'Hold-downs')
+    expect(hdRow?.quantity).toBe(members.filter((m) => m.role === 'hold-down').length)
+    expect(hdRow?.quantity).toBeGreaterThan(0)
+  })
+})
