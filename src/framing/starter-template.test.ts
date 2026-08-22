@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { classifyRoom } from '../core/wall-model'
-import type { Fixture, Member } from '../core/types'
+import type { Fixture, Member, RoomSlice, SlabSlice } from '../core/types'
+import { computeCharacteristics } from '../engines/characteristics'
 import { buildPlanSet } from '../plans/plan-set'
 import { buildServicePointNodes } from '../service/place'
 import { computeLevel } from './compute'
@@ -550,5 +551,90 @@ describe('outdoor-only level (a garden with fences, no house)', () => {
     const result = computeLevel(nodes, config())
     expect(result.fixtures.some((f) => f.label?.includes('Air handler'))).toBe(false)
     expect(condensersOf(result.fixtures).length).toBe(0)
+  })
+
+  test('outdoor-only rooms + a slab: the patio slab is NOT conditioned floor (skeptic r2 blocker)', () => {
+    // computeCharacteristics([], [144 m² outdoor garden], [24 m² patio slab])
+    // used to book the OUTDOOR slab as conditioned (floorAreaM2 = 24) while
+    // printing BOTH a false 'no rooms/zones drawn' note (a zone IS drawn)
+    // AND a false '…excluded' note (the printed figure WAS outdoor slab).
+    const garden: RoomSlice = {
+      id: 'z_garden',
+      name: 'Garden',
+      category: 'outdoor',
+      polygon: [
+        [-6, -6],
+        [6, -6],
+        [6, 6],
+        [-6, 6],
+      ],
+      boundaryWallIds: [],
+      ceilingHeight: 2.7,
+    }
+    const patio: SlabSlice = {
+      id: 'slab_patio',
+      polygon: [
+        [0, 0],
+        [6, 0],
+        [6, 4],
+        [0, 4],
+      ],
+      holes: [],
+      elevation: 0,
+      thickness: 0.1,
+    }
+    const c = computeCharacteristics([], [garden], [patio])
+    expect(c).not.toBeNull()
+    expect(c?.floorAreaM2).toBe(0)
+    expect(c?.volumeM3).toBe(0)
+    // ONE truthful note; neither of the two lies
+    expect(c?.notes.some((n) => n.includes('No conditioned space on this level'))).toBe(true)
+    expect(c?.notes.some((n) => n.includes('no rooms/zones drawn'))).toBe(false)
+    expect(c?.notes.some((n) => n.includes('outdoor zones (garden/patio/yard) excluded'))).toBe(
+      false,
+    )
+    // the no-slab outdoor-only path stays on the same truthful note
+    const noSlab = computeCharacteristics([], [garden], [])
+    expect(noSlab?.floorAreaM2).toBe(0)
+    expect(noSlab?.notes.some((n) => n.includes('No conditioned space on this level'))).toBe(
+      true,
+    )
+    // and a room-less slab keeps the legacy fallback verbatim
+    const slabOnly = computeCharacteristics([], [], [patio])
+    expect(slabOnly?.floorAreaM2).toBeCloseTo(24, 9)
+    expect(slabOnly?.notes.some((n) => n.includes('no rooms/zones drawn'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4. R314 never drops silently — the leading-qualifier reclassification warns
+// ---------------------------------------------------------------------------
+
+describe('R314 open-air warning (round-2 advisory — E6 spirit)', () => {
+  test('an "Outdoor bedroom" zone warns that no smoke alarm is placed', () => {
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Outdoor bedroom'
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes('Outdoor bedroom') &&
+          w.includes('reads as open-air') &&
+          w.includes('R314'),
+      ),
+    ).toBe(true)
+    // the warning tells the truth: no alarm was placed for it
+    expect(
+      result.fixtures.some(
+        (f) => f.kind === 'smoke-alarm' && f.label?.includes('Outdoor bedroom'),
+      ),
+    ).toBe(false)
+  })
+
+  test('a plain "Outdoor kitchen" stays silent — no sleeping word, no warning', () => {
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Outdoor kitchen'
+    const result = computeLevel(nodes, config())
+    expect(result.warnings.some((w) => w.includes('reads as open-air'))).toBe(false)
   })
 })
