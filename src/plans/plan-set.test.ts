@@ -3182,6 +3182,37 @@ describe('door + window schedule (LOD-400 B21d)', () => {
       expect([...all.matchAll(new RegExp(`advisory w${i} — verify`, 'g'))].length).toBe(1)
     }
   })
+
+  test('B11: the schedule prints the SNOW-DEEPENED header size — and only in deepened states', () => {
+    // one 56\"-RO window: the 70-psf column's 4x8 cap (53\") bites — VT
+    // frames a 4x10 where INTL frames a 4x8; the HEADER cell reads the
+    // member back, so paper moves EXACTLY where the members do (and the
+    // B11 assumption LABEL never leaks into the cell — size verbatim).
+    const w56 = bwall('w_hdr', [0, 0], [6, 0], [
+      opening('nb', 'window', 3, inches(56) - inches(1.5), 1.0, 0.9, inches(56), 1.0 + inches(1.5)),
+    ])
+    const composeAt = (code: string): { svg: string; header: Member } => {
+      const spec = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor(code))
+      const members = frameWalls([w56], spec)
+      const header = members.find((m) => m.role === 'header') as Member
+      expect(header).toBeDefined()
+      return { svg: tableSvgOf(buildPlanSet(members, [], { walls: [w56] })), header }
+    }
+    const vt = composeAt('VT')
+    const intl = composeAt('INTL')
+    const cellOf = (c: { svg: string; header: Member }): string | null => {
+      const y = parseMarks(c.svg)[0]?.y as number
+      return cellAt(c.svg, 522, y)
+    }
+    expect(vt.header.size).toBe('4x10')
+    expect(vt.header.label).toContain('Table R602.7(1)')
+    expect(cellOf(vt)).toBe('4x10') // the size verbatim — no label leak
+    expect(intl.header.size).toBe('4x8')
+    expect(cellOf(intl)).toBe('4x8')
+    // low-snow paper is byte-equal: TX prints the same sheet as INTL
+    const tx = composeAt('TX')
+    expect(tx.svg).toBe(intl.svg)
+  })
 })
 
 // ---------------------------------------------------------------------------

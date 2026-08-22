@@ -1485,3 +1485,67 @@ describe('LOD-400 B9: portal hardware books member-derived (B4 convention)', () 
     expect(hdRow?.quantity).toBeGreaterThan(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B11: snow-deepened headers shift the lumber rows — ONLY in
+// deepened states, and by exactly the header member delta.
+// ---------------------------------------------------------------------------
+
+import { inches as inchesB11 } from '../core/units'
+import { applyJurisdiction as applyJurisdictionB11, profileFor as profileForB11 } from '../jurisdiction/profiles'
+
+describe('LOD-400 B11: takeoff lumber rows follow the header snow band', () => {
+  const wall56 = (): WallSlice => {
+    const ro = inchesB11(56)
+    return {
+      id: 'w_b11',
+      start: [0, 0],
+      end: [6, 0],
+      length: 6,
+      dir: [1, 0],
+      thickness: 0.114,
+      height: 2.7,
+      exterior: false,
+      openings: [
+        {
+          id: 'n_b11',
+          kind: 'window',
+          u: 3,
+          width: ro - inchesB11(1.5),
+          height: 1.0,
+          sillHeight: 0.9,
+          roughWidth: ro,
+          roughHeight: 1.0 + inchesB11(1.5),
+        },
+      ],
+      curved: false,
+    }
+  }
+  const rowsAt = (code: string): TakeoffRow[] => {
+    const spec = applyJurisdictionB11({ ...DEFAULT_SPEC, detail: '400' as const }, profileForB11(code))
+    return computeTakeoff(frameWall(wall56(), spec), [])
+  }
+  const wallLumber = (rows: TakeoffRow[]): TakeoffRow[] =>
+    rows.filter((r) => r.section === 'Wall framing' && /^\dx\d/.test(r.item))
+
+  test('VT books the deepened 4x10 header stick; INTL books the 4x8 — nothing else moves', () => {
+    const vt = wallLumber(rowsAt('VT'))
+    const intl = wallLumber(rowsAt('INTL'))
+    const item = (rows: TakeoffRow[], name: string): TakeoffRow | undefined =>
+      rows.find((r) => r.item === name)
+    expect(item(intl, '4x8')?.quantity).toBe(1)
+    expect(item(intl, '4x10')).toBeUndefined()
+    expect(item(vt, '4x10')?.quantity).toBe(1)
+    expect(item(vt, '4x8')).toBeUndefined()
+    // every non-header row is identical — the header SKU is the whole delta
+    const others = (rows: TakeoffRow[]): TakeoffRow[] =>
+      rows.filter((r) => r.item !== '4x8' && r.item !== '4x10')
+    expect(others(vt)).toEqual(others(intl))
+  })
+
+  test('low-snow states book rows byte-equal to INTL (TX/CA pin)', () => {
+    const intl = rowsAt('INTL')
+    expect(rowsAt('TX')).toEqual(intl)
+    expect(rowsAt('CA')).toEqual(intl)
+  })
+})
