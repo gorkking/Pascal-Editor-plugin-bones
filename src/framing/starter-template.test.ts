@@ -293,6 +293,13 @@ function segDist(
 const inRect = (p: readonly [number, number], x0: number, x1: number, z0: number, z1: number) =>
   p[0] > x0 && p[0] < x1 && p[1] > z0 && p[1] < z1
 
+/** The 9.5px body-text lines of a schedules SVG (characteristics block +
+ * takeoff rows) — raw content, entities included, for width pins. */
+const textLines95 = (svg: string): string[] =>
+  [...svg.matchAll(/<text[^>]*font-size="9\.5"[^>]*>([^<]*)<\/text>/g)].map(
+    (m) => m[1] as string,
+  )
+
 // ---------------------------------------------------------------------------
 // 0. Room classification — outdoor names
 // ---------------------------------------------------------------------------
@@ -677,6 +684,19 @@ describe('outdoor-only level (a garden with fences, no house)', () => {
     expect(svg).toContain('no conditioned space on this level (all zones outdoor)')
     expect(svg).not.toContain('no floor slabs')
     expect(svg).toContain('slab-on-grade') // the flag still prints — no contradiction
+    // …and the long n/a WRAPS at the column width instead of striking
+    // through the page border (round-5: the 57-char reason made the
+    // Cooling line 123 chars, printed UNWRAPPED and clipped at the sheet
+    // edge — metric lines now route through wrapRow(…, 100) like the
+    // citation line). Raw-SVG lengths include entity expansion (&amp; on
+    // 'Floor area & volume'), hence the ~106 ceiling; the block grew: the
+    // wrapped Cooling tail is its own line.
+    const lines = textLines95(svg)
+    expect(lines.length).toBeGreaterThan(0)
+    for (const line of lines) {
+      expect(line.length).toBeLessThanOrEqual(106)
+    }
+    expect(lines.some((l) => l.trimEnd().endsWith('level (all zones outdoor)'))).toBe(true)
   })
 
   test('sibling pin: a plain no-slab scene keeps the original no-slab n/a', () => {
@@ -726,6 +746,17 @@ describe('outdoor-only level (a garden with fences, no house)', () => {
       .join('\n')
     expect(svg).toContain('no floor slabs (see flags)')
     expect(svg).not.toContain('no conditioned space')
+    // the legacy lines fit the column — wrapRow(…, 100) is a no-op for
+    // them by construction (it only splits past the width), pinned anyway:
+    // the whole 'Floor area & volume …' metric line stays ONE line.
+    expect(
+      textLines95(svg).some((l) =>
+        l.includes('no floor slabs (see flags) · Envelope'),
+      ),
+    ).toBe(true)
+    for (const line of textLines95(svg)) {
+      expect(line.length).toBeLessThanOrEqual(106)
+    }
   })
 })
 
