@@ -654,6 +654,26 @@ describe('interpenetration gate — structural members never share volume', () =
   // jacks themselves already exist.
   test.todo('roof framing: intersecting gable pair clips at the valley (overframing)', () => {})
 
+  test('roof framing: WINDY flat — B8b hurricane ties compose SAT-clean beside joists and rims', () => {
+    // Non-vacuous: ties must exist (2 per joist). The connectors nail to the
+    // joist FACES at the plate line — beside-offset + rim clamp keep the
+    // steel out of every joist/rim volume (zero-overhang worst case incl.)
+    const windy400 = { ...spec400, hurricaneTies: true }
+    const cases: [string, Partial<RoofSegmentSlice>][] = [
+      ['flat', { roofType: 'flat' }],
+      ['flatWide', { roofType: 'flat', width: 12, depth: 8 }],
+      ['flatZeroOverhang', { roofType: 'flat', overhang: 0 }],
+    ]
+    for (const [name, over] of cases) {
+      const members = frameRoofs([roofSeg(over)], [], windy400)
+      expect({
+        name,
+        ties: members.filter((m) => m.label === 'hurricane tie').length > 0,
+        v: violations(members),
+      }).toEqual({ name, ties: true, v: [] })
+    }
+  })
+
   test('roof framing: mansard + dutch skirts inscribe at arris hips (round-14)', () => {
     for (const type of ['mansard', 'dutch'] as const) {
       expect({

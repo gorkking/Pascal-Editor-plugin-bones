@@ -1583,6 +1583,20 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
   // Span discipline: a dead-level joist's horizontal projection IS its
   // length. No mid-span bearing is modeled — flag only (S1).
   const flatFlag = slopeRafterFlag(spec, span, span, 'Flat roof joist')
+  // B8b: the R802.11 uplift path exists on FLAT roofs too — the audit gap:
+  // shed tied BOTH bearing ends while frameFlat never called tieAt (the FL
+  // flat-roof market is exactly the ≥130 mph mandate zone). One tie at each
+  // bearing end of every joist, at the plate line (footprint edge, joist
+  // underside plane y = wallHeight). The connector nails to the joist FACE:
+  // placed beside it toward the roof center (the besideRafter convention)
+  // and held inside the end rims' inner faces, so the hardware composes
+  // SAT-clean with joists and rims — takeoff books the ties by
+  // role+material+system for free.
+  const tieBear = Math.min(
+    Math.min(roof.width, roof.depth) / 2,
+    Math.min(halfW, halfD) - t - inches(1.5),
+  )
+  const tieClear = t / 2 + inches(1.5)
   for (const u of layout(-stationHalf, stationHalf, spec.rafterSpacing, t / 2)) {
     emit(
       'rafter',
@@ -1597,6 +1611,13 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       undefined,
       flatFlag,
     )
+    if (spec.hurricaneTies) {
+      const beside = u + (u >= 0 ? -1 : 1) * tieClear
+      for (const side of [1, -1] as const) {
+        if (spansX) tieAt(emit, side * tieBear, beside, roof.wallHeight)
+        else tieAt(emit, beside, side * tieBear, roof.wallHeight)
+      }
+    }
   }
   // Long-axis rims run full; short-axis rims BUTT between them.
   const longIsX = halfW >= halfD

@@ -1465,3 +1465,60 @@ describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', ()
     expect(row?.quantity).toBe(1) // one ridge, one statement
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B8b: flat roofs carry the uplift path (R802.11)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B8b: flat-roof joists tie BOTH bearing ends under high wind (R802.11)', () => {
+  const windy = { ...DEFAULT_SPEC, hurricaneTies: true }
+  const tiesOf = (members: Member[]) => members.filter((m) => m.label === 'hurricane tie')
+
+  test('windy census: exactly two ties per joist, at the plate line on the joist underside plane', () => {
+    const roof = seg({ roofType: 'flat' }) // 8 × 6 → joists run along Z, bearing at z = ±3
+    const members = frameRoofs([roof], [], windy)
+    const joists = byRole(members, 'rafter')
+    const ties = tiesOf(members)
+    expect(joists.length).toBeGreaterThan(0)
+    expect(ties.length).toBe(2 * joists.length)
+    const plusEnd = ties.filter((m) => (m.position[2] as number) > 0)
+    expect(plusEnd.length).toBe(joists.length)
+    for (const tie of ties) {
+      // plate line = the FOOTPRINT edge (never the overhung rim line)…
+      expect(Math.abs(tie.position[2] as number)).toBeCloseTo(3, 6)
+      // …at the joist underside plane (the shed lowY convention)
+      expect(tie.position[1]).toBeCloseTo(roof.position[1] + roof.wallHeight, 6)
+      expect(tie.material).toBe('steel')
+    }
+    // each tie sits BESIDE a joist face (t/2 + 1.5"), snapped toward center
+    const clear = (1.5 / 2) * 0.0254 + 1.5 * 0.0254
+    const stations = joists.map((j) => j.position[0] as number)
+    for (const tie of plusEnd) {
+      const x = tie.position[0] as number
+      expect(stations.some((u) => Math.abs(u + (u >= 0 ? -1 : 1) * clear - x) < 1e-9)).toBe(true)
+    }
+  })
+
+  test('spansX orientation (width < depth): ties land on the ±X plate lines', () => {
+    const members = frameRoofs([seg({ roofType: 'flat', width: 6, depth: 8 })], [], windy)
+    const ties = tiesOf(members)
+    expect(ties.length).toBe(2 * byRole(members, 'rafter').length)
+    for (const tie of ties) expect(Math.abs(tie.position[0] as number)).toBeCloseTo(3, 6)
+  })
+
+  test('the takeoff picks the tie row up free (role+material+system)', () => {
+    const members = frameRoofs([seg({ roofType: 'flat' })], [], windy)
+    const rows = computeTakeoff(members, [])
+    const row = rows.find((r) => r.item === 'Hurricane ties')
+    expect(row?.quantity).toBe(tiesOf(members).length)
+    expect(row?.detail).toContain('R802.11')
+  })
+
+  test('non-windy flat stays byte-equal (default spec and explicit false)', () => {
+    const plain = frameRoofs([seg({ roofType: 'flat' })], [], DEFAULT_SPEC)
+    expect(plain).toEqual(frameRoofs([seg({ roofType: 'flat' })], [], { ...DEFAULT_SPEC, hurricaneTies: false }))
+    expect(tiesOf(plain)).toHaveLength(0)
+    // …and at 400, where the flat-400 sha pin above holds the whole story
+    expect(tiesOf(frameRoofs([seg({ roofType: 'flat' })], [], { ...DEFAULT_SPEC, detail: '400' }))).toHaveLength(0)
+  })
+})

@@ -903,6 +903,14 @@ AND a gate — a checklist line without a test is a wish.
   route, v1 — the beam+post member set is the follow-up; hip/crown ridges
   are a queued residual). Slopes ≥ 3:12 and LOD 200 are byte-equal to
   pre-B8.
+  (b) `spec.hurricaneTies` reaches FLAT roofs (R802.11 — shed tied both
+  ends, frameFlat never called tieAt): every flat joist ties at BOTH
+  bearing ends, at the plate line (footprint edge, never the overhung rim
+  line) on the joist underside plane. The connector nails to the joist
+  FACE — beside-offset toward the roof center + rim inner-face clamp keep
+  the steel SAT-clean against joists and rims (zero-overhang included) —
+  and the takeoff books the ties for free (role+material+system). Non-windy
+  flat is byte-equal to pre-B8 (the flat-400 sha pin holds it).
   Origin: LOD-400 audit BATCH 8 (2026-08-20) — frameGable accepted a plain
   ridge board at 2.5:12; frameFlat never called tieAt while shed tied both
   ends; a hip wing into a gable main framed straight through with no
@@ -911,7 +919,11 @@ AND a gate — a checklist line without a test is a wish.
   framing despite the overhang.
   Gates: `src/engines/roof-framing.test.ts` (B8a describe: 2.5:12 flag pin
   at 300/400 + ridge-only placement, 3:12 boundary + 40° clean, LOD-200
-  silence, takeoff Flags row).
+  silence, takeoff Flags row; B8b describe: windy 2-per-joist census at the
+  plate line + beside-a-joist placement, spansX orientation, free takeoff
+  tie row, non-windy byte-equality) +
+  `src/engines/interpenetration.test.ts` (B8b windy-flat compose matrix
+  incl. zero overhang, non-vacuous).
 
 ## M — Mechanical (HVAC)
 
