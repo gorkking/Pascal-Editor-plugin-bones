@@ -849,6 +849,17 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
   }
 
   // ---- ridge board along X at the peak ----
+  // B8a: a plain ridge BOARD is prescriptive only at slopes ≥ 3:12 —
+  // below that R802.4.3 requires a structural ridge BEAM with posts to
+  // bearing. No beam/post set is modeled v1 (nothing under the ridge is a
+  // verified bearing — the purlin-strut machinery's own assumption stops at
+  // the ceiling joists), so the gap PRINTS instead of upgrading silently:
+  // the flag rides the ridge member to the takeoff Flags row and the P4
+  // schedules block (the B6 stated-gap convention). 200 stays schematic.
+  const ridgeBeamFlag =
+    spec.detail !== '200' && tan < 3 / 12 - EPS
+      ? 'ridge slope < 3:12 — ridge beam required, R802.4.3 (plain ridge board modeled; structural ridge beam + posts to bearing not modeled — verify design)'
+      : undefined
   const ridgeSize = ridgeSizeFor(spec.rafterSize)
   const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
   const ridgeLen = roof.width + 2 * roof.overhang
@@ -862,6 +873,8 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     ridgeLen,
     'lumber',
     `Ridge ${ridgeSize}${spec.detail === '400' ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°` : ''}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`,
+    undefined,
+    ridgeBeamFlag,
   )
 
   // ---- deck on both slope planes (LOD-400 B6, R803.2) ----
@@ -1411,7 +1424,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // The joists CROSS the ridge line at plan center — on a near-flat hip
   // (an inner mansard crown can compute a ~5° pitch) the ridge board's
   // underside descends INTO the joist band; no room = no fake wood (the
-  // collar-tie low-pitch skip convention; sub-3:12 ridges are B8a's flag).
+  // collar-tie low-pitch skip convention; B8a flags sub-3:12 GABLE ridges —
+  // the hip/crown ridge's own R802.4.3 flag is a queued residual).
   const [, cjRidgeD] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const cjClearsRidge = ridgeHalf <= 0.05 || eaveY + cjD + 0.002 <= ridgeY - cjRidgeD
   if (cjLen >= 0.3 && cjBandHalf > cjT && cjClearsRidge) {

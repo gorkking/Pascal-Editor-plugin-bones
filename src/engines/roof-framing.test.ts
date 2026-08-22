@@ -1418,3 +1418,50 @@ describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (
     expect(hashOf(members)).toBe('2ef111d64bcdd8d9')
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B8a: ridge <3:12 — a plain ridge board is not a ridge beam
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', () => {
+  // 2.5:12 — the audit exhibit: frameGable emitted a plain ridge BOARD with
+  // no beam, no posts and no statement. The v1 fix is the honest flag (the
+  // stated-gap convention); the beam+post member set is the follow-up.
+  const low = seg({ pitch: Math.atan(2.5 / 12) })
+  const FLAG =
+    'ridge slope < 3:12 — ridge beam required, R802.4.3 (plain ridge board modeled; structural ridge beam + posts to bearing not modeled — verify design)'
+
+  test('2.5:12 gable: the ridge carries the R802.4.3 flag at 300 and 400', () => {
+    for (const detail of ['300', '400'] as const) {
+      const members = frameRoofs([low], [], { ...DEFAULT_SPEC, detail })
+      const ridge = byRole(members, 'ridge')
+      expect(ridge).toHaveLength(1)
+      expect((ridge[0] as Member).flag).toBe(FLAG)
+      // the flag rides the RIDGE only — rafters/joists keep their own honesty
+      for (const m of members) {
+        if (m.role !== 'ridge') expect(m.flag ?? '').not.toContain('R802.4.3')
+      }
+    }
+  })
+
+  test('slopes at/above 3:12 stay clean: exactly 3:12, and the default 40°', () => {
+    for (const pitch of [Math.atan(3 / 12), (40 * Math.PI) / 180]) {
+      const members = frameRoofs([seg({ pitch })], [], { ...DEFAULT_SPEC, detail: '400' })
+      for (const m of members) expect(m.flag ?? '').not.toContain('R802.4.3')
+    }
+  })
+
+  test('LOD 200 stays schematic (no code claims — the flag convention)', () => {
+    const members = frameRoofs([low], [], { ...DEFAULT_SPEC, detail: '200' })
+    for (const m of members) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('the flag reaches a takeoff Flags row (P4 prints it — the B7 convention)', () => {
+    const rows = computeTakeoff(frameRoofs([low], [], { ...DEFAULT_SPEC, detail: '400' }), [])
+    const row = rows.find(
+      (r) => r.section === 'Flags' && r.detail.includes('ridge beam required, R802.4.3'),
+    )
+    expect(row).toBeDefined()
+    expect(row?.quantity).toBe(1) // one ridge, one statement
+  })
+})

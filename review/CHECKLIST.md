@@ -894,6 +894,25 @@ AND a gate — a checklist line without a test is a wish.
   bolt-shank class; HI portal+uplift coexistence). All mutation-checked
   (17 probes across B10a-e).
 
+- **S17 Roof shape closures (B8): low-slope ridges, flat-roof uplift,
+  unframed intersections and the gambrel break are never silent.**
+  (a) A gable ridge below 3:12 (tan θ < 0.25) is NOT upgraded to a beam
+  silently and NOT accepted silently: the ridge member carries 'ridge slope
+  < 3:12 — ridge beam required, R802.4.3 (…not modeled — verify design)' at
+  300+, reaching the takeoff Flags row and the P4 schedules block (flag
+  route, v1 — the beam+post member set is the follow-up; hip/crown ridges
+  are a queued residual). Slopes ≥ 3:12 and LOD 200 are byte-equal to
+  pre-B8.
+  Origin: LOD-400 audit BATCH 8 (2026-08-20) — frameGable accepted a plain
+  ridge board at 2.5:12; frameFlat never called tieAt while shed tied both
+  ends; a hip wing into a gable main framed straight through with no
+  members AND no warning; the 9 m gambrel break purlins carried every
+  rafter joint with zero struts and the gambrel gable ends had no rake
+  framing despite the overhang.
+  Gates: `src/engines/roof-framing.test.ts` (B8a describe: 2.5:12 flag pin
+  at 300/400 + ridge-only placement, 3:12 boundary + 40° clean, LOD-200
+  silence, takeoff Flags row).
+
 ## M — Mechanical (HVAC)
 
 - **M1 Ducts never cross plate bands; interior storeys route in soffits.**
