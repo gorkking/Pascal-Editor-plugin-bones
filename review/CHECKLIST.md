@@ -548,14 +548,28 @@ AND a gate — a checklist line without a test is a wish.
   slide off California backing studs, and a return too congested flags
   instead of guessing) plus the 1000-lb header-to-jack strap (role
   'strap', ~1.2 mm surface steel on the framing face under the 2 mm SAT
-  skin; its advisory names what v1 does not model — CS-PF nail schedule,
-  header continuation to the wall end). A return under the CS-PF minimum
-  flags '⚠ portal frame required — not modeled … engineered shear wall
-  required'; low-seismic jurisdictions flag the same returns (Table
-  R602.10.5 + R602.10.6.4 cites) instead of inventing hardware;
-  inter-opening piers say 'bracing between adjacent openings not
-  evaluated (v1)'. Bracing flags COMPOSE with the wall's aggregate
-  compression flag (B1 ' | ' convention). CROSS-REFERENCE (both
+  skin; its advisory says it is SYMBOLIC surface hardware — it mounts on
+  the −v framing face regardless of exterior side, installed per the
+  Figure R602.10.6.4 nail schedule — and names what v1 does not model:
+  CS-PF panel nailing, header continuation to the wall end). The method
+  has a DOMAIN (skeptic round 1): CS-PF ends at 10-ft wall height
+  (Figure R602.10.6.4 max; the table column stops at 20" @ 10 ft) —
+  `portalMinPanelWidth` returns null past `PORTAL_MAX_WALL_HEIGHT` and a
+  taller SDC-D wall flags '⚠ … exceeds the 10 ft CS-PF maximum height',
+  NEVER extrapolated hardware (an unflagged portal outside the table is
+  an implicit compliance claim); under a SECOND storey the minimum
+  widens to 24" (first-of-two-storeys column), plumbed from compute's
+  level list (`FrameWallsOptions.storeyAbove` → `FrameHints.storeyAbove`
+  — a slabbed level above is a storey, an attic is not); standalone
+  callers without the hint ASSUME single-storey and the strap advisory
+  says so. A return under the applicable CS-PF minimum flags '⚠ portal
+  frame required — not modeled … engineered shear wall required';
+  low-seismic jurisdictions flag the same returns (Table R602.10.5 +
+  R602.10.6.4 cites) instead of inventing hardware; inter-opening piers
+  say 'bracing between adjacent openings not evaluated (v1)'. Bracing
+  flags COMPOSE with the wall's aggregate compression flag (B1 ' | '
+  convention) and NAME their wall ('wall w_s: …' — examiner round 1) so
+  a printed flag locates its geometry. CROSS-REFERENCE (both
   directions, ground level with walls + foundation both computed): a
   foundation HDU with no framed vertical within 0.15 m (a corner HDU
   matches the orthogonal wall's end stud — one corner assembly) flags
@@ -579,11 +593,18 @@ AND a gate — a checklist line without a test is a wish.
   foundation's honestly-labeled SDC-D hold-downs).
   Gates: `src/engines/wall-bracing.test.ts` (line identification incl.
   4-ft split + exclusions, warning pin, LOD-200 silence, CS-PF minimum
-  matrix, jurisdiction-truth describe with the enumerated CA-vs-INTL
-  delta, 51-state sweep, cross-reference describe both directions +
-  toggle honesty) + `src/engines/wall-framing.test.ts` (garage-returns
-  describe: portal census, contact matrix, surface-strap pin, INTL flag
-  pin, ⚠ too-narrow, 48"-panel no-op, out-of-scope, pier flag) +
+  matrix + null-past-10-ft domain pins, jurisdiction-truth describe with
+  the enumerated CA-vs-INTL delta, 51-state sweep, cross-reference
+  describe both directions + toggle honesty, two-storey plumb-through
+  describe: 24"-min flag under a slabbed level above + no assumption
+  clause when compute passes known context) +
+  `src/engines/wall-framing.test.ts` (garage-returns describe: portal
+  census, contact matrix, surface-strap pin, INTL flag pin, ⚠
+  too-narrow, 48"-panel no-op, out-of-scope, pier flag; CS-PF domain
+  describe: 11-ft SDC-D exhibit → flag + ZERO hardware, 10-ft boundary
+  portals; first-of-two-storeys describe: 19.6" return portal/flag by
+  storey context, >24" portals under a second storey, single-storey
+  assumption stated-when-unknown/silent-when-known, wall-id flag pin) +
   `src/engines/interpenetration.test.ts` (SDC-D garage compose:
   walls+layers strictly clean; +foundation inherits only the named
   pre-existing classes) + `src/engines/takeoff.test.ts` (B9 describe:

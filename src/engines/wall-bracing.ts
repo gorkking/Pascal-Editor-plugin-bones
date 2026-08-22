@@ -55,12 +55,25 @@ export const BRACED_PANEL_MIN_LENGTH = feet(4)
 export const PORTAL_OPENING_MIN_SPAN = feet(6)
 
 /**
+ * CS-PF is a TABULATED method with a DOMAIN: Table R602.10.5's portal
+ * column ends at 10-ft wall height (16"/18"/20" at 8/9/10 ft) and Figure
+ * R602.10.6.4 caps the portal frame at 10 ft MAX HEIGHT. Past that there
+ * is no prescriptive portal to extrapolate — a formula inventing 22"/24"
+ * minimums beyond the table is an implicit compliance claim outside the
+ * method (skeptic round 1), so callers route taller walls to the
+ * engineered-shear-wall flag path instead of hardware.
+ */
+export const PORTAL_MAX_WALL_HEIGHT = feet(10)
+
+/**
  * Minimum CS-PF portal panel width — Table R602.10.5: 16" for 8-ft walls,
  * 18" at 9 ft, 20" at 10 ft. Between tabulated heights the requirement
  * snaps UP (conservative — the tableSpanFor convention): a 2.5 m (8.2 ft)
- * wall needs the 9-ft value, 18".
+ * wall needs the 9-ft value, 18". Returns null past the 10-ft domain —
+ * there is no CS-PF minimum to quote for a wall the method doesn't cover.
  */
-export function portalMinPanelWidth(wallHeight: number): number {
+export function portalMinPanelWidth(wallHeight: number): number | null {
+  if (wallHeight > PORTAL_MAX_WALL_HEIGHT + 1e-9) return null
   const extraFt = Math.max(0, Math.ceil(wallHeight / feet(1) - 8 - 1e-9))
   return inches(16 + 2 * extraFt)
 }
@@ -187,7 +200,10 @@ export function crossReferenceHoldDowns(members: Member[]): number {
   let flagged = 0
   for (const hd of holdDowns) {
     if (verticals.some((v) => near(hd, v))) continue
-    composeFlag(hd, 'hold-down has no framed post above — verify braced-wall end post (R602.10)')
+    composeFlag(
+      hd,
+      `wall ${hd.sourceId}: hold-down has no framed post above — verify braced-wall end post (R602.10)`,
+    )
     flagged += 1
   }
   for (const post of members) {
@@ -196,7 +212,7 @@ export function crossReferenceHoldDowns(members: Member[]): number {
     if (holdDowns.some((hd) => near(post, hd))) continue
     composeFlag(
       post,
-      'portal post has no foundation hold-down below — CS-PF anchorage required (R602.10.6.4), verify',
+      `wall ${post.sourceId}: portal post has no foundation hold-down below — CS-PF anchorage required (R602.10.6.4), verify`,
     )
     flagged += 1
   }

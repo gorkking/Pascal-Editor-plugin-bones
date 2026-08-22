@@ -7,6 +7,7 @@ import { computeLevel } from '../framing/compute'
 import {
   BRACED_LINE_OFFSET_TOL,
   BRACED_PANEL_MIN_LENGTH,
+  PORTAL_MAX_WALL_HEIGHT,
   PORTAL_OPENING_MIN_SPAN,
   bracingWarnings,
   identifyBracedWallLines,
@@ -113,6 +114,15 @@ describe('portalMinPanelWidth — Table R602.10.5 CS-PF minimums, snapped UP', (
     expect(portalMinPanelWidth(feet(9))).toBeCloseTo(inches(18), 9)
     expect(portalMinPanelWidth(feet(10))).toBeCloseTo(inches(20), 9)
     expect(portalMinPanelWidth(2.5)).toBeCloseTo(inches(18), 9)
+  })
+
+  test('the table has a DOMAIN: null past the 10-ft CS-PF maximum (Figure R602.10.6.4) — never extrapolated', () => {
+    // skeptic round 1: the old formula invented 22"/24" minimums past the
+    // table — an implicit compliance claim outside the method.
+    expect(portalMinPanelWidth(feet(10))).not.toBeNull() // boundary: in domain
+    expect(portalMinPanelWidth(feet(10) + 0.001)).toBeNull()
+    expect(portalMinPanelWidth(feet(11))).toBeNull()
+    expect(PORTAL_MAX_WALL_HEIGHT).toBeCloseTo(feet(10), 9)
   })
 
   test('threshold constants match the tables they cite', () => {
@@ -447,5 +457,53 @@ describe('jurisdiction sweep — the 16-ft garage door answered in every state',
     // the SDC-D set is exactly the seismicHoldDowns profiles (7 states today)
     expect(seismicStates.sort()).toEqual(['AK', 'CA', 'HI', 'NV', 'OR', 'UT', 'WA'])
     expect(flagOnlyStates.length).toBeGreaterThanOrEqual(43) // framed non-SDC-D states + DC + INTL (FL is CMU)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B9 round 2: the first-of-two-storeys 24" minimum plumbs through compute
+// ---------------------------------------------------------------------------
+
+describe('two-storey garage (Figure R602.10.6.4): compute plumbs the storey context', () => {
+  const twoStoreyScene = (): Record<string, Record<string, unknown>> => {
+    const scene = garageScene()
+    scene.level_2 = { id: 'level_2', type: 'level', level: 1, height: 2.5 }
+    scene.slab_2 = {
+      id: 'slab_2',
+      type: 'slab',
+      parentId: 'level_2',
+      polygon: [
+        [0, 0],
+        [6.4, 0],
+        [6.4, 8],
+        [0, 8],
+      ],
+      holes: [],
+    }
+    return scene
+  }
+
+  test('CA ground-floor garage under a second storey: 23.3" returns FLAG (24" min), zero hardware', () => {
+    const result = computeLevel(twoStoreyScene(), garageConfig('CA'))
+    const wallMs = result.members.filter((m) => m.system === 'wall-framing')
+    expect(wallMs.filter((m) => m.role === 'strap')).toEqual([])
+    expect(
+      wallMs.filter((m) => m.role === 'post' && (m.label ?? '').includes('R602.10.6.4')),
+    ).toEqual([])
+    const flagged = wallMs.filter((m) =>
+      (m.flag ?? '').includes('24" under a second storey, Figure R602.10.6.4'),
+    )
+    expect(flagged).toHaveLength(2)
+    for (const k of flagged) expect(k.flag).toContain('wall w_s:')
+  })
+
+  test('single-storey CA garage: compute passes a KNOWN context — no assumption clause on the strap', () => {
+    const result = computeLevel(garageScene(), garageConfig('CA'))
+    const straps = result.members.filter((m) => m.role === 'strap')
+    expect(straps).toHaveLength(2)
+    for (const s of straps) {
+      expect(s.advisory).toContain('surface strap, symbolic')
+      expect(s.advisory).not.toContain('single-storey assumed')
+    }
   })
 })

@@ -21,7 +21,7 @@
 import { LUMBER_CROSS_SECTIONS, type LumberSize } from '../lumber'
 import { DEFAULT_SPEC, type FramingSpec, headerFor } from '../core/spec'
 import type { Member, OpeningSlice, WallSlice } from '../core/types'
-import { feet, formatIn, inches } from '../core/units'
+import { feet, formatFtIn, formatIn, inches } from '../core/units'
 import {
   BRACED_PANEL_MIN_LENGTH,
   PORTAL_OPENING_MIN_SPAN,
@@ -138,6 +138,15 @@ export type FrameHints = {
    * audit B5).
    */
   slabBearing?: boolean
+  /**
+   * A slabbed storey exists ABOVE this wall's level: the CS-PF portal
+   * panel minimum widens to 24" (Figure R602.10.6.4, first-of-two-storeys
+   * column — B9 round 2). Plumbed from compute's level list via
+   * `FrameWallsOptions.storeyAbove`; ABSENT (standalone callers — tests,
+   * the mixed-wall framed zone) means UNKNOWN → single-storey assumed and
+   * the portal strap's advisory says so. `false` is a KNOWN single storey.
+   */
+  storeyAbove?: boolean
 }
 
 type Emit = (
@@ -383,7 +392,7 @@ export function frameWall(
       })
       if (pier) {
         return {
-          kingFlag: `bracing between adjacent openings not evaluated (v1) — verify R602.10 braced panel beside the ${formatIn(ro)} opening`,
+          kingFlag: `wall ${wall.id}: bracing between adjacent openings not evaluated (v1) — verify R602.10 braced panel beside the ${formatIn(ro)} opening`,
         }
       }
       if (panel >= BRACED_PANEL_MIN_LENGTH) return {} // a full braced panel fits
@@ -392,18 +401,36 @@ export function frameWall(
         // applies everywhere, but only SDC D+ models the portal set.
         return {
           kingFlag:
-            `narrow ${formatIn(panel)} return beside ${formatIn(ro)} opening — under the 48" ` +
+            `wall ${wall.id}: narrow ${formatIn(panel)} return beside ${formatIn(ro)} opening — under the 48" ` +
             `braced-panel minimum (Table R602.10.5); portal frame (R602.10.6.4) or engineered ` +
             `bracing required — not modeled`,
         }
       }
-      const minW = portalMinPanelWidth(H)
+      // CS-PF DOMAIN (skeptic round 1): the portal method ends at 10-ft wall
+      // height — Table R602.10.5's column stops at 20" @ 10 ft and Figure
+      // R602.10.6.4 caps the frame there. A taller SDC-D wall gets the
+      // engineered flag, never extrapolated hardware (an unflagged portal
+      // set outside the table is an implicit compliance claim).
+      const minBase = portalMinPanelWidth(H)
+      if (minBase === null) {
+        return {
+          kingFlag:
+            `wall ${wall.id}: ⚠ portal frame required — not modeled: ${formatFtIn(H)} wall exceeds ` +
+            `the 10 ft CS-PF maximum height (Figure R602.10.6.4) — engineered shear wall required`,
+        }
+      }
+      // Figure R602.10.6.4, first-of-two-storeys column: under a SECOND
+      // storey the portal panel minimum widens to 24". compute plumbs the
+      // real storey context (FrameHints.storeyAbove); an ABSENT hint is a
+      // standalone caller — single-storey ASSUMED, stated on the strap
+      // advisory below.
+      const minW = hints.storeyAbove === true ? Math.max(minBase, inches(24)) : minBase
       if (panel < minW) {
         return {
           kingFlag:
-            `⚠ portal frame required — not modeled: ${formatIn(panel)} return beside ` +
+            `wall ${wall.id}: ⚠ portal frame required — not modeled: ${formatIn(panel)} return beside ` +
             `${formatIn(ro)} opening is under the ${formatIn(minW)} CS-PF minimum ` +
-            `(Table R602.10.5) — engineered shear wall required`,
+            `(Table R602.10.5${hints.storeyAbove === true ? ' — 24" under a second storey, Figure R602.10.6.4' : ''}) — engineered shear wall required`,
         }
       }
       // CS-PF portal set fits: hold-down end posts DOUBLE the existing panel
@@ -427,7 +454,7 @@ export function frameWall(
       const besideEnd = resolvePost(endStudU - side * t, -side as -1 | 1)
       if (besideKing === null || besideEnd === null || Math.abs(besideKing - besideEnd) < t) {
         return {
-          kingFlag: `⚠ portal frame required — not modeled: ${formatIn(panel)} return too congested for CS-PF hold-down posts (R602.10.6.4) — verify detail`,
+          kingFlag: `wall ${wall.id}: ⚠ portal frame required — not modeled: ${formatIn(panel)} return too congested for CS-PF hold-down posts (R602.10.6.4) — verify detail`,
         }
       }
       portalPostUs.push(besideKing, besideEnd)
@@ -515,8 +542,17 @@ export function frameWall(
           material: 'steel',
           sourceId: wall.id,
           label: 'Portal strap 1000 lb — header to jack (CS-PF, R602.10.6.4)',
+          // Symbolic surface hardware (examiner round 1): the box mounts on
+          // the −v framing face regardless of which side is exterior and
+          // laps the king at the face plane — placement is schematic, the
+          // figure's nail schedule governs the install.
           advisory:
-            'CS-PF v1 — panel sheathing nail schedule and header continuation to the wall end not modeled; verify portal detail',
+            'CS-PF v1 — surface strap, symbolic: install per the Figure R602.10.6.4 nail schedule; ' +
+            'panel sheathing nailing and header continuation to the wall end not modeled' +
+            (hints.storeyAbove === undefined
+              ? '; single-storey assumed (24" min panel under a second storey)'
+              : '') +
+            '; verify portal detail',
         })
       }
     }
@@ -862,6 +898,10 @@ export function frameHints(
 export type FrameWallsOptions = {
   /** Walls bear on a concrete slab (ground level) — see FrameHints.slabBearing. */
   slabBearing?: boolean
+  /** A slabbed storey exists above this level — see FrameHints.storeyAbove
+   * (CS-PF 24" first-of-two-storeys minimum, Figure R602.10.6.4). Leave
+   * undefined when unknown: single-storey is then ASSUMED and stated. */
+  storeyAbove?: boolean
 }
 
 /**
@@ -882,6 +922,12 @@ export function frameWalls(
   opts?: FrameWallsOptions,
 ): Member[] {
   const hints = frameHints(walls, spec, overrides)
+  // Level context folds into every wall's hints; nothing set = hints pass
+  // through untouched (byte-equal default path).
+  const level: Partial<FrameHints> = {}
+  if (opts?.slabBearing) level.slabBearing = true
+  if (opts?.storeyAbove !== undefined) level.storeyAbove = opts.storeyAbove
+  const hasLevelContext = Object.keys(level).length > 0
   const members: Member[] = []
   for (const wall of walls) {
     const h = hints.get(wall.id) ?? {}
@@ -889,7 +935,7 @@ export function frameWalls(
       ...frameWall(
         wall,
         specForWall(spec, overrides?.get(wall.id)),
-        opts?.slabBearing ? { ...h, slabBearing: true } : h,
+        hasLevelContext ? { ...h, ...level } : h,
       ),
     )
   }
