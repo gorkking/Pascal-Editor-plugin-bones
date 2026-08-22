@@ -202,6 +202,15 @@ const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
  * least-bad fallback — condenser-always fix): never a silent guess. */
 const COND_VERIFY_FLAG = '⚠ verify condenser placement — no exterior wall anchors the row'
 /**
+ * A verbatim heat-pump override farther (plan) than this from EVERY
+ * exterior wall warns — almost certainly a mis-drag into the yard.
+ * Threshold basis: NEC 210.63's 25 ft HVAC service-receptacle radius
+ * (7.62 m) — the code's own "serviceable from the dwelling" reach. The
+ * in-file 15 m line-set advisory is the wrong ruler here: it is a run-
+ * LENGTH class and would bless a unit 13 m into the garden (hunt 5f).
+ */
+const HP_OVERRIDE_FAR_M = 7.62
+/**
  * Worst-case exterior assembly beyond the wall FACE the pad must clear:
  * brick veneer's 4.625" assembly offset (1" airspace + 3.625" wythe,
  * R703.8 / Table R703.3(1)) + 7/16" sheathing ≈ 0.129 m. The hvac engine
@@ -1479,6 +1488,41 @@ export function layoutHvac(
   // (condenserPlan floors at 1 unit / 1.5 tons). Only the condensate drain
   // stays LOD-400 scope. ----
   const hpPlan = overridePlanPoint(walls, overrides?.heatPump)
+  // HEAT-PUMP OVERRIDE HONESTY (condenser-honesty set, hunt 5a/5f): the
+  // service node WINS verbatim (checklist A4 — never silently relocated),
+  // but a mis-dragged point told no one: a unit in the living room and one
+  // 13 m into the yard both composed flag-free while every OTHER service
+  // point (panel/meter/tstat/WH) carries an RO-collision warning. Two truth
+  // classes, checked on the override only (auto placement stays silent):
+  //  (a) the point sits INSIDE an indoor zone polygon — the outdoor unit
+  //      belongs outside (name the room). A point ON a wall band is a
+  //      legitimate wall-anchored override, not "indoors" — zone polygons
+  //      trace wall centerlines, so the band guard kills the boundary
+  //      false-positive (wallId/wallT anchors resolve to the centerline);
+  //  (b) the point sits beyond the NEC 210.63 service reach (25 ft ≈
+  //      7.62 m) from EVERY exterior wall — see HP_OVERRIDE_FAR_M.
+  // The override still wins below — the warning just tells the truth.
+  if (hpPlan) {
+    const hpRoom =
+      wallBandAt(hpPlan, walls) === null
+        ? rooms.find((r) => pointInPolygon(hpPlan, r.polygon))
+        : undefined
+    if (hpRoom) {
+      warnings.push(
+        `heat-pump point is inside ${hpRoom.name || hpRoom.id} — the outdoor unit belongs outside; move it or it will be drawn indoors`,
+      )
+    } else {
+      const hpExit = nearestExteriorExit(walls, hpPlan)
+      if (hpExit) {
+        const d = Math.hypot(hpExit.at[0] - hpPlan[0], hpExit.at[1] - hpPlan[1])
+        if (d > HP_OVERRIDE_FAR_M) {
+          warnings.push(
+            `heat-pump point is ${d.toFixed(1)} m from the nearest exterior wall — beyond the 25 ft service reach (NEC 210.63); verify the outdoor unit's spot`,
+          )
+        }
+      }
+    }
+  }
   {
     const exit = nearestExteriorExit(walls, equipAt)?.at
     if (spec.detail === '400' && exit) {
