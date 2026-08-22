@@ -34,6 +34,13 @@ export type PlanSetOptions = {
   warnings?: string[]
   /** Resolved code name, e.g. "2023 FBC — Residential (2021 IRC base)". */
   codeName?: string
+  /** The spec's header-band assumption (LOD-400 B11, `headerAssumption`):
+   * set only when a heavy-snow band sized the headers from Table
+   * R602.7(1) — the cover prints it as a DESIGN CRITERIA line (examiner
+   * round 2: the honesty device lived on member labels only and never
+   * reached paper, while the demo footprint runs past the assumed 24-ft
+   * width). Absent → no line, low-snow sheets byte-equal. */
+  headerAssumption?: string
   /** Preformatted date string for the title block. */
   date?: string
   /** Stud spacing (inches o.c.) for the framing-sheet callout. */
@@ -2203,6 +2210,10 @@ function coverSheet(members: Member[], opts: PlanSetOptions, index: string[]): P
     // announce itself on the first sheet, not just the title blocks.
     `${opts.levelName ?? 'Level'} — full construction set · LOD ${opts.detail ?? '400'}`,
     [opts.jurisdiction, opts.codeName].filter(Boolean).join(' · '),
+    // B11 (examiner round 2): the header snow-band assumption must reach
+    // paper — the builder deciding whether the 24-ft width assumption
+    // holds reads the cover, not member labels.
+    opts.headerAssumption ? `DESIGN CRITERIA — headers ${opts.headerAssumption}` : '',
     `${opts.date ?? ''} · Drafting aid, not engineering — verify with your local building department`,
   ].filter((l) => l.length > 0)
   const indexRows = index

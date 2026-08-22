@@ -3191,12 +3191,20 @@ describe('door + window schedule (LOD-400 B21d)', () => {
     const w56 = bwall('w_hdr', [0, 0], [6, 0], [
       opening('nb', 'window', 3, inches(56) - inches(1.5), 1.0, 0.9, inches(56), 1.0 + inches(1.5)),
     ])
-    const composeAt = (code: string): { svg: string; header: Member } => {
+    const composeAt = (
+      code: string,
+    ): { svg: string; cover: string; sheets: { title: string; svg: string }[]; header: Member } => {
       const spec = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor(code))
       const members = frameWalls([w56], spec)
       const header = members.find((m) => m.role === 'header') as Member
       expect(header).toBeDefined()
-      return { svg: tableSvgOf(buildPlanSet(members, [], { walls: [w56] })), header }
+      const sheets = buildPlanSet(members, [], {
+        walls: [w56],
+        // the panel passes result.spec.headerAssumption (round-2 examiner)
+        headerAssumption: spec.headerAssumption,
+      })
+      const cover = sheets.find((s) => s.title === 'Cover')?.svg ?? ''
+      return { svg: tableSvgOf(sheets), cover, sheets, header }
     }
     const vt = composeAt('VT')
     const intl = composeAt('INTL')
@@ -3212,6 +3220,37 @@ describe('door + window schedule (LOD-400 B21d)', () => {
     // low-snow paper is byte-equal: TX prints the same sheet as INTL
     const tx = composeAt('TX')
     expect(tx.svg).toBe(intl.svg)
+  })
+
+  test('B11 round 2 (examiner): the width assumption reaches PAPER — a cover DESIGN CRITERIA line, deepened states only', () => {
+    // Round 1 left the honesty device on member labels alone: nothing on
+    // the 18-sheet set said the header sizing assumes ≤ 24 ft building
+    // width — exactly what a builder of a wider footprint must read.
+    const w56 = bwall('w_hdr', [0, 0], [6, 0], [
+      opening('nb', 'window', 3, inches(56) - inches(1.5), 1.0, 0.9, inches(56), 1.0 + inches(1.5)),
+    ])
+    const sheetsAt = (code: string): { title: string; svg: string }[] => {
+      const spec = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor(code))
+      return buildPlanSet(frameWalls([w56], spec), [], {
+        walls: [w56],
+        headerAssumption: spec.headerAssumption,
+      })
+    }
+    const coverOf = (sheets: { title: string; svg: string }[]): string =>
+      sheets.find((s) => s.title === 'Cover')?.svg ?? ''
+    const vtCover = coverOf(sheetsAt('VT'))
+    expect(vtCover).toContain('DESIGN CRITERIA — headers sized per Table R602.7(1) @ 70 psf ground snow')
+    expect(vtCover).toContain('≤ 24 ft building width, roof-and-ceiling loading assumed')
+    const mnCover = coverOf(sheetsAt('MN'))
+    expect(mnCover).toContain('@ 50 psf ground snow')
+    // low-snow covers carry NO line, and the whole low-snow sheet set is
+    // byte-equal to one built without the option at all (the pre-round-2
+    // paper) — the line prints ONLY when a band applies
+    const intlSheets = sheetsAt('INTL')
+    expect(coverOf(intlSheets)).not.toContain('DESIGN CRITERIA')
+    const spec400 = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor('INTL'))
+    const withoutOption = buildPlanSet(frameWalls([w56], spec400), [], { walls: [w56] })
+    expect(intlSheets.map((s) => s.svg)).toEqual(withoutOption.map((s) => s.svg))
   })
 })
 

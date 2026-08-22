@@ -634,6 +634,10 @@ function ExportPlansButton({
           // resolved state code — raw 'AUTO' printed on sheets (quality C1)
           jurisdiction: result.jurisdiction,
           codeName,
+          // heavy-snow header band (B11): the Table R602.7(1) width
+          // assumption prints as a cover DESIGN CRITERIA line — unset in
+          // low-snow jurisdictions (paper stays byte-equal)
+          headerAssumption: result.spec.headerAssumption,
           date: new Date().toLocaleDateString(),
           // engine warnings print verbatim in the schedules flag block
           // (blueprint C5 / checklist P4) — paper never hides a caveat
