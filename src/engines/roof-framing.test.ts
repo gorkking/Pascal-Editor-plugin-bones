@@ -3,7 +3,13 @@ import { createHash } from 'node:crypto'
 import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member } from '../core/types'
-import { birdsmouthSeat, extractRoofs, frameRoofs, type RoofSegmentSlice } from './roof-framing'
+import {
+  birdsmouthSeat,
+  detectUnframedRoofIntersections,
+  extractRoofs,
+  frameRoofs,
+  type RoofSegmentSlice,
+} from './roof-framing'
 import { computeTakeoff } from './takeoff'
 
 const byRole = (members: Member[], role: string): Member[] => members.filter((m) => m.role === role)
@@ -1520,5 +1526,87 @@ describe('LOD-400 B8b: flat-roof joists tie BOTH bearing ends under high wind (R
     expect(tiesOf(plain)).toHaveLength(0)
     // …and at 400, where the flat-400 sha pin above holds the whole story
     expect(tiesOf(frameRoofs([seg({ roofType: 'flat' })], [], { ...DEFAULT_SPEC, detail: '400' }))).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B8c: unframed roof intersections warn — never silent
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B8c: overlapping segment pairs the valley detector skips WARN', () => {
+  const PHRASE = 'roof intersection not framed — valley detail required'
+
+  test('the audit exhibit: a hip wing into a gable main frames NO valley members — and now warns', () => {
+    const major = seg()
+    const wing = seg({
+      id: 'roofseg_hipwing',
+      roofType: 'hip',
+      width: 4,
+      depth: 4,
+      yaw: Math.PI / 2,
+      position: [1, 2.5, 4], // same crossing the gable×gable valley pair uses
+    })
+    // the silence being closed: zero valley boards, zero valley jacks
+    const members = frameRoofs([major, wing], [], DEFAULT_SPEC)
+    expect(byRole(members, 'valley')).toHaveLength(0)
+    expect(members.some((m) => m.label?.includes('Valley jack'))).toBe(false)
+    // …so the detector must say so, naming both segments
+    const warnings = detectUnframedRoofIntersections([major, wing])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain(PHRASE)
+    expect(warnings[0]).toContain('roofseg_hipwing')
+    expect(warnings[0]).toContain('roofseg_test')
+  })
+
+  test('a QUALIFYING perpendicular gable×gable pair stays quiet — its members ARE the answer', () => {
+    const major = seg()
+    const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    expect(byRole(frameRoofs([major, minor], [], DEFAULT_SPEC), 'valley')).toHaveLength(2)
+    expect(detectUnframedRoofIntersections([major, minor])).toHaveLength(0)
+  })
+
+  test('non-qualifying gable pairs warn: parallel overlap, fully BURIED cross, eave mismatch', () => {
+    const major = seg()
+    // parallel ridges, footprints overlapping — the ⊥ test skips the pair
+    expect(detectUnframedRoofIntersections([major, seg({ id: 'par', position: [2, 2.5, 3] })])).toHaveLength(1)
+    // perpendicular but fully buried inside the major (never crosses the eave)
+    const buried = seg({ id: 'bur', width: 3, depth: 2, yaw: Math.PI / 2, position: [0, 2.5, 0] })
+    expect(detectUnframedRoofIntersections([major, buried])).toHaveLength(1)
+    // qualifying geometry, but the eaves mismatch > 0.05 — detectValleys refuses it
+    const lifted = seg({ id: 'lif', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.8, 4] })
+    expect(detectUnframedRoofIntersections([major, lifted])).toHaveLength(1)
+  })
+
+  test('adjacent wings never warn: shared edge and a 3 cm graze are composition, not intersection', () => {
+    const major = seg() // x ∈ [−4, 4]
+    expect(detectUnframedRoofIntersections([major, seg({ id: 'abut', position: [8, 2.5, 0] })])).toHaveLength(0)
+    expect(detectUnframedRoofIntersections([major, seg({ id: 'graze', position: [7.97, 2.5, 0] })])).toHaveLength(0)
+  })
+
+  test('vertically separated stacks never warn (a cupola floats above the main ridge)', () => {
+    // major peak: 2.5 + 0.5 + 3·tan40° ≈ 5.52 — the cupola's base sits above it
+    const major = seg()
+    const cupola = seg({ id: 'cup', width: 2, depth: 2, position: [0, 6, 0] })
+    expect(detectUnframedRoofIntersections([major, cupola])).toHaveLength(0)
+    // …but the same cupola resting ON the roof band still warns
+    expect(
+      detectUnframedRoofIntersections([major, seg({ id: 'low', width: 2, depth: 2, position: [0, 3, 0] })]),
+    ).toHaveLength(1)
+  })
+
+  test('three wings: the served valley pair stays quiet while the hip wing warns once', () => {
+    const major = seg()
+    const gableWing = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const hipWing = seg({
+      id: 'roofseg_hipwing',
+      roofType: 'hip',
+      width: 4,
+      depth: 4,
+      yaw: Math.PI / 2,
+      position: [-2, 2.5, -4],
+    })
+    const warnings = detectUnframedRoofIntersections([major, gableWing, hipWing])
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0]).toContain('roofseg_hipwing')
   })
 })

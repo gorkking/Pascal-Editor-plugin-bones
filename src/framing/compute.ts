@@ -51,7 +51,7 @@ import { flagLinesetTradeCrossings, layoutHvac } from '../engines/hvac'
 import { layoutPlumbing, placeMeterSpot } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
-import { frameRoofs, extractRoofs } from '../engines/roof-framing'
+import { detectUnframedRoofIntersections, frameRoofs, extractRoofs } from '../engines/roof-framing'
 import { bracingWarnings, crossReferenceHoldDowns } from '../engines/wall-bracing'
 import {
   dedupeFoundationStraps,
@@ -729,6 +729,15 @@ function computeLevelUncached(
         const myOrdinal = levels[levelIndex]?.level ?? Number.POSITIVE_INFINITY
         for (const { level, roofs } of levelRoofs) {
           const framed = frameRoofs(roofs, activeWalls, spec)
+          // B8c: segment pairs the valley detector does NOT serve (a hip
+          // wing into a gable main, skewed/parallel/buried gable pairs)
+          // frame straight through with no members — that gap must PRINT,
+          // never ride a docblock. One warning per unserved overlapping
+          // pair; LOD 200 stays schematic (valleys aren't framed there
+          // either — no code claims).
+          if (spec.detail !== '200') {
+            warnings.push(...detectUnframedRoofIntersections(roofs))
+          }
           members.push(
             ...(level.id === levelId
               ? // Owner ON the roof level (F1b, user prod report: trusses rode

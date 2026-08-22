@@ -911,6 +911,18 @@ AND a gate — a checklist line without a test is a wish.
   the steel SAT-clean against joists and rims (zero-overhang included) —
   and the takeoff books the ties for free (role+material+system). Non-windy
   flat is byte-equal to pre-B8 (the flat-400 sha pin holds it).
+  (c) An overlapping roof-segment pair the valley detector does NOT serve
+  (a hip wing into a gable main; skewed/parallel/buried/eave-mismatched
+  gable pairs) NEVER frames straight through silently:
+  `detectUnframedRoofIntersections` (2D OBB SAT on the yawed footprints,
+  ≥ 5 cm real penetration + vertical-envelope interleave) raises one
+  computeLevel warning per pair — 'roof intersection not framed — valley
+  detail required (…)' — printed verbatim in the P4 schedules flag block.
+  Served gable×gable pairs stay quiet (their members ARE the answer);
+  touching/grazing neighbors and vertically separated stacks never warn;
+  LOD 200 makes no code claims (valleys aren't framed there either). Full
+  hip-plane valley FRAMING stays out of scope — v1 is the printed warning.
+  Members are untouched — the valley sha pin holds.
   Origin: LOD-400 audit BATCH 8 (2026-08-20) — frameGable accepted a plain
   ridge board at 2.5:12; frameFlat never called tieAt while shed tied both
   ends; a hip wing into a gable main framed straight through with no
@@ -921,9 +933,13 @@ AND a gate — a checklist line without a test is a wish.
   at 300/400 + ridge-only placement, 3:12 boundary + 40° clean, LOD-200
   silence, takeoff Flags row; B8b describe: windy 2-per-joist census at the
   plate line + beside-a-joist placement, spansX orientation, free takeoff
-  tie row, non-windy byte-equality) +
+  tie row, non-windy byte-equality; B8c describe: hip-wing audit exhibit
+  zero-members + warning, served-pair silence, parallel/buried/eave-
+  mismatch matrix, abut/graze silence, cupola stacking, three-wing mix) +
   `src/engines/interpenetration.test.ts` (B8b windy-flat compose matrix
-  incl. zero overhang, non-vacuous).
+  incl. zero overhang, non-vacuous) +
+  `src/framing/compute.multistorey.test.ts` (B8c describe: hip-wing scene
+  warns end-to-end + no valley members, LOD-200 silence).
 
 ## M — Mechanical (HVAC)
 

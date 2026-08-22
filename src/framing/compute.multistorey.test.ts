@@ -1085,3 +1085,50 @@ describe('LOD-400 B7: hip thrust members ride computeLevel end-to-end', () => {
     expect(rows.some((r) => r.section === 'Roof' && r.item === '2x6' && r.unit === 'pcs')).toBe(true)
   })
 })
+
+describe('LOD-400 B8c: unframed roof intersections reach the computeLevel warnings', () => {
+  const PHRASE = 'roof intersection not framed — valley detail required'
+
+  /** Single-storey scene with a gable main + a hip wing punching its eave. */
+  function hipWingScene() {
+    const nodes = twoStoreyScene()
+    delete nodes.lvl1
+    delete nodes.lvlroof
+    delete nodes.roofseg
+    delete nodes.w1a
+    delete nodes.w1b
+    delete nodes.w1c
+    delete nodes.w1d
+    ;(nodes.bldg as Record<string, unknown>).children = ['lvl0']
+    nodes.roofMain = {
+      id: 'roofMain', type: 'roof-segment', parentId: 'lvl0', position: [4, 2.5, 2.5],
+      rotation: 0, roofType: 'gable', width: 8.6, depth: 5.6, pitch: 40, thickness: 0.2,
+    }
+    nodes.roofWing = {
+      id: 'roofWing', type: 'roof-segment', parentId: 'lvl0', position: [4, 2.5, 5.5],
+      rotation: Math.PI / 2, roofType: 'hip', width: 3, depth: 3, pitch: 40, thickness: 0.2,
+    }
+    return nodes
+  }
+
+  test('a hip wing into the gable main warns (P4 prints computeLevel warnings verbatim)', () => {
+    const cfg = FramingNode.parse({
+      id: 'bonesframing_b8c', parentId: 'lvl0', jurisdiction: 'TX', detail: '400',
+    })
+    const result = computeLevel(hipWingScene(), cfg)
+    const hits = result.warnings.filter((w) => w.includes(PHRASE))
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toContain('roofMain')
+    expect(hits[0]).toContain('roofWing')
+    // the wing still framed straight through — no valley members exist
+    expect(result.members.some((m) => m.role === 'valley')).toBe(false)
+  })
+
+  test('LOD 200 stays schematic (valleys are not framed there either — no code claims)', () => {
+    const cfg = FramingNode.parse({
+      id: 'bonesframing_b8c200', parentId: 'lvl0', jurisdiction: 'TX', detail: '200',
+    })
+    const result = computeLevel(hipWingScene(), cfg)
+    expect(result.warnings.some((w) => w.includes(PHRASE))).toBe(false)
+  })
+})

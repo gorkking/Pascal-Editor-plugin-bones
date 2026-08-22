@@ -2297,6 +2297,119 @@ export function detectValleys(roofs: RoofSegmentSlice[]): ValleyLine[] {
   return out
 }
 
+// ---------------------------------------------------------------------------
+// B8c: unframed roof intersections — the labeling contract, never silent
+// ---------------------------------------------------------------------------
+
+/** Real penetration below this (shared edges, mm-scale grazes between
+ * adjacent wings) is composition, not an intersection. */
+const INTERSECT_MARGIN = 0.05
+
+/** Segment peak height (level-local): origin + wallHeight + the shape's own
+ * rise — the vertical envelope for the intersection screen. Generous per
+ * shape; flat uses a nominal platform depth. */
+function segPeakY(r: RoofSegmentSlice): number {
+  const tan = Math.tan(r.pitch)
+  const minSpan = Math.min(r.width, r.depth)
+  let rise: number
+  switch (r.roofType) {
+    case 'shed':
+      rise = r.depth * tan
+      break
+    case 'flat':
+      rise = 0.3
+      break
+    case 'gambrel': {
+      const wr = r.gambrelLowerWidthRatio ?? SHAPE_DEFAULTS.gambrelLowerWidthRatio
+      const hr = r.gambrelLowerHeightRatio ?? SHAPE_DEFAULTS.gambrelLowerHeightRatio
+      rise = ((r.depth / 2) * wr * tan) / Math.max(hr, EPS)
+      break
+    }
+    case 'mansard': {
+      const swr = r.mansardSteepWidthRatio ?? SHAPE_DEFAULTS.mansardSteepWidthRatio
+      const shr = r.mansardSteepHeightRatio ?? SHAPE_DEFAULTS.mansardSteepHeightRatio
+      rise = (minSpan * swr * tan) / Math.max(shr, EPS)
+      break
+    }
+    case 'dutch': {
+      const dwr = r.dutchHipWidthRatio ?? SHAPE_DEFAULTS.dutchHipWidthRatio
+      const dhr = r.dutchHipHeightRatio ?? SHAPE_DEFAULTS.dutchHipHeightRatio
+      rise = (minSpan * dwr * tan) / Math.max(dhr, EPS)
+      break
+    }
+    case 'hip':
+      rise = (minSpan / 2) * tan
+      break
+    default:
+      rise = (r.depth / 2) * tan
+  }
+  return r.position[1] + r.wallHeight + Math.max(0, rise)
+}
+
+/** Plan-rectangle overlap (2D OBB SAT on the two segments' yawed footprints),
+ * requiring REAL penetration past INTERSECT_MARGIN on every axis. */
+function footprintsOverlap(a: RoofSegmentSlice, b: RoofSegmentSlice): boolean {
+  // Local +X / +Z in the (x, z) plan under a three Y-rotation — the emitter
+  // convention: +X → (cosψ, −sinψ), +Z → (sinψ, cosψ).
+  const axesOf = (r: RoofSegmentSlice): [number, number][] => {
+    const c = Math.cos(r.yaw)
+    const s = Math.sin(r.yaw)
+    return [
+      [c, -s],
+      [s, c],
+    ]
+  }
+  const ax = axesOf(a)
+  const bx = axesOf(b)
+  const t: [number, number] = [b.position[0] - a.position[0], b.position[2] - a.position[2]]
+  const halfA = [a.width / 2, a.depth / 2]
+  const halfB = [b.width / 2, b.depth / 2]
+  const radius = (axes: [number, number][], half: number[], axis: [number, number]): number =>
+    axes.reduce(
+      (sum, u, i) => sum + Math.abs((u[0] ?? 0) * axis[0] + (u[1] ?? 0) * axis[1]) * (half[i] ?? 0),
+      0,
+    )
+  for (const axis of [...ax, ...bx]) {
+    const proj = Math.abs(t[0] * (axis[0] ?? 0) + t[1] * (axis[1] ?? 0))
+    if (proj > radius(ax, halfA, axis) + radius(bx, halfB, axis) - INTERSECT_MARGIN) return false
+  }
+  return true
+}
+
+/**
+ * B8c: overlapping segment pairs the valley detector does NOT serve. A hip
+ * wing into a gable main — or a skewed, parallel, buried or eave-mismatched
+ * gable pair — frames straight through with NO members, and the detector's
+ * perpendicular-gable×gable assumption used to live only in its docblock:
+ * silence broke the labeling contract. Every non-qualifying overlap now
+ * surfaces as ONE computeLevel warning per pair ('roof intersection not
+ * framed — valley detail required …'), printed verbatim in the P4 schedules
+ * flag block. Full hip-plane valley framing stays out of scope (v1 = the
+ * warning). Touching edges (adjacent wings) and vertically separated stacks
+ * (a cupola floating above the main ridge) never warn; pairs detectValleys
+ * frames are already served — their members ARE the answer.
+ */
+export function detectUnframedRoofIntersections(roofs: RoofSegmentSlice[]): string[] {
+  const key = (x: string, y: string): string => (x < y ? `${x}|${y}` : `${y}|${x}`)
+  const served = new Set<string>()
+  for (const v of detectValleys(roofs)) served.add(key(v.major.id, v.minorId))
+  const out: string[] = []
+  for (let i = 0; i < roofs.length; i++) {
+    for (let j = i + 1; j < roofs.length; j++) {
+      const a = roofs[i] as RoofSegmentSlice
+      const b = roofs[j] as RoofSegmentSlice
+      if (served.has(key(a.id, b.id))) continue
+      // vertical envelopes must interleave — plan overlap alone is stacking
+      if (a.position[1] >= segPeakY(b) - EPS || b.position[1] >= segPeakY(a) - EPS) continue
+      if (!footprintsOverlap(a, b)) continue
+      out.push(
+        `roof intersection not framed — valley detail required (${a.roofType} ${a.id} × ${b.roofType} ${b.id}: only perpendicular gable×gable valleys are modeled)`,
+      )
+    }
+  }
+  return out
+}
+
 /** Emit one valley member (one size deeper than the rafters — it carries jacks). */
 function emitValley(valley: ValleyLine, spec: FramingSpec, members: Member[]) {
   const emit = emitter(valley.major, members)
