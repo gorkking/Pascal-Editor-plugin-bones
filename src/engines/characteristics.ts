@@ -111,9 +111,19 @@ export function computeCharacteristics(
   const notes: string[] = []
 
   // ---- floor area: rooms are the truth; slab outlines are the fallback ----
+  // CONDITIONED basis (examiner round-1): outdoor zones (garden/patio/yard)
+  // are open air — their area must not inflate the figure the schedules
+  // sheet prints beside a condenser sized from indoor area (starter
+  // template: 'Floor area 168.0 m²' on the same page as a 2-ton unit from
+  // 96 m² conditioned). Excluded from area AND volume — the type already
+  // declares both CONDITIONED — with the basis stated in the notes.
+  const indoorRooms = rooms.filter((r) => r.category !== 'outdoor')
+  const outdoorAreaM2 = rooms
+    .filter((r) => r.category === 'outdoor')
+    .reduce((sum, r) => sum + ringArea(r.polygon), 0)
   let floorAreaM2 = 0
-  if (rooms.length > 0) {
-    for (const room of rooms) floorAreaM2 += ringArea(room.polygon)
+  if (indoorRooms.length > 0) {
+    for (const room of indoorRooms) floorAreaM2 += ringArea(room.polygon)
   } else {
     for (const slab of slabs) {
       let area = ringArea(slab.polygon)
@@ -124,11 +134,16 @@ export function computeCharacteristics(
       notes.push('Floor area from slab outlines (minus holes) — no rooms/zones drawn')
     }
   }
+  if (outdoorAreaM2 > 0) {
+    notes.push(
+      `Floor area & volume are CONDITIONED space — ${outdoorAreaM2.toFixed(1)} m² of outdoor zones (garden/patio/yard) excluded`,
+    )
+  }
 
   // ---- volume: per-room area × its ceiling height ----
   let volumeM3 = 0
-  if (rooms.length > 0) {
-    for (const room of rooms) volumeM3 += ringArea(room.polygon) * room.ceilingHeight
+  if (indoorRooms.length > 0) {
+    for (const room of indoorRooms) volumeM3 += ringArea(room.polygon) * room.ceilingHeight
   } else {
     const heights = walls.filter((w) => w.exterior).map((w) => w.height)
     const avgH =
