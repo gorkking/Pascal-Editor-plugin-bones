@@ -1393,6 +1393,21 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
       : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
   const cjLen = shortSpan - 2 * cjClip
   const cjFlag = ceilingJoistFlag(spec, shortSpan)
+  // B7 fix round (skeptic F1): the END planes' thrust story must PRINT,
+  // not live in code comments — the two end planes' rafters (jacks +
+  // kings, thrusting along the LONG axis at the end eaves) get no
+  // parallel tie and the station band deliberately stops short of the
+  // end triangles; near-square hips additionally carry no collar ties at
+  // all (no ridge portion — the parenthetical subsumes that zero-tie
+  // case). One statement class on the joists at 400 (the B6 shed-drip
+  // stated-gap convention), composed ' | ' onto whatever over-span
+  // honesty a joist already carries (the M2 flag-composition rule).
+  const cjEndGapFlag =
+    spec.detail === '400'
+      ? 'hip end planes: rafter ties parallel to the end-plane span + end-triangle stub joists not modeled (collar ties ride the ridge portion only) — verify tie detail (R802.4.2)'
+      : undefined
+  const cjComposedFlag =
+    [cjFlag, cjEndGapFlag].filter((f): f is string => f !== undefined).join(' | ') || undefined
   // The joists CROSS the ridge line at plan center — on a near-flat hip
   // (an inner mansard crown can compute a ~5° pitch) the ridge board's
   // underside descends INTO the joist band; no room = no fake wood (the
@@ -1426,7 +1441,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           spec.detail === '400' ? ', ends clipped to the roof slope' : ''
         }`,
         undefined,
-        cjFlag,
+        cjComposedFlag,
       )
     }
   }
@@ -2025,6 +2040,16 @@ function frameSkirt(
       cjStations.push(u)
     }
     const cjFlag = ceilingJoistFlag(spec, shortSpan)
+    // B7 fix round (skeptic F1): the same end-plane thrust statement the
+    // hip prints — the skirt END faces' rafters get no parallel tie and
+    // the band stops short of the corner triangles. 400-only (B6 stated-
+    // gap convention), composed onto over-span honesty (M2 rule).
+    const cjEndGapFlag =
+      spec.detail === '400'
+        ? `${label.toLowerCase()} end faces: rafter ties parallel to the end-face span + end-triangle stub joists not modeled — verify tie detail (R802.4.2)`
+        : undefined
+    const cjComposedFlag =
+      [cjFlag, cjEndGapFlag].filter((f): f is string => f !== undefined).join(' | ') || undefined
     for (const u of cjStations) {
       emit(
         'ceiling-joist',
@@ -2039,7 +2064,7 @@ function frameSkirt(
           spec.detail === '400' ? ', ends clipped to the roof slope' : ''
         }`,
         undefined,
-        cjFlag,
+        cjComposedFlag,
       )
     }
   }
@@ -2074,6 +2099,7 @@ function frameMansard(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   // upper deck: a shallow hip over the inset rectangle
   const innerRun = minSpan / 2 - inset
   if (innerRun > 0.2 && upperRise > EPS) {
+    const beforeCrown = members.length
     frameHip(
       {
         ...roof,
@@ -2086,6 +2112,16 @@ function frameMansard(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
       innerSpec(spec),
       members,
     )
+    // B7 fix round (skeptic advisory): the crown's ceiling joists bear on
+    // NOTHING modeled at their ends — the skirt-top junction, not a plate.
+    // Say so on the label (the purlin-strut assumed-bearing convention;
+    // the dutch gablet ships the same class from the gable machinery).
+    for (let i = beforeCrown; i < members.length; i++) {
+      const m = members[i] as Member
+      if (m.role === 'ceiling-joist') {
+        m.label = `${m.label} (assumed bearing at skirt top — verify)`
+      }
+    }
   }
 
   // perimeter fascia — sub + finish (LOD 400)

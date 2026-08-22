@@ -1286,6 +1286,100 @@ describe('LOD-400 B7c: mansard/dutch ceiling joists + inner thrust story (R802.4
 })
 
 // ---------------------------------------------------------------------------
+// B7 fix round (skeptic F1): the end-plane thrust gap PRINTS — never a
+// comment-only confession — + the crown bearing advisory
+// ---------------------------------------------------------------------------
+
+describe('B7 fix round: end-plane thrust statement prints (F1) + crown bearing honesty', () => {
+  const IN = 0.0254
+  const CJ_D = 5.5 * IN
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const cjOf = (members: Member[]) => byRole(members, 'ceiling-joist')
+
+  test('hip at 400: every ceiling joist carries the end-plane statement, composed onto over-span honesty (M2)', () => {
+    const members = frameRoofs([seg({ roofType: 'hip', width: 10, depth: 12 })], [], at400)
+    const cjs = cjOf(members)
+    expect(cjs.length).toBeGreaterThan(0)
+    for (const cj of cjs) {
+      expect(cj.flag).toContain('end-triangle stub joists not modeled')
+      expect(cj.flag).toContain('verify tie detail (R802.4.2)')
+      // never MASKS the over-span honesty — composes ' | ' onto it
+      expect(cj.flag).toContain('Ceiling joist over prescriptive span')
+      expect(cj.flag).toContain(' | ')
+    }
+  })
+
+  test('near-square subsumption: the statement covers the zero-collar-tie case too', () => {
+    const square = frameRoofs([seg({ roofType: 'hip', width: 6, depth: 6 })], [], at400)
+    expect(byRole(square, 'collar-tie')).toHaveLength(0)
+    const cjs = cjOf(square)
+    expect(cjs.length).toBeGreaterThan(0)
+    for (const cj of cjs) {
+      expect(cj.flag).toContain('collar ties ride the ridge portion only')
+    }
+  })
+
+  test('mansard/dutch at 400: the skirt end faces state the same gap on the MAIN joists', () => {
+    for (const roofType of ['mansard', 'dutch'] as const) {
+      const members = frameRoofs([seg({ roofType, width: 10, depth: 8 })], [], at400)
+      const main = cjOf(members).filter(
+        (cj) => Math.abs((cj.position[1] as number) - (3.0 + CJ_D / 2)) < 1e-6,
+      )
+      expect(main.length).toBeGreaterThan(0)
+      for (const cj of main) {
+        expect(cj.flag).toContain(`${roofType} skirt end faces`)
+        expect(cj.flag).toContain('end-triangle stub joists not modeled')
+        expect(cj.flag).toContain('verify tie detail (R802.4.2)')
+      }
+    }
+  })
+
+  test('the statement reaches a takeoff Flags row on the hip compose (P4 prints it)', () => {
+    const members = frameRoofs([seg({ roofType: 'hip', width: 10, depth: 12 })], [], at400)
+    const rows = computeTakeoff(members, [])
+    const row = rows.find(
+      (r) => r.section === 'Flags' && r.detail.includes('end-triangle stub joists not modeled'),
+    )
+    expect(row).toBeDefined()
+    expect(row?.quantity).toBe(cjOf(members).length)
+  })
+
+  test('300 stays quiet (the B6 stated-gap convention); a compact 400 hip carries ONLY the statement', () => {
+    const at300 = frameRoofs([seg({ roofType: 'hip', width: 10, depth: 12 })], [], DEFAULT_SPEC)
+    for (const cj of cjOf(at300)) {
+      expect(cj.flag ?? '').not.toContain('stub joists')
+    }
+    // a span-legal 400 hip: the statement is the WHOLE flag (nothing to compose)
+    const compact = frameRoofs([seg({ roofType: 'hip', depth: 3.8 })], [], at400)
+    const cjs = cjOf(compact)
+    expect(cjs.length).toBeGreaterThan(0)
+    for (const cj of cjs) {
+      expect(cj.flag).toBe(
+        'hip end planes: rafter ties parallel to the end-plane span + end-triangle stub joists not modeled (collar ties ride the ridge portion only) — verify tie detail (R802.4.2)',
+      )
+    }
+  })
+
+  test('mansard crown joists confess their assumed bearing; the main joists stay clean of the clause', () => {
+    const members = frameRoofs([seg({ roofType: 'mansard', width: 10, depth: 8 })], [], at400)
+    const skirtRise = 1.2 * Math.tan((40 * Math.PI) / 180)
+    const crown = cjOf(members).filter(
+      (cj) => Math.abs((cj.position[1] as number) - (3.0 + skirtRise + CJ_D / 2)) < 1e-6,
+    )
+    expect(crown.length).toBeGreaterThan(0)
+    for (const cj of crown) {
+      expect(cj.label).toContain('assumed bearing at skirt top — verify')
+      expect(cj.label).toContain('rafter tie (R802.4.2)') // the clause APPENDS, never replaces
+    }
+    const main = cjOf(members).filter(
+      (cj) => Math.abs((cj.position[1] as number) - (3.0 + CJ_D / 2)) < 1e-6,
+    )
+    expect(main.length).toBeGreaterThan(0)
+    for (const cj of main) expect(cj.label).not.toContain('assumed bearing')
+  })
+})
+
+// ---------------------------------------------------------------------------
 // LOD-400 B7 blast radius: untouched shapes byte-equal to master (pinned)
 // ---------------------------------------------------------------------------
 
