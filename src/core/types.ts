@@ -320,8 +320,21 @@ export type SlabSlice = {
 export type RoomSlice = {
   id: string
   name: string
-  /** Classified from the name: kitchen/bathroom/bedroom/garage/laundry/other. */
-  category: 'kitchen' | 'bathroom' | 'bedroom' | 'garage' | 'laundry' | 'hallway' | 'other'
+  /** Classified from the name: kitchen/bathroom/bedroom/garage/laundry/
+   * hallway/outdoor/other. 'outdoor' (garden/patio/yard…) is open air —
+   * never conditioned, never a register target, never floor coverage for
+   * the exterior-wall election (starter-template report 2026-08-22: the
+   * back-garden zone read as a habitable room, so HVAC ducted a supply
+   * register into the yard and the election saw rooms on both wall sides). */
+  category:
+    | 'kitchen'
+    | 'bathroom'
+    | 'bedroom'
+    | 'garage'
+    | 'laundry'
+    | 'hallway'
+    | 'outdoor'
+    | 'other'
   polygon: readonly (readonly [number, number])[]
   boundaryWallIds: readonly string[]
   ceilingHeight: number

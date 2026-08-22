@@ -12,7 +12,7 @@
 
 import type { Fixture, Member, OpeningSlice, WallSlice } from '../core/types'
 import { formatFtIn, inches } from '../core/units'
-import type { BuildingCharacteristics } from '../engines/characteristics'
+import { type BuildingCharacteristics, zeroAreaNa } from '../engines/characteristics'
 import { openingSpans } from '../engines/electrical'
 import { computeTakeoff } from '../engines/takeoff'
 import {
@@ -2306,17 +2306,36 @@ function schedulesSheets(
     const c = opts.characteristics
     // A slab-less model has NO floor area — printing 'Floor area 0.0 m² …
     // Cooling ~0.0 ton' reads as computed fact (round-3 scorecard C5);
-    // the area-derived metrics say n/a and point at the no-slab flag.
+    // the area-derived metrics say n/a WITH THE TRUE REASON (round-4 F1:
+    // an all-outdoor roof terrace WITH its floor slab printed 'no floor
+    // slabs' beside the slab-on-grade flag on the same page — the string
+    // is single-sourced with characteristicsRows via zeroAreaNa now).
     const noSlab = c.floorAreaM2 <= 0
-    const na = 'n/a — no floor slabs (see flags)'
+    const na = zeroAreaNa(c)
+    // EVERY block line wraps at the ~100-char column width (round-5: the
+    // 57-char NO_CONDITIONED_NA made the Cooling line 123 chars and it
+    // struck through the page border unclipped — only the citation line
+    // was routed through wrapRow). wrapRow is a no-op ≤ 100, so fitting
+    // sheets stay byte-identical; charBlockLines is fully built BEFORE
+    // charNeed0/charLines derive from its length, so the flag budget and
+    // pagination absorb the extra lines automatically.
     charBlockLines.push(
-      noSlab
-        ? `Floor area & volume ${na} · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`
-        : `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
-      `Windows ${c.windowCount} (${c.windowAreaM2.toFixed(1)} m²) · Doors ${c.doorCount} · Climate zone ${c.insulation.climateZone} · Wall cavity R-${c.insulation.wallR}`,
-      noSlab
-        ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
-        : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
+      ...wrapRow(
+        noSlab
+          ? `Floor area & volume ${na} · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`
+          : `Floor area ${c.floorAreaM2.toFixed(1)} m² · Volume ${c.volumeM3.toFixed(1)} m³ · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`,
+        100,
+      ),
+      ...wrapRow(
+        `Windows ${c.windowCount} (${c.windowAreaM2.toFixed(1)} m²) · Doors ${c.doorCount} · Climate zone ${c.insulation.climateZone} · Wall cavity R-${c.insulation.wallR}`,
+        100,
+      ),
+      ...wrapRow(
+        noSlab
+          ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
+          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
+        100,
+      ),
       // ~100 chars ≈ the column width at 9.5px — WRAPPED, never clipped
       ...wrapRow(
         `${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`,

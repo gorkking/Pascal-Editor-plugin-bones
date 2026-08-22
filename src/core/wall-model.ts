@@ -376,21 +376,60 @@ export function extractLevels(nodes: NodesRecord): LevelSlice[] {
   return sorted.map(({ id, level, height, baseY, buildingId }) => ({ id, level, height, baseY, buildingId }))
 }
 
+/** Sleeping-area name words — the bedroom row below, and exported so the
+ * compose can WARN when the leading-qualifier branch reclassifies a
+ * sleeping-word name outdoors ('Outdoor bedroom' → open air → NO smoke
+ * alarm placed; R314 must never drop silently — round-2 advisory). */
+export const SLEEPING_NAME_RE = /bed|chambre|master|primary/i
+
 const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
   [/kitchen|cuisine/i, 'kitchen'],
   [/bath|wc|toilet|powder|salle de bain/i, 'bathroom'],
-  [/bed|chambre|master|primary/i, 'bedroom'],
+  [SLEEPING_NAME_RE, 'bedroom'],
   [/garage/i, 'garage'],
   [/laundry|utility|buanderie/i, 'laundry'],
   [/hall|corridor|couloir/i, 'hallway'],
 ]
 
-/** Classify a zone name into the room categories the MEP engines key on. */
+/** Outdoor names (open air — never conditioned/habitable; starter-template
+ * 'Back garden' zone, 2026-08-22). The terrace forms are spelled OUT
+ * (terrace|terrasse|terraza) so material adjectives never match: a
+ * 'Terrazzo bathroom' is a bathroom (plumbing stubs, exhaust fan, wet
+ * GFCI), a 'Terracotta kitchen' a kitchen (skeptic round-1 harm class).
+ * 'balcon' covers balcony/balcon/balcón; 'lanai' is the FL porch. */
+const OUTDOOR_RE =
+  /garden|yard|patio|terrace|terrasse|terraza|deck|porch|balcon|lanai|pergola|jardin|outdoor|outside|exterior/i
+
+/** A LEADING outdoor qualifier flips a compound name outdoors: an 'Outdoor
+ * kitchen' or 'Roof terrace' is open air even where the trailing word alone
+ * would classify indoor. */
+const OUTDOOR_QUALIFIER_RE = /^\s*(outdoor|outside|exterior|roof)\b/i
+
+/**
+ * Classify a zone name into the room categories the MEP engines key on.
+ *
+ * Compound-name precedence (skeptic round-1): when a name carries BOTH an
+ * indoor category word and an outdoor keyword, the INDOOR category wins —
+ * a 'Garden bedroom' is a bedroom (it keeps its R314 smoke alarm), a
+ * 'Patio kitchen' a kitchen — UNLESS the outdoor word LEADS as a qualifier
+ * (OUTDOOR_QUALIFIER_RE): an 'Outdoor kitchen' is open air. A name with an
+ * outdoor keyword and NO indoor category word stays outdoor: 'Back garden',
+ * 'Roof terrace' — and deliberately also 'Winter garden' / 'Garden room'
+ * ('room' is not a category word; a conservatory is unconditioned glass
+ * space until the user renames or re-zones it — the defensible reading).
+ */
 export function classifyRoom(name: string): RoomSlice['category'] {
+  let indoor: RoomSlice['category'] | null = null
   for (const [pattern, category] of ROOM_PATTERNS) {
-    if (pattern.test(name)) return category
+    if (pattern.test(name)) {
+      indoor = category
+      break
+    }
   }
-  return 'other'
+  if (OUTDOOR_RE.test(name) && (indoor === null || OUTDOOR_QUALIFIER_RE.test(name))) {
+    return 'outdoor'
+  }
+  return indoor ?? 'other'
 }
 
 /** Extract named rooms (zones) on `levelId`. */

@@ -551,7 +551,19 @@ const CLOSET_RE = /closet|mech|furnace|placard/i
  * (laundry > garage > hallway) parked the AH + open return in the garage
  * silently whenever the scene had no laundry.
  */
+/** HVAC serves indoor space only: OUTDOOR zones (garden/patio/yard…) are
+ * open air — no tonnage, no supply register, never the equipment room and
+ * never a thermostat/heat-pump anchor room (starter-template report
+ * 2026-08-22: the back-garden zone drew a ceiling register floating in the
+ * yard and inflated the condenser sizing). Applied at EVERY exported
+ * rooms-boundary so direct callers — the engine, service seeding, the
+ * panel — share one view (A4 parity); the filter is idempotent. */
+function hvacServedRooms(rooms: RoomSlice[]): RoomSlice[] {
+  return rooms.filter((r) => r.category !== 'outdoor')
+}
+
 export function equipmentRoomOf(rooms: RoomSlice[]): RoomSlice {
+  rooms = hvacServedRooms(rooms)
   const conditioned = rooms.filter((r) => r.category !== 'garage')
   const byArea = [...conditioned].sort((a, b) => polygonArea(b.polygon) - polygonArea(a.polygon))
   return (
@@ -700,6 +712,7 @@ export function placeReturnGrilleSpot(
   walls: WallSlice[],
   rooms: RoomSlice[],
 ): { room: RoomSlice; at: Pt; clear: boolean } | null {
+  rooms = hvacServedRooms(rooms)
   const conditioned = rooms.filter((r) => r.category !== 'garage')
   if (conditioned.length === 0) return null
   const equip = equipmentRoomOf(rooms)
@@ -782,6 +795,7 @@ export function placeThermostatSpot(
   walls: WallSlice[],
   rooms: RoomSlice[],
 ): { wall: WallSlice; u: number; heightAff: number } | null {
+  rooms = hvacServedRooms(rooms)
   if (rooms.length === 0) return null
   const equipAt = centroid(equipmentRoomOf(rooms).polygon)
   // The tstat reads MIXED return air — target the actual central return
@@ -822,6 +836,7 @@ export function placeThermostatSpot(
  * service clearance survives). Exported for the Bones panel action.
  */
 export function placeHeatPumpSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
+  rooms = hvacServedRooms(rooms)
   if (rooms.length === 0) return null
   const equipAt = centroid(equipmentRoomOf(rooms).polygon)
   const exit = nearestExteriorExit(walls, equipAt)?.at
@@ -863,6 +878,7 @@ type CondenserSlot = {
  * on-wall-anchor fallback, so the anchor itself is a safe stand-in.
  */
 export function placeCondenserSeedSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
+  rooms = hvacServedRooms(rooms)
   const anchor = placeHeatPumpSpot(walls, rooms)
   if (!anchor) return null
   // The REAL equipAt (dawn review 1d: passing `anchor` let the degenerate
@@ -990,6 +1006,10 @@ export function layoutHvac(
   const members: Member[] = []
   const fixtures: Fixture[] = []
   const warnings: string[] = []
+  // Outdoor zones drop out entirely: a level with ONLY a garden/patio has no
+  // AH — and per the condenser-always contract (no AH ⇒ no outdoor unit,
+  // nothing silent about it) that is the honest compose.
+  rooms = hvacServedRooms(rooms)
   if (rooms.length === 0) return { members, fixtures, warnings }
   const fab = spec.detail !== '200'
 

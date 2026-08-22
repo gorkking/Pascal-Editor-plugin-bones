@@ -22,6 +22,7 @@ import {
   extractServiceOverrides,
   extractSlabs,
   extractWalls,
+  SLEEPING_NAME_RE,
   type LevelSlice,
 } from '../core/wall-model'
 import {
@@ -293,11 +294,14 @@ function extractExtraServiceOverrides(
  * The ONE wall-classification probe (checklist A4 parity): this level's own
  * slabs, widened to the nearest LOWER storey with flooring in the same
  * building when the level has none (plan projection — the footprint below
- * says which side of a gable wall is in), plus the hasLowerStorey flag that
- * gates the attic blanket-exterior rule. Exported so the service seeding
- * action (place.ts) and the per-element drawer (panel-selection.ts) classify
- * walls EXACTLY like the engines — seeding with a narrower probe moved the
- * water meter on creation (verify round 2026-08-16, F3).
+ * says which side of a gable wall is in), then — when the whole building has
+ * NO flooring at all — this level's INDOOR zone polygons as declared floor
+ * coverage (the starter-template shape: walls + zones, no slab; 2026-08-22),
+ * plus the hasLowerStorey flag that gates the attic blanket-exterior rule.
+ * Exported so the service seeding action (place.ts) and the per-element
+ * drawer (panel-selection.ts) classify walls EXACTLY like the engines —
+ * seeding with a narrower probe moved the water meter on creation (verify
+ * round 2026-08-16, F3).
  * `levels` (building-scoped, ordinal-sorted) is accepted to save the
  * re-extraction when the caller already has it.
  */
@@ -326,6 +330,32 @@ export function probeSlabsFor(
         break
       }
     }
+  }
+  // A building with NO flooring anywhere still knows its indoors when zones
+  // are drawn: INDOOR room polygons are declared floor area, so they stand in
+  // as probe coverage (zero-thickness pseudo-slabs — every consumer reads
+  // only `.polygon`). The starter templates ship walls + zones and no slab;
+  // without this the election probe found both sides of every perimeter wall
+  // equally 'uncovered' and framed the whole shell INTERIOR — no condenser
+  // wall, no AC disconnect, ⚠-flagged pad at the fallback anchor, no outdoor
+  // receptacles, no sheathing/WRB/cladding (starter-template heat-pump
+  // report 2026-08-22). OUTDOOR zones (garden/patio/yard…) never count —
+  // they are exactly the outdoors the probe is trying to detect, and the
+  // wall-layers exteriorSide probe stays coherent: indoor pseudo-slab on one
+  // side + nothing on the garden side still picks the outdoor face.
+  if (probeSlabs.length === 0) {
+    const zoneFloors = extractRooms(nodes, levelId)
+      .filter((room) => room.category !== 'outdoor')
+      .map(
+        (room): SlabSlice => ({
+          id: `zonefloor_${room.id}`,
+          polygon: room.polygon,
+          holes: [],
+          elevation: 0,
+          thickness: 0,
+        }),
+      )
+    if (zoneFloors.length > 0) probeSlabs = zoneFloors
   }
   return { slabs, probeSlabs, hasLowerStorey: levelIndex > 0 }
 }
@@ -458,6 +488,18 @@ function computeLevelUncached(
     )
   }
   const rooms = extractRooms(nodes, levelId)
+  // R314 never drops silently (round-2 advisory): a LEADING outdoor
+  // qualifier can reclassify a sleeping-word name outdoors ('Outdoor
+  // bedroom' → open air), which strips its smoke alarm — the only path to
+  // category 'outdoor' with a sleeping word in the name, since the
+  // compound-name precedence keeps 'Garden bedroom' indoors. Say so.
+  for (const room of rooms) {
+    if (room.category === 'outdoor' && SLEEPING_NAME_RE.test(room.name)) {
+      warnings.push(
+        `zone “${room.name}” reads as open-air — no smoke alarm placed (R314); rename if it is conditioned space`,
+      )
+    }
+  }
 
   const members: Member[] = []
   const fixtures: Fixture[] = []
