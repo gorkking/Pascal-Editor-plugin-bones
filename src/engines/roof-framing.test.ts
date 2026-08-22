@@ -848,3 +848,47 @@ describe('LOD-400 B6b: underlayment rides every deck panel 1:1 (R905.1.1)', () =
     for (const u of wingMembrane) expect(u.label).toContain('valley overlay')
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B6c: drip edge at eaves + rakes (R905.2.8.5)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B6c: drip edge members at eaves + rakes (R905.2.8.5)', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const dripOf = (members: Member[]) => members.filter((m) => m.role === 'drip-edge')
+
+  test('gable: 2 eave runs cap the fascia + 4 rake runs ride the barges', () => {
+    const roof = seg()
+    const drips = dripOf(frameRoofs([roof], [], at400))
+    const eaves = drips.filter((m) => m.label?.includes('eave'))
+    const rakes = drips.filter((m) => m.label?.includes('rake'))
+    expect(eaves).toHaveLength(2)
+    expect(rakes).toHaveLength(4)
+    for (const e of eaves) expect(e.length).toBeCloseTo(roof.width + 2 * roof.overhang, 6)
+    for (const r of rakes) {
+      // rake drip length == the barge slope length
+      const barge = frameRoofs([roof], [], at400).find((m) => m.label?.includes('Barge'))
+      expect(r.length).toBeCloseTo((barge as Member).length, 6)
+      expect(Math.abs(r.position[0])).toBeCloseTo(roof.width / 2 + roof.overhang, 6)
+    }
+    for (const d of drips) {
+      expect(d.material).toBe('steel')
+      expect(d.system).toBe('roof-framing')
+      expect(d.label).toContain('R905.2.8.5')
+    }
+  })
+
+  test('per-shape counts: hip/mansard/dutch cap 4 fascia eaves, gambrel 2, flat 4 perimeter', () => {
+    const count = (roofType: string) =>
+      dripOf(frameRoofs([seg({ roofType, width: 10, depth: 8 })], [], at400)).length
+    expect(count('hip')).toBe(4)
+    expect(count('mansard')).toBe(4)
+    expect(count('dutch')).toBe(4)
+    expect(count('gambrel')).toBe(2) // rakes unframed on gambrel ends (B8d) — stated
+    expect(count('flat')).toBe(4)
+  })
+
+  test('LOD 300 books none (trim class, the fascia convention)', () => {
+    expect(dripOf(frameRoofs([seg()], [], DEFAULT_SPEC))).toHaveLength(0)
+  })
+})

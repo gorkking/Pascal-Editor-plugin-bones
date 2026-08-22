@@ -80,6 +80,8 @@ export type MemberRole =
   | 'jack-rafter'
   | 'outlooker'
   | 'fascia'
+  /** Eave/rake deck-edge metal (R905.2.8.5) — booked by the lf, LOD 400. */
+  | 'drip-edge'
   | 'fire-blocking'
   | 'backing'
   // wall assembly layers (round 13)

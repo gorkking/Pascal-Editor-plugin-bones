@@ -279,6 +279,9 @@ const MIN_RAKE_OVERHANG = 0.15
 const FASCIA_SIZE: LumberSize = '2x6'
 /** Finish fascia board — 1x8 (3/4" × 7-1/4" actual), face-nailed over the sub. */
 const FINISH_FASCIA_SIZE: LumberSize = '1x8'
+/** Drip edge profile approximated as a thin bar (flange width × metal). */
+const DRIP_W = 0.05
+const DRIP_T = 0.004
 
 /**
  * One eave edge = a 2x6 sub-fascia + a 1x8 FINISH fascia proud of its face
@@ -325,6 +328,20 @@ function fasciaPair(
     length,
     'lumber',
     `Fascia 1x8 (finish, over sub-fascia)${note}`,
+  )
+  // B6c: eave drip edge caps the finish fascia (R905.2.8.5) — one lf run
+  // per fascia'd eave, drawn as a thin bar on the finish board's top edge.
+  const p = at(subCross + out)
+  emit(
+    'drip-edge',
+    undefined,
+    [length, DRIP_T, DRIP_W],
+    [p[0], p[1] + nD / 2 + DRIP_T / 2, p[2]],
+    yaw,
+    0,
+    length,
+    'steel',
+    'Drip edge — eave (R905.2.8.5)',
   )
 }
 
@@ -752,6 +769,33 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     const fasciaY = eaveY - roof.overhang * Math.sin(theta) + fD / 2
     for (const side of [1, -1] as const) {
       fasciaPair(emit, true, fasciaLen, 0, side * (run + roof.overhang * cosT), fasciaY, splicedNote(spec, fasciaLen, 'rafter tails (scarf joints)'))
+    }
+    // B6c: rake drip edge rides the deck edge over each barge — plumb-
+    // lifted to the deck TOP plane (+2 mm seam) so it caps the panel edge
+    // without sharing volume with barge or deck.
+    if (hasRake) {
+      const lift = (rd / 2 + ROOF_DECK_T + DRIP_T / 2) / cosT + 0.002
+      for (const sx of [1, -1] as const) {
+        for (const side of [1, -1] as const) {
+          const tipZ = side * (run + roof.overhang * cosT)
+          const tipY = eaveY - roof.overhang * Math.sin(theta)
+          emit(
+            'drip-edge',
+            undefined,
+            [slopeLen, DRIP_T, DRIP_W],
+            [
+              sx * (roof.width / 2 + roof.overhang),
+              (tipY + ridgeFaceY) / 2 + lift,
+              (tipZ + side * ridgeFaceZ) / 2,
+            ],
+            (side * Math.PI) / 2,
+            theta,
+            slopeLen,
+            'steel',
+            'Drip edge — rake (R905.2.8.5)',
+          )
+        }
+      }
     }
   }
 
@@ -1376,6 +1420,23 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
     yTop: centerY,
     rafterDepth: rd,
   })
+
+  // ---- B6c: perimeter drip (gravel-stop analog) at the deck edge, LOD 400.
+  // Long-axis runs full, short-axis runs BUTT between them — the rim
+  // convention (real corners lap; boxes can't share the corner volume).
+  if (spec.detail === '400') {
+    const dripY = centerY + rd / 2 + ROOF_DECK_T + UNDERLAYMENT_T + DRIP_T / 2 + 0.001
+    const label = 'Drip edge — eave (R905.2.8.5)'
+    for (const side of [1, -1] as const) {
+      if (longIsX) {
+        emit('drip-edge', undefined, [2 * halfW, DRIP_T, DRIP_W], [0, dripY, side * halfD], 0, 0, 2 * halfW, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfD - 2 * DRIP_W, DRIP_T, DRIP_W], [side * halfW, dripY, 0], -Math.PI / 2, 0, 2 * halfD - 2 * DRIP_W, 'steel', label)
+      } else {
+        emit('drip-edge', undefined, [2 * halfW - 2 * DRIP_W, DRIP_T, DRIP_W], [0, dripY, side * halfD], 0, 0, 2 * halfW - 2 * DRIP_W, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfD, DRIP_T, DRIP_W], [side * halfW, dripY, 0], -Math.PI / 2, 0, 2 * halfD, 'steel', label)
+      }
+    }
+  }
 }
 
 /**
