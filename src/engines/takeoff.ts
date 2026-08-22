@@ -19,11 +19,13 @@
  *    built, S4) wherever the engines emitted the layers/deck: wall
  *    sheathing (WSP), subfloor T&G, drywall, roof deck. The gross-area
  *    path (openings cut from the sheet, not deducted from the buy)
- *    survives only as the LOD-200 fallback and says 'gross' on the row —
- *    its built-in allowance is the openings it never deducted, so it
- *    carries no additional waste factor (B21e header honesty: the old
- *    header claimed ALL sheets were gross buys while the member rows
- *    booked net).
+ *    survives only as the LOD-200 WALL fallback (WSP/drywall faceArea
+ *    sums) and says 'gross' on those rows — their built-in allowance is
+ *    the openings never deducted, so no waste factor stacks on top (B21e
+ *    header honesty: the old header claimed ALL sheets were gross buys
+ *    while the member rows booked net). The SUBFLOOR fallback is NOT
+ *    gross — compute.ts deducts slab holes — so it states its
+ *    net-of-floor-openings basis and carries the stated waste factor.
  *  - WASTE   — stated ordering allowances per material class (B21e, the
  *    B6 stated-factor precedent): the row keeps its member-derived NET
  *    quantity and prints '+X% waste ≈ buy' in the detail — a waste factor
@@ -32,7 +34,10 @@
  *    (NAHB-style rules of thumb — verify for your job): sheet goods
  *    (WSP/drywall/subfloor/roof deck) +10% offcut; dimensional lumber
  *    +5% cull/damage ON TOP of the stock-length drop the pcs/bd-ft rows
- *    already buy; concrete pours +5% spillage/over-excavation. Counted
+ *    already buy; concrete pours +5% spillage/over-excavation, with the
+ *    buy figure CEILED to the 0.1 yd³ ready-mix batch (a rounded buy
+ *    that collapses onto the net would state a factor adding zero).
+ *    The printed percents derive from the constants themselves. Counted
  *    hardware, fixtures, supplier SKUs (engineered headers, hoses,
  *    line-sets) and rule-of-thumb rows (mortar, grout) carry none.
  *    LAP factors are NOT waste and keep the opposite convention: seam/
@@ -142,6 +147,10 @@ const SHEET_WASTE = 0.1
 const LUMBER_WASTE = 0.05
 /** Concrete pours: +5% spillage/over-excavation. */
 const CONCRETE_WASTE = 0.05
+/** '+X%' label text derived from the factor ITSELF — the printed percent
+ * can never drift from the arithmetic if a constant moves (skeptic r1
+ * advisory; the lap rows below share the same self-consistency). */
+const pctOf = (factor: number): string => `${Math.round(factor * 100)}%`
 /** Grout per filled 8" CMU cell (~0.3 ft³ with the core deducted). */
 const GROUT_M3_PER_CELL = 0.0085
 /** Mortar: one 80-lb Type S bag lays ~20 blocks (supplier rule of thumb). */
@@ -368,7 +377,7 @@ export function computeTakeoff(
         // Stated waste (B21e): the quantity stays the exact member-derived
         // stick count; the +5% cull/damage order figure prints beside it.
         const lumberWaste = (n: number): string =>
-          ` — +5% waste ≈ ${Math.ceil(n * (1 + LUMBER_WASTE))} pcs`
+          ` — +${pctOf(LUMBER_WASTE)} waste ≈ ${Math.ceil(n * (1 + LUMBER_WASTE))} pcs`
         for (const stockFt of [...plain.keys()].sort((a, b) => a - b)) {
           const n = plain.get(stockFt) ?? 0
           push(section, item, `${stockFt} ft stock${ptNote}${lumberWaste(n)}`, n, 'pcs')
@@ -450,14 +459,17 @@ export function computeTakeoff(
     // B21e subfloor label fix: the member-derived path (B3) books NET deck
     // area (stair/chase holes carved) but the row still claimed '4x8
     // sheets, gross' — a builder read a gross allowance that wasn't there.
-    // Member path says net + stated waste; only the LOD-200 area fallback
-    // keeps its honest 'gross'.
+    // The LOD-200 area fallback is NOT gross either (skeptic r1 F2):
+    // compute.ts deducts slab HOLES (stairwells) from the polygon area, so
+    // the fallback is a net-of-floor-openings number — it states that
+    // basis and joins the stated-waste convention like the member path.
+    // Only the WALL fallbacks (WSP/drywall faceArea sums) stay 'gross'.
     push(
       'Sheathing',
       'Subfloor 3/4" T&G',
       subfloorFromDeck
-        ? `4x8 sheets from deck members, net — +10% waste ≈ ${Math.ceil((deckAreaM2 * (1 + SHEET_WASTE)) / SHEET_M2)} sheets`
-        : '4x8 sheets, gross',
+        ? `4x8 sheets from deck members, net — +${pctOf(SHEET_WASTE)} waste ≈ ${Math.ceil((deckAreaM2 * (1 + SHEET_WASTE)) / SHEET_M2)} sheets`
+        : `4x8 sheets from slab area, net of floor openings — +${pctOf(SHEET_WASTE)} waste ≈ ${Math.ceil(((areas.subfloorM2 ?? 0) * (1 + SHEET_WASTE)) / SHEET_M2)} sheets`,
       subfloorSheets,
       'sheets',
     )
@@ -524,10 +536,13 @@ export function computeTakeoff(
     // Stated waste (B21e): the quantity stays the member-derived pour
     // volume; the +5% spillage/over-excavation order figure prints beside
     // it. Grout/mortar keep their rule-of-thumb rows — no stacked factors.
+    // The BUY figure CEILS to the 0.1 yd³ batch (skeptic r1 F1): round1
+    // could round the +5% back DOWN onto the net figure — a stated factor
+    // that adds zero — while every other class already ceils its buy.
     push(
       pour.section,
       'Concrete',
-      `${pour.detail} — +5% waste ≈ ${Math.max(0.1, round1(pour.m3 * M3_TO_YD3 * (1 + CONCRETE_WASTE)))} yd³`,
+      `${pour.detail} — +${pctOf(CONCRETE_WASTE)} waste ≈ ${Math.ceil(pour.m3 * M3_TO_YD3 * (1 + CONCRETE_WASTE) * 10) / 10} yd³`,
       Math.max(0.1, round1(pour.m3 * M3_TO_YD3)),
       'yd³',
     )
@@ -543,7 +558,7 @@ export function computeTakeoff(
     push(
       'Foundation',
       'Vapor retarder 6-mil poly',
-      'under slab, +10% seam laps/turn-ups (R506.2.3)',
+      `under slab, +${pctOf(VAPOR_LAP_FACTOR - 1)} seam laps/turn-ups (R506.2.3)`,
       round1(vaporM2 * VAPOR_LAP_FACTOR * SQFT),
       'sqft',
     )
@@ -614,7 +629,7 @@ export function computeTakeoff(
     // count. Membranes (WRB) and cladding/insulation keep their own
     // conventions — no invented factors.
     const sheets = isBoard
-      ? ` (~${sheetCount} 4x8 sheets) — +10% waste ≈ ${Math.ceil((tally.sqft * (1 + SHEET_WASTE)) / 32)} sheets`
+      ? ` (~${sheetCount} 4x8 sheets) — +${pctOf(SHEET_WASTE)} waste ≈ ${Math.ceil((tally.sqft * (1 + SHEET_WASTE)) / 32)} sheets`
       : ''
     push('Wall framing', tally.item, `${tally.detail}${sheets}`, round1(tally.sqft), 'sqft')
     // Fastener basis == the booked row (B4): when the member tally is the
@@ -651,7 +666,7 @@ export function computeTakeoff(
     push(
       'Roof',
       'Roof sheathing 7/16" WSP',
-      `deck panels, from members (~${roofSheets} 4x8 sheets, R803.2) — +10% waste ≈ ${Math.ceil((roofDeckM2 * SQFT * (1 + SHEET_WASTE)) / 32)} sheets${
+      `deck panels, from members (~${roofSheets} 4x8 sheets, R803.2) — +${pctOf(SHEET_WASTE)} waste ≈ ${Math.ceil((roofDeckM2 * SQFT * (1 + SHEET_WASTE)) / 32)} sheets${
         underTiled
           ? '; tapered planes conservatively under-tiled (see member labels) — shortfall NOT covered by the stated waste'
           : ''
@@ -674,7 +689,7 @@ export function computeTakeoff(
     push(
       'Roof',
       'Roof underlayment',
-      'one layer felt/synthetic, +10% course laps (R905.1.1) — covering by finish schedule, not booked',
+      `one layer felt/synthetic, +${pctOf(UNDERLAYMENT_LAP_FACTOR - 1)} course laps (R905.1.1) — covering by finish schedule, not booked`,
       round1(underlaymentM2 * UNDERLAYMENT_LAP_FACTOR * SQFT),
       'sqft',
     )

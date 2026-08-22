@@ -267,18 +267,19 @@ describe('concrete', () => {
     // two footing runs of exactly 1 m³ each → 2 m³ = 2.6159 yd³ → 2.6
     const rows = computeTakeoff([concrete([2, 0.5, 1]), concrete([2, 0.5, 1])], [])
     // B21e: net pour in the quantity column, stated +5% order figure in the
-    // detail (2 m³ = 2.6159 yd³ → 2.6 net; × 1.05 = 2.7467 → 2.7 order).
+    // detail — CEILED to the 0.1 yd³ ready-mix batch (r1 F1): 2 m³ =
+    // 2.6159 yd³ → 2.6 net; × 1.05 = 2.7467 → 2.8 order, never 2.7.
     expect(find(rows, 'Concrete')).toEqual({
       section: 'Foundation',
       item: 'Concrete',
-      detail: 'footings — +5% waste ≈ 2.7 yd³',
+      detail: 'footings — +5% waste ≈ 2.8 yd³',
       quantity: 2.6,
       unit: 'yd³',
     })
   })
 
   test('foundation pours split by ELEMENT: footing / stemwall / slab field', () => {
-    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ 0.2 yd³'
+    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ 0.3 yd³'
     const rows = computeTakeoff(
       [
         concrete([2, 0.5, 1]), // footing, 1 m³
@@ -288,9 +289,11 @@ describe('concrete', () => {
       [],
     )
     expect(find(rows, 'Concrete', 'footings — +5% waste ≈ 1.4 yd³')?.quantity).toBeCloseTo(1.3, 5)
-    expect(find(rows, 'Concrete', 'stemwalls — +5% waste ≈ 0.5 yd³')?.quantity).toBeCloseTo(0.5, 5)
+    // stemwall 0.5232 yd³ net → ×1.05 = 0.5493 → batch-ceil 0.6 (round1
+    // would have printed 0.5 == net, a factor adding zero — r1 F1)
+    expect(find(rows, 'Concrete', 'stemwalls — +5% waste ≈ 0.6 yd³')?.quantity).toBeCloseTo(0.5, 5)
     expect(find(rows, 'Concrete', SLAB_DETAIL)?.quantity).toBeCloseTo(0.2, 5)
-    for (const detail of ['footings — +5% waste ≈ 1.4 yd³', 'stemwalls — +5% waste ≈ 0.5 yd³', SLAB_DETAIL]) {
+    for (const detail of ['footings — +5% waste ≈ 1.4 yd³', 'stemwalls — +5% waste ≈ 0.6 yd³', SLAB_DETAIL]) {
       expect(find(rows, 'Concrete', detail)?.section).toBe('Foundation')
     }
   })
@@ -379,7 +382,7 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
     // the detail and derives from the same volume (B21e net preservation)
     expect(row?.quantity).toBe(Math.max(0.1, round1(vol * M3_TO_YD3)))
     expect(row?.detail).toBe(
-      `slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ ${Math.max(0.1, round1(vol * M3_TO_YD3 * 1.05))} yd³`,
+      `slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ ${Math.ceil(vol * M3_TO_YD3 * 1.05 * 10) / 10} yd³`,
     )
   })
 
@@ -1797,14 +1800,21 @@ describe('LOD-400 B21e: stated waste factors never inflate member truth (S4)', (
     expect(find(rows, '2x4', 'board feet')?.detail).toBe('board feet')
   })
 
-  test('concrete pour rows: NET yd³ in the column, +5% order figure derived from the same volume', () => {
+  test('concrete pour rows: NET yd³ in the column, +5% order CEILED to the 0.1 yd³ batch', () => {
     const vol = 2 * 0.5 * 1 // 1 m³
     const rows = computeTakeoff([concrete([2, 0.5, 1])], [])
     const row = find(rows, 'Concrete')
     expect(row?.quantity).toBe(Math.max(0.1, round1(vol * 1.30795)))
     expect(row?.detail).toBe(
-      `footings — +5% waste ≈ ${Math.max(0.1, round1(vol * 1.30795 * 1.05))} yd³`,
+      `footings — +5% waste ≈ ${Math.ceil(vol * 1.30795 * 1.05 * 10) / 10} yd³`,
     )
+    // the batch-ceil is NON-VACUOUS (r1 F1): a pour whose +5% would round
+    // back DOWN onto the net figure must still buy the next 0.1 batch —
+    // 0.7354 m³ = 0.9619 yd³ → net prints 1.0; ×1.05 = 1.0100 → round1
+    // collapses to 1.0 (stated factor adds zero), batch-ceil buys 1.1
+    const tight = find(computeTakeoff([concrete([2, 0.3677, 1])], []), 'Concrete')
+    expect(tight?.quantity).toBe(1)
+    expect(tight?.detail).toBe('footings — +5% waste ≈ 1.1 yd³')
   })
 
   test('roof deck row: NET sqft quantity + stated +10% buy; LAP rows never say waste (B6 reconcile)', () => {
@@ -1839,9 +1849,14 @@ describe('LOD-400 B21e: stated waste factors never inflate member truth (S4)', (
     expect(memberRow?.detail).toBe(
       `4x8 sheets from deck members, net — +10% waste ≈ ${Math.ceil((netM2 * 1.1) / SHEET)} sheets`,
     )
-    // FALLBACK path (LOD-200): gross label, no stacked waste factor
+    // FALLBACK path (LOD-200): NOT gross — compute.ts deducts slab holes
+    // (stairwells), so the row states its net-of-floor-openings basis and
+    // carries the stated factor too (r1 F2: '4x8 sheets, gross' sat on a
+    // hole-deducted number — the same mislabel class as the member path)
     const fallbackRow = find(computeTakeoff([], [], { subfloorM2: 30 }), 'Subfloor 3/4" T&G')
-    expect(fallbackRow?.detail).toBe('4x8 sheets, gross')
+    expect(fallbackRow?.detail).toBe(
+      `4x8 sheets from slab area, net of floor openings — +10% waste ≈ ${Math.ceil((30 * 1.1) / SHEET)} sheets`,
+    )
     expect(fallbackRow?.quantity).toBe(Math.ceil(30 / SHEET))
   })
 
@@ -1850,20 +1865,25 @@ describe('LOD-400 B21e: stated waste factors never inflate member truth (S4)', (
     const result = computeLevel(baselineScene(), baselineConfig('TX'))
     const rows = computeTakeoff(result.members, result.fixtures, result.areas)
     expect(rows.some((r) => r.detail.includes('gross'))).toBe(false)
-    // LOD-200 fallback → all three gross rows say so (incl. the drywall
-    // row that left its faceArea basis unstated pre-B21e) and none stacks
-    // a waste factor on the openings-not-deducted allowance
+    // LOD-200 fallback → 'gross' is exactly the WALL fallbacks (WSP +
+    // drywall faceArea sums, openings never deducted — the drywall row
+    // states that basis since B21e) and neither stacks a waste factor on
+    // the openings-not-deducted allowance
     const fallback = computeTakeoff([], [], { wallSheathingM2: 60, subfloorM2: 30, drywallM2: 90 })
-    const grossRows = fallback.filter((r) => r.section === 'Sheathing')
+    const grossRows = fallback.filter((r) => r.detail.includes('gross'))
     expect(grossRows.map((r) => r.item).sort()).toEqual([
       'Drywall 1/2"',
-      'Subfloor 3/4" T&G',
       'Wall sheathing 7/16" WSP',
     ])
     for (const r of grossRows) {
-      expect(r.detail).toContain('gross')
       expect(WASTE_RE.test(r.detail)).toBe(false)
     }
+    // the SUBFLOOR fallback is hole-deducted NET (r1 F2), never 'gross' —
+    // it states its basis and carries the stated waste factor instead
+    const sub = fallback.find((r) => r.item === 'Subfloor 3/4" T&G')
+    expect(sub?.detail).toContain('net of floor openings')
+    expect(sub?.detail).not.toContain('gross')
+    expect(WASTE_RE.test(sub?.detail ?? '')).toBe(true)
   })
 
   test('expected-diff enumeration: on the demo compose the waste-stated rows are EXACTLY the enumerated classes', () => {
