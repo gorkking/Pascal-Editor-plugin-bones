@@ -17,6 +17,25 @@
 4. SHIP at dawn when loop-verified: repin dev 3002 → editor PR →
    private-editor PR → prod; morning review file.
 
+## NIGHT-8 PERF+CAMERA QA RESULTS (evidence /tmp/perfqa/, 54 files)
+CAMERAS: CLEAN BILL 16/16 — orbit/pan/zoom in all 3 modes, activation
+transition pose byte-identical, exploded cycle, 0.000m camera drift
+across 7 move drags, cold-load-with-xray self-heal + sane pose, zoom
+extremes vs below-grade content (rods/buried runs) artifact-free,
+0 console errors across ~16 sessions. Nothing camera-side blocks ship.
+PERF (softGL caveat on absolutes; JS-only + relative deltas valid):
+F2 PRIMARY — move ghost preview = full recompute + material rebuild
+PER POINTERMOVE (~2.4s JS/cursor step, hardware-independent) → fix
+pilot feat/perf-move-materials LAUNCHED (throttle + instance-matrix
+updates). F1 — shader/program rebuild on EVERY X-ray/Basement entry
+(347 unique material instances re-minted per build; 2.6s pure-JS TSL
+rebuild per toggle; wants stable material cache) — same pilot.
+F3 — heap leak +2.9MB/toggle-pair + 1229 deleted-texture binds
+(disposal bug) — same pilot. Wall-mode chips ~330ms even in softGL
+(fine); toggle churn flat; move COMMIT lands grid-snapped exact.
+GPU EYEBALL for Julien: whether driver program caching absorbs the
+toggle recompile on real hardware (headless can't tell).
+
 # DAY-8 (2026-08-21) — full backlog go ("all these are great ideas, please work on implementing them")
 
 ## DAY-8 STATUS (~evening) — 7 merges on master (9ecf978, 1281 tests)
