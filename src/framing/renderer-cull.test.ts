@@ -5,6 +5,7 @@ import {
   applyFaceCut,
   buildGroup,
   collectCutPlanes,
+  patchGroup,
   updateWallSides,
   type WallSide,
   XRAY_CUT_BAND,
@@ -20,8 +21,10 @@ import {
  * the visibility test for both stacks, so side walls read as fully open
  * ("no drywall at all"). These gates drive the pure visibility functions
  * headlessly: near/far truth per azimuth, the exactly-one-face invariant,
- * the hysteresis dead band, mode pins, the never-cull-framing pin, and the
- * write-only-on-flip call-count contract.
+ * the hysteresis dead band, mode pins, the never-cull-framing pin, the
+ * write-only-on-flip call-count contract, SELECTION INVARIANCE (day-9 #4:
+ * selecting a wall must not close its near face over the in-wall MEP), and
+ * the patch-reset regression gate (an in-place patch never resets the cut).
  */
 
 // ---------------------------------------------------------------------------
@@ -360,6 +363,31 @@ describe('write-only-on-flip — the call-count contract (perf round survivorshi
     expect(intB.writes()).toBe(baseline[3] as number)
   })
 
+  test('selection toggling causes ZERO visibility writes — the cut is selection-blind (day-9 #4)', () => {
+    // The exemption's removal is also a perf win: selecting/deselecting a
+    // wall used to flip its near face (two writes per toggle); now the cut
+    // has no selection input at all, so a click costs nothing here. The
+    // smuggled third argument keeps this gate fatal to a restored exemption:
+    // honoring it would re-show the near face on even frames → writes ≫ 1.
+    const planes = collectCutPlanes(SCENE, WALLS)
+    const near = probe([0, -1], 'ext')
+    const far = probe([0, 1], 'ext')
+    const sides = new Map<string, WallSide>()
+    const cut = applyFaceCut as unknown as (
+      children: readonly { userData: unknown; visible: boolean }[],
+      s: ReadonlyMap<string, WallSide>,
+      selected?: readonly string[],
+    ) => void
+    for (let frame = 0; frame < 60; frame++) {
+      updateWallSides(planes, 2, -8, sides)
+      cut([near.child, far.child], sides, frame % 2 === 0 ? ['ext'] : undefined)
+    }
+    expect(near.writes()).toBe(1) // the initial commit only — selection adds nothing
+    expect(far.writes()).toBe(0)
+    expect(near.child.visible).toBe(false) // open toward the camera even while "selected"
+    expect(far.child.visible).toBe(true)
+  })
+
   test('the side cache itself is write-stable: entry object identity survives same-side frames', () => {
     const planes = collectCutPlanes(SCENE, WALLS)
     const sides = new Map<string, WallSide>()
@@ -370,16 +398,92 @@ describe('write-only-on-flip — the call-count contract (perf round survivorshi
   })
 })
 
-describe('exemptions and fallbacks', () => {
-  test('the SELECTED wall keeps BOTH faces from any angle (Engineering card flow)', () => {
+describe('selection invariance (day-9 #4) and fallbacks', () => {
+  // The retired night-4 exemption kept BOTH faces of the SELECTED wall
+  // visible — under the position cut that CLOSED the near drywall over the
+  // in-wall wires/pipes exactly when the user opened the Engineering card
+  // to look inside ("electrical, plumbing, all the wires… disappear").
+  // applyFaceCut no longer takes a selection at all; these gates smuggle
+  // one through a widened cast so RESTORING the exemption (re-adding the
+  // parameter and honoring it) fails here, not just in review.
+  const cutWithSelection = applyFaceCut as unknown as (
+    children: readonly FaceChild[],
+    sides: ReadonlyMap<string, WallSide>,
+    selected?: readonly string[],
+  ) => void
+
+  // Near-face truth per azimuth for both walls (same geometry as the
+  // classification suite above): [cam, hidden ext face, hidden int face].
+  const AZIMUTH_TRUTH = [
+    [[2, -8], [0, -1], [1, 0]], // SOUTH, outside: siding/sheathing open
+    [[2, 10], [0, 1], [1, 0]], // NORTH, deep inside: room gypsum opens
+    [[12, 2], [0, 1], [1, 0]], // EAST: interior side of ext, +x side of int
+    [[-12, 2], [0, 1], [-1, 0]], // WEST: the int wall mirrors
+  ] as const
+
+  test('a SELECTED wall cuts EXACTLY like an unselected one — near face open toward the camera, pinned at 4 azimuths', () => {
+    for (const [[camX, camZ], extHidden, intHidden] of AZIMUTH_TRUTH) {
+      const plain = buildGroup(SCENE, [], 'xray')
+      const selectedGroup = buildGroup(SCENE, [], 'xray')
+      const planes = collectCutPlanes(SCENE, WALLS)
+      const sidesA = new Map<string, WallSide>()
+      const sidesB = new Map<string, WallSide>()
+      updateWallSides(planes, camX, camZ, sidesA)
+      updateWallSides(planes, camX, camZ, sidesB)
+      applyFaceCut(plain.children as unknown as FaceChild[], sidesA)
+      cutWithSelection(selectedGroup.children as unknown as FaceChild[], sidesB, ['ext', 'int'])
+      // identical build → children align by index; selection changes NOTHING
+      const a = (plain.children as unknown as FaceChild[]).map((c) => c.visible)
+      const b = (selectedGroup.children as unknown as FaceChild[]).map((c) => c.visible)
+      expect(b).toEqual(a)
+      // the selected wall reads OPEN toward the camera: near face hidden,
+      // far face the closed backing — the in-wall guts are in direct view
+      expect(faceVisible(selectedGroup, 'ext', extHidden)).toBe(false)
+      expect(faceVisible(selectedGroup, 'ext', [-extHidden[0], -extHidden[1]])).toBe(true)
+      expect(faceVisible(selectedGroup, 'int', intHidden)).toBe(false)
+      expect(faceVisible(selectedGroup, 'int', [-intHidden[0], -intHidden[1]])).toBe(true)
+      // …and the guts themselves stay untouchable by this pass, selected or not
+      for (const c of plainChildren(selectedGroup)) expect(c.visible).toBe(true)
+    }
+  })
+
+  test('dedupe-twin consistency under the new rule: kept id, dropped-twin id, or no selection — one identical cut', () => {
+    // Members always carry the KEPT twin's sourceId (compute's colinear
+    // dedupe). The old exemption had to resolve dropped ids through
+    // duplicateOf; selection-blindness subsumes that mapping: EVERY id —
+    // kept, dropped, or absent — must yield the same visibility state.
+    const snapshots: boolean[][] = []
+    for (const selected of [undefined, ['ext'], ['ext_dropped_twin'], ['nonexistent']] as const) {
+      const group = buildGroup(SCENE, [], 'xray')
+      const planes = collectCutPlanes(SCENE, WALLS)
+      const sides = new Map<string, WallSide>()
+      updateWallSides(planes, 2, -8, sides)
+      cutWithSelection(group.children as unknown as FaceChild[], sides, selected)
+      snapshots.push((group.children as unknown as FaceChild[]).map((c) => c.visible))
+    }
+    for (const s of snapshots.slice(1)) expect(s).toEqual(snapshots[0] as boolean[])
+    expect((snapshots[0] as boolean[]).some((v) => !v)).toBe(true) // the cut is live, not vacuous
+  })
+
+  test('patch-reset regression gate: applyFaceCut → patchGroup(same structure) → the visibility snapshot survives', () => {
+    // The far-face review flagged this hole: a same-structure in-place patch
+    // (every live-drag preview tick) must NOT reset .visible on face buckets
+    // — applyFaceCut writes only on side FLIPS, so a patch that silently
+    // re-showed the near face would STAY wrong until the camera crossed the
+    // wall plane. Pin: patch rewrites matrices, never visibility.
     const group = buildGroup(SCENE, [], 'xray')
-    const planes = collectCutPlanes(SCENE, WALLS)
-    const sides = new Map<string, WallSide>()
-    updateWallSides(planes, 2, -8, sides)
-    applyFaceCut(group.children as unknown as FaceChild[], sides, ['ext'])
-    expect(faceVisible(group, 'ext', [0, -1])).toBe(true) // near face exempt
-    expect(faceVisible(group, 'ext', [0, 1])).toBe(true)
-    expect(faceVisible(group, 'int', [1, 0])).toBe(false) // others keep the cut
+    const sides = cutAt(group, 2, -8)
+    const snapshot = (group.children as unknown as FaceChild[]).map((c) => c.visible)
+    expect(snapshot.some((v) => !v)).toBe(true) // the cut is live before the patch
+    const moved = SCENE.map((m) => ({
+      ...m,
+      position: [m.position[0] + 0.4, m.position[1], m.position[2]] as const,
+    }))
+    expect(patchGroup(group, moved, [], 'xray')).toBe(true) // in-place path taken
+    expect((group.children as unknown as FaceChild[]).map((c) => c.visible)).toEqual(snapshot)
+    // the next frame's cut on the unchanged camera side flips nothing
+    applyFaceCut(group.children as unknown as FaceChild[], sides)
+    expect((group.children as unknown as FaceChild[]).map((c) => c.visible)).toEqual(snapshot)
   })
 
   test('a face bucket whose wall the compute did not return still cuts via the member-centroid plane', () => {
