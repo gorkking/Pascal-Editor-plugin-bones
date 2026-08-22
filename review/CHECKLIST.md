@@ -272,7 +272,11 @@ AND a gate — a checklist line without a test is a wish.
   schedule — not booked' (the assumption-label contract); underlayment
   buys the deck area at a STATED +10% course-lap factor; tapered
   hip/arris planes strip-tile conservatively INSIDE the hip lines with
-  the under-tile stated on the member labels; valley-minor panels carry
+  the EXACT per-compose coverage percentage stated on the member labels
+  (never 'slight' prose — the shortfall is scene-dependent) and the
+  waste caveat repeated on the buy row; the area gate floor is DERIVED
+  from the strip arithmetic (edge wedges + vanishing tail strips +
+  apexes), never a pinned magic number; valley-minor panels carry
   the overlay-framing trim statement as a FLAG (it must PRINT — Flags
   rows/block, never a label-only aside). Stated trim gaps are flags too:
   SHED roofs model no fascia and therefore NO drip edge at 400 (deck
