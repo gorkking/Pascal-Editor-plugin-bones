@@ -475,6 +475,9 @@ export function layoutElectrical(
   // ---- kitchen counter runs at 44" AFF (NEC 210.52(C), B14c) ----
   fixtures.push(...placeCounterReceptacles(walls, rooms, placed, warnings))
 
+  // ---- basin receptacles within 3 ft of placed lavs (210.52(D), B14d) ----
+  fixtures.push(...placeBasinReceptacles(walls, placed, warnings))
+
   // ---- lights: one switched lighting outlet per habitable room (210.70(A)(1)) ----
   for (const room of rooms) {
     const [cx, cz] = polygonCentroid(room.polygon)
@@ -1174,6 +1177,79 @@ function placeCounterReceptacles(
         })
       }
     }
+  }
+  return out
+}
+
+
+// ---------------------------------------------------------------------------
+// Bathroom basin receptacles (LOD-400 B14d, NEC 210.52(D))
+// ---------------------------------------------------------------------------
+
+/**
+ * NEC 210.52(D): a receptacle within 3 ft of the outside edge of EACH basin
+ * (one may serve two basins when within 3 ft of both). The engine never had
+ * one — every bathroom box sat on the 15" floor-line walk. A PLACED lavatory
+ * pins it: the box mounts on the nearest wall's basin-side face at ~40" AFF
+ * (above the 34" vanity, inside the 12"-below-countertop floor), GFCI per
+ * 210.8(A)(1), snapped RO-clear. Honesty paths: a freestanding basin (no
+ * wall within 3 ft) WARNS instead of placing an unreachable box; an RO snap
+ * that lands the box past 3 ft keeps the box AND warns — never silent.
+ * Basin boxes never count toward the 210.52(A) floor-line census
+ * (meta.basin keys the exclusion).
+ */
+function placeBasinReceptacles(
+  walls: WallSlice[],
+  placed: PlacedFixtureSlice[],
+  warnings?: string[],
+): Fixture[] {
+  const lavs = placed
+    .filter((p) => p.kind === 'lavatory')
+    .sort((a, b) => a.id.localeCompare(b.id))
+  if (lavs.length === 0) return []
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  const out: Fixture[] = []
+  for (const lav of lavs) {
+    // 210.52(D): one receptacle may serve two basins — a box already within
+    // 3 ft of THIS basin satisfies it (deterministic: lavs walk id-sorted).
+    const served = out.some(
+      (f) => Math.hypot(f.position[0] - lav.plan[0], f.position[2] - lav.plan[1]) <= BASIN_RADIUS,
+    )
+    if (served) continue
+    const near = nearestWallTo(straight, lav.plan)
+    if (!near || near.d > BASIN_RADIUS) {
+      warnings?.push(
+        `basin \u201c${lav.id}\u201d: no wall within 3 ft \u2014 basin receptacle (NEC 210.52(D)) not placed; verify`,
+      )
+      continue
+    }
+    const { wall, u: uLav } = near
+    // the BASIN side of the wall (geometric — works with or without zones)
+    const sideRaw =
+      -(lav.plan[0] - wall.start[0]) * wall.dir[1] + (lav.plan[1] - wall.start[1]) * wall.dir[0]
+    const face = faceOf(wall, sideRaw >= 0 ? 1 : -1)
+    const y0 = BASIN_RECEPTACLE_AFF - DEVICE_BOX_HALF_H
+    const y1 = BASIN_RECEPTACLE_AFF + DEVICE_BOX_HALF_H
+    const u = snapBoxClearOfRo(wall, uLav, y0, y1)
+    const [x, z] = face.plan(u)
+    const dist = Math.hypot(x - lav.plan[0], z - lav.plan[1])
+    if (dist > BASIN_RADIUS + 1e-9) {
+      warnings?.push(
+        `basin \u201c${lav.id}\u201d: receptacle snapped ${dist.toFixed(2)} m away (rough opening) \u2014 exceeds 210.52(D)'s 3 ft; verify`,
+      )
+    }
+    out.push({
+      system: 'electrical',
+      kind: 'receptacle-gfci',
+      position: [x, BASIN_RECEPTACLE_AFF, z],
+      rotationY: face.rotationY,
+      sourceId: wall.id,
+      label: 'Basin receptacle \u2014 within 3 ft of basin, GFCI (NEC 210.52(D))',
+      meta: {
+        deviceId: `recep-${wall.id}-basin-${lav.id}-${face.side === 1 ? 'p' : 'm'}`,
+        basin: true,
+      },
+    })
   }
   return out
 }

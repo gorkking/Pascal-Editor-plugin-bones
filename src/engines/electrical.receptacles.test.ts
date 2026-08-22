@@ -521,3 +521,117 @@ describe('B14c counter run — hybrid: placed sink pins the walk, sink-less kitc
     expect(low.length + counter.length).toBe(inKitchen.length)
   })
 })
+
+// ---------------------------------------------------------------------------
+// B14d — basin receptacle within 3 ft of placed lavatories (NEC 210.52(D))
+// ---------------------------------------------------------------------------
+
+const BASIN_AFF = inches(40)
+const THREE_FT = feet(3)
+const basinBoxes = (fixtures: Fixture[]): Fixture[] =>
+  fixtures.filter((f) => f.meta?.basin === true)
+
+/** rectScene + a bathroom zone in the north-east corner. */
+function bathScene(): { walls: WallSlice[]; rooms: RoomSlice[]; bath: RoomSlice } {
+  const { walls, rooms } = rectScene()
+  const bath = room(
+    'bathroom',
+    [
+      [5, 4],
+      [8, 4],
+      [8, 6],
+      [5, 6],
+    ],
+    { name: 'Bath' },
+  )
+  return { walls, rooms: [bath, ...rooms], bath }
+}
+
+describe('B14d basin receptacles — NEC 210.52(D) from placed lavs', () => {
+  test('a placed lav pins a GFCI basin box within 3 ft, at 40" AFF, on the basin side', () => {
+    const { walls, rooms } = bathScene()
+    const lav = placedItem('lav_1', 'lavatory', [6.5, 5.6]) // 0.4 m off w_n
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [lav])
+    const basins = basinBoxes(fixtures)
+    expect(basins.length).toBe(1)
+    const f = basins[0] as Fixture
+    expect(f.kind).toBe('receptacle-gfci')
+    expect(f.position[1]).toBeCloseTo(BASIN_AFF, 5)
+    expect(f.sourceId).toBe('w_n')
+    expect(f.label).toContain('210.52(D)')
+    expect(Math.hypot(f.position[0] - 6.5, f.position[2] - 5.6)).toBeLessThanOrEqual(THREE_FT)
+    expect(String(f.meta?.deviceId)).toBe(`recep-w_n-basin-lav_1-${f.meta?.deviceId?.toString().endsWith('p') ? 'p' : 'm'}`)
+    // basin side: the box sits INSIDE the room (interior face of the shell wall)
+    expect(f.position[2]).toBeLessThan(6)
+  })
+
+  test('one box may serve two basins: twin lavs 0.6 m apart share a single 210.52(D) box', () => {
+    const { walls, rooms } = bathScene()
+    const lavs = [
+      placedItem('lav_1', 'lavatory', [6.2, 5.6]),
+      placedItem('lav_2', 'lavatory', [6.8, 5.6]),
+    ]
+    const basins = basinBoxes(layoutElectrical(walls, rooms, undefined, undefined, lavs))
+    expect(basins.length).toBe(1)
+    const f = basins[0] as Fixture
+    for (const lav of lavs) {
+      expect(Math.hypot(f.position[0] - lav.plan[0], f.position[2] - lav.plan[1])).toBeLessThanOrEqual(
+        THREE_FT,
+      )
+    }
+  })
+
+  test('distant lavs each get their own box', () => {
+    const { walls, rooms } = bathScene()
+    const lavs = [
+      placedItem('lav_1', 'lavatory', [1, 5.6]), // west end of w_n
+      placedItem('lav_2', 'lavatory', [7, 5.6]), // east end of w_n
+    ]
+    const basins = basinBoxes(layoutElectrical(walls, rooms, undefined, undefined, lavs))
+    expect(basins.length).toBe(2)
+  })
+
+  test('freestanding basin (no wall within 3 ft): NO box, explicit 210.52(D) warning', () => {
+    const { walls, rooms } = bathScene()
+    const warnings: string[] = []
+    const lav = placedItem('lav_1', 'lavatory', [4, 3]) // 3 m from every wall
+    const basins = basinBoxes(layoutElectrical(walls, rooms, undefined, warnings, [lav]))
+    expect(basins.length).toBe(0)
+    expect(warnings.some((w) => w.includes('lav_1') && w.includes('210.52(D)'))).toBe(true)
+  })
+
+  test('an RO snap past 3 ft keeps the box AND warns — never silent', () => {
+    const { walls, rooms } = bathScene()
+    // low fixed glazing filling w_n's u in [4.5, 7.5] crosses the 40" band
+    const w = walls[2] as WallSlice // w_n runs [8,6] -> [0,6]
+    w.openings.push({
+      id: 'win_big',
+      kind: 'window',
+      u: 2, // w_n u measured from [8,6]: u=2 is x=6
+      width: 3,
+      height: 1.8,
+      sillHeight: 0.3,
+      roughWidth: 3 + RO_PAD,
+      roughHeight: 1.8 + RO_PAD,
+    })
+    const warnings: string[] = []
+    const lav = placedItem('lav_1', 'lavatory', [6, 5.6])
+    const basins = basinBoxes(layoutElectrical(walls, rooms, undefined, warnings, [lav]))
+    expect(basins.length).toBe(1)
+    const f = basins[0] as Fixture
+    expect(Math.hypot(f.position[0] - 6, f.position[2] - 5.6)).toBeGreaterThan(THREE_FT)
+    expect(warnings.some((wn) => wn.includes('lav_1') && wn.includes("210.52(D)'s 3 ft"))).toBe(true)
+  })
+
+  test('basin box rides the bathroom 20 A circuit (BA-1) and stays E2-continuous', () => {
+    const { walls, rooms } = bathScene()
+    const lav = placedItem('lav_1', 'lavatory', [6.5, 5.6])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [lav])
+    const f = basinBoxes(fixtures)[0] as Fixture
+    expect(f.meta?.circuit).toBe('BA-1')
+    expect(f.meta?.breakerA).toBe(20)
+    expect(f.meta?.gfci).toBe(true)
+    const members = routeWiring(fixtures, walls)
+    expect(unreachableDevices(members, fixtures)).toEqual([])
+  })
+})
