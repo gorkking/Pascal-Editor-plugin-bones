@@ -464,7 +464,16 @@ export function computeTakeoff(
     addNails('8d-common', subfloorSheets * fastening.connections['subfloor-sheet'].count)
   }
   if (drywallSheets > 0) {
-    push('Sheathing', 'Drywall 1/2"', '4x8 sheets, both faces of interior walls', drywallSheets, 'sheets')
+    // B21e header honesty: this fallback area is faceArea sums (openings
+    // NOT deducted, compute.ts) — it says 'gross' like its WSP/subfloor
+    // fallback siblings instead of leaving the basis unstated.
+    push(
+      'Sheathing',
+      'Drywall 1/2"',
+      '4x8 sheets, gross — both faces of interior walls',
+      drywallSheets,
+      'sheets',
+    )
   }
 
   // ---- CONCRETE + MASONRY per system ----

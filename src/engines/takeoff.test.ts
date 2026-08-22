@@ -1380,7 +1380,7 @@ describe('LOD-400 B6d: roof package rows are member-derived; wall gates filter b
     })
     const rows = computeTakeoff([alien], [], { drywallM2: 90 })
     const grossSheets = Math.ceil(90 / (32 / 10.7639))
-    expect(find(rows, 'Drywall 1/2"', '4x8 sheets, both faces of interior walls')?.quantity).toBe(
+    expect(find(rows, 'Drywall 1/2"', '4x8 sheets, gross — both faces of interior walls')?.quantity).toBe(
       grossSheets,
     )
   })
@@ -1722,5 +1722,181 @@ describe('LOD-400 B10: uplift hardware books member-derived (B4 convention)', ()
     )
     expect(members.filter((m) => m.role === 'strap').length).toBe(2)
     expect(members.filter((m) => m.role === 'uplift-strap').length).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B21e: stated waste factors + sheet-goods convention honesty
+// ---------------------------------------------------------------------------
+
+import { baselineConfig, baselineScene } from '../framing/baseline-scene'
+import { frameRoofs as frameRoofsB21e, type RoofSegmentSlice as RoofSegB21e } from './roof-framing'
+
+describe('LOD-400 B21e: stated waste factors never inflate member truth (S4)', () => {
+  const SQ = 1 / 0.09290304
+  const SHEET = 32 / 10.7639
+  const round1 = (n: number) => Math.round(n * 10) / 10
+  /** The ONE stated-waste shape every factor row prints: '+X% waste ≈ …'. */
+  const WASTE_RE = /\+\d+% waste ≈ /
+  const wallLayer = (role: 'sheathing' | 'drywall' | 'wrb', len = 3, h = 2.4): Member =>
+    mem({ role, size: undefined, dims: [len, h, 0.011], length: len, material: 'lumber' })
+  const deckPanel = (len = 1.2192, w = 2.4384): Member =>
+    mem({
+      system: 'floor-framing',
+      role: 'subfloor',
+      size: undefined,
+      dims: [len, 0.018, w],
+      length: len,
+      material: 'engineered',
+    })
+  const roofSeg = (overrides: Partial<RoofSegB21e> = {}): RoofSegB21e => ({
+    id: 'roofseg_b21e',
+    roofType: 'gable',
+    position: [0, 2.5, 0],
+    yaw: 0,
+    width: 8,
+    depth: 6,
+    pitch: (40 * Math.PI) / 180,
+    overhang: 0.3,
+    wallHeight: 0.5,
+    ...overrides,
+  })
+
+  test('wall sheathing + drywall member rows: NET quantity column, +10% buy DERIVED from the same net', () => {
+    const members = [
+      ...Array.from({ length: 10 }, () => wallLayer('sheathing')),
+      ...Array.from({ length: 14 }, () => wallLayer('drywall')),
+    ]
+    const rows = computeTakeoff(members, [], { wallSheathingM2: 100, drywallM2: 140 })
+    for (const [item, count] of [
+      ['Sheathing 7/16" WSP', 10],
+      ['Drywall 1/2"', 14],
+    ] as const) {
+      const netSqft = count * 3 * 2.4 * SQ
+      const row = find(rows, item)
+      // NET preservation: the quantity column IS the member arithmetic —
+      // a waste factor that silently scaled it would fail here
+      expect(row?.quantity).toBe(round1(netSqft))
+      // …and the stated order figure derives from the SAME net: net sheet
+      // count visible, buy = ceil(net × 1.10 / 32) — pinned at +10%
+      expect(row?.detail).toContain(`(~${Math.ceil(netSqft / 32)} 4x8 sheets)`)
+      expect(row?.detail).toContain(`+10% waste ≈ ${Math.ceil((netSqft * 1.1) / 32)} sheets`)
+    }
+  })
+
+  test('lumber pcs rows: exact member stick count in the column, +5% order figure in the detail', () => {
+    // 43 sticks: ceil(43 × 1.05) = 46 — the ceil really bites (45.15 → 46)
+    const rows = computeTakeoff(
+      Array.from({ length: 43 }, () => lumber('2x4', 2.3)),
+      [],
+    )
+    const row = find(rows, '2x4', '8 ft stock — +5% waste ≈ 46 pcs')
+    expect(row?.quantity).toBe(43)
+    // the bd-ft row stays factor-free: the drop is already bought via
+    // stock rounding, and the pcs rows carry the class's stated allowance
+    expect(find(rows, '2x4', 'board feet')?.detail).toBe('board feet')
+  })
+
+  test('concrete pour rows: NET yd³ in the column, +5% order figure derived from the same volume', () => {
+    const vol = 2 * 0.5 * 1 // 1 m³
+    const rows = computeTakeoff([concrete([2, 0.5, 1])], [])
+    const row = find(rows, 'Concrete')
+    expect(row?.quantity).toBe(Math.max(0.1, round1(vol * 1.30795)))
+    expect(row?.detail).toBe(
+      `footings — +5% waste ≈ ${Math.max(0.1, round1(vol * 1.30795 * 1.05))} yd³`,
+    )
+  })
+
+  test('roof deck row: NET sqft quantity + stated +10% buy; LAP rows never say waste (B6 reconcile)', () => {
+    const members = frameRoofsB21e([roofSeg()], [], { ...DEFAULT_SPEC, detail: '400' })
+    const rows = computeTakeoff(members, [])
+    const deckM2 = members
+      .filter((m) => m.role === 'sheathing')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const deckRow = find(rows, 'Roof sheathing 7/16" WSP')
+    expect(deckRow?.quantity).toBeCloseTo(round1(deckM2 * SQ), 6)
+    expect(deckRow?.detail).toContain(
+      `+10% waste ≈ ${Math.ceil((deckM2 * SQ * 1.1) / 32)} sheets`,
+    )
+    // LAP ≠ WASTE: the underlayment quantity INCLUDES its +10% course laps
+    // (installed overlap) and the row says 'laps', never 'waste'
+    const underM2 = members
+      .filter((m) => m.role === 'wrb')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const underRow = find(rows, 'Roof underlayment')
+    expect(underRow?.quantity).toBeCloseTo(round1(underM2 * 1.1 * SQ), 6)
+    expect(underRow?.detail).toContain('+10% course laps')
+    expect(WASTE_RE.test(underRow?.detail ?? '')).toBe(false)
+  })
+
+  test('subfloor label fix: member path says net + stated waste; only the area fallback says gross', () => {
+    // MEMBER path (B3): net deck area, quantity = net sheet count, stated buy
+    const deck = Array.from({ length: 9 }, () => deckPanel())
+    const netM2 = 9 * 1.2192 * 2.4384
+    const memberRows = computeTakeoff(deck, [], { subfloorM2: 60 }) // decoy area ignored
+    const memberRow = find(memberRows, 'Subfloor 3/4" T&G')
+    expect(memberRow?.quantity).toBe(Math.ceil(netM2 / SHEET))
+    expect(memberRow?.detail).toBe(
+      `4x8 sheets from deck members, net — +10% waste ≈ ${Math.ceil((netM2 * 1.1) / SHEET)} sheets`,
+    )
+    // FALLBACK path (LOD-200): gross label, no stacked waste factor
+    const fallbackRow = find(computeTakeoff([], [], { subfloorM2: 30 }), 'Subfloor 3/4" T&G')
+    expect(fallbackRow?.detail).toBe('4x8 sheets, gross')
+    expect(fallbackRow?.quantity).toBe(Math.ceil(30 / SHEET))
+  })
+
+  test("header honesty: 'gross' prints ONLY on LOD-200 fallback rows, and those carry NO stacked factor", () => {
+    // fully member-derived demo compose → no row may claim a gross buy
+    const result = computeLevel(baselineScene(), baselineConfig('TX'))
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(rows.some((r) => r.detail.includes('gross'))).toBe(false)
+    // LOD-200 fallback → all three gross rows say so (incl. the drywall
+    // row that left its faceArea basis unstated pre-B21e) and none stacks
+    // a waste factor on the openings-not-deducted allowance
+    const fallback = computeTakeoff([], [], { wallSheathingM2: 60, subfloorM2: 30, drywallM2: 90 })
+    const grossRows = fallback.filter((r) => r.section === 'Sheathing')
+    expect(grossRows.map((r) => r.item).sort()).toEqual([
+      'Drywall 1/2"',
+      'Subfloor 3/4" T&G',
+      'Wall sheathing 7/16" WSP',
+    ])
+    for (const r of grossRows) {
+      expect(r.detail).toContain('gross')
+      expect(WASTE_RE.test(r.detail)).toBe(false)
+    }
+  })
+
+  test('expected-diff enumeration: on the demo compose the waste-stated rows are EXACTLY the enumerated classes', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('TX'))
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    const stated = rows.filter((r) => WASTE_RE.test(r.detail))
+    const isLumberPcs = (r: TakeoffRow) =>
+      r.unit === 'pcs' && /^\d+x\d+( PT)?$/.test(r.item) && / ft stock/.test(r.detail)
+    const isBoardGood = (r: TakeoffRow) =>
+      r.item === 'Sheathing 7/16" WSP' || r.item === 'Drywall 1/2"'
+    const isPour = (r: TakeoffRow) => r.item === 'Concrete'
+    // every stated row belongs to an enumerated class…
+    for (const r of stated) {
+      expect(isLumberPcs(r) || isBoardGood(r) || isPour(r)).toBe(true)
+    }
+    // …and every row of those classes states its factor (uniform, both ways)
+    for (const r of rows) {
+      if (isLumberPcs(r) || isPour(r) || (isBoardGood(r) && r.section === 'Wall framing')) {
+        expect(WASTE_RE.test(r.detail)).toBe(true)
+      }
+    }
+    // the demo compose really exercises all three classes (non-vacuous)
+    expect(stated.some(isLumberPcs)).toBe(true)
+    expect(stated.some(isBoardGood)).toBe(true)
+    expect(stated.some(isPour)).toBe(true)
+    // LAP rows keep the opposite convention and never read as waste
+    const vapor = find(rows, 'Vapor retarder 6-mil poly')
+    expect(vapor?.detail).toContain('+10% seam laps')
+    expect(WASTE_RE.test(vapor?.detail ?? '')).toBe(false)
+    // net preservation, whole-compose: no factor row's quantity is a
+    // waste-scaled figure — the lumber pcs columns are integers (counts)
+    for (const r of stated.filter(isLumberPcs)) {
+      expect(Number.isInteger(r.quantity)).toBe(true)
+    }
   })
 })

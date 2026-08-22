@@ -363,6 +363,26 @@ AND a gate — a checklist line without a test is a wish.
   SHED roofs model no fascia and therefore NO drip edge at 400 (deck
   flag, count pinned at zero); gambrel rake metal rides with the B8d
   rake-ladder follow-up (deck flag).
+  Stated WASTE factors are ordering allowances, never quantity
+  multipliers (B21e): every sheet-goods, lumber-pcs and concrete buy
+  row keeps its member-derived NET quantity in the quantity column and
+  prints '+X% waste ≈ buy' in the detail — sheet goods (WSP/drywall/
+  subfloor/roof deck) +10% offcut, dimensional lumber +5% cull/damage
+  (the cut drop is already bought via stock-length rounding), concrete
+  pours +5% spillage/over-excavation; NAHB-style estimating defaults,
+  deliberately coarse, basis + 'verify for your job' cited in the
+  takeoff convention header. Counted hardware, fixtures, supplier SKUs
+  and rule-of-thumb rows (mortar/grout) carry none. LAP factors are the
+  OPPOSITE convention (B6 reconcile): seam/course overlap is INSTALLED
+  material, so the vapor-retarder and underlayment quantities include
+  their stated +10% and a lap row never reads as waste. 'gross' prints
+  ONLY on the LOD-200 fallback rows — their allowance is the openings
+  never deducted, so no factor stacks on top (the drywall fallback
+  states its gross faceArea basis now instead of leaving it unstated) —
+  and the member-derived subfloor row says 'from deck members, net'
+  instead of the pre-B21e 'gross' mislabel over net (holes-carved) deck
+  area. The roof deck's under-tile caveat states that the exact
+  scene-dependent shortfall sits ON TOP of the generic stated waste.
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
   framed exterior/CMU and the takeoff booked sheathing the layer engine never
@@ -382,7 +402,11 @@ AND a gate — a checklist line without a test is a wish.
   underlayment 1:1 count/area/normal-offset parity, drip counts/lengths,
   LOD-200/300 zeros, valley notes) +
   `src/engines/foundation.test.ts` B17 describe (field/membrane geometry,
-  holes carved, carve bands)
+  holes carved, carve bands) + `src/engines/takeoff.test.ts` B21e
+  describe (net-preservation per class, stated-factor buy figures
+  re-derived from the same net arithmetic, gross-only-on-fallback
+  header honesty, subfloor label both paths, demo-compose enumeration
+  in BOTH directions, lap-vs-waste distinction)
 - **S5 A mixed CMU/framed wall seams on a whole course and tops out at its
   architectural height.** The override `{ construction: 'cmu', cmuHeightM }`
   splits the wall at `snapCmuHeight` (8" module, R606 coursing): bond beam as
