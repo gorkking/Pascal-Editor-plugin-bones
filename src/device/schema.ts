@@ -23,7 +23,7 @@ import { z } from 'zod'
  * auto-placement (the reconciler re-creates it at the derived spot).
  */
 
-export const DEVICE_KINDS = ['receptacle', 'receptacle-gfci', 'switch'] as const
+export const DEVICE_KINDS = ['receptacle', 'receptacle-gfci', 'receptacle-wr-gfci', 'switch'] as const
 
 export const DeviceKind = z.enum(DEVICE_KINDS)
 export type DeviceKind = z.infer<typeof DeviceKind>
@@ -63,5 +63,6 @@ export type DeviceNode = z.infer<typeof DeviceNode>
 export const DEVICE_LABEL: Record<DeviceKind, string> = {
   receptacle: 'Receptacle',
   'receptacle-gfci': 'GFCI receptacle',
+  'receptacle-wr-gfci': 'WR GFCI receptacle (outdoor)',
   switch: 'Switch',
 }

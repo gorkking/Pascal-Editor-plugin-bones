@@ -24,6 +24,7 @@ export type DerivedDevice = {
 const DEVICE_FIXTURE_KINDS: ReadonlySet<Fixture['kind']> = new Set([
   'receptacle',
   'receptacle-gfci',
+  'receptacle-wr-gfci',
   'switch',
 ])
 

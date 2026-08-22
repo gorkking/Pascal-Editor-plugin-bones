@@ -52,6 +52,7 @@ function synthesizeMembers(count: number): Member[] {
 const ALL_FIXTURE_KINDS = {
   receptacle: 1,
   'receptacle-gfci': 1,
+  'receptacle-wr-gfci': 1,
   switch: 1,
   light: 1,
   'smoke-alarm': 1,

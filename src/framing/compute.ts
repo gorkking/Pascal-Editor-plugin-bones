@@ -773,11 +773,17 @@ function computeLevelUncached(
     warnings.push(`duplicate service point (${dup}) — extra node ignored`)
   }
 
+  // Placed sanitary items (toilet/shower/sinks…) — extracted ONCE: the
+  // electrical layout consumes them for the 210.8(A)(7)/(9) sink-radius
+  // GFCI flip + counter/basin receptacles (B14), plumbing for its demand
+  // points, and the B12 GES water-bond check reuses the same slice.
+  const placedFixtures = extractPlacedFixtures(nodes, levelId)
+
   let devices: DerivedDevice[] = []
   if (config.showElectrical) {
     // B13a: layout-level warnings (un-placeable R314.3(2)/R315.3 alarms)
     // surface with the level warnings — never a silent drop.
-    const derived = layoutElectrical(activeWalls, activeRooms, services, warnings)
+    const derived = layoutElectrical(activeWalls, activeRooms, services, warnings, placedFixtures)
     // Movable outlets (Q7): moved `bones:device` nodes override the derived
     // receptacle/switch spots — code-aware (RO snap-out, stud rule +
     // blocking, height clamps, spacing advisory). Unmoved nodes are ignored
@@ -857,8 +863,7 @@ function computeLevelUncached(
       // has no entry to bond to: the engine LABELS the assumption on the
       // intersystem termination member and the level warns — never silent.
       const forcedEntry = overrideWallPoint(activeWalls, services.waterEntry)
-      const plumbingModelsMeter =
-        config.showPlumbing && extractPlacedFixtures(nodes, levelId).length > 0
+      const plumbingModelsMeter = config.showPlumbing && placedFixtures.length > 0
       const entrySpot = forcedEntry
         ? {
             wall: forcedEntry.wall,
@@ -897,9 +902,9 @@ function computeLevelUncached(
   }
 
   if (config.showPlumbing) {
-    // Placed sanitary items (toilet/shower/sinks…) are the demand points;
-    // the engine's room-category inference is only the fallback.
-    const placedFixtures = extractPlacedFixtures(nodes, levelId)
+    // Placed sanitary items are the demand points; the engine's
+    // room-category inference is only the fallback (slice hoisted above —
+    // shared with the electrical sink-radius/counter/basin machinery).
     const plumbing = layoutPlumbing(
       activeWalls,
       activeRooms,

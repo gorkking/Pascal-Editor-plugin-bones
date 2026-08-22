@@ -3333,3 +3333,70 @@ describe('B18 paper round — anchorage on paper', () => {
     expect(svg2).toContain('post pad 24&quot;×24&quot;×12&quot;')
   })
 })
+
+describe('B14 device tags — counter/basin/outdoor boxes read distinctly on paper (examiner round 2)', () => {
+  const wire = member({
+    system: 'electrical',
+    role: 'wire-run',
+    size: undefined,
+    material: 'copper',
+    dims: [2, 0.013, 0.013],
+    label: 'NM-B 12/2 w/G — SA-1',
+    sourceId: 'SA-1',
+  })
+
+  test('GC (44") / GB (40") / WR bubbles print with their own legend rows — never plain G', () => {
+    const fixtures = [
+      fixture({ kind: 'receptacle-gfci', position: [1, 1.12, 0], meta: { counter: true } }),
+      fixture({ kind: 'receptacle-gfci', position: [3, 1.02, 0], meta: { basin: true } }),
+      fixture({ kind: 'receptacle-wr-gfci', position: [5, 0.38, 0], meta: { wr: true } }),
+      fixture({ kind: 'receptacle-gfci', position: [7, 0.38, 0] }), // 15" wall-line GFCI
+    ]
+    const elec =
+      buildPlanSet([wire], fixtures, {}).find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
+    expect(elec).toContain('>GC</text>')
+    expect(elec).toContain('>GB</text>')
+    expect(elec).toContain('>WR</text>')
+    expect(elec).toContain('>G</text>') // the wall-line box keeps plain G
+    // legend rows name the heights so the rough-in reads right
+    expect(elec).toContain('44&quot; AFF (210.52(C))')
+    expect(elec).toContain('40&quot; AFF (210.52(D))')
+    expect(elec).toContain('in-use cover (406.9(B))')
+  })
+
+  test('a counter box plan-stacked over a wall-line box keeps BOTH bubbles (tag-keyed dedupe)', () => {
+    const fixtures = [
+      fixture({ kind: 'receptacle-gfci', position: [1, 0.38, 0] }),
+      fixture({ kind: 'receptacle-gfci', position: [1, 1.12, 0], meta: { counter: true } }),
+    ]
+    const elec =
+      buildPlanSet([wire], fixtures, {}).find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
+    expect(elec).toContain('>G</text>')
+    expect(elec).toContain('>GC</text>')
+  })
+
+  test('EXT-1 legend row prints the family hint and the non-copper swatch (E3)', () => {
+    const extWire = member({
+      system: 'electrical',
+      role: 'wire-run',
+      size: undefined,
+      material: 'copper',
+      dims: [2, 0.013, 0.013],
+      label: 'NM-B 12/2 w/G — EXT-1',
+      sourceId: 'EXT-1',
+    })
+    const fixtures = [
+      fixture({
+        kind: 'receptacle-wr-gfci',
+        meta: { circuit: 'EXT-1', breakerA: 20, gaugeAwg: 12, wr: true },
+      }),
+    ]
+    const elec =
+      buildPlanSet([extWire], fixtures, {}).find((s) => s.title.startsWith('Electrical'))?.svg ?? ''
+    const { circuitColor } = require('./circuit-colors') as typeof import('./circuit-colors')
+    expect(elec).toContain('outdoor receptacles (WR GFCI, 210.52(E))')
+    expect(elec).not.toContain('ext-1')
+    expect(elec).toContain(circuitColor('EXT-1'))
+    expect(circuitColor('EXT-1')).not.toBe('#b0723d')
+  })
+})

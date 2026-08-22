@@ -53,7 +53,10 @@ describe('BYTE-EQUALITY vs master (zero device nodes/overrides)', () => {
       // and the ONLY meta delta really is deviceId, on device kinds only
       for (const f of result.fixtures) {
         const isDevice =
-          f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch'
+          f.kind === 'receptacle' ||
+          f.kind === 'receptacle-gfci' ||
+          f.kind === 'receptacle-wr-gfci' ||
+          f.kind === 'switch'
         expect(typeof f.meta?.deviceId === 'string').toBe(isDevice)
       }
     })
@@ -96,7 +99,11 @@ describe('computeLevel — device nodes end to end', () => {
   test('result.devices manifests every device fixture 1:1, unique ids', () => {
     const result = computeLevel(baselineScene(), config())
     const deviceFixtures = result.fixtures.filter(
-      (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
+      (f) =>
+        f.kind === 'receptacle' ||
+        f.kind === 'receptacle-gfci' ||
+        f.kind === 'receptacle-wr-gfci' ||
+        f.kind === 'switch',
     )
     expect(result.devices.length).toBe(deviceFixtures.length)
     const ids = result.devices.map((d) => d.deviceId)

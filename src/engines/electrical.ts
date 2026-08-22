@@ -25,6 +25,7 @@ import type {
   WallSlice,
 } from '../core/types'
 import { feet, inches } from '../core/units'
+import type { PlacedFixtureSlice } from '../core/wall-model'
 
 // ---- rule constants (data/electrical-rules.json) --------------------------
 
@@ -60,6 +61,48 @@ const GFCI_CATEGORIES: ReadonlySet<RoomSlice['category']> = new Set([
   'garage',
   'laundry',
 ])
+
+/** NEC 210.8(A)(7)/(9): receptacles within 6 ft of a sink bowl edge — or of
+ * a bathtub / shower stall — are GFCI. Measured here from the placed item's
+ * plan CENTER (the scene carries no bowl-edge geometry; the center is the
+ * conservative deterministic proxy). */
+const SINK_GFCI_RADIUS = feet(rules.gfci.sinkRuleFt)
+
+/** Placed sanitary kinds that trigger the 6-ft GFCI radius: sinks per
+ * 210.8(A)(7) (kitchen sinks + lavatories), tubs/showers per 210.8(A)(9). */
+const SINK_RULE_KINDS: ReadonlySet<PlacedFixtureSlice['kind']> = new Set([
+  'kitchen-sink',
+  'lavatory',
+  'bathtub',
+  'shower',
+])
+
+// ---- counter + basin receptacles (B14c/d, NEC 210.52(C)/(D)) ---------------
+
+/** Counter receptacle center ~44" AFF: the 36" counter convention + 8" —
+ * inside 210.52(C)(3)'s 20"-above-counter cap (the data's
+ * counterReceptacleMaxAboveCounterIn). The height is convention, not NEC. */
+const COUNTER_RECEPTACLE_AFF = inches(44)
+/** 210.52(C)(1): first counter receptacle within 24" of each run end… */
+const COUNTER_FIRST_MAX = inches(
+  rules.layoutAlgorithmHints.countertopPlacement.firstReceptacleMaxFromEndIn,
+)
+/** …then every <= 48" along the counter wall line. */
+const COUNTER_SPACING = inches(
+  rules.layoutAlgorithmHints.countertopPlacement.subsequentSpacingMaxIn,
+)
+/** 210.52(C)(1): counter spaces narrower than 12" require no receptacle. */
+const COUNTER_MIN_WIDTH = inches(rules.receptacles.counterMinWidthRequiringReceptacleIn)
+/** Basin receptacle center ~40" AFF: above the 34" vanity convention, inside
+ * 210.52(D)'s 12"-below-countertop floor. Convention, not NEC. */
+const BASIN_RECEPTACLE_AFF = inches(40)
+/** 210.52(D): a receptacle within 3 ft of each basin's outside edge. */
+const BASIN_RADIUS = feet(3)
+/** A placed sink further than this from every wall reads as an ISLAND. */
+const ISLAND_WALL_DIST = 1.2
+/** F4 glazing flag — one string so a user MOVE can shed/re-add it
+ * (applyDeviceOverrides recomputes obstruction at the new spot, round 3). */
+const OBSTRUCTED_NOTE = ' (\u26a0 position obstructed by glazing \u2014 verify on site)'
 
 // ---- small 2D helpers ------------------------------------------------------
 
@@ -346,9 +389,16 @@ export function layoutElectrical(
   rooms: RoomSlice[],
   overrides?: ServiceOverrides,
   warnings?: string[],
+  /** Placed sanitary items (compute's `extractPlacedFixtures` — the same
+   * slice plumbing consumes): sinks/tubs drive the 210.8(A)(7)/(9) GFCI
+   * radius and pin the B14c counter runs + B14d basin receptacles. */
+  placed: PlacedFixtureSlice[] = [],
 ): Fixture[] {
   const fixtures: Fixture[] = []
   const wetRooms = rooms.filter((r) => GFCI_CATEGORIES.has(r.category))
+  const sinkSpots = placed.filter((p) => SINK_RULE_KINDS.has(p.kind))
+  const nearSink = (x: number, z: number): boolean =>
+    sinkSpots.some((s) => Math.hypot(x - s.plan[0], z - s.plan[1]) <= SINK_GFCI_RADIUS)
 
   for (const wall of walls) {
     // Curved walls are flagged upstream (matches wall framing) — skip in v1.
@@ -371,16 +421,34 @@ export function layoutElectrical(
       for (const u of receptaclePositions(segment)) {
         for (const face of faces) {
           const [x, z] = face.plan(u)
-          // NEC 210.8(A): device lands in a kitchen/bath/garage/laundry zone → GFCI.
-          // LOD 400: add the within-6-ft-of-sink/tub test [210.8(A)(7)/(9)]
-          // once fixture (sink) positions are extracted from the scene.
-          const gfci = wetRooms.some((r) => pointInPolygon([x, z], r.polygon))
+          // NEC 210.8(A): device lands in a kitchen/bath/garage/laundry zone
+          // → GFCI — OR within 6 ft of a placed sink/tub/shower
+          // [210.8(A)(7)/(9)]: the radius reaches receptacles in ADJACENT
+          // dry rooms (a dining-room box 5 ft from the kitchen sink flips).
+          // B14b closed the stale "once sink positions are extracted" gap —
+          // compute has extracted placedFixtures since the plumbing rebuild.
+          // F3 DECISION (round 2, stated): the radius is STRAIGHT-LINE and
+          // pierces walls — NEC measures the cord path 'without piercing a
+          // wall', so this over-protects (a box behind a partition 0.2 m
+          // from a lav flips). Chosen deliberately: a same-room guard needs
+          // zone data both sides and would silently UNDER-protect exactly
+          // where scenes are weakest, and extra GFCI is always code-legal
+          // while a missed one is a violation. Dry-room flips carry the
+          // assumption on their LABEL; checklist E8 states it.
+          const wet = wetRooms.some((r) => pointInPolygon([x, z], r.polygon))
+          const sinkFlip = !wet && nearSink(x, z)
           fixtures.push({
             system: 'electrical',
-            kind: gfci ? 'receptacle-gfci' : 'receptacle',
+            kind: wet || sinkFlip ? 'receptacle-gfci' : 'receptacle',
             position: [x, RECEPTACLE_AFF, z],
             rotationY: face.rotationY,
             sourceId: wall.id,
+            ...(sinkFlip
+              ? {
+                  label:
+                    'GFCI \u2014 within 6 ft of sink/tub (NEC 210.8(A)(7)/(9); straight-line reach, conservative)',
+                }
+              : {}),
             meta: { deviceId: `recep-${wall.id}-${ordinal}-${face.side === 1 ? 'p' : 'm'}` },
           })
         }
@@ -421,6 +489,12 @@ export function layoutElectrical(
       }
     }
   }
+
+  // ---- kitchen counter runs at 44" AFF (NEC 210.52(C), B14c) ----
+  fixtures.push(...placeCounterReceptacles(walls, rooms, placed, warnings))
+
+  // ---- basin receptacles within 3 ft of placed lavs (210.52(D), B14d) ----
+  fixtures.push(...placeBasinReceptacles(walls, placed, warnings))
 
   // ---- lights: one switched lighting outlet per habitable room (210.70(A)(1)) ----
   for (const room of rooms) {
@@ -590,6 +664,9 @@ export function layoutElectrical(
   // ---- electric meter: street → METER → panel is the standard chain ----
   const meter = placeElectricMeter(walls, rooms, overrides?.electricMeter)
   if (meter) fixtures.push(meter)
+
+  // ---- outdoor receptacles: front + back WR GFCI (NEC 210.52(E), B14a) ----
+  fixtures.push(...placeOutdoorReceptacles(walls, rooms, meter, warnings))
 
   // ---- circuiting (NEC 210.11/210.12/220.12) + 3-way switching ----
   assignCircuits(fixtures, rooms)
@@ -847,6 +924,444 @@ function placeElectricMeter(
     sourceId: spot.wall.id,
     label: 'Electric meter — service entrance (NEC 230.66)',
   }
+}
+
+// ---------------------------------------------------------------------------
+// Outdoor receptacles (LOD-400 B14a, NEC 210.52(E))
+// ---------------------------------------------------------------------------
+
+/** 210.52(E)(1): outdoor receptacles mount no more than 6'6" above grade. */
+const OUTDOOR_MAX_AFF = feet(rules.receptacles.outdoorMaxAboveGradeFt)
+
+/** The exterior FACE of a wall — the opposite of its resolved interior face
+ * (no room data resolves a side → interior guess is +normal → use −). */
+function exteriorFaceOf(wall: WallSlice, rooms: RoomSlice[]): WallFace {
+  const inFace = interiorFaces(wall, rooms)[0] ?? faceOf(wall, 1)
+  return faceOf(wall, inFace.side === 1 ? -1 : 1)
+}
+
+/**
+ * NEC 210.52(E)(1): one receptacle at the FRONT and one at the BACK of every
+ * dwelling. Never modeled before B14 — `interiorFaces()` mounts devices on
+ * interior faces only, so the outdoor count was zero forever while
+ * rules.json booked `outdoorFrontAndBack`. Both boxes are weather-resistant
+ * GFCI behind an extra-duty in-use cover [210.8(A)(3), 406.9(A)/(B)] on
+ * their own 20 A exterior circuit.
+ *  - FRONT = the exterior wall whose OUTSIDE face midpoint is nearest the
+ *    street point — the same bbox+margin pick the service lateral rides
+ *    (`streetEdgePoint`, anchored at the meter when the scene has one), so
+ *    the lateral and the front receptacle agree on "street side".
+ *  - BACK = the most nearly opposite-facing exterior wall, farthest from the
+ *    street (ties by id); with no opposing wall, the farthest remaining
+ *    exterior wall. A single-exterior-wall scene mounts both on it, apart,
+ *    and WARNS — two required outlets never silently collapse to one.
+ * Boxes snap clear of rough openings box-edge-aware (`snapBoxClearOfRo`);
+ * the 15" interior mounting convention sits far under the 6'6" grade cap.
+ */
+function placeOutdoorReceptacles(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  meter: Fixture | null,
+  warnings?: string[],
+): Fixture[] {
+  const ext = walls.filter((w) => w.exterior && !w.curved && w.length >= 0.5)
+  if (ext.length === 0) {
+    // A scene with walls but no shell (partition-only drafts) has no
+    // "outdoors" to serve — say so instead of inventing a face.
+    if (walls.some((w) => !w.curved && w.length >= 0.5)) {
+      warnings?.push(
+        'no exterior wall — outdoor receptacles (NEC 210.52(E)) not placed; verify front/back coverage',
+      )
+    }
+    return []
+  }
+  // Street anchor: the meter (the service chain's own anchor), else the
+  // walls' bbox center — deterministic either way.
+  let anchor: Pt
+  if (meter) {
+    anchor = [meter.position[0], meter.position[2]]
+  } else {
+    let minX = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let minZ = Number.POSITIVE_INFINITY
+    let maxZ = Number.NEGATIVE_INFINITY
+    for (const w of walls) {
+      for (const p of [w.start, w.end]) {
+        minX = Math.min(minX, p[0])
+        maxX = Math.max(maxX, p[0])
+        minZ = Math.min(minZ, p[1])
+        maxZ = Math.max(maxZ, p[1])
+      }
+    }
+    anchor = [(minX + maxX) / 2, (minZ + maxZ) / 2]
+  }
+  const street = streetEdgePoint(walls, anchor)
+
+  const facing = new Map<string, WallFace>()
+  for (const w of ext) facing.set(w.id, exteriorFaceOf(w, rooms))
+  const distStreet = (w: WallSlice): number => {
+    const [x, z] = (facing.get(w.id) as WallFace).plan(w.length / 2)
+    return Math.hypot(x - street[0], z - street[1])
+  }
+  /** Outward plan normal of the wall's exterior face. */
+  const outNormal = (w: WallSlice): Pt => {
+    const side = (facing.get(w.id) as WallFace).side
+    return [-w.dir[1] * side, w.dir[0] * side]
+  }
+
+  const front = [...ext].sort(
+    (a, b) => distStreet(a) - distStreet(b) || a.id.localeCompare(b.id),
+  )[0] as WallSlice
+  const fn = outNormal(front)
+  const opposing = ext.filter(
+    (w) => w.id !== front.id && outNormal(w)[0] * fn[0] + outNormal(w)[1] * fn[1] < -0.5,
+  )
+  const backPool = opposing.length > 0 ? opposing : ext.filter((w) => w.id !== front.id)
+  const back = [...backPool].sort(
+    (a, b) => distStreet(b) - distStreet(a) || a.id.localeCompare(b.id),
+  )[0]
+
+  const out: Fixture[] = []
+  const mount = (wall: WallSlice, role: 'front' | 'back', u0: number): void => {
+    const aff = Math.min(RECEPTACLE_AFF, OUTDOOR_MAX_AFF)
+    const y0 = aff - DEVICE_BOX_HALF_H
+    const y1 = aff + DEVICE_BOX_HALF_H
+    const u = snapBoxClearOfRo(wall, u0, y0, y1)
+    // F4 (round 2): near-full-width glazing defeats snapBoxClearOfRo (4-pass
+    // give-up + end clamp) — the box overlapped the RO edge SILENTLY. The
+    // E1 contract: an unroutable RO is ⚠-flagged, never silent.
+    const boxHalf = DEVICE_BOX_W / 2
+    const obstructed = openingSpans(wall, y0, y1).some(
+      (s) => u + boxHalf > s.lo && u - boxHalf < s.hi,
+    )
+    if (obstructed) {
+      warnings?.push(
+        `outdoor receptacle (${role}): mount position obstructed by glazing/rough openings — verify on site (NEC 210.52(E))`,
+      )
+    }
+    const face = facing.get(wall.id) as WallFace
+    const [x, z] = face.plan(u)
+    out.push({
+      system: 'electrical',
+      kind: 'receptacle-wr-gfci',
+      position: [x, aff, z],
+      rotationY: face.rotationY,
+      sourceId: wall.id,
+      label: `Outdoor receptacle (${role}) — WR GFCI, in-use cover (NEC 210.52(E), 406.9(B))${
+        obstructed ? OBSTRUCTED_NOTE : ''
+      }`,
+      meta: {
+        deviceId: `recep-${wall.id}-out-${role}`,
+        outdoor: role,
+        wr: true,
+        inUseCover: true,
+        ...(obstructed ? { obstructed: true } : {}),
+      },
+    })
+  }
+  if (back && back.id !== front.id) {
+    mount(front, 'front', front.length / 2)
+    mount(back, 'back', back.length / 2)
+  } else {
+    mount(front, 'front', front.length / 3)
+    mount(front, 'back', (2 * front.length) / 3)
+    warnings?.push(
+      'single exterior wall — front AND back outdoor receptacles (NEC 210.52(E)) share it; verify coverage',
+    )
+  }
+  return out
+}
+
+
+// ---------------------------------------------------------------------------
+// Kitchen counter runs (LOD-400 B14c, NEC 210.52(C))
+// ---------------------------------------------------------------------------
+
+/** Nearest straight wall to a plan point, raw projected u (NOT RO-snapped —
+ * counter/basin placement snaps box-edge-aware afterwards). Ties by id. */
+function nearestWallTo(
+  walls: WallSlice[],
+  p: Pt,
+): { wall: WallSlice; u: number; d: number } | null {
+  let best: { wall: WallSlice; u: number; d: number } | null = null
+  for (const wall of walls) {
+    if (wall.curved || wall.length < 0.1) continue
+    const raw = (p[0] - wall.start[0]) * wall.dir[0] + (p[1] - wall.start[1]) * wall.dir[1]
+    const u = Math.max(0, Math.min(wall.length, raw))
+    const q: Pt = [wall.start[0] + wall.dir[0] * u, wall.start[1] + wall.dir[1] * u]
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1])
+    const wins =
+      !best || d < best.d - 1e-9 || (d <= best.d + 1e-9 && wall.id.localeCompare(best.wall.id) < 0)
+    if (wins) best = { wall, u, d }
+  }
+  return best
+}
+
+/**
+ * NEC 210.52(C)(1) countertop receptacles — the counter-height walk the
+ * engine never had (every kitchen box sat at 15" AFF). The scene carries no
+ * casework runs, so the walk is HYBRID-honest (B14c decision):
+ *  - a PLACED kitchen-sink item pins its counter wall (nearest wall) — that
+ *    wall's kitchen-side face gets the 44"-AFF walk, first box within 24" of
+ *    each run end then every <= 48" (rules.json layoutAlgorithmHints);
+ *    ASSUMPTION (stated): the counter runs the full kitchen wall space
+ *    carrying the sink, clipped to the kitchen polygon and broken by door
+ *    ROs; no box lands in the faucet zone directly behind the bowl.
+ *  - a kitchen zone WITHOUT a placed sink has NO honest counter geometry —
+ *    the level warns per kitchen instead of inventing casework.
+ *  - an island sink (> ISLAND_WALL_DIST from every wall) requires no island
+ *    receptacle under NEC 2023 210.52(C)(2) — labeled, never silent.
+ * Counter boxes never count toward the 210.52(A) floor-line spacing census
+ * (doNotCountTowardWallSpacing — meta.counter keys the exclusion).
+ */
+function placeCounterReceptacles(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  placed: PlacedFixtureSlice[],
+  warnings?: string[],
+): Fixture[] {
+  const kitchens = rooms.filter((r) => r.category === 'kitchen')
+  if (kitchens.length === 0) return []
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  const out: Fixture[] = []
+  // Per counter FACE (`${wall.id}|${side}`): the u-spans already walked,
+  // the box u-positions placed there, and the running deviceId ordinal —
+  // a second walk on the same face (another kitchen zone down the wall, or
+  // a same-kitchen sink across a door RO) covers ITS OWN span with unique
+  // ids instead of silently bailing (round-3 finding: the old global
+  // `walked.has(key) → continue` was a FOURTH wordless zero-box exit).
+  const walked = new Map<
+    string,
+    { spans: { a: number; b: number }[]; us: number[]; ordinal: number }
+  >()
+  for (const kitchen of kitchens) {
+    const name = kitchen.name || kitchen.id
+    const sinks = placed
+      .filter((p) => p.kind === 'kitchen-sink' && pointInPolygon(p.plan, kitchen.polygon))
+      .sort((a, b) => a.id.localeCompare(b.id))
+    if (sinks.length === 0) {
+      warnings?.push(
+        `kitchen \u201c${name}\u201d: countertop receptacles (NEC 210.52(C)) not modeled \u2014 no placed counter/sink item pins the counter wall; verify counter runs`,
+      )
+      continue
+    }
+    for (const sink of sinks) {
+      const near = nearestWallTo(straight, sink.plan)
+      if (!near || near.d > ISLAND_WALL_DIST) {
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: island sink \u2014 no island receptacle required (NEC 2023 210.52(C)(2)); future-provision outlet not modeled, verify`,
+        )
+        continue
+      }
+      const { wall, u: uSink } = near
+      // the kitchen-side FACE: whichever face's point at the sink's u lies
+      // inside THIS kitchen polygon
+      const face = [faceOf(wall, 1), faceOf(wall, -1)].find((f) =>
+        pointInPolygon(f.plan(uSink), kitchen.polygon),
+      )
+      if (!face) {
+        // degenerate: neither face of the sink's nearest wall lies inside
+        // its kitchen — a sink with a wall but no counter face (F2 round 2:
+        // this bail exited SILENT, leaving a sinked kitchen with zero
+        // counter boxes and zero words).
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: counter wall does not face its kitchen \u2014 countertop receptacles (NEC 210.52(C)) not modeled; verify counter runs`,
+        )
+        continue
+      }
+      const y0 = COUNTER_RECEPTACLE_AFF - DEVICE_BOX_HALF_H
+      const y1 = COUNTER_RECEPTACLE_AFF + DEVICE_BOX_HALF_H
+      const doors = wall.openings
+        .filter((o) => o.kind === 'door')
+        .map((o) => ({
+          lo: Math.max(0, o.u - o.roughWidth / 2),
+          hi: Math.min(wall.length, o.u + o.roughWidth / 2),
+        }))
+      const usable = (u: number): boolean =>
+        u >= 0 &&
+        u <= wall.length &&
+        !doors.some((s) => u > s.lo && u < s.hi) &&
+        pointInPolygon(face.plan(u), kitchen.polygon)
+      if (!usable(uSink)) {
+        // the sink projects into a door RO span (or off the kitchen face) —
+        // there is no counter line to walk (F2 round 2: silent zero-box
+        // kitchen; the sink-less warning never covered this path).
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: sink sits in a doorway span \u2014 countertop receptacles (NEC 210.52(C)) not modeled; verify counter runs`,
+        )
+        continue
+      }
+      // contiguous counter span around the sink (0.05 m march — drafting
+      // resolution; the polygon clip is what keeps the run out of the hall)
+      const step = 0.05
+      let a = uSink
+      while (a - step >= 0 && usable(a - step)) a -= step
+      let b = uSink
+      while (b + step <= wall.length && usable(b + step)) b += step
+      if (b - a < COUNTER_MIN_WIDTH) {
+        // code-legal exemption, but never wordless (the F2 class)
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: counter strip narrower than 12" \u2014 no receptacle required (NEC 210.52(C)(1))`,
+        )
+        continue
+      }
+      const key = `${wall.id}|${face.side}`
+      const rec = walked.get(key) ?? { spans: [], us: [], ordinal: 0 }
+      // Skip ONLY when this sink's own span already lies inside a prior
+      // walk (its boxes exist there — honest silence). An uncovered span
+      // gets its own walk + F1 coverage audit (round 3, scenarios A/B:
+      // two kitchens on one 16 m wall; two sinks split by a door RO).
+      if (rec.spans.some((s) => a >= s.a - 0.1 && b <= s.b + 0.1)) continue
+
+      // even centers: pitch <= 48" AND end overhang (= pitch/2) <= 24"
+      const count = Math.max(
+        1,
+        Math.ceil((b - a) / COUNTER_SPACING),
+        Math.ceil((b - a) / (2 * COUNTER_FIRST_MAX)),
+      )
+      const pitch = (b - a) / count
+      const used: number[] = []
+      for (let i = 0; i < count; i++) {
+        let u = a + pitch * (i + 0.5)
+        // faucet zone: never directly behind the bowl
+        if (Math.abs(u - uSink) < 0.3) {
+          const shifted = u <= uSink ? uSink - 0.35 : uSink + 0.35
+          if (shifted > a && shifted < b) u = shifted
+        }
+        u = snapBoxClearOfRo(wall, u, y0, y1)
+        if (!usable(u)) continue // snapped off the counter run
+        // collapsed spots dedupe — across THIS walk and any prior walk on
+        // the same face (overlapping kitchen zones can graze boundaries)
+        if ([...rec.us, ...used].some((v) => Math.abs(v - u) < 0.15)) continue
+        used.push(u)
+        const [x, z] = face.plan(u)
+        out.push({
+          system: 'electrical',
+          kind: 'receptacle-gfci', // kitchen counters are GFCI in every adopted edition
+          position: [x, COUNTER_RECEPTACLE_AFF, z],
+          rotationY: face.rotationY,
+          sourceId: wall.id,
+          label: 'Counter receptacle \u2014 44" AFF (NEC 210.52(C)(1))',
+          meta: {
+            // slot-based WITHIN a walk (single-walk scenes keep their ids
+            // byte-identical); the per-face running offset keeps a second
+            // walk's ids unique (round 3)
+            deviceId: `recep-${wall.id}-ctr-${rec.ordinal + i}-${face.side === 1 ? 'p' : 'm'}`,
+            counter: true,
+          },
+        })
+      }
+      // F1 (round 2): a WINDOW whose RO crosses the 44" band silently
+      // GUTTED the walk — snapBoxClearOfRo pushed every box to the RO
+      // edges, dedupe collapsed them, and a 4 m run kept two boxes 3.3 m
+      // apart with zero words. Audit the PLACED boxes against the walk's
+      // own contract on [a, b] (first box <= 24" of each end, <= 48"
+      // o.c.); gaps spanning the faucet zone subtract it — the
+      // behind-the-sink strip is exempt counter space
+      // (counterBehindSinkOrRangeExemptIfDepthLessThanIn). Violated (or
+      // empty) coverage warns — never silent.
+      const faucetLo = uSink - 0.35
+      const faucetHi = uSink + 0.35
+      const effGap = (lo: number, hi: number): number => {
+        const cut = Math.max(0, Math.min(hi, faucetHi) - Math.max(lo, faucetLo))
+        return hi - lo - cut
+      }
+      const sorted = [...used].sort((p, q) => p - q)
+      const tol = 0.11 // march resolution + box-margin slack
+      let broken = sorted.length === 0
+      if (!broken) {
+        broken =
+          effGap(a, sorted[0] as number) > COUNTER_FIRST_MAX + tol ||
+          effGap(sorted[sorted.length - 1] as number, b) > COUNTER_FIRST_MAX + tol
+        for (let i = 0; !broken && i + 1 < sorted.length; i++) {
+          broken = effGap(sorted[i] as number, sorted[i + 1] as number) > COUNTER_SPACING + tol
+        }
+      }
+      if (broken) {
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: counter receptacle spacing exceeds NEC 210.52(C)'s 24"/48" walk after rough-opening snap (window over the counter) \u2014 verify`,
+        )
+      }
+      rec.spans.push({ a, b })
+      rec.us.push(...used)
+      rec.ordinal += count
+      walked.set(key, rec)
+    }
+  }
+  return out
+}
+
+
+// ---------------------------------------------------------------------------
+// Bathroom basin receptacles (LOD-400 B14d, NEC 210.52(D))
+// ---------------------------------------------------------------------------
+
+/**
+ * NEC 210.52(D): a receptacle within 3 ft of the outside edge of EACH basin
+ * (one may serve two basins when within 3 ft of both). The engine never had
+ * one — every bathroom box sat on the 15" floor-line walk. A PLACED lavatory
+ * pins it: the box mounts on the nearest wall's basin-side face at ~40" AFF
+ * (above the 34" vanity, inside the 12"-below-countertop floor), GFCI per
+ * 210.8(A)(1), snapped RO-clear. Honesty paths: a freestanding basin (no
+ * wall within 3 ft) WARNS instead of placing an unreachable box; an RO snap
+ * that lands the box past 3 ft keeps the box AND warns — never silent.
+ * Basin boxes never count toward the 210.52(A) floor-line census
+ * (meta.basin keys the exclusion).
+ */
+function placeBasinReceptacles(
+  walls: WallSlice[],
+  placed: PlacedFixtureSlice[],
+  warnings?: string[],
+): Fixture[] {
+  const lavs = placed
+    .filter((p) => p.kind === 'lavatory')
+    .sort((a, b) => a.id.localeCompare(b.id))
+  if (lavs.length === 0) return []
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  const out: Fixture[] = []
+  for (const lav of lavs) {
+    // 210.52(D): one receptacle may serve two basins — a box already within
+    // 3 ft of THIS basin satisfies it (deterministic: lavs walk id-sorted).
+    const served = out.some(
+      (f) => Math.hypot(f.position[0] - lav.plan[0], f.position[2] - lav.plan[1]) <= BASIN_RADIUS,
+    )
+    if (served) continue
+    const near = nearestWallTo(straight, lav.plan)
+    if (!near || near.d > BASIN_RADIUS) {
+      warnings?.push(
+        `basin \u201c${lav.id}\u201d: no wall within 3 ft \u2014 basin receptacle (NEC 210.52(D)) not placed; verify`,
+      )
+      continue
+    }
+    const { wall, u: uLav } = near
+    // the BASIN side of the wall (geometric — works with or without zones)
+    const sideRaw =
+      -(lav.plan[0] - wall.start[0]) * wall.dir[1] + (lav.plan[1] - wall.start[1]) * wall.dir[0]
+    const face = faceOf(wall, sideRaw >= 0 ? 1 : -1)
+    const y0 = BASIN_RECEPTACLE_AFF - DEVICE_BOX_HALF_H
+    const y1 = BASIN_RECEPTACLE_AFF + DEVICE_BOX_HALF_H
+    const u = snapBoxClearOfRo(wall, uLav, y0, y1)
+    const [x, z] = face.plan(u)
+    const dist = Math.hypot(x - lav.plan[0], z - lav.plan[1])
+    if (dist > BASIN_RADIUS + 1e-9) {
+      warnings?.push(
+        `basin \u201c${lav.id}\u201d: receptacle snapped ${dist.toFixed(2)} m away (rough opening) \u2014 exceeds 210.52(D)'s 3 ft; verify`,
+      )
+    }
+    out.push({
+      system: 'electrical',
+      kind: 'receptacle-gfci',
+      position: [x, BASIN_RECEPTACLE_AFF, z],
+      rotationY: face.rotationY,
+      sourceId: wall.id,
+      label: 'Basin receptacle \u2014 within 3 ft of basin, GFCI (NEC 210.52(D))',
+      meta: {
+        deviceId: `recep-${wall.id}-basin-${lav.id}-${face.side === 1 ? 'p' : 'm'}`,
+        basin: true,
+      },
+    })
+  }
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -1219,7 +1734,28 @@ export function applyDeviceOverrides(
     // stands. Switches keep their OPENING/room key: a moved switch still
     // controls the same light.
     const sourceId = !isSwitch && derivedWall && wall.id !== derivedWall.id ? wall.id : fixture.sourceId
-    out[idx] = { ...fixture, position: [x, h, z], rotationY: face.rotationY, sourceId }
+    // F4 (round 3): the WR glazing ⚠ was computed at AUTO placement and a
+    // user move never re-ran it — a box dragged to a clear wall kept the
+    // stale flag (and one dragged INTO glazing gained none). Recompute at
+    // the user's spot; flag + label note set or shed together.
+    let flagPatch: Partial<Fixture> = {}
+    if (fixture.kind === 'receptacle-wr-gfci') {
+      const boxHalf = DEVICE_BOX_W / 2
+      const nowObstructed = openingSpans(wall, y0, y1).some(
+        (s) => u + boxHalf > s.lo && u - boxHalf < s.hi,
+      )
+      const base = (fixture.label ?? '').replace(OBSTRUCTED_NOTE, '')
+      if (nowObstructed) {
+        flagPatch = {
+          label: `${base}${OBSTRUCTED_NOTE}`,
+          meta: { ...fixture.meta, obstructed: true },
+        }
+      } else if (fixture.meta?.obstructed === true) {
+        const { obstructed: _shed, ...restMeta } = fixture.meta
+        flagPatch = { label: base, meta: restMeta }
+      }
+    }
+    out[idx] = { ...fixture, ...flagPatch, position: [x, h, z], rotationY: face.rotationY, sourceId }
 
     if (!isSwitch) {
       if (derivedWall) spacingWalls.add(derivedWall.id)
@@ -1233,9 +1769,13 @@ export function applyDeviceOverrides(
     if (!wall || wall.curved || wall.length < 0.1) continue
     let violated = false
     for (const side of [1, -1] as const) {
-      // receptacle u-positions on this wall FACE (moved arrivals included)
+      // receptacle u-positions on this wall FACE (moved arrivals included).
+      // Counter + basin boxes never count toward 210.52(A) floor-line
+      // spacing (doNotCountTowardWallSpacing — they serve the counter, not
+      // the wall line); outdoor WR boxes are a different kind entirely.
       const us = out
         .filter((f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci')
+        .filter((f) => f.meta?.counter !== true && f.meta?.basin !== true)
         .filter((f) => {
           const off = wallSideOffset(wall, f.position)
           if (Math.sign(off) !== side) return false
@@ -1366,7 +1906,11 @@ export function assignCircuits(fixtures: Fixture[], rooms: RoomSlice[]): void {
   for (const fixture of fixtures) {
     const plan: Pt = [fixture.position[0], fixture.position[2]]
     const room = roomAt(plan)
-    if (fixture.kind === 'receptacle' || fixture.kind === 'receptacle-gfci') {
+    if (fixture.kind === 'receptacle-wr-gfci') {
+      // Outdoor receptacles ride ONE 20 A exterior circuit: GFCI per
+      // 210.8(A)(3); NOT AFCI — 210.12(A) lists interior areas only.
+      tag(fixture, 'EXT-1', 20, 12, RECEPTACLE_VA, { gfci: true })
+    } else if (fixture.kind === 'receptacle' || fixture.kind === 'receptacle-gfci') {
       switch (room?.category) {
         case 'kitchen':
           // both required SABCs get used — straps alternate 210.11(C)(1)
@@ -1462,10 +2006,14 @@ export function circuitSchedule(fixtures: Fixture[]): CircuitRow[] {
     row.devices += 1
     row.va += Number(f.meta?.va ?? 0)
     row.afci = row.afci || f.meta?.afci === true
-    row.gfci = row.gfci || f.meta?.gfci === true || f.kind === 'receptacle-gfci'
+    row.gfci =
+      row.gfci ||
+      f.meta?.gfci === true ||
+      f.kind === 'receptacle-gfci' ||
+      f.kind === 'receptacle-wr-gfci'
     rows.set(circuit, row)
   }
-  const order = ['SA', 'BA', 'LA', 'GA', 'SD', 'GEN', 'LTG', 'AC']
+  const order = ['SA', 'BA', 'LA', 'GA', 'EXT', 'SD', 'GEN', 'LTG', 'AC']
   return [...rows.values()].sort((a, b) => {
     const pa = order.indexOf(a.circuit.split('-')[0] ?? '')
     const pb = order.indexOf(b.circuit.split('-')[0] ?? '')
@@ -1995,6 +2543,38 @@ const SERVICE_LATERAL_Y = -0.45
 const SERVICE_SECTION = 0.035
 /** Map-edge proxy: the street corridor runs this far outside the walls' bbox. */
 const STREET_EDGE_MARGIN = 4
+
+/**
+ * Nearest "street" point: the walls' plan bbox pushed out by the street
+ * margin, then the closest point on that ring to `anchor`. ONE definition of
+ * street-side for the whole electrical story: the service lateral
+ * (routeServiceCable, anchored at the meter) and the B14 outdoor-receptacle
+ * FRONT pick both ride it.
+ */
+export function streetEdgePoint(walls: WallSlice[], anchor: Pt): Pt {
+  const [ax, az] = anchor
+  let minX = ax
+  let maxX = ax
+  let minZ = az
+  let maxZ = az
+  for (const w of walls) {
+    for (const p of [w.start, w.end]) {
+      minX = Math.min(minX, p[0])
+      maxX = Math.max(maxX, p[0])
+      minZ = Math.min(minZ, p[1])
+      maxZ = Math.max(maxZ, p[1])
+    }
+  }
+  const edges: Pt[] = [
+    [minX - STREET_EDGE_MARGIN, az],
+    [maxX + STREET_EDGE_MARGIN, az],
+    [ax, minZ - STREET_EDGE_MARGIN],
+    [ax, maxZ + STREET_EDGE_MARGIN],
+  ]
+  return edges.reduce((best, e) =>
+    Math.hypot(e[0] - ax, e[1] - az) < Math.hypot(best[0] - ax, best[1] - az) ? e : best,
+  )
+}
 /** The meter→panel feed's service plane along the walls — one step above
  * the branch circuits' 8 stapled drill planes, inside the RO-cleared zone. */
 const SERVICE_FEED_Y = WIRE_RUN_Y + 9 * 0.012
@@ -2219,29 +2799,10 @@ export function routeServiceCable(
     )
 
   // Nearest map-edge point: the walls' plan bbox pushed out by the street
-  // margin, then the closest point on that ring to the meter.
-  let minX = meter.position[0]
-  let maxX = meter.position[0]
-  let minZ = meter.position[2]
-  let maxZ = meter.position[2]
-  for (const w of walls) {
-    for (const p of [w.start, w.end]) {
-      minX = Math.min(minX, p[0])
-      maxX = Math.max(maxX, p[0])
-      minZ = Math.min(minZ, p[1])
-      maxZ = Math.max(maxZ, p[1])
-    }
-  }
+  // margin, then the closest point on that ring to the meter (shared with
+  // the B14 outdoor-receptacle front pick — one definition of "street").
   const [mx, my, mz] = meter.position
-  const edges: [number, number][] = [
-    [minX - STREET_EDGE_MARGIN, mz],
-    [maxX + STREET_EDGE_MARGIN, mz],
-    [mx, minZ - STREET_EDGE_MARGIN],
-    [mx, maxZ + STREET_EDGE_MARGIN],
-  ]
-  const street = edges.reduce((best, e) =>
-    Math.hypot(e[0] - mx, e[1] - mz) < Math.hypot(best[0] - mx, best[1] - mz) ? e : best,
-  )
+  const street = streetEdgePoint(walls, [mx, mz])
 
   // Underground lateral (Manhattan), then the riser up into the socket —
   // sampled against the RO boxes (a meter dragged under full-height glazing

@@ -136,6 +136,7 @@ const CONTEXT_SHEETS = new Set(['electrical', 'mep'])
 const FIXTURE_TAG: Record<string, string> = {
   receptacle: 'R',
   'receptacle-gfci': 'G',
+  'receptacle-wr-gfci': 'WR',
   switch: 'S',
   light: 'L',
   'smoke-alarm': 'SD',
@@ -154,6 +155,19 @@ const FIXTURE_TAG: Record<string, string> = {
   cleanout: 'CO',
   disconnect: 'DS',
 }
+
+/** Refined device tag — meta distinguishes what kind alone cannot: the
+ * condenser body (CU vs the air handler's AH), and B14's counter (GC,
+ * 44" AFF) / basin (GB, 40" AFF) GFCI boxes vs the 15" wall-line 'G'
+ * (examiner round 2: an all-'G' sheet roughs the wrong heights). */
+const deviceTag = (f: Fixture): string =>
+  f.kind === 'equipment' && f.meta?.equipment === 'condenser'
+    ? 'CU'
+    : f.meta?.counter === true
+      ? 'GC'
+      : f.meta?.basin === true
+        ? 'GB'
+        : (FIXTURE_TAG[f.kind] ?? '\u00b7')
 
 const esc = (s: string): string =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
@@ -659,15 +673,16 @@ function planSheet(
   const placed: { x: number; y: number }[] = []
   const seenDev = new Set<string>()
   for (const f of devs) {
-    const key = `${f.kind}|${f.position[0].toFixed(2)}|${f.position[2].toFixed(2)}`
+    // key on the REFINED tag: a 44" counter box plan-projects onto the
+    // same x/z as the 15" wall box below it — a kind-keyed dedupe dropped
+    // the GC bubble entirely (round-2 GC/GB follow-through).
+    const key = `${deviceTag(f)}|${f.position[0].toFixed(2)}|${f.position[2].toFixed(2)}`
     if (seenDev.has(key)) continue
     seenDev.add(key)
-    // Condensers share kind 'equipment' with the air handler — key the
-    // refinement off meta (examiner round-4: two 'AH' bubbles outdoors).
-    const tag =
-      f.kind === 'equipment' && f.meta?.equipment === 'condenser'
-        ? 'CU'
-        : (FIXTURE_TAG[f.kind] ?? '·')
+    // Condensers share kind 'equipment' with the air handler; counter and
+    // basin GFCI boxes share kind 'receptacle-gfci' with the wall line —
+    // the shared deviceTag helper keys the refinement off meta.
+    const tag = deviceTag(f)
     let px = X(f.position[0])
     let py = Z(f.position[2])
     for (let attempt = 0; attempt < 8; attempt++) {
@@ -1295,6 +1310,9 @@ function planSheet(
     const TAG_NAMES: Record<string, string> = {
       R: 'receptacle',
       G: 'GFCI receptacle',
+      GC: 'GFCI counter receptacle — 44" AFF (210.52(C))',
+      GB: 'GFCI basin receptacle — 40" AFF (210.52(D))',
+      WR: 'WR GFCI receptacle — outdoor, in-use cover (406.9(B))',
       S: 'switch',
       L: 'light',
       SD: 'smoke alarm',
@@ -1326,14 +1344,7 @@ function planSheet(
           ]
         : []
     const usedTags = [
-      ...new Set([
-        ...devs.map((f) =>
-          f.kind === 'equipment' && f.meta?.equipment === 'condenser'
-            ? 'CU'
-            : (FIXTURE_TAG[f.kind] ?? '·'),
-        ),
-        ...memberTags,
-      ]),
+      ...new Set([...devs.map(deviceTag), ...memberTags]),
     ]
     let trow = legendLines.length
     for (const tag of usedTags) {

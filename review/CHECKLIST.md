@@ -202,6 +202,77 @@ AND a gate — a checklist line without a test is a wish.
   scans + deterministic flip-step pins + no-confession pins — all
   mutation-checked) + the GR/IB key pins in
   `src/plans/plan-set.test.ts`.
+- **E8 Receptacle coverage is complete beyond the 15" wall walk — and
+  honest where the scene can't carry it.** OUTDOOR (NEC 210.52(E),
+  210.8(A)(3), 406.9(A)/(B)): every scene with an exterior shell mounts
+  a front AND a back receptacle on EXTERIOR faces — front = the
+  street-nearest exterior wall via the SAME `streetEdgePoint` the
+  service lateral rides, back = the most nearly opposite wall farthest
+  from street — as the dedicated `receptacle-wr-gfci` kind (WR + GFCI +
+  extra-duty in-use cover in kind, meta AND label; own `EXT-1` 20 A
+  GFCI circuit, never AFCI; takeoff books WR boxes and covers as their
+  own rows, paper marks them `WR` with a legend line). A
+  single-exterior-wall scene doubles up on it and WARNS; a shell-less
+  scene warns — two required outlets never silently collapse or drop.
+  SINK RADIUS (210.8(A)(7)/(9)): any receptacle within 6 ft plan of a
+  PLACED kitchen-sink/lavatory/bathtub/shower flips to GFCI — measured
+  from the item center (no bowl-edge geometry; stated proxy), deviceId
+  untouched by the flip (the reconciler follows deviceKind). The reach
+  is STRAIGHT-LINE and pierces walls BY DECISION (round-2 F3): NEC
+  measures the cord path 'without piercing a wall', so this
+  over-protects — a same-room guard would need zone data on both
+  sides and silently UNDER-protect exactly where scenes are weakest,
+  and extra GFCI is always code-legal while a missed one is a
+  violation. Dry-room flips carry the assumption on their label
+  ('straight-line reach, conservative'). COUNTER
+  (210.52(C), hybrid-honest): a placed kitchen-sink pins its counter
+  wall → 44" AFF walk per layoutAlgorithmHints (first box ≤ 24" of
+  each run end, ≤ 48" o.c.), clipped to the kitchen polygon, broken by
+  door ROs, faucet zone kept clear; a sink-less kitchen zone WARNS per
+  kitchen instead of inventing casework; island sinks raise the 2023
+  210.52(C)(2) per-kitchen WARNING. A sinked kitchen with ZERO (or
+  gutted) counter coverage is NEVER wordless (round-2 F1/F2 + round-3):
+  the post-snap walk audits its own 24"/48" contract — the behind-sink
+  strip is exempt counter space — and warns when a window RO breaks
+  the pitch; the sink-in-doorway and no-kitchen-face bails and the
+  sub-12"-strip exemption each raise a per-kitchen WARNING; and the
+  per-face walk dedupe is SPAN-AWARE (round 3 — the old global
+  wall|face key was a fourth wordless zero-box exit): a second kitchen
+  zone down the same wall, or a same-kitchen sink across a door RO,
+  walks its own uncovered span with unique continuing deviceIds, while
+  a sink inside an already-walked span stays silent because its boxes
+  exist.
+  An outdoor WR box that cannot clear near-full-width glazing is
+  ⚠-flagged on its label + `meta.obstructed` + a level warning
+  (round-2 F4 — the E1 never-silent contract), and the flag is
+  RECOMPUTED on user moves (round 3): a drag to a clear wall sheds the
+  ⚠ + meta, a drag into glazing gains them — never stale. BASIN (210.52(D)): a
+  placed lav pins a GFCI box within 3 ft at 40" AFF on the basin-side
+  face; one box may serve two basins; freestanding basins and >3 ft
+  RO snap-outs warn, never silent. Counter/basin boxes never count
+  toward the 210.52(A) floor-line spacing census
+  (doNotCountTowardWallSpacing; census-exclusion gated round 2). NOTE
+  (pre-existing, documented not fixed): the census's
+  `us.length===0 && wall.exterior` skip makes the exclusion reachable
+  only on INTERIOR counter walls — an exterior counter wall's faces
+  skip the 210.52(A) census entirely. On paper the B14 boxes print as
+  their OWN tags — GC (44" AFF) / GB (40" AFF) / WR — with legend
+  rows naming the heights and a tag-keyed bubble dedupe (a counter box
+  plan-stacks exactly over the wall-line box below it); EXT-1 carries
+  its own circuit-color family (round-2 E3 blocker: it printed
+  byte-identical to the SE copper fallback). All B14 boxes carry
+  deterministic deviceIds (`-out-front/back`, `-ctr-<i>`,
+  `-basin-<lavId>`) and are movable `bones:device` nodes (E5 contract).
+  Origin: LOD-400 audit BATCH 14 (2026-08-21) — zero outdoor
+  receptacles ever, all kitchen/bath boxes at 15", the sink-GFCI test
+  skipped behind a stale 'once sink positions are extracted' comment;
+  round-2 skeptic F1–F5 + examiner E3 blocker + GC/GB tags; round-3
+  walked-dedupe fourth bail + WR-flag staleness (2026-08-22).
+  Gate: `src/engines/electrical.receptacles.test.ts` (46 tests, all
+  sub-invariants mutation-checked) + the GC/GB/WR/EXT-1 paper pins in
+  `src/plans/plan-set.test.ts` + the EXT family floor (incl. the
+  explicit `service-entrance` id) in
+  `src/plans/circuit-colors.test.ts`.
 
 ## S — Structure
 

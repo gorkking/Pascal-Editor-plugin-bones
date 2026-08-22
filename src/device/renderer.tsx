@@ -46,6 +46,7 @@ const DEFAULT_AFF: Record<string, number> = {
   switch: inches(48),
   receptacle: inches(15),
   'receptacle-gfci': inches(15),
+  'receptacle-wr-gfci': inches(15),
 }
 
 type Placement = { position: readonly [number, number, number]; rotationY: number }
