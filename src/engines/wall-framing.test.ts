@@ -946,6 +946,38 @@ describe('LOD-400 B11: heavy-snow headers deepen per Table R602.7(1); low snow s
     expect(h.flag).toBeUndefined()
   })
 
+  test('round 2 (skeptic): past-cap spans are ENGINEERED — never a silent lumber 4x12 affirming the table', () => {
+    // The 70-psf column's 2-2x12 cell ends at 6-2 (74"); 50-psf at 6-11
+    // (83"). Round 1 let every span in (74", 120") frame a plain lumber
+    // 4x12 whose label AFFIRMED the table outside its domain — the band
+    // now caps engineeredHeaderSpan at its terminal cell, so those spans
+    // route to the supplier/flag path.
+    for (const roIn of [76, 90, 110]) {
+      const h = headerOf(roIn, VT)
+      expect(h.material, `VT @ ${roIn}"`).toBe('engineered')
+      expect(h.flag, `VT @ ${roIn}"`).toContain('ENGINEERED BEAM REQUIRED')
+      expect(h.label, `VT @ ${roIn}"`).toContain('size by supplier')
+      // the SAME spans at INTL keep their pre-B11 lumber 4x12 (the
+      // low-band terminal gap is pre-existing and out of B11 scope —
+      // low-snow output must stay byte-equal)
+      const li = headerOf(roIn, INTL)
+      expect(li.material, `INTL @ ${roIn}"`).toBe('lumber')
+      expect(li.flag, `INTL @ ${roIn}"`).toBeUndefined()
+    }
+    // the band boundaries stay PRESCRIPTIVE — 74"/83" ARE the code cells
+    const vt74 = headerOf(74, VT)
+    expect(vt74.size).toBe('4x12')
+    expect(vt74.material).toBe('lumber')
+    expect(vt74.flag).toBeUndefined()
+    expect(vt74.label).toContain('Table R602.7(1)') // in-domain claim stands
+    const mn83 = headerOf(83, MN)
+    expect(mn83.size).toBe('4x12')
+    expect(mn83.material).toBe('lumber')
+    expect(mn83.flag).toBeUndefined()
+    expect(headerOf(84, MN).material).toBe('engineered')
+    expect(headerOf(84, INTL).material).toBe('lumber')
+  })
+
   test('the label pin: band-sized headers state the R602.7(1) building-width assumption; INTL headers do not', () => {
     const vtHeader = headerOf(56, VT)
     expect(vtHeader.label).toBe(
@@ -984,6 +1016,7 @@ describe('LOD-400 B11: heavy-snow headers deepen per Table R602.7(1); low snow s
           ...DEFAULT_SPEC,
           headerRules: applied.headerRules,
           headerAssumption: applied.headerAssumption,
+          engineeredHeaderSpan: applied.engineeredHeaderSpan, // round 2: the cap is part of the delta
         }
         expect(JSON.parse(JSON.stringify(frameWall(wall, specNeutral)))).toEqual(
           JSON.parse(JSON.stringify(frameWall(wall, DEFAULT_SPEC))),

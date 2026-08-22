@@ -1548,4 +1548,31 @@ describe('LOD-400 B11: takeoff lumber rows follow the header snow band', () => {
     expect(rowsAt('TX')).toEqual(intl)
     expect(rowsAt('CA')).toEqual(intl)
   })
+
+  test('round 2: a past-cap VT span books the SUPPLIER line, never a 4x12 stick (the cap reaches the buy list)', () => {
+    // 76" RO: past the 70-psf column's 2-2x12 cell (74") — VT routes to
+    // the engineered path; INTL (cap untouched at 10 ft) still buys the
+    // prescriptive 4x10 stick.
+    const wall76 = (): WallSlice => {
+      const w = wall56()
+      const ro = inchesB11(76)
+      const op = w.openings[0] as (typeof w.openings)[number]
+      op.roughWidth = ro
+      op.width = ro - inchesB11(1.5)
+      return w
+    }
+    const at = (code: string): TakeoffRow[] => {
+      const spec = applyJurisdictionB11(
+        { ...DEFAULT_SPEC, detail: '400' as const },
+        profileForB11(code),
+      )
+      return computeTakeoff(frameWall(wall76(), spec), [])
+    }
+    const vt = at('VT')
+    const intl = at('INTL')
+    expect(vt.find((r) => r.item.startsWith('Engineered header'))?.quantity).toBe(1)
+    expect(vt.find((r) => r.item === '4x12')).toBeUndefined()
+    expect(intl.find((r) => r.item === '4x10')?.quantity).toBe(1)
+    expect(intl.find((r) => r.item.startsWith('Engineered header'))).toBeUndefined()
+  })
 })

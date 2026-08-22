@@ -138,6 +138,15 @@ export function applyJurisdiction(
   const headerBand = headerBandForSnow(profile.groundSnowLoadPsf)
   next.headerRules = headerBand.rules
   next.headerAssumption = headerBand.assumption
+  // The band's 2-ply table ends at its 2-2x12 cell (83" @ 50 psf / 74" @
+  // 70 psf) — past it the open-ended 4x12 rule would claim the table
+  // outside its domain, so the engineered threshold caps there too: a
+  // longer span routes to the supplier/flag path, never a silent lumber
+  // 4x12 with the assumption label (round-2 skeptic). Low-snow keeps the
+  // shipped 10 ft (its labels make no table claim).
+  if (headerBand.engineeredSpanCap !== undefined) {
+    next.engineeredHeaderSpan = Math.min(next.engineeredHeaderSpan, headerBand.engineeredSpanCap)
+  }
   return next
 }
 

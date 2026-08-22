@@ -4,6 +4,8 @@ import {
   HEADER_RULES_SNOW30,
   HEADER_RULES_SNOW50,
   HEADER_RULES_SNOW70,
+  HEADER_TERMINAL_SPAN_SNOW50,
+  HEADER_TERMINAL_SPAN_SNOW70,
   RAFTER_SPANS_SNOW20,
   RAFTER_SPANS_SNOW50,
   headerFor,
@@ -174,6 +176,30 @@ describe('applyJurisdiction', () => {
     expect(at90.headerRules).toBe(HEADER_RULES_SNOW70)
     expect(at90.headerAssumption).toContain('exceeds')
     expect(at90.headerAssumption).toContain('engineered')
+  })
+
+  test('B11 round 2 (skeptic): the band CAPS engineeredHeaderSpan at its 2-2x12 cell — the 4x12 rule never claims the table past its domain', () => {
+    // 70-psf column ends at 6-2 (74"); 50-psf at 6-11 (83") — reference
+    // identity with the exported terminal constants, derived from the same
+    // encoded cells as the rules
+    const vt = applyJurisdiction(DEFAULT_SPEC, profileFor('VT'))
+    expect(vt.engineeredHeaderSpan).toBe(HEADER_TERMINAL_SPAN_SNOW70 as number)
+    expect(vt.engineeredHeaderSpan).toBeCloseTo(inches(74), 9)
+    const mn = applyJurisdiction(DEFAULT_SPEC, profileFor('MN'))
+    expect(mn.engineeredHeaderSpan).toBe(HEADER_TERMINAL_SPAN_SNOW50 as number)
+    expect(mn.engineeredHeaderSpan).toBeCloseTo(inches(83), 9)
+    // the cap only ever LOWERS the threshold (min with the shipped 10 ft)
+    expect(vt.engineeredHeaderSpan).toBeLessThan(DEFAULT_SPEC.engineeredHeaderSpan)
+    expect(mn.engineeredHeaderSpan).toBeLessThan(DEFAULT_SPEC.engineeredHeaderSpan)
+    // low-snow keeps the shipped 10 ft untouched — its labels make no
+    // table claim (pre-existing terminal gap, out of B11 scope) and
+    // low-snow output must stay byte-equal
+    expect(applyJurisdiction(DEFAULT_SPEC, profileFor('INTL')).engineeredHeaderSpan).toBe(
+      DEFAULT_SPEC.engineeredHeaderSpan,
+    )
+    expect(applyJurisdiction(DEFAULT_SPEC, profileFor('TX')).engineeredHeaderSpan).toBe(
+      DEFAULT_SPEC.engineeredHeaderSpan,
+    )
   })
 
   test('B11: 51-state sweep — every jurisdiction lands in exactly ONE band; the deepened set is enumerated', () => {

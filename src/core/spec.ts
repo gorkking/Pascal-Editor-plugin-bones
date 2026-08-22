@@ -87,10 +87,13 @@ export const HEADER_RULES_SNOW30: HeaderRule[] = [
   { maxSpan: Number.POSITIVE_INFINITY, size: '4x12' },
 ]
 
-/** '5-11' (ft-in, authoritative in the data file) → meters. */
+/** '5-11' (ft-in, authoritative in the data file) → meters. ONE arithmetic
+ * path (whole inches) so a threshold derived from '6-2' compares EXACTLY
+ * equal to an engine span built as inches(74) — mixing feet()+inches()
+ * lands 2e-16 above it and would flip the band boundaries. */
 function ftInToMeters(spanFtIn: string): number {
   const [ft, inch] = spanFtIn.split('-').map(Number)
-  return feet(ft ?? 0) + inches(inch ?? 0)
+  return inches((ft ?? 0) * 12 + (inch ?? 0))
 }
 
 /**
@@ -100,9 +103,10 @@ function ftInToMeters(spanFtIn: string): number {
  * column, the low-snow default's threshold) — never LOOSER than the
  * shipped default (the default's small-size steps are rounded below the
  * table, and heavier snow must never print a shallower header), never
- * LONGER than the code cell. The terminal open-ended 4x12 rule stays: the
- * existing `engineeredHeaderSpan` machinery owns spans past prescriptive
- * range.
+ * LONGER than the code cell. The terminal open-ended 4x12 rule stays, but
+ * it is NOT a table claim past the band's 2-2x12 cell — the band caps
+ * `engineeredHeaderSpan` there (`terminalSpanOf` below), so longer spans
+ * route to the ENGINEERED machinery.
  */
 function headerRulesFromSnowColumn(rows: JsonHeaderRows): HeaderRule[] {
   return HEADER_RULES_SNOW30.map((rule) => {
@@ -124,6 +128,35 @@ export const HEADER_RULES_SNOW70: HeaderRule[] = headerRulesFromSnowColumn(
 )
 
 /**
+ * A band's prescriptive TERMINAL span — its 2-2x12 cell at the 24-ft width
+ * column (50 psf: 6-11 = 83"; 70 psf: 6-2 = 74"). Past it the table has no
+ * 2-ply answer (3-/4-ply rows and R602.7's engineered path take over), so
+ * the band also CAPS `engineeredHeaderSpan` (applyJurisdiction takes
+ * min(default 10 ft, cap)): a longer span routes to the ENGINEERED
+ * machinery — supplier SKU + 'ENGINEERED BEAM REQUIRED' flag — instead of
+ * a silent lumber 4x12 whose assumption label would AFFIRM the table
+ * outside its domain (skeptic round 2 — the B9-r2 domain class: VT 76–110"
+ * headers claimed the 70-psf table past its 74" cell). The low-snow band
+ * leaves the shipped 10-ft threshold untouched: its labels make no table
+ * claim (that terminal gap is pre-existing and out of B11 scope), and
+ * low-snow output must stay byte-equal.
+ */
+function terminalSpanOf(rows: JsonHeaderRows): number | undefined {
+  const cell = rows['2-2x12']?.['24']
+  return cell ? ftInToMeters(cell.spanFtIn) : undefined
+}
+
+/** 2-2x12 @ 50 psf / 24 ft: 6-11 (83"). */
+export const HEADER_TERMINAL_SPAN_SNOW50 = terminalSpanOf(
+  tables.headers.groundSnow50Psf.roofAndCeiling,
+)
+
+/** 2-2x12 @ 70 psf / 24 ft: 6-2 (74"). */
+export const HEADER_TERMINAL_SPAN_SNOW70 = terminalSpanOf(
+  tables.headers.groundSnow70Psf.roofAndCeiling,
+)
+
+/**
  * Header band for a ground snow load — Table R602.7(1) tabulates its three
  * columns at 30/50/70 psf, and a column may not serve loads ABOVE it (the
  * spans would run long), so the band snaps UP: ≤ 30 psf reads the 30-psf
@@ -136,11 +169,15 @@ export const HEADER_RULES_SNOW70: HeaderRule[] = headerRulesFromSnowColumn(
  * wall engine prints it on every header it sizes (label, never a guess);
  * the low-snow band carries none so default output stays byte-equal.
  * Sites past the 70-psf column (no shipped state profile exceeds 60) are
- * beyond the prescriptive table — the assumption says so.
+ * beyond the prescriptive table — the assumption says so. The band also
+ * returns its prescriptive terminal span (`engineeredSpanCap`) so
+ * `applyJurisdiction` can stop the open-ended 4x12 rule from claiming the
+ * table past its 2-2x12 cell (see `terminalSpanOf`).
  */
 export function headerBandForSnow(groundSnowLoadPsf: number): {
   rules: HeaderRule[]
   assumption?: string
+  engineeredSpanCap?: number
 } {
   if (groundSnowLoadPsf <= 30) return { rules: HEADER_RULES_SNOW30 }
   const band = groundSnowLoadPsf <= 50 ? 50 : 70
@@ -153,6 +190,7 @@ export function headerBandForSnow(groundSnowLoadPsf: number): {
     assumption:
       `sized per Table R602.7(1) @ ${band} psf ground snow — ` +
       `≤ 24 ft building width, roof-and-ceiling loading assumed${beyond}`,
+    engineeredSpanCap: band === 50 ? HEADER_TERMINAL_SPAN_SNOW50 : HEADER_TERMINAL_SPAN_SNOW70,
   }
 }
 
