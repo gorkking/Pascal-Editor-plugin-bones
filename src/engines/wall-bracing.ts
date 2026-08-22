@@ -22,7 +22,7 @@
  */
 
 import type { FramingSpec } from '../core/spec'
-import type { WallSlice } from '../core/types'
+import type { Member, WallSlice } from '../core/types'
 import { feet, inches } from '../core/units'
 
 const EPS = 1e-6
@@ -144,4 +144,61 @@ export function bracingWarnings(walls: WallSlice[], spec: FramingSpec): string[]
         line.wallIds.length > 1 ? 's' : ''
       }, ${line.totalLength.toFixed(1)}m): ${spec.wallBracingMethod} continuous sheathing assumed — R602.10 panel length/spacing not verified`,
   )
+}
+
+// ---------------------------------------------------------------------------
+// Foundation hold-down ↔ wall-end post cross-reference (B9c)
+// ---------------------------------------------------------------------------
+
+/** Plan-distance tolerance tying a hold-down to the post it clamps: the HDU
+ * body is 3" square and sits against the end stud — anything within ~6" in
+ * plan is the same assembly; past that the tie is fiction. */
+export const HOLD_DOWN_POST_TOL = 0.15
+
+/** Wall verticals a hold-down can honestly claim to clamp. */
+const POST_ROLES = new Set<Member['role']>(['stud', 'king-stud', 'trimmer', 'post'])
+
+const composeFlag = (member: Member, flag: string): void => {
+  member.flag = member.flag !== undefined ? `${flag} | ${member.flag}` : flag
+}
+
+/**
+ * Tie the foundation's SDC-D hold-downs to the wall framing above them —
+ * BOTH directions, flags on the offending members (they surface on the
+ * takeoff's Flags rows and on paper via P4):
+ *  - a hold-down with NO framed vertical within tolerance is anchoring
+ *    nothing ('hold-down has no framed post above');
+ *  - a CS-PF portal hold-down post with NO foundation hold-down below has
+ *    unbuilt anchorage (R602.10.6.4 requires it) — the foundation only
+ *    places HDUs at wall ENDS today, so the portal's opening-side post
+ *    flags by design until the foundation models per-panel hold-downs.
+ * Runs only when BOTH systems were computed on a ground level (compute.ts
+ * call site) — a missing system is a toggle, not missing hardware.
+ * Mutates the freshly-built members in place; returns the flagged count.
+ */
+export function crossReferenceHoldDowns(members: Member[]): number {
+  const holdDowns = members.filter((m) => m.system === 'foundation' && m.role === 'hold-down')
+  const verticals = members.filter(
+    (m) => m.system === 'wall-framing' && POST_ROLES.has(m.role) && m.dims[1] > 1,
+  )
+  const near = (a: Member, b: Member): boolean =>
+    Math.hypot(a.position[0] - b.position[0], a.position[2] - b.position[2]) <=
+    HOLD_DOWN_POST_TOL
+  let flagged = 0
+  for (const hd of holdDowns) {
+    if (verticals.some((v) => near(hd, v))) continue
+    composeFlag(hd, 'hold-down has no framed post above — verify braced-wall end post (R602.10)')
+    flagged += 1
+  }
+  for (const post of members) {
+    if (post.system !== 'wall-framing' || post.role !== 'post') continue
+    if (!(post.label ?? '').includes('R602.10.6.4')) continue
+    if (holdDowns.some((hd) => near(post, hd))) continue
+    composeFlag(
+      post,
+      'portal post has no foundation hold-down below — CS-PF anchorage required (R602.10.6.4), verify',
+    )
+    flagged += 1
+  }
+  return flagged
 }

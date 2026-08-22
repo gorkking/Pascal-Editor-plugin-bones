@@ -292,3 +292,101 @@ describe('SDC-D ≠ INTL on the garage scene — delta enumerated (B9 jurisdicti
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// B9c: foundation hold-down ↔ wall-end post cross-reference, both directions
+// ---------------------------------------------------------------------------
+
+import { buildFoundation } from './foundation'
+import { frameWalls } from './wall-framing'
+import { HOLD_DOWN_POST_TOL, crossReferenceHoldDowns } from './wall-bracing'
+
+describe('hold-down cross-reference (B9c) — anchors tie to posts, both directions', () => {
+  const SEISMIC400 = { ...DEFAULT_SPEC, detail: '400' as const, seismicHoldDowns: true }
+  const shellSlab = {
+    id: 'slab_x',
+    polygon: [
+      [0, 0],
+      [12, 0],
+      [12, 8],
+      [0, 8],
+    ] as [number, number][],
+    holes: [],
+    elevation: 0,
+    thickness: 0.2,
+  }
+
+  test('a matched seismic shell is clean: every HDU finds its end post, count 0', () => {
+    const walls = rectShell()
+    const members = [
+      ...frameWalls(walls, SEISMIC400, undefined, { slabBearing: true }),
+      ...buildFoundation(walls, [shellSlab], SEISMIC400),
+    ]
+    expect(crossReferenceHoldDowns(members)).toBe(0)
+    expect(members.filter((m) => (m.flag ?? '').includes('no framed post above'))).toEqual([])
+  })
+
+  test('unframed walls\' hold-downs anchor NOTHING — flagged, composed onto the member', () => {
+    const walls = rectShell()
+    const members = [
+      // only the NORTH wall frames (the others simulate skipped/curved) …
+      ...frameWalls(walls.filter((w) => w.id === 'w_n'), SEISMIC400, undefined, {
+        slabBearing: true,
+      }),
+      // … while the foundation still carries every wall's HDUs
+      ...buildFoundation(walls, [shellSlab], SEISMIC400),
+    ]
+    const flagged = crossReferenceHoldDowns(members)
+    const orphanHds = members.filter(
+      (m) => m.role === 'hold-down' && (m.flag ?? '').includes('no framed post above'),
+    )
+    // the south wall's two HDUs + the side walls' south-end HDUs are far
+    // from every framed vertical; the side walls' NORTH-end HDUs sit at the
+    // framed corner (the north wall's end studs — one corner assembly) and
+    // must NOT flag.
+    expect(orphanHds).toHaveLength(4)
+    expect(flagged).toBe(4)
+    for (const hd of orphanHds) expect(hd.flag).toContain('R602.10')
+    const northHds = members.filter(
+      (m) => m.role === 'hold-down' && Math.abs(m.position[2] - 8) < 0.5,
+    )
+    expect(northHds.length).toBeGreaterThanOrEqual(2)
+    expect(northHds.filter((m) => m.flag !== undefined)).toEqual([])
+  })
+
+  test('CA garage: the opening-side portal posts flag their missing hold-down; wall-end posts are anchored', () => {
+    const result = computeLevel(garageScene(), garageConfig('CA'))
+    const posts = result.members.filter(
+      (m) => m.role === 'post' && (m.label ?? '').includes('R602.10.6.4'),
+    )
+    expect(posts).toHaveLength(4)
+    const flaggedPosts = posts.filter((m) =>
+      (m.flag ?? '').includes('portal post has no foundation hold-down below'),
+    )
+    // foundation HDUs live at wall ENDS: the two end-side posts are anchored,
+    // the two opening-side posts honestly flag their unbuilt anchorage.
+    expect(flaggedPosts).toHaveLength(2)
+    const holdDowns = result.members.filter((m) => m.role === 'hold-down')
+    expect(holdDowns.length).toBeGreaterThan(0)
+    for (const post of posts.filter((p) => !flaggedPosts.includes(p))) {
+      expect(
+        holdDowns.some(
+          (hd) =>
+            Math.hypot(hd.position[0] - post.position[0], hd.position[2] - post.position[2]) <=
+            HOLD_DOWN_POST_TOL,
+        ),
+      ).toBe(true)
+    }
+    // no hold-down on this shell is orphaned
+    expect(holdDowns.filter((m) => (m.flag ?? '').includes('no framed post above'))).toEqual([])
+  })
+
+  test('a toggled-off system is not missing hardware: walls-off CA computes zero cross-ref flags', () => {
+    const config = { ...garageConfig('CA'), showWalls: false }
+    const result = computeLevel(garageScene(), config)
+    expect(result.members.some((m) => m.role === 'hold-down')).toBe(true)
+    expect(
+      result.members.filter((m) => (m.flag ?? '').includes('no framed post above')),
+    ).toEqual([])
+  })
+})

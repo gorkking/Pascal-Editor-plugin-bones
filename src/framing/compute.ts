@@ -52,7 +52,7 @@ import { layoutPlumbing, placeMeterSpot } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
-import { bracingWarnings } from '../engines/wall-bracing'
+import { bracingWarnings, crossReferenceHoldDowns } from '../engines/wall-bracing'
 import { frameHints, frameWalls, specForWall, studSizeFor } from '../engines/wall-framing'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
@@ -768,6 +768,11 @@ function computeLevelUncached(
       }
     }
     members.push(...buildFoundation(activeWalls, slabs, spec, { cmu: cmuAnchorage, girderPosts }))
+    // B9c: tie the foundation's SDC-D hold-downs to the wall framing above
+    // them, both directions (a hold-down with no post above / a portal post
+    // with no hold-down below gets flagged). Only when BOTH systems are in
+    // this result — a toggled-off system is not missing hardware.
+    if (config.showWalls) crossReferenceHoldDowns(members)
   }
 
   // bones:service nodes on this level are AUTHORITATIVE — the engines route
