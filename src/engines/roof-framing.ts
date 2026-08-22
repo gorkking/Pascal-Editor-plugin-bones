@@ -335,7 +335,11 @@ function fasciaPair(
   )
   // B6c: eave drip edge caps the finish fascia (R905.2.8.5) — one lf run
   // per fascia'd eave, drawn as a thin bar on the finish board's top edge.
-  const p = at(subCross + out)
+  // Its OUTER edge stops flush with the finish board's outer face (the
+  // vertical leg lies ON that face; the flange runs INWARD over the deck
+  // edge) so the drip never grows the plan envelope the fascia already
+  // set — the shared sheet transform stays put (round-1 F1b).
+  const p = at(subCross + out + Math.sign(cross) * (nT / 2 - DRIP_W / 2))
   emit(
     'drip-edge',
     undefined,
@@ -827,7 +831,9 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
             undefined,
             [slopeLen, DRIP_T, DRIP_W],
             [
-              sx * (roof.width / 2 + roof.overhang),
+              // outer edge flush with the BARGE's outer face — the rake
+              // metal never grows the plan envelope (round-1 F1b)
+              sx * (roof.width / 2 + roof.overhang + t / 2 - DRIP_W / 2),
               (tipY + ridgeFaceY) / 2 + lift,
               (tipZ + side * ridgeFaceZ) / 2,
             ],
@@ -1480,13 +1486,17 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
   if (spec.detail === '400') {
     const dripY = centerY + rd / 2 + ROOF_DECK_T + UNDERLAYMENT_T + DRIP_T / 2 + 0.001
     const label = 'Drip edge — eave (R905.2.8.5)'
+    // Outer edges flush with the RIM outer faces — the gravel stop never
+    // grows the plan envelope the rims already set (round-1 F1b).
+    const dz = halfD + t / 2 - DRIP_W / 2
+    const dx = halfW + t / 2 - DRIP_W / 2
     for (const side of [1, -1] as const) {
       if (longIsX) {
-        emit('drip-edge', undefined, [2 * halfW, DRIP_T, DRIP_W], [0, dripY, side * halfD], 0, 0, 2 * halfW, 'steel', label)
-        emit('drip-edge', undefined, [2 * halfD - 2 * DRIP_W, DRIP_T, DRIP_W], [side * halfW, dripY, 0], -Math.PI / 2, 0, 2 * halfD - 2 * DRIP_W, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfW, DRIP_T, DRIP_W], [0, dripY, side * dz], 0, 0, 2 * halfW, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfD - 2 * DRIP_W, DRIP_T, DRIP_W], [side * dx, dripY, 0], -Math.PI / 2, 0, 2 * halfD - 2 * DRIP_W, 'steel', label)
       } else {
-        emit('drip-edge', undefined, [2 * halfW - 2 * DRIP_W, DRIP_T, DRIP_W], [0, dripY, side * halfD], 0, 0, 2 * halfW - 2 * DRIP_W, 'steel', label)
-        emit('drip-edge', undefined, [2 * halfD, DRIP_T, DRIP_W], [side * halfW, dripY, 0], -Math.PI / 2, 0, 2 * halfD, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfW - 2 * DRIP_W, DRIP_T, DRIP_W], [0, dripY, side * dz], 0, 0, 2 * halfW - 2 * DRIP_W, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfD, DRIP_T, DRIP_W], [side * dx, dripY, 0], -Math.PI / 2, 0, 2 * halfD, 'steel', label)
       }
     }
   }

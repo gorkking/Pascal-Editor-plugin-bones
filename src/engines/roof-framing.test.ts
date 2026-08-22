@@ -916,11 +916,17 @@ describe('LOD-400 B6c: drip edge members at eaves + rakes (R905.2.8.5)', () => {
     expect(eaves).toHaveLength(2)
     expect(rakes).toHaveLength(4)
     for (const e of eaves) expect(e.length).toBeCloseTo(roof.width + 2 * roof.overhang, 6)
+    const t = 1.5 * 0.0254 // rafter/barge thickness
     for (const r of rakes) {
       // rake drip length == the barge slope length
       const barge = frameRoofs([roof], [], at400).find((m) => m.label?.includes('Barge'))
       expect(r.length).toBeCloseTo((barge as Member).length, 6)
-      expect(Math.abs(r.position[0])).toBeCloseTo(roof.width / 2 + roof.overhang, 6)
+      // outer edge FLUSH with the barge outer face (F1b: trim must never
+      // grow the plan envelope / the shared sheet transform)
+      expect(Math.abs(r.position[0]) + r.dims[2] / 2).toBeCloseTo(
+        roof.width / 2 + roof.overhang + t / 2,
+        6,
+      )
     }
     for (const d of drips) {
       expect(d.material).toBe('steel')
