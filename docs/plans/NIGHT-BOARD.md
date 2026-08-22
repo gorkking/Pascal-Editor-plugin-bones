@@ -18,6 +18,25 @@ Gates to keep: hvac.condensers.test.ts override-honesty describe +
 compute.mep-honesty.test.ts F2 describe (swap the warning assertion for
 a world-grade one when the truth route lands).
 
+# HONESTY FAST-FOLLOW SHIPPED TO PROD 2026-08-22 (night)
+
+## SHIP RECORD: private-editor #396 → ef093760
+Chain: plugin 43fbf41 (1610 tests; warnings-only, baseline
+byte-identical) → editor #708 → private-editor #396, CI green first
+pass, Vercel prod SUCCESS. Origin: Julien's SECOND missing-heat-pump
+prod report; hunt agent mapped 4 classes (prod bundle verified
+current — a stale bundle could NOT produce the symptom): (1) X-rayed
+level owns no indoor zones → HVAC+plumbing silently empty while
+framing/electrical render [THE likely hit]; (2) present but never in
+the default camera + hidden half the orbit; (3) verbatim heat-pump
+override parked indoors/afar, silent; (4) upper-storey unit at
+facade height. The set: silent-empty MEP levels warn (3 classes,
+per-silent-system naming, ||-mutant killed by gate); heat-pump
+mis-drag warns (indoor-zone naming + >25ft NEC 210.63); upper-storey
+condenser states floor-elevation mounting (grade remount queued —
+foreign groups build with [] fixtures, machinery list on board).
+M2 checklist amended. 2 rounds + orchestrator inline mutant gate.
+
 # DAY-9 SHIPPED TO PROD 2026-08-22 (evening)
 
 ## SHIP RECORD: private-editor #395 → 67fbe97e
