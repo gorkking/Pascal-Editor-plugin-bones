@@ -681,7 +681,7 @@ export function explodedRoofOffset(
   return levelMode === 'exploded' && strataAbove ? -2.5 : 0
 }
 
-function disposeGroup(group: Group) {
+export function disposeGroup(group: Group) {
   // mesh.dispose() releases the per-mesh GPU state (instance-matrix
   // buffers) via the renderer's dispose listener — that is ALL a teardown
   // may free. Materials are module-cache SHARED across live groups (F1)

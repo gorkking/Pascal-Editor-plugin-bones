@@ -44,6 +44,15 @@ export function throttleTrailing(
     const now = Date.now()
     const elapsed = now - last
     if (elapsed >= waitMs) {
+      // A trailing timer may still be pending (scheduled inside the window
+      // but delayed past its slot by event-loop lag). Firing immediately
+      // AND letting the stale timer land would double-execute within one
+      // window — clear it first (night-8 storm-counter gate caught the
+      // ceil(span/wait)+1 breach).
+      if (timer !== null) {
+        clearTimeout(timer)
+        timer = null
+      }
       last = now
       fn()
       return
