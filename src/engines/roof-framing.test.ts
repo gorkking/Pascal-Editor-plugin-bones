@@ -1189,6 +1189,103 @@ describe('LOD-400 B7b: hip collar ties on the ridge portion (R802.4.6)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// LOD-400 B7c: mansard/dutch — main ceiling + the inner thrust story
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B7c: mansard/dutch ceiling joists + inner thrust story (R802.4.2/R802.4.6)', () => {
+  const IN = 0.0254
+  const T = 1.5 * IN
+  const RD = 5.5 * IN
+  const CJ_D = 5.5 * IN
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const cjOf = (members: Member[]) => byRole(members, 'ceiling-joist')
+  const baseY = 3.0 // position 2.5 + wallHeight 0.5
+
+  test('mansard: main joists span the short axis at the eave line, band pulled off the end skirts', () => {
+    const roof = seg({ roofType: 'mansard', width: 10, depth: 8 })
+    const members = frameRoofs([roof], [], at400)
+    const theta = roof.pitch
+    const main = cjOf(members).filter((cj) => Math.abs((cj.position[1] as number) - (baseY + CJ_D / 2)) < 1e-6)
+    const clip = (CJ_D - RD / (2 * Math.cos(theta))) / Math.tan(theta) + 0.002
+    const clear = (CJ_D + RD / (2 * Math.cos(theta))) / Math.tan(theta) + T + 0.002
+    const bandHalf = 5 - clear
+    const floor = Math.floor((2 * bandHalf) / DEFAULT_SPEC.ceilingJoistSpacing) - 1
+    expect(main.length).toBeGreaterThanOrEqual(floor)
+    expect(main.length).toBeLessThanOrEqual(floor + 4)
+    for (const cj of main) {
+      expect(Math.abs(longAxis(cj).z)).toBeCloseTo(1, 5) // depth 8 < width 10
+      expect(cj.length).toBeCloseTo(8 - 2 * clip, 6)
+      expect(Math.abs(cj.position[0] as number)).toBeLessThanOrEqual(bandHalf + 1e-9)
+      expect(cj.label).toContain('rafter tie (R802.4.2)')
+      // an 8 m one-piece joist is past the R802.5.1(2) table — honest flag
+      expect(cj.flag).toContain('Ceiling joist over prescriptive span')
+    }
+  })
+
+  test('mansard: the inner hip crown models its own joists at the skirt top; steep crowns tie per R802.4.6', () => {
+    const roof = seg({ roofType: 'mansard', width: 10, depth: 8 })
+    const skirtRise = 1.2 * Math.tan(roof.pitch) // inset 8·0.15 at the schema pitch
+    const members = frameRoofs([roof], [], at400)
+    const upper = cjOf(members).filter(
+      (cj) => Math.abs((cj.position[1] as number) - (baseY + skirtRise + CJ_D / 2)) < 1e-6,
+    )
+    expect(upper.length).toBeGreaterThan(0)
+    // the DEFAULT crown computes ~8.8° — too flat for a collar tie band
+    // (the gable low-pitch skip convention): pinned at zero, not fake wood
+    expect(byRole(members, 'collar-tie')).toHaveLength(0)
+    // a steep mansard's crown is a real hip — its ridge portion ties
+    const steep = frameRoofs([seg({ roofType: 'mansard', pitch: (55 * Math.PI) / 180 })], [], at400)
+    const ties = byRole(steep, 'collar-tie')
+    expect(ties.length).toBeGreaterThan(0)
+    for (const tie of ties) expect(tie.label).toContain('R802.4.6')
+  })
+
+  test('dutch: main joists at the eave line + the gablet thrust story above', () => {
+    const roof = seg({ roofType: 'dutch', width: 10, depth: 8 })
+    const members = frameRoofs([roof], [], at400)
+    const main = cjOf(members).filter((cj) => Math.abs((cj.position[1] as number) - (baseY + CJ_D / 2)) < 1e-6)
+    expect(main.length).toBeGreaterThan(15)
+    for (const cj of main) {
+      expect(Math.abs(longAxis(cj).z)).toBeCloseTo(1, 5)
+      expect(cj.label).toContain('rafter tie (R802.4.2)')
+    }
+    // the gablet (frameGable) carries its own ceiling joists + collar ties
+    // at the skirt top — the dutch ridge portion is tied
+    const skirtRise = 2 * Math.tan(roof.pitch) // inset 8·0.25
+    const gabletCjs = cjOf(members).filter((cj) => (cj.position[1] as number) > baseY + skirtRise)
+    expect(gabletCjs.length).toBeGreaterThan(0)
+    expect(byRole(members, 'collar-tie').length).toBeGreaterThan(0)
+  })
+
+  test('orientation: a depth-major mansard runs its joists along X', () => {
+    const members = frameRoofs([seg({ roofType: 'mansard', width: 8, depth: 10 })], [], at400)
+    const main = cjOf(members).filter((cj) => Math.abs((cj.position[1] as number) - (baseY + CJ_D / 2)) < 1e-6)
+    expect(main.length).toBeGreaterThan(15)
+    for (const cj of main) expect(Math.abs(longAxis(cj).x)).toBeCloseTo(1, 5)
+  })
+
+  test('degenerate near-flat skirt emits NO ceiling frame (honesty over buried wood)', () => {
+    // 3° skirt: the planes never rise clear of the joist band, and the
+    // inner crown's ridge underside descends into it — zero joists, silent
+    const members = frameRoofs([seg({ roofType: 'mansard', pitch: (3 * Math.PI) / 180 })], [], at400)
+    expect(cjOf(members)).toHaveLength(0)
+  })
+
+  test('LOD 200 keeps the schematic full-span main joists (gable convention)', () => {
+    const members = frameRoofs([seg({ roofType: 'dutch', width: 10, depth: 8 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '200',
+    })
+    const main = cjOf(members).filter((cj) => Math.abs((cj.position[1] as number) - (baseY + CJ_D / 2)) < 1e-6)
+    expect(main.length).toBeGreaterThan(0)
+    for (const cj of main) {
+      expect(cj.length).toBeCloseTo(8, 6)
+      expect(cj.flag).toBeUndefined()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
 // LOD-400 B7 blast radius: untouched shapes byte-equal to master (pinned)
 // ---------------------------------------------------------------------------
 

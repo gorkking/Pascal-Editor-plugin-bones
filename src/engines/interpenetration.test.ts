@@ -662,6 +662,32 @@ describe('interpenetration gate — structural members never share volume', () =
       }).toEqual({ type, v: [] })
     }
   })
+
+  test('roof framing: B7 thrust members (ceiling joists + collar ties) compose SAT-clean across the hip family', () => {
+    // Joists thread UNDER jacks, kings, hips, the B6 deck/underlayment and
+    // the fascia band; ties thread BETWEEN the commons under the ridge —
+    // non-vacuous: every case must actually carry ceiling joists.
+    const cases: [string, Partial<RoofSegmentSlice>][] = [
+      ['hipAudit', { roofType: 'hip', width: 10, depth: 12 }], // the B7 audit repro
+      ['hip25', { roofType: 'hip', pitch: (25 * Math.PI) / 180 }], // snapped-station collapse repro
+      ['hip75', { roofType: 'hip', pitch: (75 * Math.PI) / 180 }],
+      ['hipWide', { roofType: 'hip', width: 16, depth: 14 }],
+      ['hipZspan', { roofType: 'hip', width: 6, depth: 8 }],
+      ['mansard55', { roofType: 'mansard', pitch: (55 * Math.PI) / 180 }], // steep crown ties live
+      ['mansard25', { roofType: 'mansard', pitch: (25 * Math.PI) / 180 }], // near-flat crown: ridge-skip guard
+      ['dutch25', { roofType: 'dutch', pitch: (25 * Math.PI) / 180 }],
+      ['dutch70', { roofType: 'dutch', pitch: (70 * Math.PI) / 180 }],
+      ['dutchWide', { roofType: 'dutch', width: 16, depth: 10 }],
+    ]
+    for (const [name, over] of cases) {
+      const members = frameRoofs([roofSeg(over)], [], spec400)
+      expect({
+        name,
+        cj: members.some((m) => m.role === 'ceiling-joist'),
+        v: violations(members),
+      }).toEqual({ name, cj: true, v: [] })
+    }
+  })
   const UNUSED = () => {
     expect(
       violations(
