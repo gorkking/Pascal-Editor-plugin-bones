@@ -61,6 +61,11 @@ lineset×dryer-duct bore, F3 trap-drop residuals.
 Loop rules unchanged: skeptic+examiner per batch, gates same commit,
 detached worktrees ONLY (two incidents), inline gate fallback on
 agent stalls, ship batches as they accumulate green.
+PILOT BRIEF RULES (standing, added day-8): (1) COMMIT INCREMENTALLY
++ push per slice — API timeouts killed a pilot 3× with zero commits;
+(2) mutation probes revert from /tmp BACKUP COPIES, never
+`git checkout <file>` — two pilots (B14 r1, B9) wiped uncommitted
+work with checkout mid-probe.
 
 # NIGHT-7 SHIPPED TO PROD 2026-08-21 (~08:30)
 
