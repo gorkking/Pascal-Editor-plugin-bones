@@ -826,8 +826,10 @@ describe('LOD-400 B17: slab-on-grade booked == built, ground storeys only', () =
     const round1 = (n: number) => Math.round(n * 10) / 10
     const vol = field.reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
     const slabRow = rows.find(
-      (r) => r.item === 'Concrete' && r.detail === 'slab field (3-1/2" slab-on-grade, R506.1)',
+      (r) =>
+        r.item === 'Concrete' && r.detail.startsWith('slab field (3-1/2" slab-on-grade, R506.1)'),
     )
+    // quantity = NET member volume — the B21e stated waste never inflates it
     expect(slabRow?.quantity).toBe(Math.max(0.1, round1(vol * 1.30795)))
     const area = membrane.reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
     const vaporRow = rows.find((r) => r.item === 'Vapor retarder 6-mil poly')
@@ -835,7 +837,7 @@ describe('LOD-400 B17: slab-on-grade booked == built, ground storeys only', () =
     // …and the biggest pour on the job is no longer a phantom: the field
     // outweighs footings + stemwalls combined (the B17 defect shape).
     const pourOf = (detail: string) =>
-      rows.find((r) => r.item === 'Concrete' && r.detail === detail)?.quantity ?? 0
+      rows.find((r) => r.item === 'Concrete' && r.detail.startsWith(detail))?.quantity ?? 0
     expect(slabRow?.quantity ?? 0).toBeGreaterThan(pourOf('footings') + pourOf('stemwalls'))
   })
 
@@ -1026,7 +1028,8 @@ describe('LOD-400 B18d: upper-storey girder posts bear on ground pads end-to-end
   test('pads join the foundation footings pour; a storey with no floor above pours none', () => {
     const rows = computeTakeoff(ground.members, ground.fixtures, ground.areas)
     const footings = rows.find(
-      (r) => r.section === 'Foundation' && r.item === 'Concrete' && r.detail === 'footings',
+      (r) =>
+        r.section === 'Foundation' && r.item === 'Concrete' && r.detail.startsWith('footings'),
     )
     expect(footings).toBeDefined()
     const single = girderScene()
@@ -1037,7 +1040,8 @@ describe('LOD-400 B18d: upper-storey girder posts bear on ground pads end-to-end
     expect(noUpper.members.filter((m) => m.label?.startsWith('Pad footing'))).toHaveLength(0)
     const soloRows = computeTakeoff(noUpper.members, noUpper.fixtures, noUpper.areas)
     const soloFootings = soloRows.find(
-      (r) => r.section === 'Foundation' && r.item === 'Concrete' && r.detail === 'footings',
+      (r) =>
+        r.section === 'Foundation' && r.item === 'Concrete' && r.detail.startsWith('footings'),
     )
     expect(Number(footings?.quantity)).toBeGreaterThan(Number(soloFootings?.quantity))
   })

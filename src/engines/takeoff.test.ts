@@ -65,24 +65,26 @@ const find = (rows: TakeoffRow[], item: string, detail?: string): TakeoffRow | u
 describe('lumber stock rounding', () => {
   test('2.5 m stud (8.2 ft) rounds UP to 10 ft stock, not 8', () => {
     const rows = computeTakeoff([lumber('2x4', 2.5)], [])
-    expect(find(rows, '2x4', '10 ft stock')).toEqual({
+    // B21e: the quantity stays the exact member-derived count; the stated
+    // +5% cull/damage order figure prints in the detail, never the column.
+    expect(find(rows, '2x4', '10 ft stock — +5% waste ≈ 2 pcs')).toEqual({
       section: 'Wall framing',
       item: '2x4',
-      detail: '10 ft stock',
+      detail: '10 ft stock — +5% waste ≈ 2 pcs',
       quantity: 1,
       unit: 'pcs',
     })
-    expect(find(rows, '2x4', '8 ft stock')).toBeUndefined()
+    expect(rows.some((r) => r.item === '2x4' && r.detail.startsWith('8 ft stock'))).toBe(false)
   })
 
   test('an exactly-8-ft cut buys 8 ft stock (no float creep to 10)', () => {
     const rows = computeTakeoff([lumber('2x4', feet(8))], [])
-    expect(find(rows, '2x4', '8 ft stock')?.quantity).toBe(1)
+    expect(find(rows, '2x4', '8 ft stock — +5% waste ≈ 2 pcs')?.quantity).toBe(1)
   })
 
   test('an exactly-20-ft cut buys one 20 ft stick, no splice', () => {
     const rows = computeTakeoff([lumber('2x12', feet(20))], [])
-    expect(find(rows, '2x12', '20 ft stock')?.quantity).toBe(1)
+    expect(find(rows, '2x12', '20 ft stock — +5% waste ≈ 2 pcs')?.quantity).toBe(1)
     expect(rows.some((r) => r.detail.includes('splice'))).toBe(false)
   })
 
@@ -130,8 +132,8 @@ describe('lumber stock rounding', () => {
       ],
       [],
     )
-    expect(find(rows, '2x4', '8 ft stock')?.quantity).toBe(3)
-    expect(find(rows, '2x4', '14 ft stock')?.quantity).toBe(2)
+    expect(find(rows, '2x4', '8 ft stock — +5% waste ≈ 4 pcs')?.quantity).toBe(3)
+    expect(find(rows, '2x4', '14 ft stock — +5% waste ≈ 3 pcs')?.quantity).toBe(2)
   })
 
   test('every stock boundary rounds up correctly', () => {
@@ -144,7 +146,7 @@ describe('lumber stock rounding', () => {
     ]
     for (const [len, expected] of cuts) {
       const rows = computeTakeoff([lumber('2x6', len)], [])
-      expect(find(rows, '2x6', expected)?.quantity).toBe(1)
+      expect(find(rows, '2x6', `${expected} — +5% waste ≈ 2 pcs`)?.quantity).toBe(1)
     }
   })
 })
@@ -208,7 +210,11 @@ describe('lumber row ordering', () => {
     const rows = computeTakeoff([lumber('2x4', 2.5), lumber('2x4', 2.3)], []).filter(
       (r) => r.item === '2x4',
     )
-    expect(rows.map((r) => r.detail)).toEqual(['8 ft stock', '10 ft stock', 'board feet'])
+    expect(rows.map((r) => r.detail)).toEqual([
+      '8 ft stock — +5% waste ≈ 2 pcs',
+      '10 ft stock — +5% waste ≈ 2 pcs',
+      'board feet',
+    ])
   })
 
   test('pressure-treated mudsills count as lumber ON THEIR OWN PT row; steel and concrete never do', () => {
@@ -221,8 +227,10 @@ describe('lumber row ordering', () => {
       [],
     )
     // PT is a different SKU — never blended into the untreated count.
-    expect(find(rows, '2x6 PT', '8 ft stock (pressure-treated)')?.quantity).toBe(1)
-    expect(find(rows, '2x6', '8 ft stock')).toBeUndefined()
+    expect(
+      find(rows, '2x6 PT', '8 ft stock (pressure-treated) — +5% waste ≈ 2 pcs')?.quantity,
+    ).toBe(1)
+    expect(rows.some((r) => r.item === '2x6' && r.detail.startsWith('8 ft stock'))).toBe(false)
     // exactly one lumber size section (one board-feet row)
     expect(rows.filter((r) => r.detail === 'board feet')).toHaveLength(1)
   })
@@ -235,8 +243,10 @@ describe('lumber row ordering', () => {
       ],
       [],
     )
-    expect(find(rows, '2x6', '8 ft stock')?.quantity).toBe(1)
-    expect(find(rows, '2x6 PT', '8 ft stock (pressure-treated)')?.quantity).toBe(1)
+    expect(find(rows, '2x6', '8 ft stock — +5% waste ≈ 2 pcs')?.quantity).toBe(1)
+    expect(
+      find(rows, '2x6 PT', '8 ft stock (pressure-treated) — +5% waste ≈ 2 pcs')?.quantity,
+    ).toBe(1)
     const items = rows.filter((r) => r.detail.startsWith('8 ft stock')).map((r) => r.item)
     expect(items).toEqual(['2x6', '2x6 PT'])
     expect(rows.filter((r) => r.detail === 'board feet')).toHaveLength(2)
@@ -256,17 +266,19 @@ describe('concrete', () => {
   test('sums member volumes and converts m³ → yd³ at 1.30795, 1 decimal', () => {
     // two footing runs of exactly 1 m³ each → 2 m³ = 2.6159 yd³ → 2.6
     const rows = computeTakeoff([concrete([2, 0.5, 1]), concrete([2, 0.5, 1])], [])
+    // B21e: net pour in the quantity column, stated +5% order figure in the
+    // detail (2 m³ = 2.6159 yd³ → 2.6 net; × 1.05 = 2.7467 → 2.7 order).
     expect(find(rows, 'Concrete')).toEqual({
       section: 'Foundation',
       item: 'Concrete',
-      detail: 'footings',
+      detail: 'footings — +5% waste ≈ 2.7 yd³',
       quantity: 2.6,
       unit: 'yd³',
     })
   })
 
   test('foundation pours split by ELEMENT: footing / stemwall / slab field', () => {
-    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1)'
+    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ 0.2 yd³'
     const rows = computeTakeoff(
       [
         concrete([2, 0.5, 1]), // footing, 1 m³
@@ -275,10 +287,10 @@ describe('concrete', () => {
       ],
       [],
     )
-    expect(find(rows, 'Concrete', 'footings')?.quantity).toBeCloseTo(1.3, 5)
-    expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBeCloseTo(0.5, 5)
+    expect(find(rows, 'Concrete', 'footings — +5% waste ≈ 1.4 yd³')?.quantity).toBeCloseTo(1.3, 5)
+    expect(find(rows, 'Concrete', 'stemwalls — +5% waste ≈ 0.5 yd³')?.quantity).toBeCloseTo(0.5, 5)
     expect(find(rows, 'Concrete', SLAB_DETAIL)?.quantity).toBeCloseTo(0.2, 5)
-    for (const detail of ['footings', 'stemwalls', SLAB_DETAIL]) {
+    for (const detail of ['footings — +5% waste ≈ 1.4 yd³', 'stemwalls — +5% waste ≈ 0.5 yd³', SLAB_DETAIL]) {
       expect(find(rows, 'Concrete', detail)?.section).toBe('Foundation')
     }
   })
@@ -299,8 +311,8 @@ describe('concrete', () => {
       ],
       [],
     )
-    expect(find(rows, 'Concrete', 'footings')?.section).toBe('Foundation')
-    const lintelRow = find(rows, 'Concrete', 'lintels/beams')
+    expect(find(rows, 'Concrete', 'footings — +5% waste ≈ 1.4 yd³')?.section).toBe('Foundation')
+    const lintelRow = find(rows, 'Concrete', 'lintels/beams — +5% waste ≈ 0.1 yd³')
     expect(lintelRow?.section).toBe('Wall framing')
     expect(lintelRow?.quantity).toBe(0.1) // 0.0433 m³ floors at the 0.1 yd³ batch
   })
@@ -358,10 +370,17 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
       .filter((m) => m.role === 'slab')
       .reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
     expect(vol).toBeGreaterThan(0)
-    const row = find(rows, 'Concrete', 'slab field (3-1/2" slab-on-grade, R506.1)')
+    const row = rows.find(
+      (r) => r.item === 'Concrete' && r.detail.startsWith('slab field (3-1/2" slab-on-grade, R506.1)'),
+    )
     expect(row?.section).toBe('Foundation')
     expect(row?.unit).toBe('yd³')
+    // quantity = NET member volume; the stated +5% order figure prints in
+    // the detail and derives from the same volume (B21e net preservation)
     expect(row?.quantity).toBe(Math.max(0.1, round1(vol * M3_TO_YD3)))
+    expect(row?.detail).toBe(
+      `slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ ${Math.max(0.1, round1(vol * M3_TO_YD3 * 1.05))} yd³`,
+    )
   })
 
   test('the vapor-retarder sqft row = member plan area × the STATED +10% lap factor', () => {
@@ -387,10 +406,12 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
       members
         .filter((m) => m.role === role)
         .reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
-    expect(find(rows, 'Concrete', 'footings')?.quantity).toBe(
+    const pourRow = (prefix: string) =>
+      rows.find((r) => r.item === 'Concrete' && r.detail.startsWith(prefix))
+    expect(pourRow('footings')?.quantity).toBe(
       Math.max(0.1, round1(volOf('footing') * M3_TO_YD3)),
     )
-    expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBe(
+    expect(pourRow('stemwalls')?.quantity).toBe(
       Math.max(0.1, round1(volOf('stemwall') * M3_TO_YD3)),
     )
   })
@@ -401,7 +422,9 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
       [],
     )
     expect(find(bare, 'Vapor retarder 6-mil poly')).toBeUndefined()
-    expect(find(bare, 'Concrete', 'slab field (3-1/2" slab-on-grade, R506.1)')).toBeUndefined()
+    expect(
+      bare.some((r) => r.item === 'Concrete' && r.detail.startsWith('slab field')),
+    ).toBe(false)
   })
 })
 
@@ -561,7 +584,7 @@ describe('takeoffCsv', () => {
     const rows = computeTakeoff([lumber('2x4', 2.5)], [fixture('receptacle')])
     const lines = takeoffCsv(rows).split('\n')
     expect(lines[0]).toBe('section,item,detail,quantity,unit')
-    expect(lines).toContain('Wall framing,2x4,10 ft stock,1,pcs')
+    expect(lines).toContain('Wall framing,2x4,10 ft stock — +5% waste ≈ 2 pcs,1,pcs')
     expect(lines).toContain('Electrical,Receptacles,NEC 210.52 spacing,1,pcs')
   })
 })
