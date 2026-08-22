@@ -124,6 +124,21 @@ export function computeCharacteristics(
   let floorAreaM2 = 0
   if (indoorRooms.length > 0) {
     for (const room of indoorRooms) floorAreaM2 += ringArea(room.polygon)
+    if (outdoorAreaM2 > 0) {
+      notes.push(
+        `Floor area & volume are CONDITIONED space — ${outdoorAreaM2.toFixed(1)} m² of outdoor zones (garden/patio/yard) excluded`,
+      )
+    }
+  } else if (rooms.length > 0) {
+    // EVERY drawn zone is outdoor (a garden level, a roof terrace with its
+    // floor slab): there is NO conditioned space — the slab under open air
+    // is paving, not conditioned floor. Booking it (skeptic round-2 corner:
+    // 24 m² patio slab printed as 'Floor area 24.0 m²' next to a FALSE
+    // 'no rooms/zones drawn' note AND a false exclusion note) lied twice.
+    // The figure stays 0 and ONE truthful note says why.
+    notes.push(
+      'No conditioned space on this level — every zone is outdoor (garden/patio/terrace)',
+    )
   } else {
     for (const slab of slabs) {
       let area = ringArea(slab.polygon)
@@ -133,11 +148,6 @@ export function computeCharacteristics(
     if (slabs.length > 0) {
       notes.push('Floor area from slab outlines (minus holes) — no rooms/zones drawn')
     }
-  }
-  if (outdoorAreaM2 > 0) {
-    notes.push(
-      `Floor area & volume are CONDITIONED space — ${outdoorAreaM2.toFixed(1)} m² of outdoor zones (garden/patio/yard) excluded`,
-    )
   }
 
   // ---- volume: per-room area × its ceiling height ----
