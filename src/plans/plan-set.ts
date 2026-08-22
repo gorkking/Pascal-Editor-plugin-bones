@@ -2123,6 +2123,21 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
     const cz = a[2] + t * dz
     const cyW = a[1] + t * dy
     const dims = m.dims
+    // ROLLED plate members (roof deck/underlayment, outlookers — B6
+    // round-1 F5): the axis-aligned slice model printed the deck's cut as
+    // a false HORIZONTAL chord (slope width at mid-roof height). The true
+    // cut of a rolled plate is its local cross-section — a thin band
+    // [dims[2] × dims[1]] rotated by the roll about the crossing point,
+    // running eave → ridge exactly like the built panel (memberAxis's B17
+    // true-thickness convention, extended to the rolled case).
+    if (m.rotation[0] !== 0 && dims[1] <= dims[0] && dims[1] <= dims[2]) {
+      const wPx2 = Math.max(1.5, dims[2] * f.scale)
+      const hPx2 = Math.max(1.5, dims[1] * f.scale)
+      poche.push(
+        `<rect x="${(-wPx2 / 2).toFixed(1)}" y="${(-hPx2 / 2).toFixed(1)}" width="${wPx2.toFixed(1)}" height="${hPx2.toFixed(1)}" fill="#222" transform="translate(${f.sx(cz).toFixed(1)} ${f.sy(-cyW).toFixed(1)}) rotate(${deg(m.rotation[0]).toFixed(2)})"/>`,
+      )
+      continue
+    }
     const axis = dims[0] >= dims[1] && dims[0] >= dims[2] ? 0 : dims[1] >= dims[2] ? 1 : 2
     const hDim = axis === 0 ? dims[2] : dims[0] // plan cross thickness
     const vDim = axis === 1 ? Math.min(dims[0], dims[2]) : dims[1] // vertical thickness

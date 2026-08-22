@@ -3495,3 +3495,39 @@ describe('B6 fix F1 — rolled plates foreshorten on plan; deck is layer-0 trans
     expect(svg).not.toContain('WSP roof deck')
   })
 })
+
+describe('B6 fix F5 — the section cuts a rolled plate as its TRUE sloped band, never a horizontal chord', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const roofSeg = (over: Partial<RoofSegmentSlice> = {}): RoofSegmentSlice => ({
+    id: 'roofseg_f5',
+    roofType: 'gable',
+    position: [4, 2.5, 3],
+    yaw: 0,
+    width: 8,
+    depth: 6,
+    pitch: (40 * Math.PI) / 180,
+    overhang: 0.3,
+    wallHeight: 0.5,
+    ...over,
+  })
+
+  test('deck poché rects rotate with the roll; no wide UN-rotated dark chord survives', () => {
+    const members = frameRoofs([roofSeg()], [], at400)
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Section'))?.svg ?? ''
+    // the two slope panels cut as ±40°-rotated thin bands
+    const rotated = [...svg.matchAll(/<rect [^>]*fill="#222"[^>]*rotate\((-?40\.00)\)"\/>/g)]
+    expect(rotated.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(rotated.map((r) => r[1])).size).toBe(2) // both slopes, both signs
+    // …and every plain axis-aligned dark rect stays a plausible stick
+    // cross-section: the pre-fix chord printed the FULL slope width
+    // (dims[2] ≈ 4.2 m) as one horizontal bar — nothing axis-aligned may
+    // come near that class. Bound: half the rotated band's length.
+    const bandPx = Math.max(
+      ...rotated.map((r) => Number((r[0].match(/width="([\d.]+)"/) ?? [])[1])),
+    )
+    for (const m of svg.matchAll(/<rect x="[^"]*" y="[^"]*" width="([\d.]+)"[^>]*fill="#222"(?![^>]*rotate)/g)) {
+      expect(Number(m[1])).toBeLessThan(bandPx / 2)
+    }
+  })
+})
