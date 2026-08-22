@@ -659,6 +659,153 @@ export function patchGroups(
   return true
 }
 
+/**
+ * X-RAY DOLLHOUSE CUT — camera-POSITION based, per wall (night-8 UX round:
+ * "the closest [face] to the camera is removed as if the wall was opened…
+ * the drywall in the back shows — we don't see through the whole wall").
+ *
+ * The original cut classified faces by VIEW DIRECTION (face · camera
+ * forward > 0.02): any wall roughly PARALLEL to the view axis had BOTH
+ * faces at dot ≈ 0 → both hidden → you saw straight through the wall into
+ * the next room ("shouldn't just be like no drywall at all"). Position-
+ * based: the camera sits on exactly ONE side of each wall's plan-space
+ * plane; the LAYER face pointing at that side (the near face) opens, its
+ * twin stays visible as the closed backing. Exactly one face per wall is
+ * ever hidden, from any azimuth. Framing members and in-wall MEP carry no
+ * `face` and are never touched by this pass; 'off' has no face buckets at
+ * all and 'basement' buckets are built face-less (the faint shell owns it) —
+ * plus the mode gate in the frame loop.
+ *
+ * HYSTERESIS: while the camera's plan distance to a wall plane is within
+ * ±XRAY_CUT_BAND (m), the wall HOLDS its last committed side — crossing or
+ * grazing a wall plane while orbiting never flaps the cut. A wall flips
+ * only once the camera is clearly past the plane, and the per-wall cache
+ * means visibility writes happen only on that flip (O(walls) dots per
+ * frame, zero .visible churn while the side is stable).
+ */
+export const XRAY_CUT_BAND = 0.5
+
+/** Plan-space cut plane of one wall: unit normal (nx, nz) + a point on the
+ * centerline (cx, cz) — level-local XZ, same frame the members live in. */
+export type CutPlane = { nx: number; nz: number; cx: number; cz: number }
+
+/**
+ * Cut planes for every face-carrying source wall. Exact planes come from
+ * the compute result's WallSlices (normal = dir rotated -90°, matching
+ * wall-layers' normalOf, so face · n = ±1 for that wall's two stacks).
+ * Defensive fallback (every wall-layers member sources an ACTIVE wall
+ * today): a face member whose wall the compute didn't return derives its
+ * plane from the members themselves — first face as the canonical normal,
+ * centroid of ALL that wall's layer boxes as the plane point (the two
+ * stacks average out to ≈ the centerline; the residual is centimeters,
+ * far inside the hysteresis band).
+ */
+export function collectCutPlanes(
+  members: readonly Pick<Member, 'face' | 'sourceId' | 'position'>[],
+  walls: readonly {
+    id: string
+    start: readonly [number, number]
+    dir: readonly [number, number]
+    length: number
+  }[],
+): Map<string, CutPlane> {
+  const planes = new Map<string, CutPlane>()
+  for (const w of walls) {
+    planes.set(w.id, {
+      nx: -w.dir[1],
+      nz: w.dir[0],
+      cx: w.start[0] + (w.dir[0] * w.length) / 2,
+      cz: w.start[1] + (w.dir[1] * w.length) / 2,
+    })
+  }
+  let fallback: Map<string, { nx: number; nz: number; sx: number; sz: number; n: number }> | null =
+    null
+  for (const m of members) {
+    if (!m.face || planes.has(m.sourceId)) continue
+    fallback ??= new Map()
+    let acc = fallback.get(m.sourceId)
+    if (!acc) {
+      acc = { nx: m.face[0], nz: m.face[1], sx: 0, sz: 0, n: 0 }
+      fallback.set(m.sourceId, acc)
+    }
+    acc.sx += m.position[0]
+    acc.sz += m.position[2]
+    acc.n += 1
+  }
+  if (fallback) {
+    for (const [id, acc] of fallback) {
+      planes.set(id, { nx: acc.nx, nz: acc.nz, cx: acc.sx / acc.n, cz: acc.sz / acc.n })
+    }
+  }
+  return planes
+}
+
+/** Last committed camera side of one wall (+1 = the side its canonical
+ * normal points to), stored WITH that normal so a re-oriented wall (face
+ * keys re-bucket on rotation anyway) never reuses a stale side. */
+export type WallSide = { side: 1 | -1; nx: number; nz: number }
+
+/**
+ * Per-frame side classification: one dot per wall against the PLAN camera
+ * position — dot(wallNormal, camPos − wallPoint) — with the hysteresis dead
+ * band. Mutates `state` in place; entries flip only when the camera is
+ * clearly (> XRAY_CUT_BAND) on the other side of the plane.
+ */
+export function updateWallSides(
+  planes: ReadonlyMap<string, CutPlane>,
+  camX: number,
+  camZ: number,
+  state: Map<string, WallSide>,
+): void {
+  for (const [id, p] of planes) {
+    const s = p.nx * (camX - p.cx) + p.nz * (camZ - p.cz)
+    const cached = state.get(id)
+    // No cache yet, or the wall re-oriented (> ~8°): commit the raw sign —
+    // hysteresis needs a committed side to hold.
+    if (!cached || cached.nx * p.nx + cached.nz * p.nz < 0.99) {
+      state.set(id, { side: s >= 0 ? 1 : -1, nx: p.nx, nz: p.nz })
+      continue
+    }
+    if (Math.abs(s) > XRAY_CUT_BAND) {
+      const side: 1 | -1 = s > 0 ? 1 : -1
+      if (cached.side !== side) cached.side = side
+    }
+    // inside the band: hold the last committed side — no flapping
+  }
+}
+
+/**
+ * Apply the cut to one group's children: LAYER buckets (userData.face) hide
+ * exactly when they are the wall's NEAR face — face · wallNormal has the
+ * same sign as the camera's side. The far face, framing, MEP, fixtures:
+ * untouched. `.visible` is written ONLY when the value actually changes
+ * (the side cache makes that "only on a flip"). The selected wall stays
+ * fully visible (night-4 Engineering-card exemption); a face with no
+ * classifiable plane stays visible — this pass may open ONE face of a wall,
+ * never both.
+ */
+export function applyFaceCut(
+  children: readonly { userData: unknown; visible: boolean }[],
+  sides: ReadonlyMap<string, WallSide>,
+  selected?: readonly string[],
+): void {
+  for (const child of children) {
+    const ud = child.userData as { face?: readonly [number, number]; sourceId?: string }
+    const face = ud.face
+    if (!face) continue
+    const sourceId = ud.sourceId
+    let visible = true
+    if (!(sourceId && selected?.includes(sourceId))) {
+      const wall = sourceId ? sides.get(sourceId) : undefined
+      if (wall) {
+        const toward = face[0] * wall.nx + face[1] * wall.nz
+        visible = toward * wall.side <= 0
+      }
+    }
+    if (child.visible !== visible) child.visible = visible
+  }
+}
+
 /** Exploded-view stratum for a foreign roof group (day board A): drop the
  * bones roof HALF an exploded slot below the roof shell so floor / trusses /
  * shingle shell read as three ~equal strata — but ONLY for groups whose
@@ -697,7 +844,10 @@ export function disposeGroup(group: Group) {
 
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   const ref = useRef<Group>(null!)
-  const viewDir = useRef(new Vector3())
+  const camLocal = useRef(new Vector3())
+  // Per-wall committed camera side — survives rebuilds AND the patch path,
+  // so the hysteresis band holds across drags and mode round-trips.
+  const wallSides = useRef(new Map<string, WallSide>())
   // Cached useViewer store handle (resolved by the dynamic import below) —
   // useFrame can't await, so attachForeign reads levelMode through this ref;
   // null until the import lands = treat as stacked.
@@ -893,16 +1043,32 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     })
   }, [])
 
-  // Dollhouse cut (round 13): assembly-layer buckets carry their face
-  // normal — hide the stacks whose face points TOWARD the camera so you
-  // look INTO the cavity and see the far side's drywall as the backdrop.
-  // The wall is never transparent; the near face is simply removed.
+  // Cut planes for every face-carrying wall — recomputed with the compute
+  // result (`active` moves on every commit AND every live-drag tick, so the
+  // planes are never stale under the patch path).
+  const cutPlanes = useMemo(
+    () => collectCutPlanes(active.members, active.walls),
+    [active],
+  )
+
+  // Dollhouse cut (round 13; camera-POSITION rewrite night-8): assembly-
+  // layer buckets carry their face normal — the face on the CAMERA'S side
+  // of the wall plane opens so you look INTO the cavity, and the far face
+  // stays visible as the closed backing (you never see through the wall
+  // into the next room). The wall is never transparent; the near face is
+  // simply removed.
   useFrame(({ camera }) => {
     attachForeign()
     // The dollhouse cut is an X-ray affordance: 'off' has no face buckets
     // at all, 'basement' keeps its faint shell intact from every angle.
     if (mode !== 'xray') return
-    const dir = camera.getWorldDirection(viewDir.current)
+    // Camera position in the LEVEL's local plan frame: levels move in Y
+    // across stacked/exploded/solo (XZ shared), and worldToLocal also
+    // covers hosts that transform buildings in plan.
+    const cam = camera.getWorldPosition(camLocal.current)
+    group.updateWorldMatrix(true, false)
+    group.worldToLocal(cam)
+    updateWallSides(cutPlanes, cam.x, cam.z, wallSides.current)
     // The SELECTED wall is exempt from the cut: the user is inspecting it
     // (Engineering card flow), so its full stack — cladding included —
     // must read from any angle. Everything else keeps the dollhouse cut.
@@ -911,24 +1077,13 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     // exempt its twin (verify night-4 F5).
     const selectedRaw = viewerStore.current?.getState().selection?.selectedIds
     const selected = selectedRaw?.map((id) => active.duplicateOf[id] ?? id)
-    const cullChildren = (children: readonly { userData: unknown; visible: boolean }[]) => {
-      for (const child of children) {
-        const face = (child.userData as { face?: readonly [number, number] }).face
-        if (!face) continue
-        const sourceId = (child.userData as { sourceId?: string }).sourceId
-        if (sourceId && selected && selected.includes(sourceId)) {
-          child.visible = true
-          continue
-        }
-        // face normal · view direction > 0 → face points away → keep it
-        child.visible = face[0] * dir.x + face[1] * dir.z > 0.02
-      }
-    }
-    cullChildren(group.children)
+    applyFaceCut(group.children, wallSides.current, selected)
     // Foreign groups (cross-level roofs, gable-wall layers) carry face
     // buckets too — they were never culled NOR exemption-checked, leaving
     // gable finishes permanently opaque from every angle (night-5 queue).
-    for (const [, g] of built.foreign) cullChildren(g.children)
+    // Levels differ by Y only, so the owner-local plan camera classifies
+    // their walls identically.
+    for (const [, g] of built.foreign) applyFaceCut(g.children, wallSides.current, selected)
   })
 
   if (!node.visible) return null
