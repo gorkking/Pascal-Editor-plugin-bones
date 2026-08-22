@@ -1072,6 +1072,23 @@ function computeLevelUncached(
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
     warnings.push(...hvac.warnings)
+    // UPPER-STOREY CONDENSER TRUTH (condenser-honesty set F2, hunt 4a):
+    // compute is per-LEVEL, so this storey's condenser row mints at ITS
+    // level-local grade — an upper-storey X-ray draws the "outdoor" unit at
+    // facade height (world y ≈ storey base + pad). The cross-level mounting
+    // machinery (Member.levelId — the B6/B7 roofs ride it) could drop the
+    // row's MEMBERS into the ground storey's frame, but its FIXTURES
+    // (condenser + disconnect) cannot follow — the renderer mounts foreign
+    // MEMBERS only (buildGroups builds fixture-less foreign groups), so a
+    // remount would split the unit from its own selectable fixture, and the
+    // pad/whip/line-set drop legs would still need a facade riser to the
+    // storey's wall penetration that the engine doesn't model. Honest
+    // warning instead; grade mounting is queued on the board.
+    if (!isGroundLevel && hvac.fixtures.some((f) => f.meta?.equipment === 'condenser')) {
+      warnings.push(
+        'condenser for this storey drawn at its floor elevation — grade mounting not modeled; verify',
+      )
+    }
     // Cross-trade coordination (post-merge seam round): the line-set pair
     // rides a lateral off the plumbing plane, but a 3" DWV stack is wider
     // than the wall cavity lets it dodge and thin-wall runs clamp back onto
@@ -1102,6 +1119,56 @@ function computeLevelUncached(
       )
       if (panelFx && disconnects.length > 0) {
         members.push(...routeWiring([panelFx, ...disconnects], activeWalls))
+      }
+    }
+  }
+
+  // MEP EMPTINESS HONESTY (condenser-honesty set F1 — the class behind the
+  // second "I don't see the heat pump" prod report): HVAC + plumbing DERIVE
+  // from rooms, so a level whose zones can't feed them composes ZERO
+  // hvac/plumbing output while framing/electrical render fine — and nothing
+  // said so (hunt classes 7a walls+slab+no-zones, 7b garage+hallway only,
+  // 7c outdoor-only, 7d zones parented to the building, 4b/4c two-storey
+  // zone/level mismatch, roof levels). Three honest classes, keyed off the
+  // ACTUAL compose (a system that emitted anything is not silent; a
+  // toggled-off system is not missing hardware — B9c convention):
+  //  - no zones parented to this level at all (walls-only storeys, zones
+  //    hung on the building node, the wrong storey X-rayed);
+  //  - zones exist but ALL classify outdoor (the day-9 outdoor-category
+  //    delta: these levels LOST a previously-drawn condenser honestly —
+  //    garden zones no longer count as rooms — but silently);
+  //  - indoor zones exist but none habitable (garage/hallway-only levels —
+  //    layoutHvac's habitable filter is the same silent early-return).
+  // One warning covering both systems (the alarm-interconnect grammar);
+  // it reaches the panel Warnings drawer and the plan set's flags block on
+  // the standard result.warnings channel.
+  if (config.showHvac || config.showPlumbing) {
+    const hvacSilent =
+      config.showHvac &&
+      !members.some((m) => m.system === 'hvac') &&
+      !fixtures.some((f) => f.system === 'hvac')
+    const plumbingSilent =
+      config.showPlumbing &&
+      !members.some((m) => m.system === 'plumbing') &&
+      !fixtures.some((f) => f.system === 'plumbing')
+    if (hvacSilent || plumbingSilent) {
+      const indoor = activeRooms.filter((room) => room.category !== 'outdoor')
+      const systems =
+        hvacSilent && plumbingSilent ? 'HVAC + plumbing are' : hvacSilent ? 'HVAC is' : 'plumbing is'
+      if (activeRooms.length === 0) {
+        warnings.push(
+          `no indoor zones on this level — ${systems} derived from rooms; draw zones here or X-ray the storey that has them`,
+        )
+      } else if (indoor.length === 0) {
+        warnings.push('all zones on this level are outdoor — no conditioned space to serve')
+      } else if (
+        hvacSilent &&
+        indoor.every((room) => room.category === 'garage' || room.category === 'hallway')
+      ) {
+        warnings.push(
+          'no habitable rooms on this level (garage/hallway zones only) — HVAC has no conditioned space to serve' +
+            (plumbingSilent ? '; plumbing found no wet rooms or placed fixtures' : ''),
+        )
       }
     }
   }
