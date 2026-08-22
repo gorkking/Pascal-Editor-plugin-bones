@@ -1,5 +1,46 @@
 # Bones board — DAY-8 (2026-08-21) — full backlog go ("all these are great ideas, please work on implementing them")
 
+## DAY-8 STATUS (~evening) — 7 merges on master (9ecf978, 1281 tests)
+MERGED today, in order: B13 alarms (8438485) → UX tri-state (89e64f0
++ seam fix bd33ffa) → move-parity (45b6418) → B21d schedule + panel
+hookup (52320a1) → B20 plumbing safety (59e73b8) → B18 anchorage
+(3fd0a1a) → B12 GES (9ecf978). Tests 1054 → 1281.
+B12 loop: 4 verify rounds / 5 pilot commits. Round 1 killed 4 defects
+(street lateral boring rod 1 — enshrined in the baseline; bond
+swallowed inside the SE feed at the PANEL end; L-plan rods inside a
+wing footprint unflagged; per-storey GES silent). Rounds 2-3 narrowed
+to the no-wall-path FALLBACK branch being invisible to the new scans
+(endpoint coincidence, then mid-leg coincidence at a 49mm
+perpendicular-island window). Final machinery: deterministic ±6
+bay-step strap ladder that also refuses wall-band bores, honest
+'separate in the trench' confession when undodgeable, scene-aware rod
+slide/flag, per-storey honesty labels (B13 convention). Examiner
+APPROVE r1+r2 (GR/IB device-tag bubbles + legend keys added).
+INLINE GATE (r4): the skeptic stalled 6× (API), so the merge gate ran
+inline in a detached worktree — 201-position panel sweep w/
+independent seg-seg math (worst clearance 35.95mm ≥ 24.5 floor, zero
+silent embedments), 49mm-window determinism ×3, bond self-collision
+scan, alley dodge, baseline sha-chain 3fd0a1a→bd4812f5 + recapture
+byte-stable, suite 1281 + tsc. LESSON (recorded for future inline
+probes): Member.dims are LOCAL-frame + rotation — a world-axis
+reconstruction reads z-running legs as phantom parallels; my probe
+first "found" a silent embedment that was my own math (the honest
+geometry passed once rotation was honored).
+B6 RESTARTED fresh (3rd API death with ZERO commits — the giant
+context itself was timing out). New standing rule IN EVERY PILOT
+BRIEF: COMMIT INCREMENTALLY + push per slice (a/b/c/d pattern).
+IN FLIGHT: B6 roof package (fresh pilot, worktree pilot-b6);
+B14 receptacle coverage (launched off 9ecf978, worktree pilot-b14 —
+E5 baseline reset expected; baseline-recapture conflict with B6 at
+merge is EXPECTED, standard recipe). Worktree pile pruned to the two
+live pilots. Board-note advisories from B12 (queued): gecSizeAwg flat
+2 AWG >200A (250.66 reaches 1/0 above 350 kcmil); heat-pump override
+parked at the meter drags the condenser onto the GEC grade run
+(night-4 fixture-overlap class now extends to GES); rod-to-rod GEC
+leg masks inside the slab comb on elevations (examiner note); exotic
+courtyard rod-vs-neighboring-wing (MEP-vs-structure SAT un-gated by
+design, pre-existing class).
+
 ## DAY-8 PLAN — wave structure by file ownership
 IN FLIGHT (UX, from the morning's 6 asks): feat/xray-activation-ux
 (A walls-low default, B service auto-place + button removal, C no
