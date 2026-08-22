@@ -1,5 +1,34 @@
 # Bones board — NIGHT-8 (2026-08-22) — "Performance, responsiveness. test cameras."
 
+## NIGHT-8 MERGE LEDGER (~morning) — BACKLOG COMPLETE, master e96ef30, 1531 tests
+Merged this night, in order: B14 receptacles (00d39e4, 4 rounds) →
+B6 roof package (75591f9, 2) → B9 wall bracing (6c45c8e+recapture, 2)
+→ B11 snow headers (1bd3a7d, 2) → B7 hip thrust (5d415e7, 2) →
+B10 wind uplift (298b3ef+S16 renumber, 1 — first single-round pass of
+the wave) → B8 roof closures (3616d1a ff, 2) → perf/materials
+(b883cb9, 1) → B21e waste honesty (e96ef30, 2). Tests 1332 → 1531.
+Every wave-1/wave-2 batch from the 2026-08-20 audit is now on master.
+IN FLIGHT: feat/xray-far-face (Julien's live ask: X-ray hides the
+NEAR wall face, far-face drywall stays — camera-aware per-face cull
+on the perf branch's visibility machinery).
+JULIEN PROD REPORT (answered): concrete-base gray lines through
+X-ray floor on editor.pascal.app = the pre-tri-state ghost overlay,
+fixed by the day-8 UX merge, ships with this chain.
+LOOP OBSERVATIONS: the domain-extrapolation class (B9 CS-PF height →
+B11 header terminal rule → B8 gambrel ridge) — the skeptics now
+pattern-match it across batches; two single-finding rounds ended in
+double-APPROVEs. Worktree-collision class recurred (B21e r1: examiner
+wrote into the skeptic's worktree) — briefs now demand unique paths.
+AWS SSO expiry killed 2 agents mid-flight (~08:00) — default chain
+stayed alive, both resumed with zero loss (incremental commits).
+QUEUED RESIDUALS (next cycle): plan-set legend grammar for
+strap/HDU/GR + uplift roles (anchor-bolt-dot class, 4 batches note
+it); zone-twin dedupe (S8); square-hip SAT gate; yawed-section euler
+bands; sub-130mph roof-tie wall-path label; LOD-200 paper omits
+areas-fallback rows (C5); B14 walk-removal ordinal re-base; B10
+warning stale parenthetical; hip/crown sub-3:12 ridges; concrete
+sub-1yd³ display collapse note; GPU eyeball on toggle recompile.
+
 ## NIGHT-8 PLAN (Julien's sign-off asks + backlog continuation)
 1. BACKLOG: B9 merge (final skeptic in flight) → B11 snow headers;
    B7 hip thrust (pilot building) → B8 roof closures → B10 uplift;
