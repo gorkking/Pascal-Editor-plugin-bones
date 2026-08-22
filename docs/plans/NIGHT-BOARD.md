@@ -1,3 +1,23 @@
+# CONDENSER HONESTY SET — fix/condenser-honesty (2026-08-24)
+
+## Queued: upper-storey condenser GRADE MOUNTING (the F2 truth route)
+The honesty set ships the WARNING route for hunt 4a ('condenser for this
+storey drawn at its floor elevation — grade mounting not modeled;
+verify'). The truth route — mounting the upper storey's condenser row at
+world grade via the ground level's frame — needs machinery the warning
+channel doesn't have: Member.levelId carries MEMBERS only (renderer
+buildGroups builds fixture-less foreign groups), so the condenser +
+disconnect FIXTURES would stay orphaned at facade height; and the
+pad/whip/line-set drop legs need a modeled facade riser from grade up to
+the storey's wall penetration. To build it: (1) fixture-level levelId +
+renderer/plan-set mounting parity, (2) a vertical line-set facade run
+(outside-wall riser member, RO-aware), (3) disconnect placement against
+the GROUND storey's wall face (layoutHvac only sees its own level's
+walls today — needs the ground wall slice or a compute-side remount).
+Gates to keep: hvac.condensers.test.ts override-honesty describe +
+compute.mep-honesty.test.ts F2 describe (swap the warning assertion for
+a world-grade one when the truth route lands).
+
 # DAY-9 SHIPPED TO PROD 2026-08-22 (evening)
 
 ## SHIP RECORD: private-editor #395 → 67fbe97e
