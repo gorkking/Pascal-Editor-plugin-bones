@@ -103,6 +103,9 @@ const SQFT = 1 / 0.09290304
 /** R506.2.3 vapor retarder buys +10% over the field area: strip-seam laps
  * and stemwall turn-ups (stated on the row so the estimate is auditable). */
 const VAPOR_LAP_FACTOR = 1.1
+/** R905.1.1 roof underlayment buys +10% over the deck area: 2"/4" course
+ * laps and eave/rake edge trim (stated on the row — B6). */
+const UNDERLAYMENT_LAP_FACTOR = 1.1
 /** Grout per filled 8" CMU cell (~0.3 ft³ with the core deducted). */
 const GROUT_M3_PER_CELL = 0.0085
 /** Mortar: one 80-lb Type S bag lays ~20 blocks (supplier rule of thumb). */
@@ -263,9 +266,16 @@ export function computeTakeoff(
   const push = (section: string, item: string, detail: string, quantity: number, unit: string) =>
     rows.push({ section, item, detail, quantity, unit })
 
-  const nails = new Map<NailType, number>()
-  const addNails = (type: NailType, count: number) =>
-    nails.set(type, (nails.get(type) ?? 0) + count)
+  // Nail tallies key on type + an optional VARIANT suffix: the roof deck's
+  // 8d poundage books on its OWN row (B6 — Table R602.3(1) lists roof and
+  // wall sheathing as separate schedule lines; one blended 8d row would
+  // hide which line the pounds answer to). No variant = the historic rows,
+  // byte-equal.
+  const nails = new Map<string, number>()
+  const addNails = (type: NailType, count: number, variant?: string) => {
+    const key = variant ? `${type}|${variant}` : type
+    nails.set(key, (nails.get(key) ?? 0) + count)
+  }
 
   // ---- LUMBER: pieces per (system × size × stock length) + board feet ----
   // Pressure-treated stock is a DIFFERENT SKU (ground/masonry contact — the
@@ -359,8 +369,17 @@ export function computeTakeoff(
   // purchaser summing sections ordered ~2×. The gross path survives only
   // as the LOD-200 fallback where no layers are framed (the subfloor deck
   // fallback pattern below).
-  const hasSheathingMembers = members.some((m) => m.role === 'sheathing')
-  const hasDrywallMembers = members.some((m) => m.role === 'drywall')
+  // SYSTEM filter (B6, the B4 skeptic's advisory): these gates suppress the
+  // WALL gross rows, so only WALL-framing layer members may trip them — the
+  // roof deck is role 'sheathing' too, and without the filter a roofed
+  // LOD-200-wall scene would lose its wall gross row entirely while the
+  // roof's sqft poured into the wall member tally below.
+  const hasSheathingMembers = members.some(
+    (m) => m.role === 'sheathing' && m.system === 'wall-framing',
+  )
+  const hasDrywallMembers = members.some(
+    (m) => m.role === 'drywall' && m.system === 'wall-framing',
+  )
   const wspSheets = hasSheathingMembers
     ? 0
     : Math.ceil((areas.wallSheathingM2 ?? 0) / SHEET_M2)
@@ -481,6 +500,10 @@ export function computeTakeoff(
   // different R values buy on separate rows.
   const layerTallies = new Map<string, { item: string; sqft: number; detail: string }>()
   for (const m of members) {
+    // WALL rows tally WALL layers only (B6 system filter): the roof deck
+    // and underlayment share the sheathing/wrb roles but book on their own
+    // member-derived Roof rows below — roof sqft never lands in wall rows.
+    if (m.system !== 'wall-framing') continue
     if (
       m.role !== 'drywall' &&
       m.role !== 'sheathing' &&
@@ -515,6 +538,49 @@ export function computeTakeoff(
     if (tally.item.startsWith('Sheathing')) {
       addNails('8d-common', sheetCount * fastening.connections['wallSheathing-sheet'].count)
     }
+  }
+
+  // ---- roof deck + underlayment + drip edge (LOD-400 B6) ----
+  // Member-derived, the B4 convention: booked == built, no gross fallback
+  // (an LOD-200 roof has no deck to buy yet). Deck/membrane panels carry
+  // [along, t, slope width] dims — surface area = dims[0] × dims[2].
+  const roofDeckM2 = members
+    .filter((m) => m.role === 'sheathing' && m.system === 'roof-framing')
+    .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+  if (roofDeckM2 > 0) {
+    const roofSheets = Math.ceil((roofDeckM2 * SQFT) / 32)
+    push(
+      'Roof',
+      'Roof sheathing 7/16" WSP',
+      `deck panels, from members (~${roofSheets} 4x8 sheets, R803.2)`,
+      round1(roofDeckM2 * SQFT),
+      'sqft',
+    )
+    // Fastener basis == the booked row (B4), on the roof deck's OWN 8d
+    // line — never blended into the wall-sheathing 8d row (B6 re-key).
+    addNails(
+      '8d-common',
+      roofSheets * fastening.connections['roofSheathing-sheet'].count,
+      'roof deck',
+    )
+  }
+  const underlaymentM2 = members
+    .filter((m) => m.role === 'wrb' && m.system === 'roof-framing')
+    .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
+  if (underlaymentM2 > 0) {
+    push(
+      'Roof',
+      'Roof underlayment',
+      'one layer felt/synthetic, +10% course laps (R905.1.1) — covering by finish schedule, not booked',
+      round1(underlaymentM2 * UNDERLAYMENT_LAP_FACTOR * SQFT),
+      'sqft',
+    )
+  }
+  const dripLf = members
+    .filter((m) => m.role === 'drip-edge')
+    .reduce((sum, m) => sum + toFeet(m.length), 0)
+  if (dripLf > 0) {
+    push('Roof', 'Drip edge', 'eaves + rakes (R905.2.8.5)', round1(dripLf), 'lf')
   }
 
   // Rebar: linear feet per system (steel role 'rebar' — CMU cells, bond
@@ -968,12 +1034,16 @@ export function computeTakeoff(
   }
 
   // ---- FASTENERS: nails by type, in pounds ----
-  for (const [type, count] of nails) {
+  // Variant-keyed tallies ('8d-common|roof deck') print as their own rows —
+  // the item carries the variant so the roof deck's pounds stay a separate
+  // buy line from the wall 8d row (B6).
+  for (const [key, count] of nails) {
     if (count <= 0) continue
+    const [type, variant] = key.split('|') as [NailType, string | undefined]
     const info = fastening.nails[type]
     push(
       'Fasteners',
-      `Nails ${type.replace('-common', '')} common`,
+      `Nails ${type.replace('-common', '')} common${variant ? ` (${variant})` : ''}`,
       `${info.lengthIn}" — R602.3(1) schedule, ${count} nails`,
       Math.max(0.5, round1(count / info.perLb)),
       'lbs',

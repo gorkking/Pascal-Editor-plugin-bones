@@ -29,7 +29,8 @@
     "ceilingJoist-to-plate": { "nail": "10d-common", "count": 3, "note": "toe-nail per bearing" },
     "ceilingJoist-lap": { "nail": "10d-common", "count": 3, "note": "at laps over partitions" },
     "subfloor-sheet": { "nail": "8d-common", "count": 40, "note": "6-in edges / 12-in field per 4x8 T&G sheet (ring shank preferred)" },
-    "wallSheathing-sheet": { "nail": "8d-common", "count": 44, "note": "6-in edges / 12-in field per 4x8 WSP sheet" }
+    "wallSheathing-sheet": { "nail": "8d-common", "count": 44, "note": "6-in edges / 12-in field per 4x8 WSP sheet" },
+    "roofSheathing-sheet": { "nail": "8d-common", "count": 44, "note": "6-in edges / 12-in field per 4x8 WSP roof deck sheet (R803.2.3.1)" }
   },
   "hardware": {
     "joist-hanger": { "model": "LUS-series (size to joist)", "nailsPer": 10, "nail": "10d-common" },
