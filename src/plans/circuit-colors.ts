@@ -78,6 +78,15 @@ const FAMILY: Record<string, { hint: string; hue: number }> = {
   // Hue 338 @ lightness 42 sits between GEN-6 (336 @ 63) and SA-1 (21 @ 42)
   // with a wide RGB margin (gate: circuit-colors.test.ts real-id floor).
   SD: { hint: 'smoke/CO alarms (interconnected, R314.4)', hue: 338 },
+  // Outdoor receptacle circuit (B14a, one EXT-1 per level). Without a
+  // family entry circuitColor fell back to legacy copper #b0723d —
+  // BYTE-IDENTICAL to the service-entrance cable on the same sheet
+  // (examiner E3 blocker) — and the legend hint printed raw 'ext-1'.
+  // Hue 89 @ its OWN pale stop 74 (below) was brute-forced against every
+  // REAL circuit id + the SE copper fallback: worst pair 84.9 RGB
+  // (LTG-2) — gate: circuit-colors.test.ts real-id floor incl.
+  // 'service-entrance'.
+  EXT: { hint: 'outdoor receptacles (WR GFCI, 210.52(E))', hue: 89 },
   // Grounding electrode system (B12): GES-1 = GEC, GES-2 = water-pipe
   // bond. Bare-copper green band with its OWN deep/pale stops (below) —
   // the mid-lightness walk would land in the crowded LTG/LA greens
@@ -105,6 +114,9 @@ export function circuitColor(circuit: string): string {
   const ac = prefix === 'AC'
   // GES rides deep (GES-1 GEC) / pale (GES-2 water bond) stops — see note.
   const ges = prefix === 'GES'
+  // EXT rides its own pale stop — the brute-forced 84.9-RGB config vs
+  // every real id AND the SE copper (see the FAMILY note).
+  const ext = prefix === 'EXT'
   // GEN walks 16° from 256: the old 26° walk from 285 WRAPPED into the
   // lighting band (GEN-8 at hue 107 vs LTG-6 at 114 — twin greens on
   // paper, examiner round-4); 256+16° stays inside [256, 368→8] clear
@@ -112,15 +124,17 @@ export function circuitColor(circuit: string): string {
   // (the residual 22 is the pre-existing GA-1/LTG-3 pair — full-palette
   // redesign queued).
   const hue = (family.hue + (index - 1) * (crowded ? 16 : ac ? 22 : 14)) % 360
-  const light = ges
-    ? ([26, 74][(index - 1) % 2] as number)
-    : ac
-      ? ([30, 48, 66][(index - 1) % 3] as number)
-      : crowded
-        ? ([40, 52, 63][(index - 1) % 3] as number)
-        : index % 2 === 1
-          ? 42
-          : 55
+  const light = ext
+    ? 74
+    : ges
+      ? ([26, 74][(index - 1) % 2] as number)
+      : ac
+        ? ([30, 48, 66][(index - 1) % 3] as number)
+        : crowded
+          ? ([40, 52, 63][(index - 1) % 3] as number)
+          : index % 2 === 1
+            ? 42
+            : 55
   const sat = 62
   // hsl → hex so both three.js and the SVG sheets get plain hex strings
   const h = hue / 360
