@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { classifyRoom } from '../core/wall-model'
 import type { Fixture, Member } from '../core/types'
+import { buildPlanSet } from '../plans/plan-set'
 import { buildServicePointNodes } from '../service/place'
 import { computeLevel } from './compute'
 import { FramingNode } from './schema'
@@ -304,7 +305,8 @@ describe('classifyRoom — outdoor zones', () => {
       'Balcony',
       'Lanai',
       'Jardin',
-      'Outdoor kitchen', // open air beats the kitchen pattern — never ducted
+      'Roof terrace',
+      'Outdoor kitchen', // LEADING outdoor qualifier beats the kitchen word
     ]) {
       expect(classifyRoom(name)).toBe('outdoor')
     }
@@ -314,6 +316,42 @@ describe('classifyRoom — outdoor zones', () => {
     expect(classifyRoom('Bedroom 1')).toBe('bedroom')
     expect(classifyRoom('Hall')).toBe('hallway')
     expect(classifyRoom('Living')).toBe('other')
+  })
+
+  test('material adjectives never read as terraces (skeptic round-1 harm class)', () => {
+    // /terra(c|ss|z)/ ate 'Terrazzo'/'Terracotta' — a Terrazzo bathroom
+    // silently lost its plumbing stubs, exhaust fan and wet-GFCI
+    expect(classifyRoom('Terrazzo bathroom')).toBe('bathroom')
+    expect(classifyRoom('Terracotta kitchen')).toBe('kitchen')
+    // …and WITHOUT an indoor word the anchoring itself is the only guard
+    // (the compound-precedence rule can't help a 'Terrazzo entry')
+    expect(classifyRoom('Terrazzo entry')).toBe('other')
+    expect(classifyRoom('Terracotta foyer')).toBe('other')
+  })
+
+  test('compound names: the indoor category wins unless the outdoor word LEADS', () => {
+    // 'Garden bedroom' is a bedroom — it keeps its R314 smoke alarm
+    expect(classifyRoom('Garden bedroom')).toBe('bedroom')
+    expect(classifyRoom('Patio kitchen')).toBe('kitchen')
+    expect(classifyRoom('Garden bath')).toBe('bathroom')
+    // leading qualifier flips outdoors
+    expect(classifyRoom('Outdoor kitchen')).toBe('outdoor')
+    expect(classifyRoom('Exterior hall')).toBe('outdoor')
+    // outdoor word with NO indoor category word stays outdoor — the
+    // documented conservatory class: unconditioned glass space until the
+    // user renames or re-zones it
+    expect(classifyRoom('Winter garden')).toBe('outdoor')
+    expect(classifyRoom('Garden room')).toBe('outdoor')
+  })
+
+  test('a Garden bedroom KEEPS its smoke alarms in the compose (R314 pin)', () => {
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Garden bedroom'
+    const result = computeLevel(nodes, config())
+    const alarms = result.fixtures.filter((f) => f.kind === 'smoke-alarm')
+    // in-bedroom + outside-sleeping-area proxy — identical to 'Bedroom 1'
+    expect(alarms.length).toBe(2)
+    expect(alarms.some((a) => a.label?.includes('Garden bedroom'))).toBe(true)
   })
 })
 
@@ -428,6 +466,30 @@ describe('starter template (garden-house shape) — the heat pump stands outside
     expect(hp).toBeDefined()
     const p = hp?.position as [number, number, number]
     expect(inRect([p[0], p[2]], -HOUSE_W, HOUSE_W, -HOUSE_D, HOUSE_D)).toBe(false)
+  })
+
+  test('BUILDING CHARACTERISTICS prints the CONDITIONED figure (examiner round-1)', () => {
+    // The schedules sheet printed 'Floor area 168.0 m²' (house + garden) on
+    // the same page where the condenser reads 2 tons from 96 m² conditioned.
+    const c = result.characteristics
+    expect(c).not.toBeNull()
+    expect(c?.floorAreaM2).toBeCloseTo(96, 9)
+    expect(c?.volumeM3).toBeCloseTo(96 * 2.7, 9)
+    // the basis is STATED, never silent
+    expect(
+      c?.notes.some((n) => n.includes('CONDITIONED space') && n.includes('72.0 m²')),
+    ).toBe(true)
+    // and the figure the sheet prints is the conditioned one
+    // the block bottom-anchors on the LAST schedules page — scan them all
+    const svg = buildPlanSet(result.members, result.fixtures, {
+      characteristics: c ?? undefined,
+    })
+      .filter((s) => s.title.startsWith('Schedules'))
+      .map((s) => s.svg)
+      .join('\n')
+    expect(svg).toContain('BUILDING CHARACTERISTICS')
+    expect(svg).toContain('Floor area 96.0 m²')
+    expect(svg).not.toContain('168.0 m²')
   })
 
   test('cross-feature seam guard: B14 outdoor receptacles + meter compose here too', () => {
