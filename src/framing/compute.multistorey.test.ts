@@ -1046,3 +1046,42 @@ describe('LOD-400 B18d: upper-storey girder posts bear on ground pads end-to-end
     expect(upper.members.filter((m) => m.system === 'foundation')).toHaveLength(0)
   })
 })
+
+describe('LOD-400 B7: hip thrust members ride computeLevel end-to-end', () => {
+  test('a hip-roofed storey composes ceiling joists + collar ties at 400 (non-vacuous)', () => {
+    // The E5 baseline scene has no roof segments (recapture = byte-identical
+    // on B7) — THIS compose carries the truth that the hip family's new
+    // R802.4.2/R802.4.6 members survive extraction → framing → takeoff.
+    const nodes = twoStoreyScene()
+    delete nodes.lvl1
+    delete nodes.lvlroof
+    delete nodes.roofseg
+    delete nodes.w1a
+    delete nodes.w1b
+    delete nodes.w1c
+    delete nodes.w1d
+    ;(nodes.bldg as Record<string, unknown>).children = ['lvl0']
+    nodes.roofH = {
+      id: 'roofH', type: 'roof-segment', parentId: 'lvl0', position: [4, 2.5, 2.5],
+      rotation: 0, roofType: 'hip', width: 10, depth: 12, pitch: 40, thickness: 0.2,
+    }
+    const cfg = FramingNode.parse({
+      id: 'bonesframing_b7', parentId: 'lvl0', jurisdiction: 'TX', detail: '400',
+    })
+    const result = computeLevel(nodes, cfg)
+    const cjs = result.members.filter(
+      (m) => m.system === 'roof-framing' && m.role === 'ceiling-joist',
+    )
+    const ties = result.members.filter(
+      (m) => m.system === 'roof-framing' && m.role === 'collar-tie',
+    )
+    expect(cjs.length).toBeGreaterThan(20)
+    expect(ties.length).toBeGreaterThan(0)
+    expect(cjs.every((m) => m.label?.includes('R802.4.2'))).toBe(true)
+    expect(ties.every((m) => m.label?.includes('R802.4.6'))).toBe(true)
+    // S4 free ride: the sticks land on the existing Roof lumber pcs rows
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(rows.some((r) => r.section === 'Roof' && r.item === '2x4' && r.unit === 'pcs')).toBe(true)
+    expect(rows.some((r) => r.section === 'Roof' && r.item === '2x6' && r.unit === 'pcs')).toBe(true)
+  })
+})
