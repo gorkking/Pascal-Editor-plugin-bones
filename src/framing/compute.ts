@@ -52,6 +52,7 @@ import { layoutPlumbing, placeMeterSpot } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
+import { bracingWarnings } from '../engines/wall-bracing'
 import { frameHints, frameWalls, specForWall, studSizeFor } from '../engines/wall-framing'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
@@ -589,6 +590,13 @@ function computeLevelUncached(
         `${mixed.length} mixed CMU/framed wall${mixed.length > 1 ? 's' : ''}: assembly layers follow the CMU treatment for the whole wall (v1)`,
       )
     }
+    // Wall bracing declaration (R602.10, LOD-400 B9): braced wall lines are
+    // identified from the FRAMED exterior graph and each declares CS-WSP as
+    // its method with an honest not-verified assumption flag — the required
+    // panel length/spacing is panel-schedule math (v2). CMU walls brace as
+    // reinforced masonry (cmu.ts), never CS-WSP, so they stay out of the
+    // lines. LOD 200 emits nothing (no code claims).
+    warnings.push(...bracingWarnings(framed, spec))
   }
 
   // Rooms with no flooring at all deserve a call-out regardless of level

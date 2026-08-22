@@ -128,6 +128,15 @@ export type FramingSpec = {
   seismicHoldDowns: boolean
   /** High-wind → hurricane ties at rafter/plate. */
   hurricaneTies: boolean
+  // ---- wall bracing (R602.10, LOD-400 B9) ----
+  /**
+   * Declared braced-wall METHOD. v1 ships CS-WSP only (continuous
+   * sheathing, wood structural panel — the assembly the layer engine
+   * already builds on every exterior face); the field exists so the
+   * declaration is data, not prose, and v2's panel-schedule math has a
+   * knob to key on.
+   */
+  wallBracingMethod: 'CS-WSP'
 }
 
 export const DEFAULT_SPEC: FramingSpec = {
@@ -163,6 +172,7 @@ export const DEFAULT_SPEC: FramingSpec = {
   anchorBoltEndDistance: inches(12),
   seismicHoldDowns: false,
   hurricaneTies: false,
+  wallBracingMethod: 'CS-WSP',
 }
 
 /** Pick a header size for a clear span using the spec's rules. */
