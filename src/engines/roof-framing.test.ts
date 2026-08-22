@@ -788,3 +788,63 @@ describe('LOD-400 B6a: roof deck panels per slope plane (R803.2)', () => {
     for (const m of majorDeck) expect(m.label).not.toContain('valley overlay')
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B6b: underlayment membrane 1:1 on the deck (R905.1.1)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B6b: underlayment rides every deck panel 1:1 (R905.1.1)', () => {
+  const IN = 0.0254
+  const DECK_T = (7 / 16) * IN
+  const shapes = ['gable', 'shed', 'hip', 'flat', 'gambrel', 'mansard', 'dutch'] as const
+
+  test('every shape: one membrane per deck panel, same area, one deck-thickness up the plane normal', () => {
+    for (const roofType of shapes) {
+      const members = frameRoofs([seg({ roofType, width: 10, depth: 8 })], [], DEFAULT_SPEC)
+      const deck = members.filter((m) => m.role === 'sheathing')
+      const membrane = members.filter((m) => m.role === 'wrb')
+      expect({ roofType, n: membrane.length }).toEqual({ roofType, n: deck.length })
+      expect(deck.length).toBeGreaterThan(0)
+      // deckPlane emits the pair back-to-back — pair by order
+      deck.forEach((d, i) => {
+        const u = membrane[i] as Member
+        expect(u.dims[0]).toBeCloseTo(d.dims[0], 9)
+        expect(u.dims[2]).toBeCloseTo(d.dims[2], 9)
+        // the membrane sits (deck/2 + membrane/2) further UP the deck's own
+        // normal — "mind the roof orientation": the offset follows the
+        // plane, not world Y
+        const [rx, ry, rz] = d.rotation
+        const n = new Vector3(0, 1, 0).applyEuler(new Euler(rx, ry, rz, 'XYZ'))
+        const delta = new Vector3(...u.position).sub(new Vector3(...d.position))
+        expect(delta.dot(n)).toBeCloseTo(DECK_T / 2 + 0.001, 6)
+        // the stack advances PLUMB (identical plan cover band — the
+        // in-plane slide convention): delta is vertical, Δy = Δup/cosθ,
+        // and cosθ is the deck normal's own y — orientation-derived
+        expect(delta.x).toBeCloseTo(0, 9)
+        expect(delta.z).toBeCloseTo(0, 9)
+        expect(delta.y).toBeCloseTo((DECK_T / 2 + 0.001) / n.y, 6)
+      })
+    }
+  })
+
+  test('the top membrane carries the assumption-label contract (covering stays HOST cosmetic)', () => {
+    const members = frameRoofs([seg()], [], DEFAULT_SPEC)
+    const membrane = members.filter((m) => m.role === 'wrb')
+    for (const u of membrane) {
+      expect(u.label).toContain('R905.1.1')
+      expect(u.label).toContain('covering by finish schedule — not booked')
+    }
+  })
+
+  test('LOD 200 emits no membrane; valley minors carry the overlay note on the membrane too', () => {
+    expect(
+      frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '200' }).filter((m) => m.role === 'wrb'),
+    ).toHaveLength(0)
+    const major = seg()
+    const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+    const wingMembrane = members.filter((m) => m.role === 'wrb' && m.sourceId === 'roofseg_wing')
+    expect(wingMembrane.length).toBeGreaterThan(0)
+    for (const u of wingMembrane) expect(u.label).toContain('valley overlay')
+  })
+})

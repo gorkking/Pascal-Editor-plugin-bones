@@ -205,7 +205,7 @@ export function frameRoofs(
     const minors = new Set(valleys.map((v) => v.minorId))
     if (minors.size > 0) {
       for (const m of members) {
-        if (m.role === 'sheathing' && minors.has(m.sourceId)) {
+        if ((m.role === 'sheathing' || m.role === 'wrb') && minors.has(m.sourceId)) {
           m.label = `${m.label} — valley overlay: trim to the valley line on site`
         }
       }
@@ -469,6 +469,14 @@ const deckGap = (theta: number): number => (ROOF_DECK_T / 2) * Math.sin(theta) +
 const DECK_LABEL =
   'Roof sheathing 7/16" WSP — 8d @ 6"/12" edges/field (R803.2, Table R602.3(1))'
 
+/** Underlayment membrane drawn thickness — the wall-layers WRB convention
+ * (a thin box; real felt has no structural thickness). */
+const UNDERLAYMENT_T = 0.002
+/** The TOP membrane carries the assumption-label contract: the covering
+ * itself (shingles/metal/tile) stays HOST cosmetic and is never booked. */
+const UNDERLAYMENT_LABEL =
+  'Roof underlayment — one layer felt/synthetic (R905.1.1); covering by finish schedule — not booked'
+
 /**
  * One deck panel on a slope plane. Geometry in the SEGMENT frame: the
  * plane's eave (level) direction runs along X when `alongXAxis` (downhill =
@@ -514,23 +522,40 @@ function deckPlane(
   // first (local +X → +Z, local +Z → −X), which flips the roll sign.
   const roll = alongXAxis ? side * theta : -side * theta
   const yaw = alongXAxis ? 0 : -Math.PI / 2
-  const up = rafterDepth / 2 + ROOF_DECK_T / 2
   // Normal offset + in-plane slide back to the band: vertically that is
   // up/cosθ (the dropped-gable olT/cosθ convention) with the plan center
-  // staying at zm — the panel covers [zTop, zBot] exactly.
-  const y = ym + up / cosT
+  // staying at zm — the panel covers [zTop, zBot] exactly. The membrane
+  // stacks 1:1 ON the deck, one thickness further up the normal — the
+  // wall-layers emitStack pattern (each layer advances its own thickness).
   const cross = side * zm
-  emit(
-    'sheathing',
-    undefined,
-    [len, ROOF_DECK_T, slopeW],
-    alongXAxis ? [along, y, cross] : [cross, y, along],
-    yaw,
-    0,
-    len,
-    'engineered',
-    DECK_LABEL + note,
-    roll,
+  const layer = (
+    role: Member['role'],
+    up: number,
+    t: number,
+    material: Member['material'],
+    label: string,
+  ) => {
+    const y = ym + up / cosT
+    emit(
+      role,
+      undefined,
+      [len, t, slopeW],
+      alongXAxis ? [along, y, cross] : [cross, y, along],
+      yaw,
+      0,
+      len,
+      material,
+      label,
+      roll,
+    )
+  }
+  layer('sheathing', rafterDepth / 2 + ROOF_DECK_T / 2, ROOF_DECK_T, 'engineered', DECK_LABEL + note)
+  layer(
+    'wrb',
+    rafterDepth / 2 + ROOF_DECK_T + UNDERLAYMENT_T / 2,
+    UNDERLAYMENT_T,
+    'lumber',
+    UNDERLAYMENT_LABEL + note,
   )
 }
 
