@@ -143,6 +143,14 @@ const ALLOWED: ReadonlySet<string> = new Set(
     ['hold-down', 'stemwall'],
     ['hold-down', 'stud'],
     ['hold-down', 'king-stud'],
+    // …and the CS-PF portal hold-down post (B9): the HDU body exists to
+    // CLAMP that post — same design intent as the stud/king-stud pairs.
+    ['hold-down', 'post'],
+    // The HDU standoff base bears ON the sole plate at its anchor (the
+    // foundation emits the body from the plate line up the post by design —
+    // R602.10.4.4 practice). Pre-existing on every seismic slab-on-grade
+    // wall; first composed by the B9 garage-portal scenario.
+    ['hold-down', 'bottom-plate'],
     ['hold-down', 'anchor-bolt'],
     // Rebar embeds inside concrete and grouted masonry by definition, and
     // bars LAP each other (hooked verticals into the bond-beam bar, corner
@@ -717,6 +725,65 @@ describe('interpenetration gate — structural members never share volume', () =
     // footprint. Bolt-vs-stud layout nudging is queued on the board, not
     // B5 scope; the compose must not silently widen beyond that class.
     expect(v.every((s) => s.includes('anchor-bolt') && s.includes('stud'))).toBe(true)
+  })
+
+  test('SDC-D garage portal (B9): posts + straps compose SAT-clean with framing, layers and foundation', () => {
+    // 16-ft door in a 6.4 m exterior front wall → CS-PF portal set at both
+    // narrow returns (R602.10.6.4). The doubled hold-down posts must land in
+    // CONTACT with the panel-edge studs (never overlap, grid studs yield)
+    // and the 1000-lb straps are surface hardware — flat steel on the
+    // framing face under the SAT skin, never inside a stud volume (S1).
+    const seismic = { ...spec400, seismicHoldDowns: true }
+    const garageDoor = (u: number): OpeningSlice => ({
+      id: 'garage_door',
+      kind: 'door',
+      u,
+      width: 4.83,
+      roughWidth: 4.877, // 16 ft RO
+      height: 2.13,
+      roughHeight: 2.17,
+      sillHeight: 0,
+    })
+    const walls = [
+      wall({ id: 'w_s', start: [0, 0], end: [6.4, 0], openings: [garageDoor(3.2)] }),
+      wall({ id: 'w_e', start: [6.4, 0], end: [6.4, 4] }),
+      wall({ id: 'w_n', start: [6.4, 4], end: [0, 4] }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms: RoomSlice[] = [
+      {
+        id: 'room_g',
+        name: 'Garage',
+        category: 'garage',
+        polygon: [[0, 0], [6.4, 0], [6.4, 4], [0, 4]],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.44,
+      },
+    ]
+    const framing = frameWalls(walls, seismic, undefined, { slabBearing: true })
+    expect(framing.filter((m) => m.role === 'strap')).toHaveLength(2)
+    expect(framing.filter((m) => m.role === 'post')).toHaveLength(4)
+    // walls + layers alone: strictly clean
+    const withLayers = [...framing, ...layoutWallLayers(walls, rooms, seismic, 'CA')]
+    expect(violations(withLayers)).toEqual([])
+    // + seismic foundation (HDU hold-downs at the braced wall ends): only
+    // KNOWN pre-existing residual classes may remain — none involving the
+    // portal hardware. This is the FIRST seismic foundation × walls ×
+    // layers compose, so it names the classes it inherits (all present in
+    // prod CA scenes today, none introduced by B9):
+    //  (1) anchor-bolt × stud (the S1 row's documented bolt-shank class)
+    //      and its washer sibling plate-washer × stud (the 3" washer
+    //      follows its bolt one-for-one under a grid stud's footprint);
+    //  (2) corner drywall × hold-down: a layer running to the through
+    //      wall's face crosses the neighbor's HDU body at the corner (the
+    //      tee/corner layer-vs-hardware family, queued on the board).
+    const composed = [...withLayers, ...buildFoundation(walls, [slab(rect(6.4, 4))], seismic)]
+    const v = violations(composed)
+    expect(v.filter((s) => s.includes('strap') || s.includes('Portal'))).toEqual([])
+    const boltKit = (s: string) =>
+      s.includes('stud') && (s.includes('anchor-bolt') || s.includes('plate-washer'))
+    const cornerLayer = (s: string) => s.includes('drywall') && s.includes('hold-down')
+    expect(v.filter((s) => !boltKit(s) && !cornerLayer(s))).toEqual([])
   })
 
   test('two-storey compose: every girder post bears on its pad, slab carved, SAT-clean (B18d)', () => {

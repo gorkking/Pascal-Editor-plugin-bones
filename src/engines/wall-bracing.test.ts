@@ -137,3 +137,158 @@ describe('computeLevel integration — every framed level declares its lines', (
     expect(result.warnings.filter((w) => w.startsWith('braced wall line'))).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// Jurisdiction truth (the B9 defect): SDC-D wall members ≠ INTL, and the
+// difference is EXACTLY the bracing/portal content — enumerated.
+// ---------------------------------------------------------------------------
+
+import { FramingNode } from '../framing/schema'
+import type { Member } from '../core/types'
+
+/** Garage box: 6.4×8 m shell, 16-ft door RO centered in the south wall —
+ * returns land between the CS-PF minimum (18" @ 2.5 m walls) and the 48"
+ * braced-panel minimum: portal territory on both sides. */
+const garageScene = (): Record<string, Record<string, unknown>> => {
+  const wall = (id: string, start: [number, number], end: [number, number], children: string[] = []) => ({
+    id,
+    type: 'wall',
+    parentId: 'level_1',
+    start,
+    end,
+    thickness: 0.15,
+    height: 2.5,
+    frontSide: 'exterior',
+    children,
+  })
+  return {
+    level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+    w_s: wall('w_s', [0, 0], [6.4, 0], ['garage_door']),
+    garage_door: {
+      id: 'garage_door',
+      type: 'door',
+      parentId: 'w_s',
+      position: [3.2, 0, 0],
+      width: feet(16) - inches(1.5),
+      height: 2.13,
+    },
+    w_e: wall('w_e', [6.4, 0], [6.4, 8]),
+    w_n: wall('w_n', [6.4, 8], [0, 8]),
+    w_w: wall('w_w', [0, 8], [0, 0]),
+    slab_1: {
+      id: 'slab_1',
+      type: 'slab',
+      parentId: 'level_1',
+      polygon: [
+        [0, 0],
+        [6.4, 0],
+        [6.4, 8],
+        [0, 8],
+      ],
+      holes: [],
+    },
+    z_garage: {
+      id: 'z_garage',
+      type: 'zone',
+      parentId: 'level_1',
+      name: 'Garage',
+      polygon: [
+        [0, 0],
+        [6.4, 0],
+        [6.4, 8],
+        [0, 8],
+      ],
+      boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+    },
+  }
+}
+
+const garageConfig = (jurisdiction: string): FramingNode =>
+  FramingNode.parse({
+    id: 'bonesframing_garage',
+    parentId: 'level_1',
+    jurisdiction,
+    detail: '400',
+    studSpacingIn: 16,
+    showWalls: true,
+    showFoundation: true,
+    showFloor: false,
+    showRoof: false,
+    showElectrical: false,
+    showPlumbing: false,
+    showHvac: false,
+  })
+
+describe('SDC-D ≠ INTL on the garage scene — delta enumerated (B9 jurisdiction truth)', () => {
+  // The B9 defect was STRUCTURAL wall members byte-identical CA vs INTL —
+  // assembly LAYERS already differ by jurisdiction (cladding family,
+  // climate-zone labels; pre-existing, not bracing), so the gate compares
+  // the structural set.
+  const LAYER_ROLES = new Set(['drywall', 'sheathing', 'wrb', 'cladding', 'insulation'])
+  const wallMembers = (code: string): Member[] =>
+    computeLevel(garageScene(), garageConfig(code)).members.filter(
+      (m) => m.system === 'wall-framing' && !LAYER_ROLES.has(m.role),
+    )
+  const isPortalHardware = (m: Member): boolean =>
+    (m.role === 'post' || m.role === 'strap') && (m.label ?? '').includes('R602.10.6.4')
+  /** Strip a member list down to the non-bracing content: portal members
+   * out, the R602.10 parts of composed flags out. */
+  const stripBracing = (members: Member[]): unknown[] =>
+    JSON.parse(
+      JSON.stringify(
+        members
+          .filter((m) => !isPortalHardware(m))
+          .map((m) => {
+            if (!m.flag?.includes('R602.10')) return m
+            const rest = m.flag.split(' | ').filter((p) => !p.includes('R602.10'))
+            const { flag: _dropped, ...restMember } = m
+            return rest.length > 0 ? { ...restMember, flag: rest.join(' | ') } : restMember
+          }),
+      ),
+    )
+
+  test('CA garage returns build the CS-PF portal set; INTL flags the same returns', () => {
+    const ca = wallMembers('CA')
+    const intl = wallMembers('INTL')
+    // CA: 4 doubled hold-down posts + 2 header straps, kings unflagged
+    expect(ca.filter((m) => m.role === 'post' && isPortalHardware(m))).toHaveLength(4)
+    expect(ca.filter((m) => m.role === 'strap')).toHaveLength(2)
+    // INTL: zero hardware, both garage kings carry the honest flag
+    expect(intl.some(isPortalHardware)).toBe(false)
+    const flaggedKings = intl.filter(
+      (m) => m.role === 'king-stud' && (m.flag ?? '').includes('portal frame (R602.10.6.4)'),
+    )
+    expect(flaggedKings).toHaveLength(2)
+  })
+
+  test('the CA-vs-INTL structural delta is EXACTLY the bracing/portal content', () => {
+    const ca = wallMembers('CA')
+    const intl = wallMembers('INTL')
+    expect(JSON.parse(JSON.stringify(ca))).not.toEqual(JSON.parse(JSON.stringify(intl)))
+    // Grid studs YIELD to the portal posts' keep-outs (contact allowed,
+    // overlap never) — enumerate them: every INTL stud missing from CA
+    // stands within one stud thickness of a CA portal post.
+    const postPlans = ca
+      .filter((m) => m.role === 'post' && isPortalHardware(m))
+      .map((m) => [m.position[0], m.position[2]] as const)
+    // Strictly INSIDE one stud thickness — a stud in exact face contact
+    // with a post (distance == t) survives, mirroring the keep-out's ±EPS.
+    const yieldsToPost = (m: Member): boolean =>
+      m.role === 'stud' &&
+      m.label === undefined &&
+      postPlans.some(([x, z]) => Math.hypot(m.position[0] - x, m.position[2] - z) < 0.0381 - 1e-5)
+    const yielded = intl.filter(yieldsToPost)
+    expect(yielded.length).toBeGreaterThan(0)
+    expect(yielded.length).toBeLessThanOrEqual(postPlans.length)
+    expect(stripBracing(ca)).toEqual(stripBracing(intl.filter((m) => !yieldsToPost(m))) as never)
+  })
+
+  test('never plain framing silently: every jurisdiction answers the 16-ft door', () => {
+    for (const code of ['CA', 'INTL', 'TX'] as const) {
+      const members = wallMembers(code)
+      const portal = members.filter(isPortalHardware)
+      const flagged = members.filter((m) => (m.flag ?? '').includes('R602.10'))
+      expect(portal.length > 0 || flagged.length > 0, code).toBe(true)
+    }
+  })
+})

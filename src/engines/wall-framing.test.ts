@@ -618,3 +618,153 @@ describe('LOD-400 B5: PT sole plate on slab (R317.1)', () => {
     expect(plate?.label).toContain('R317.1')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Wall bracing at garage returns — R602.10.6.4 portal frames (LOD-400 B9)
+// ---------------------------------------------------------------------------
+
+describe('garage returns (R602.10, LOD-400 B9): portal set or flag, never plain framing silently', () => {
+  const SEISMIC = { ...DEFAULT_SPEC, seismicHoldDowns: true }
+  /** Exterior garage front: 16-ft door RO centered in a `len` m wall. */
+  const garageWall = (len = 6.1, overrides: Partial<WallSlice> = {}): WallSlice =>
+    makeWall({
+      id: 'garage_front',
+      start: [0, 0],
+      end: [len, 0],
+      thickness: 0.15,
+      exterior: true,
+      openings: [
+        {
+          id: 'garage_door',
+          kind: 'door',
+          u: len / 2,
+          width: feet(16) - T,
+          height: 2.13,
+          sillHeight: 0,
+          roughWidth: feet(16),
+          roughHeight: 2.13 + T,
+        },
+      ],
+      ...overrides,
+    })
+  const portalPosts = (members: Member[]): Member[] =>
+    members.filter((m) => m.role === 'post' && (m.label ?? '').includes('R602.10.6.4'))
+  const straps = (members: Member[]): Member[] => members.filter((m) => m.role === 'strap')
+  const bracingFlags = (members: Member[]): Member[] =>
+    members.filter((m) => (m.flag ?? '').includes('R602.10'))
+
+  test('SDC D: both narrow returns get the CS-PF member set — 2 doubled posts + 1 strap each', () => {
+    const members = frameWall(garageWall(), SEISMIC)
+    expect(portalPosts(members)).toHaveLength(4)
+    expect(straps(members)).toHaveLength(2)
+    // hardware present ⇒ the kings carry no bracing flag (the set IS the answer)
+    expect(bracingFlags(members)).toHaveLength(0)
+    for (const s of straps(members)) {
+      expect(s.material).toBe('steel')
+      expect(s.label).toContain('1000 lb')
+      expect(s.advisory).toContain('not modeled')
+    }
+    for (const p of portalPosts(members)) {
+      // full-height studs, lumber — they book on the ordinary lumber rows
+      expect(p.size).toBe('2x6')
+      expect(p.dims[1]).toBeCloseTo(
+        2.5 - 3 * T, // stud height between plates
+        6,
+      )
+    }
+  })
+
+  test('posts double the panel-edge studs: contact allowed, overlap never — and grid studs yield', () => {
+    const members = frameWall(garageWall(), SEISMIC)
+    const verticals = members.filter((m) =>
+      ['stud', 'king-stud', 'trimmer', 'post'].includes(m.role),
+    )
+    for (let i = 0; i < verticals.length; i++) {
+      for (let j = i + 1; j < verticals.length; j++) {
+        const du = Math.abs(
+          (verticals[i] as Member).position[0] - (verticals[j] as Member).position[0],
+        )
+        expect(du).toBeGreaterThanOrEqual(T - 1e-9)
+      }
+    }
+  })
+
+  test('the strap is SURFACE hardware: on the framing face, thinner than the 2mm SAT skin (S1)', () => {
+    const members = frameWall(garageWall(), SEISMIC)
+    const wFit = 0.15 - inches(1)
+    for (const s of straps(members)) {
+      expect(s.dims[2]).toBeLessThan(0.002)
+      expect(Math.abs(s.position[2])).toBeGreaterThanOrEqual(wFit / 2)
+    }
+  })
+
+  test('low-seismic (INTL default): the same returns FLAG — portal cited, no invented hardware', () => {
+    const members = frameWall(garageWall(), DEFAULT_SPEC)
+    expect(portalPosts(members)).toHaveLength(0)
+    expect(straps(members)).toHaveLength(0)
+    const kings = members.filter((m) => m.role === 'king-stud')
+    expect(kings).toHaveLength(2)
+    for (const k of kings) {
+      expect(k.flag).toContain('portal frame (R602.10.6.4)')
+      expect(k.flag).toContain('48" braced-panel minimum')
+      // composed with the wall's aggregate compression flag, never replacing it
+      expect(k.flag).toContain('framing compressed')
+    }
+  })
+
+  test('return under the CS-PF minimum: explicit ⚠ not-modeled flag, never silent (SDC D)', () => {
+    const members = frameWall(garageWall(5.4), SEISMIC)
+    expect(portalPosts(members)).toHaveLength(0)
+    const kings = members.filter((m) => m.role === 'king-stud')
+    for (const k of kings) {
+      expect(k.flag).toContain('⚠ portal frame required — not modeled')
+      expect(k.flag).toContain('engineered shear wall required')
+    }
+  })
+
+  test('a return hosting a full 48" braced panel needs no portal: no hardware, no flag', () => {
+    const members = frameWall(garageWall(10), SEISMIC)
+    expect(portalPosts(members)).toHaveLength(0)
+    expect(straps(members)).toHaveLength(0)
+    expect(bracingFlags(members)).toHaveLength(0)
+  })
+
+  test('out of scope stays out: interior walls, narrow openings, LOD 200', () => {
+    const interior = frameWall(garageWall(6.1, { exterior: false }), SEISMIC)
+    expect([...portalPosts(interior), ...straps(interior), ...bracingFlags(interior)]).toEqual([])
+    const narrow = frameWall(
+      makeWall({ exterior: true, thickness: 0.15, openings: [door(2)] }),
+      SEISMIC,
+    )
+    expect([...portalPosts(narrow), ...straps(narrow), ...bracingFlags(narrow)]).toEqual([])
+    const lod200 = frameWall(garageWall(), { ...SEISMIC, detail: '200' })
+    expect([...portalPosts(lod200), ...straps(lod200), ...bracingFlags(lod200)]).toEqual([])
+  })
+
+  test('inter-opening pier: honest not-evaluated flag on the shared side (v1)', () => {
+    const w = garageWall(12, {
+      openings: [
+        {
+          id: 'garage_door',
+          kind: 'door',
+          u: 3.2,
+          width: feet(16) - T,
+          height: 2.13,
+          sillHeight: 0,
+          roughWidth: feet(16),
+          roughHeight: 2.13 + T,
+        },
+        window_(9),
+      ],
+    })
+    const members = frameWall(w, SEISMIC)
+    // left return still hosts its portal set…
+    expect(portalPosts(members)).toHaveLength(2)
+    expect(straps(members)).toHaveLength(1)
+    // …while the side toward the window says it was NOT evaluated.
+    const pierFlags = members.filter((m) =>
+      (m.flag ?? '').includes('bracing between adjacent openings not evaluated'),
+    )
+    expect(pierFlags.length).toBeGreaterThanOrEqual(1)
+  })
+})
