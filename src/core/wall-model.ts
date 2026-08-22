@@ -376,10 +376,16 @@ export function extractLevels(nodes: NodesRecord): LevelSlice[] {
   return sorted.map(({ id, level, height, baseY, buildingId }) => ({ id, level, height, baseY, buildingId }))
 }
 
+/** Sleeping-area name words — the bedroom row below, and exported so the
+ * compose can WARN when the leading-qualifier branch reclassifies a
+ * sleeping-word name outdoors ('Outdoor bedroom' → open air → NO smoke
+ * alarm placed; R314 must never drop silently — round-2 advisory). */
+export const SLEEPING_NAME_RE = /bed|chambre|master|primary/i
+
 const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
   [/kitchen|cuisine/i, 'kitchen'],
   [/bath|wc|toilet|powder|salle de bain/i, 'bathroom'],
-  [/bed|chambre|master|primary/i, 'bedroom'],
+  [SLEEPING_NAME_RE, 'bedroom'],
   [/garage/i, 'garage'],
   [/laundry|utility|buanderie/i, 'laundry'],
   [/hall|corridor|couloir/i, 'hallway'],

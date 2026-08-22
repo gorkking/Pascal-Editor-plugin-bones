@@ -22,6 +22,7 @@ import {
   extractServiceOverrides,
   extractSlabs,
   extractWalls,
+  SLEEPING_NAME_RE,
   type LevelSlice,
 } from '../core/wall-model'
 import {
@@ -487,6 +488,18 @@ function computeLevelUncached(
     )
   }
   const rooms = extractRooms(nodes, levelId)
+  // R314 never drops silently (round-2 advisory): a LEADING outdoor
+  // qualifier can reclassify a sleeping-word name outdoors ('Outdoor
+  // bedroom' → open air), which strips its smoke alarm — the only path to
+  // category 'outdoor' with a sleeping word in the name, since the
+  // compound-name precedence keeps 'Garden bedroom' indoors. Say so.
+  for (const room of rooms) {
+    if (room.category === 'outdoor' && SLEEPING_NAME_RE.test(room.name)) {
+      warnings.push(
+        `zone “${room.name}” reads as open-air — no smoke alarm placed (R314); rename if it is conditioned space`,
+      )
+    }
+  }
 
   const members: Member[] = []
   const fixtures: Fixture[] = []
