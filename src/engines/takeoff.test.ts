@@ -1576,3 +1576,128 @@ describe('LOD-400 B11: takeoff lumber rows follow the header snow band', () => {
     expect(intl.find((r) => r.item.startsWith('Engineered header'))).toBeUndefined()
   })
 })
+
+describe('LOD-400 B10: uplift hardware books member-derived (B4 convention)', () => {
+  const T10 = 0.0381
+  const laWall = (): WallSlice => {
+    const len = 6
+    return {
+      id: 'w_uplift',
+      start: [0, 0],
+      end: [len, 0],
+      length: len,
+      dir: [1, 0],
+      thickness: 0.15,
+      height: 2.5,
+      exterior: true,
+      curved: false,
+      openings: [
+        {
+          id: 'door_1',
+          kind: 'door',
+          u: 2,
+          width: 0.9,
+          height: 2.1,
+          sillHeight: 0,
+          roughWidth: 0.9 + T10,
+          roughHeight: 2.1 + T10,
+        },
+        {
+          id: 'win_1',
+          kind: 'window',
+          u: 4.4,
+          width: 1.2,
+          height: 1.2,
+          sillHeight: 0.9,
+          roughWidth: 1.2 + T10,
+          roughHeight: 1.2 + T10,
+        },
+      ],
+    }
+  }
+  const laSpec10 = { ...DEFAULT_SPEC, highWindUplift: true }
+
+  test('three dedicated rows == role counts; absent when no hardware (S4 both directions)', () => {
+    const members = frameWall(laWall(), laSpec10, { slabBearing: true })
+    const rows = computeTakeoff(members, [])
+    const count = (role: string): number => members.filter((m) => m.role === role).length
+    const row = (item: string): TakeoffRow | undefined => rows.find((r) => r.item === item)
+
+    const connectors = row('Stud-to-plate connectors')
+    expect(count('uplift-connector')).toBeGreaterThan(0)
+    expect(connectors?.quantity).toBe(count('uplift-connector'))
+    expect(connectors?.section).toBe('Wall framing')
+    expect(connectors?.unit).toBe('pcs')
+    expect(connectors?.detail).toContain('R802.11/WFCM')
+    expect(connectors?.detail).toContain('install per schedule')
+
+    const straps = row('Header uplift straps')
+    expect(count('uplift-strap')).toBe(4)
+    expect(straps?.quantity).toBe(4)
+    expect(straps?.detail).toContain('install per schedule')
+
+    const fdn = row('Foundation uplift straps')
+    expect(count('foundation-strap')).toBeGreaterThan(0)
+    expect(fdn?.quantity).toBe(count('foundation-strap'))
+    // The dedupe convention is STATED on the buy row — a purchaser sees
+    // why the count is lower than the bare 48" arithmetic would suggest.
+    expect(fdn?.detail).toContain('deduped where an R403.1.6 bolt/hold-down anchors')
+
+    // Member-derived, never invented: no hardware → no rows.
+    const intlRows = computeTakeoff(frameWall(laWall(), DEFAULT_SPEC, { slabBearing: true }), [])
+    expect(intlRows.find((r) => r.item === 'Stud-to-plate connectors')).toBeUndefined()
+    expect(intlRows.find((r) => r.item === 'Header uplift straps')).toBeUndefined()
+    expect(intlRows.find((r) => r.item === 'Foundation uplift straps')).toBeUndefined()
+  })
+
+  test('the LA takeoff delta is EXACTLY the three rows — no nail poundage, no lumber leak (B9 fastener rule)', () => {
+    const la = computeTakeoff(frameWall(laWall(), laSpec10, { slabBearing: true }), [])
+    const intl = computeTakeoff(frameWall(laWall(), DEFAULT_SPEC, { slabBearing: true }), [])
+    const UPLIFT_ITEMS = new Set([
+      'Stud-to-plate connectors',
+      'Header uplift straps',
+      'Foundation uplift straps',
+    ])
+    expect(la.filter((r) => !UPLIFT_ITEMS.has(r.item))).toEqual(intl)
+    expect(la.filter((r) => UPLIFT_ITEMS.has(r.item))).toHaveLength(3)
+  })
+
+  test("B9's portal-strap census is untouched: uplift straps never book as portal straps", () => {
+    // HI-style spec: seismic AND high-wind — both hardware families on one
+    // garage wall. Each row counts ITS role only.
+    const garage: WallSlice = {
+      id: 'garage_hi',
+      start: [0, 0],
+      end: [6.1, 0],
+      length: 6.1,
+      dir: [1, 0],
+      thickness: 0.15,
+      height: 2.5,
+      exterior: true,
+      curved: false,
+      openings: [
+        {
+          id: 'garage_door',
+          kind: 'door',
+          u: 3.05,
+          width: feet(16) - T10,
+          height: 2.13,
+          sillHeight: 0,
+          roughWidth: feet(16),
+          roughHeight: 2.13 + T10,
+        },
+      ],
+    }
+    const hi = { ...DEFAULT_SPEC, seismicHoldDowns: true, highWindUplift: true }
+    const members = frameWall(garage, hi, { slabBearing: true })
+    const rows = computeTakeoff(members, [])
+    expect(rows.find((r) => r.item === 'Portal straps 1000 lb')?.quantity).toBe(
+      members.filter((m) => m.role === 'strap').length,
+    )
+    expect(rows.find((r) => r.item === 'Header uplift straps')?.quantity).toBe(
+      members.filter((m) => m.role === 'uplift-strap').length,
+    )
+    expect(members.filter((m) => m.role === 'strap').length).toBe(2)
+    expect(members.filter((m) => m.role === 'uplift-strap').length).toBe(2)
+  })
+})

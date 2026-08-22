@@ -673,6 +673,41 @@ export function computeTakeoff(
       'pcs',
     )
   }
+  // High-wind wall uplift hardware (LOD-400 B10): three dedicated roles,
+  // counted by role like every hardware line, member-derived (B4 — booked
+  // == built). B9's convention on fasteners holds: no nail poundage is
+  // invented — the WFCM/manufacturer schedule is exactly what the members'
+  // advisories say v1 does not model.
+  const upliftConnectors = roleCount('uplift-connector')
+  const upliftStraps = roleCount('uplift-strap')
+  const foundationStraps = roleCount('foundation-strap')
+  if (upliftConnectors > 0) {
+    push(
+      'Wall framing',
+      'Stud-to-plate connectors',
+      'one per full-height stud (o.c. rhythm) — high-wind uplift path (R802.11/WFCM); install per schedule',
+      upliftConnectors,
+      'pcs',
+    )
+  }
+  if (upliftStraps > 0) {
+    push(
+      'Wall framing',
+      'Header uplift straps',
+      'header to jack at openings — high-wind uplift (WFCM); install per schedule',
+      upliftStraps,
+      'pcs',
+    )
+  }
+  if (foundationStraps > 0) {
+    push(
+      'Wall framing',
+      'Foundation uplift straps',
+      '48" o.c. along slab-bearing plates, deduped where an R403.1.6 bolt/hold-down anchors; anchorage per schedule',
+      foundationStraps,
+      'pcs',
+    )
+  }
   if (hangers > 0) {
     push('Floor', 'Joist hangers', 'LUS-series @ girders/headers', hangers, 'pcs')
     addNails('10d-common', hangers * HANGER_NAILS)
