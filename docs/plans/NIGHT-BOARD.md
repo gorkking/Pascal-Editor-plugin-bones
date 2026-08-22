@@ -1,3 +1,17 @@
+# NIGHT-8 SHIPPED TO PROD 2026-08-22 (~15:28 UTC)
+
+## SHIP RECORD: private-editor #394 → 8112e5f7
+Chain: plugin 92d84d7 (1550 tests; full LOD-400 backlog + perf +
+X-ray far-face) → editor #705 (8f162181) → private-editor #394
+(community pin + submodule), E2E ×2 green, Vercel prod SUCCESS.
+Pre-ship 3D visual: SHIP 7/7 (far-face probe 18 walls × 11 cams
+zero violations; prod concrete-ghost report verified fixed).
+CI note: 'Lint, Typecheck & Test' failed once on 3 host
+pointer-support-cap tests (registry mock leak, order-dependent —
+same tree passed 752/752 locally ×2 forced), green on rerun;
+flake class recorded for the host owners.
+Morning review: docs/morning-review-2026-08-23.txt.
+
 # Bones board — NIGHT-8 (2026-08-22) — "Performance, responsiveness. test cameras."
 
 ## NIGHT-8 MERGE LEDGER (~morning) — BACKLOG COMPLETE, master e96ef30, 1531 tests
