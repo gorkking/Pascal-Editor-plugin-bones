@@ -229,15 +229,24 @@ AND a gate — a checklist line without a test is a wish.
   wall → 44" AFF walk per layoutAlgorithmHints (first box ≤ 24" of
   each run end, ≤ 48" o.c.), clipped to the kitchen polygon, broken by
   door ROs, faucet zone kept clear; a sink-less kitchen zone WARNS per
-  kitchen instead of inventing casework; island sinks take the 2023
-  210.52(C)(2) label. A sinked kitchen with ZERO (or gutted) counter
-  coverage is NEVER wordless (round-2 F1/F2): the post-snap walk
-  audits its own 24"/48" contract — the behind-sink strip is exempt
-  counter space — and warns when a window RO breaks the pitch; the
-  sink-in-doorway, no-kitchen-face and sub-12"-strip bails each warn.
+  kitchen instead of inventing casework; island sinks raise the 2023
+  210.52(C)(2) per-kitchen WARNING. A sinked kitchen with ZERO (or
+  gutted) counter coverage is NEVER wordless (round-2 F1/F2 + round-3):
+  the post-snap walk audits its own 24"/48" contract — the behind-sink
+  strip is exempt counter space — and warns when a window RO breaks
+  the pitch; the sink-in-doorway and no-kitchen-face bails and the
+  sub-12"-strip exemption each raise a per-kitchen WARNING; and the
+  per-face walk dedupe is SPAN-AWARE (round 3 — the old global
+  wall|face key was a fourth wordless zero-box exit): a second kitchen
+  zone down the same wall, or a same-kitchen sink across a door RO,
+  walks its own uncovered span with unique continuing deviceIds, while
+  a sink inside an already-walked span stays silent because its boxes
+  exist.
   An outdoor WR box that cannot clear near-full-width glazing is
   ⚠-flagged on its label + `meta.obstructed` + a level warning
-  (round-2 F4 — the E1 never-silent contract). BASIN (210.52(D)): a
+  (round-2 F4 — the E1 never-silent contract), and the flag is
+  RECOMPUTED on user moves (round 3): a drag to a clear wall sheds the
+  ⚠ + meta, a drag into glazing gains them — never stale. BASIN (210.52(D)): a
   placed lav pins a GFCI box within 3 ft at 40" AFF on the basin-side
   face; one box may serve two basins; freestanding basins and >3 ft
   RO snap-outs warn, never silent. Counter/basin boxes never count
@@ -257,9 +266,9 @@ AND a gate — a checklist line without a test is a wish.
   Origin: LOD-400 audit BATCH 14 (2026-08-21) — zero outdoor
   receptacles ever, all kitchen/bath boxes at 15", the sink-GFCI test
   skipped behind a stale 'once sink positions are extracted' comment;
-  round-2 skeptic F1–F5 + examiner E3 blocker + GC/GB tags
-  (2026-08-22).
-  Gate: `src/engines/electrical.receptacles.test.ts` (41 tests, all
+  round-2 skeptic F1–F5 + examiner E3 blocker + GC/GB tags; round-3
+  walked-dedupe fourth bail + WR-flag staleness (2026-08-22).
+  Gate: `src/engines/electrical.receptacles.test.ts` (46 tests, all
   sub-invariants mutation-checked) + the GC/GB/WR/EXT-1 paper pins in
   `src/plans/plan-set.test.ts` + the EXT family floor (incl. the
   explicit `service-entrance` id) in

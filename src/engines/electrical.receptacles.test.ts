@@ -898,3 +898,152 @@ describe('B14 round-2 F5 — counter boxes never satisfy the 210.52(A) floor-lin
     ).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// B14 round 3 — the walked-dedupe was a FOURTH silent bail; WR ⚠ follows moves
+// ---------------------------------------------------------------------------
+
+describe('B14 round-3 — a second counter run on the SAME wall face walks its own span', () => {
+  /** 16 m shell: kitchens A (x in [0,4]) and B (x in [8,12]) both face w_s. */
+  function twoKitchenScene(): { walls: WallSlice[]; rooms: RoomSlice[] } {
+    const walls = [
+      wall('w_s', [0, 0], [16, 0]),
+      wall('w_e', [16, 0], [16, 6]),
+      wall('w_n', [16, 6], [0, 6]),
+      wall('w_w', [0, 6], [0, 0]),
+    ]
+    const kA = room(
+      'kitchen',
+      [
+        [0, 0],
+        [4, 0],
+        [4, 3],
+        [0, 3],
+      ],
+      { id: 'room_kA', name: 'Kitchen A' },
+    )
+    const kB = room(
+      'kitchen',
+      [
+        [8, 0],
+        [12, 0],
+        [12, 3],
+        [8, 3],
+      ],
+      { id: 'room_kB', name: 'Kitchen B' },
+    )
+    return { walls, rooms: [kA, kB] }
+  }
+
+  test('scenario A: two kitchen zones down one wall — BOTH get counter boxes, ids unique', () => {
+    const { walls, rooms } = twoKitchenScene()
+    const warnings: string[] = []
+    const sinks = [
+      placedItem('sink_a', 'kitchen-sink', [2, 0.5]),
+      placedItem('sink_b', 'kitchen-sink', [10, 0.5]),
+    ]
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings, sinks))
+    const inA = ctr.filter((f) => f.position[0] < 4.1)
+    const inB = ctr.filter((f) => f.position[0] > 7.9 && f.position[0] < 12.1)
+    expect(inA.length).toBeGreaterThanOrEqual(2)
+    expect(inB.length).toBeGreaterThanOrEqual(2) // the old global key gave B ZERO, wordless
+    const ids = ctr.map((f) => String(f.meta?.deviceId))
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(warnings.some((w) => w.includes('rough-opening snap'))).toBe(false)
+  })
+
+  test('scenario B: same kitchen, two sinks split by a door RO — the far run walks too', () => {
+    const { walls, rooms } = kitchenScene(8) // kitchen spans the full 8 m wall
+    ;(walls[0] as WallSlice).openings.push(door(4, 0.9, 'door_split'))
+    const sinks = [
+      placedItem('sink_1', 'kitchen-sink', [2, 0.5]),
+      placedItem('sink_2', 'kitchen-sink', [6, 0.5]),
+    ]
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, undefined, sinks))
+    const doorLo = 4 - (0.9 + RO_PAD) / 2
+    const doorHi = 4 + (0.9 + RO_PAD) / 2
+    const left = ctr.filter((f) => f.position[0] < doorLo)
+    const right = ctr.filter((f) => f.position[0] > doorHi)
+    expect(left.length).toBeGreaterThanOrEqual(2)
+    expect(right.length).toBeGreaterThanOrEqual(2) // the old key left this run EMPTY
+    const ids = ctr.map((f) => String(f.meta?.deviceId))
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  test('honest silence: a second sink INSIDE an already-walked span adds no boxes and no words', () => {
+    const { walls, rooms } = kitchenScene()
+    const one = counterBoxes(
+      layoutElectrical(walls, rooms, undefined, undefined, [
+        placedItem('sink_1', 'kitchen-sink', [2, 0.5]),
+      ]),
+    )
+    const warnings: string[] = []
+    const two = counterBoxes(
+      layoutElectrical(walls, rooms, undefined, warnings, [
+        placedItem('sink_1', 'kitchen-sink', [2, 0.5]),
+        placedItem('sink_2', 'kitchen-sink', [3, 0.5]),
+      ]),
+    )
+    expect(two.length).toBe(one.length)
+    expect(warnings.some((w) => w.includes('210.52(C)'))).toBe(false)
+  })
+})
+
+describe('B14 round-3 — the WR glazing ⚠ follows user moves (recomputed, never stale)', () => {
+  /** 8 m glazed front (w_s, near-full window) + clear back (w_n). */
+  function glazedScene(): { walls: WallSlice[]; rooms: RoomSlice[] } {
+    const walls = [
+      wall('w_s', [0, 0], [8, 0], {
+        openings: [
+          {
+            id: 'win_wall',
+            kind: 'window',
+            u: 4,
+            width: 7.8 - RO_PAD,
+            height: 1.4,
+            sillHeight: 0.2,
+            roughWidth: 7.8,
+            roughHeight: 1.4 + RO_PAD,
+          },
+        ],
+      }),
+      wall('w_e', [8, 0], [8, 6]),
+      wall('w_n', [8, 6], [0, 6]),
+      wall('w_w', [0, 6], [0, 0]),
+    ]
+    const rooms = [
+      room('other', [
+        [0, 0],
+        [8, 0],
+        [8, 6],
+        [0, 6],
+      ]),
+    ]
+    return { walls, rooms }
+  }
+
+  test('dragging the obstructed front box to a CLEAR wall sheds the flag and the label note', () => {
+    const { walls, rooms } = glazedScene()
+    const fixtures = layoutElectrical(walls, rooms)
+    const front = fixtures.find((f) => f.meta?.outdoor === 'front')
+    expect(front?.meta?.obstructed).toBe(true) // starts flagged (F4)
+    const overrides = new Map([[String(front?.meta?.deviceId), { wallId: 'w_e', wallT: 0.5 }]])
+    const applied = applyDeviceOverrides(fixtures, walls, rooms, [], overrides)
+    const moved = applied.fixtures.find((f) => f.meta?.outdoor === 'front')
+    expect(moved?.meta?.obstructed).toBeUndefined()
+    expect(moved?.label).not.toContain('⚠')
+    expect(moved?.label).toContain('WR GFCI') // the base label survives the shed
+  })
+
+  test('dragging the clear back box INTO the glazing gains the flag (bite both directions)', () => {
+    const { walls, rooms } = glazedScene()
+    const fixtures = layoutElectrical(walls, rooms)
+    const back = fixtures.find((f) => f.meta?.outdoor === 'back')
+    expect(back?.meta?.obstructed).toBeUndefined() // w_n is clear
+    const overrides = new Map([[String(back?.meta?.deviceId), { wallId: 'w_s', wallT: 0.5 }]])
+    const applied = applyDeviceOverrides(fixtures, walls, rooms, [], overrides)
+    const moved = applied.fixtures.find((f) => f.meta?.outdoor === 'back')
+    expect(moved?.meta?.obstructed).toBe(true)
+    expect(moved?.label).toContain('⚠')
+  })
+})

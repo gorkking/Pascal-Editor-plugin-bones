@@ -100,6 +100,9 @@ const BASIN_RECEPTACLE_AFF = inches(40)
 const BASIN_RADIUS = feet(3)
 /** A placed sink further than this from every wall reads as an ISLAND. */
 const ISLAND_WALL_DIST = 1.2
+/** F4 glazing flag — one string so a user MOVE can shed/re-add it
+ * (applyDeviceOverrides recomputes obstruction at the new spot, round 3). */
+const OBSTRUCTED_NOTE = ' (\u26a0 position obstructed by glazing \u2014 verify on site)'
 
 // ---- small 2D helpers ------------------------------------------------------
 
@@ -1045,7 +1048,7 @@ function placeOutdoorReceptacles(
       rotationY: face.rotationY,
       sourceId: wall.id,
       label: `Outdoor receptacle (${role}) — WR GFCI, in-use cover (NEC 210.52(E), 406.9(B))${
-        obstructed ? ' (⚠ position obstructed by glazing — verify on site)' : ''
+        obstructed ? OBSTRUCTED_NOTE : ''
       }`,
       meta: {
         deviceId: `recep-${wall.id}-out-${role}`,
@@ -1121,7 +1124,16 @@ function placeCounterReceptacles(
   if (kitchens.length === 0) return []
   const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
   const out: Fixture[] = []
-  const walked = new Set<string>() // `${wall.id}|${side}` — one walk per counter face
+  // Per counter FACE (`${wall.id}|${side}`): the u-spans already walked,
+  // the box u-positions placed there, and the running deviceId ordinal —
+  // a second walk on the same face (another kitchen zone down the wall, or
+  // a same-kitchen sink across a door RO) covers ITS OWN span with unique
+  // ids instead of silently bailing (round-3 finding: the old global
+  // `walked.has(key) → continue` was a FOURTH wordless zero-box exit).
+  const walked = new Map<
+    string,
+    { spans: { a: number; b: number }[]; us: number[]; ordinal: number }
+  >()
   for (const kitchen of kitchens) {
     const name = kitchen.name || kitchen.id
     const sinks = placed
@@ -1157,10 +1169,6 @@ function placeCounterReceptacles(
         )
         continue
       }
-      const key = `${wall.id}|${face.side}`
-      if (walked.has(key)) continue
-      walked.add(key)
-
       const y0 = COUNTER_RECEPTACLE_AFF - DEVICE_BOX_HALF_H
       const y1 = COUNTER_RECEPTACLE_AFF + DEVICE_BOX_HALF_H
       const doors = wall.openings
@@ -1197,6 +1205,13 @@ function placeCounterReceptacles(
         )
         continue
       }
+      const key = `${wall.id}|${face.side}`
+      const rec = walked.get(key) ?? { spans: [], us: [], ordinal: 0 }
+      // Skip ONLY when this sink's own span already lies inside a prior
+      // walk (its boxes exist there — honest silence). An uncovered span
+      // gets its own walk + F1 coverage audit (round 3, scenarios A/B:
+      // two kitchens on one 16 m wall; two sinks split by a door RO).
+      if (rec.spans.some((s) => a >= s.a - 0.1 && b <= s.b + 0.1)) continue
 
       // even centers: pitch <= 48" AND end overhang (= pitch/2) <= 24"
       const count = Math.max(
@@ -1215,7 +1230,9 @@ function placeCounterReceptacles(
         }
         u = snapBoxClearOfRo(wall, u, y0, y1)
         if (!usable(u)) continue // snapped off the counter run
-        if (used.some((v) => Math.abs(v - u) < 0.15)) continue // collapsed spots dedupe
+        // collapsed spots dedupe — across THIS walk and any prior walk on
+        // the same face (overlapping kitchen zones can graze boundaries)
+        if ([...rec.us, ...used].some((v) => Math.abs(v - u) < 0.15)) continue
         used.push(u)
         const [x, z] = face.plan(u)
         out.push({
@@ -1226,7 +1243,10 @@ function placeCounterReceptacles(
           sourceId: wall.id,
           label: 'Counter receptacle \u2014 44" AFF (NEC 210.52(C)(1))',
           meta: {
-            deviceId: `recep-${wall.id}-ctr-${i}-${face.side === 1 ? 'p' : 'm'}`,
+            // slot-based WITHIN a walk (single-walk scenes keep their ids
+            // byte-identical); the per-face running offset keeps a second
+            // walk's ids unique (round 3)
+            deviceId: `recep-${wall.id}-ctr-${rec.ordinal + i}-${face.side === 1 ? 'p' : 'm'}`,
             counter: true,
           },
         })
@@ -1262,6 +1282,10 @@ function placeCounterReceptacles(
           `kitchen \u201c${name}\u201d: counter receptacle spacing exceeds NEC 210.52(C)'s 24"/48" walk after rough-opening snap (window over the counter) \u2014 verify`,
         )
       }
+      rec.spans.push({ a, b })
+      rec.us.push(...used)
+      rec.ordinal += count
+      walked.set(key, rec)
     }
   }
   return out
@@ -1710,7 +1734,28 @@ export function applyDeviceOverrides(
     // stands. Switches keep their OPENING/room key: a moved switch still
     // controls the same light.
     const sourceId = !isSwitch && derivedWall && wall.id !== derivedWall.id ? wall.id : fixture.sourceId
-    out[idx] = { ...fixture, position: [x, h, z], rotationY: face.rotationY, sourceId }
+    // F4 (round 3): the WR glazing ⚠ was computed at AUTO placement and a
+    // user move never re-ran it — a box dragged to a clear wall kept the
+    // stale flag (and one dragged INTO glazing gained none). Recompute at
+    // the user's spot; flag + label note set or shed together.
+    let flagPatch: Partial<Fixture> = {}
+    if (fixture.kind === 'receptacle-wr-gfci') {
+      const boxHalf = DEVICE_BOX_W / 2
+      const nowObstructed = openingSpans(wall, y0, y1).some(
+        (s) => u + boxHalf > s.lo && u - boxHalf < s.hi,
+      )
+      const base = (fixture.label ?? '').replace(OBSTRUCTED_NOTE, '')
+      if (nowObstructed) {
+        flagPatch = {
+          label: `${base}${OBSTRUCTED_NOTE}`,
+          meta: { ...fixture.meta, obstructed: true },
+        }
+      } else if (fixture.meta?.obstructed === true) {
+        const { obstructed: _shed, ...restMeta } = fixture.meta
+        flagPatch = { label: base, meta: restMeta }
+      }
+    }
+    out[idx] = { ...fixture, ...flagPatch, position: [x, h, z], rotationY: face.rotationY, sourceId }
 
     if (!isSwitch) {
       if (derivedWall) spacingWalls.add(derivedWall.id)
