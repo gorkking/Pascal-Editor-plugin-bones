@@ -205,8 +205,13 @@ describe('over-span flag matrix', () => {
     const jacks = byRole(members, 'jack-rafter')
     expect(jacks.some((j) => j.flag?.includes('Jack rafter over prescriptive span'))).toBe(true)
     for (const j of jacks.filter((x) => x.length < 2)) expect(j.flag).toBeUndefined()
-    // default 8×6 hip (run 3) stays clean
-    expect(flagged(frameRoofs([seg({ roofType: 'hip' })], [], DEFAULT_SPEC))).toHaveLength(0)
+    // a compact hip (run 1.9, B7 ceiling joists spanning 3.8 ≤ 3.90) stays
+    // clean — the DEFAULT 8×6 hip now honestly flags its 6 m one-piece
+    // ceiling joists per R802.5.1 (they exist since B7)
+    expect(flagged(frameRoofs([seg({ roofType: 'hip', depth: 3.8 })], [], DEFAULT_SPEC))).toHaveLength(0)
+    const cjs = byRole(frameRoofs([seg({ roofType: 'hip' })], [], DEFAULT_SPEC), 'ceiling-joist')
+    expect(cjs.length).toBeGreaterThan(0)
+    for (const cj of cjs) expect(cj.flag).toContain('Ceiling joist over prescriptive span')
   })
 
   test('flat: the 10.5 m dead-level joist flags (audit class: 10.7 m flat-roof joist)', () => {
@@ -278,13 +283,15 @@ describe('over-span flag matrix', () => {
 describe('compact roofs stay byte-equal (blast radius gate)', () => {
   const compactCases: [string, Partial<RoofSegmentSlice>][] = [
     // depths chosen so BOTH rafter projection AND ceiling-joist length fit
+    // (the hip family carries R802.4.2 ceiling joists since B7 — their
+    // short-span joists must fit the R802.5.1(2) table to stay flag-free)
     ['gable', { width: 8, depth: 3.8 }],
     ['shed', { roofType: 'shed', depth: 3 }],
-    ['hip', { roofType: 'hip' }], // run 3 ≤ 3.57, no ceiling joists
+    ['hip', { roofType: 'hip', depth: 3.8 }], // run 1.9 ≤ 3.57, cj 3.8 ≤ 3.90
     ['flat', { roofType: 'flat', width: 4, depth: 3 }],
     ['gambrel', { roofType: 'gambrel', width: 8, depth: 3.8 }],
-    ['mansard', { roofType: 'mansard' }],
-    ['dutch', { roofType: 'dutch' }],
+    ['mansard', { roofType: 'mansard', depth: 3.8 }],
+    ['dutch', { roofType: 'dutch', depth: 3.8 }],
   ]
 
   for (const [name, over] of compactCases) {

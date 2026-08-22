@@ -1164,9 +1164,10 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   const cPlumbInset = (rd / 2) * tan
   const commonSlopeLen = run / cosT + roof.overhang - cRidgeFace / cosT - 2 * cPlumbInset
   const commonFaceY = ridgeY - cRidgeFace * tan
-  // Span discipline: hip commons/kings project `run` horizontally. No
-  // ceiling joists are modeled under a hip (LOD-400 audit batch 7), so
-  // struts have nothing real to bear on — flag only (S1).
+  // Span discipline: hip commons/kings project `run` horizontally. Ceiling
+  // joists exist under the ridge portion since B7, but the purlin+strut fix
+  // stays a follow-up (the gable machinery assumes full-width joist lines;
+  // the hip band stops short of the end planes) — flag only (S1).
   const commonFlag = slopeRafterFlag(spec, run, commonSlopeLen)
   const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
   for (const u of commons) {
@@ -1347,6 +1348,136 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           }
         }
       }
+    }
+  }
+
+  // ---- ceiling joists across the short span (LOD-400 B7a, R802.4.2) ----
+  // The gable machinery mirrored: joists at o.c. stations along the LONG
+  // axis span the short footprint dimension at the eave line — the rafter
+  // ties that resist the commons' thrust (the audit's hip modeled a
+  // non-structural ridge board with NO tie below it and no ceiling frame
+  // for the storey under, R802.4.2). Stations cover the ridge portion and
+  // continue into the end bands only while the END planes' rafters and the
+  // hip boxes stay clear above the joist top: past longHalf − cjEndClear a
+  // jack/king underside descends into the joist — the small triangular end
+  // ceilings ride a stub-joist follow-up (honesty over fake wood).
+  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  const shortSpan = 2 * run
+  // Clearance vs the end-plane rafter UNDERSIDES (centerline − rd/(2cosθ)
+  // vertical, descending to the end eave at tanθ); + one hip thickness for
+  // the hip boxes' plan band crossing the joist line at the corner runs.
+  const cjEndClear = tan <= EPS ? longHalf : (cjD + rd / (2 * cosT)) / tan + t + 0.002
+  const cjBandHalf = longHalf - cjEndClear
+  // Sister BESIDE any parallel rafter plane — the long-plane commons AND
+  // the side-plane jacks past the ridge ends (both run with the joists) —
+  // snapped toward the roof center (the gable besideRafter convention).
+  const cjParallel: number[] = [...commons]
+  if (spec.detail !== '200') {
+    for (let d = spec.rafterSpacing; d < run - halfT; d += spec.rafterSpacing) {
+      cjParallel.push(ridgeHalf + d, -(ridgeHalf + d))
+    }
+  }
+  const besideRafter = (u0: number, half: number): number => {
+    const clash = cjParallel.find((ru) => Math.abs(ru - u0) < halfT + half - EPS)
+    if (clash === undefined) return u0
+    return clash + (clash >= 0 ? -1 : 1) * (halfT + half)
+  }
+  // B6 end-clip vs the LONG planes at the joists' own ends: the box
+  // inscribes inside the field clip to the rafter slope so its end top
+  // corner never pokes the deck riding the rafter TOPs. Span/flag math
+  // stays on the FULL short span (the buy length); LOD 200 has no deck and
+  // keeps the schematic full box (the gable cjClip convention).
+  const cjClip =
+    spec.detail === '200' || tan <= EPS
+      ? 0
+      : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
+  const cjLen = shortSpan - 2 * cjClip
+  const cjFlag = ceilingJoistFlag(spec, shortSpan)
+  // B7 fix round (skeptic F1): the END planes' thrust story must PRINT,
+  // not live in code comments — the two end planes' rafters (jacks +
+  // kings, thrusting along the LONG axis at the end eaves) get no
+  // parallel tie and the station band deliberately stops short of the
+  // end triangles; near-square hips additionally carry no collar ties at
+  // all (no ridge portion — the parenthetical subsumes that zero-tie
+  // case). One statement class on the joists at 400 (the B6 shed-drip
+  // stated-gap convention), composed ' | ' onto whatever over-span
+  // honesty a joist already carries (the M2 flag-composition rule).
+  const cjEndGapFlag =
+    spec.detail === '400'
+      ? 'hip end planes: rafter ties parallel to the end-plane span + end-triangle stub joists not modeled (collar ties ride the ridge portion only) — verify tie detail (R802.4.2)'
+      : undefined
+  const cjComposedFlag =
+    [cjFlag, cjEndGapFlag].filter((f): f is string => f !== undefined).join(' | ') || undefined
+  // The joists CROSS the ridge line at plan center — on a near-flat hip
+  // (an inner mansard crown can compute a ~5° pitch) the ridge board's
+  // underside descends INTO the joist band; no room = no fake wood (the
+  // collar-tie low-pitch skip convention; sub-3:12 ridges are B8a's flag).
+  const [, cjRidgeD] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
+  const cjClearsRidge = ridgeHalf <= 0.05 || eaveY + cjD + 0.002 <= ridgeY - cjRidgeD
+  if (cjLen >= 0.3 && cjBandHalf > cjT && cjClearsRidge) {
+    // Two neighboring stations can snap beside the SAME jack (the layout's
+    // guaranteed end station lands next to a grid station at some pitches)
+    // — collapse any snapped pair closer than one joist thickness.
+    const snapped = layout(-cjBandHalf, cjBandHalf, spec.ceilingJoistSpacing, cjT / 2)
+      .map((u0) => besideRafter(u0, cjT / 2))
+      .sort((a, b) => a - b)
+    const cjStations: number[] = []
+    for (const u of snapped) {
+      const prev = cjStations[cjStations.length - 1]
+      if (prev !== undefined && u - prev < cjT - EPS) continue
+      cjStations.push(u)
+    }
+    for (const u of cjStations) {
+      emit(
+        'ceiling-joist',
+        spec.ceilingJoistSize,
+        [cjLen, cjD, cjT],
+        alongX ? [u, eaveY + cjD / 2, 0] : [0, eaveY + cjD / 2, u],
+        alongX ? -Math.PI / 2 : 0,
+        0,
+        cjLen,
+        'lumber',
+        `Ceiling joist ${spec.ceilingJoistSize} — rafter tie (R802.4.2)${
+          spec.detail === '400' ? ', ends clipped to the roof slope' : ''
+        }`,
+        undefined,
+        cjComposedFlag,
+      )
+    }
+  }
+
+  // ---- collar ties on the ridge portion, upper third (LOD-400 B7b) ----
+  // R802.4.6: collar ties in the upper third of the attic space, 4 ft o.c.
+  // max — every other common pair on the ridge portion (the end planes'
+  // uplift resolves through the hips/kings at the ridge ends; the tie band
+  // stays between them so nothing reaches the hip boxes). Geometry mirrors
+  // the gable: face-nailed beside the rafter toward the roof center,
+  // clamped beneath the ridge bottom at low pitches (round-14 convention).
+  if (ridgeHalf > 0.05 && tan > EPS) {
+    const [ctT, ctD] = LUMBER_CROSS_SECTIONS['2x4']
+    const [, ctRdd] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
+    const ridgeBottom = ridgeY - ctRdd
+    const collarY = Math.min(eaveY + (2 / 3) * rise, ridgeBottom - ctD / 2 - 0.005)
+    const collarLen = (2 * (ridgeY - collarY)) / tan
+    if (collarLen > 0.3 && collarY > eaveY + 0.2) {
+      commons.forEach((u, i) => {
+        if (i % 2 !== 0) return
+        const cu = u + (u >= 0 ? -1 : 1) * (halfT + ctT / 2)
+        emit(
+          'collar-tie',
+          '2x4',
+          [collarLen, ctD, ctT],
+          alongX ? [cu, collarY, 0] : [0, collarY, cu],
+          alongX ? -Math.PI / 2 : 0,
+          0,
+          collarLen,
+          'lumber',
+          'Collar tie 2x4 — upper third (R802.4.6)',
+          undefined,
+          // a TENSION member cannot field-splice — over-stock ties flag
+          spec.detail === '200' ? undefined : onePieceFlag('Collar tie', collarLen),
+        )
+      })
     }
   }
 
@@ -1852,6 +1983,91 @@ function frameSkirt(
       )
     }
   }
+
+  // ---- ceiling joists across the short span (LOD-400 B7c, R802.4.2) ----
+  // The storey below a mansard/dutch had NO ceiling frame at all while
+  // gable/gambrel model theirs (audit B7). The hip band logic mirrored:
+  // joists span the short footprint axis at the eave line, ends inscribed
+  // inside the B6 field clip to the near skirt planes (the deck rides the
+  // rafter tops), stations pulled off the far faces where the end-skirt
+  // rafters and the arris hips descend to joist-top height. The upper
+  // thrust story rides the INNER shapes — the mansard's hip crown and the
+  // dutch gablet model their own joists + R802.4.6 collar ties at the
+  // skirt top. A degenerate skirt whose planes never rise clear of the
+  // joist band emits nothing (honesty over buried wood).
+  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  const spansZ = roof.depth <= roof.width // joists run along the short axis
+  const shortSpan = Math.min(roof.width, roof.depth)
+  const longHalf = Math.max(roof.width, roof.depth) / 2
+  const spanTheta = spansZ ? sideTheta : endTheta // planes at the joist ENDS
+  const spanRun = spansZ ? sideRun : endRun
+  const bandTheta = spansZ ? endTheta : sideTheta // planes bounding the stations
+  const bandRun = spansZ ? endRun : sideRun
+  const spanTan = Math.tan(spanTheta)
+  const bandTan = Math.tan(bandTheta)
+  const cjClip =
+    spec.detail === '200'
+      ? 0
+      : spanTan <= EPS
+        ? Number.POSITIVE_INFINITY
+        : Math.max(0, (cjD - rd / (2 * Math.cos(spanTheta))) / spanTan + 0.002)
+  const cjEndClear =
+    bandTan <= EPS
+      ? Number.POSITIVE_INFINITY
+      : (cjD + rd / (2 * Math.cos(bandTheta))) / bandTan + t + 0.002
+  const cjLen = shortSpan - 2 * cjClip
+  const cjBandHalf = longHalf - cjEndClear
+  if (cjLen >= 0.3 && cjBandHalf > cjT && cjClip <= spanRun && cjEndClear <= bandRun) {
+    // sister BESIDE the parallel skirt rafters (the two faces whose rafter
+    // stations run with the joists), snapped toward the center, snapped
+    // pairs deduped — the hip/gable convention.
+    const spanStationHalf = spansZ
+      ? roof.width / 2 - endRun - t
+      : roof.depth / 2 - sideRun - t
+    const parallel = layout(-spanStationHalf, spanStationHalf, spec.rafterSpacing, halfT)
+    const besideRafter = (u0: number): number => {
+      const clash = parallel.find((ru) => Math.abs(ru - u0) < halfT + cjT / 2 - EPS)
+      if (clash === undefined) return u0
+      return clash + (clash >= 0 ? -1 : 1) * (halfT + cjT / 2)
+    }
+    const snapped = layout(-cjBandHalf, cjBandHalf, spec.ceilingJoistSpacing, cjT / 2)
+      .map(besideRafter)
+      .sort((a, b) => a - b)
+    const cjStations: number[] = []
+    for (const u of snapped) {
+      const prev = cjStations[cjStations.length - 1]
+      if (prev !== undefined && u - prev < cjT - EPS) continue
+      cjStations.push(u)
+    }
+    const cjFlag = ceilingJoistFlag(spec, shortSpan)
+    // B7 fix round (skeptic F1): the same end-plane thrust statement the
+    // hip prints — the skirt END faces' rafters get no parallel tie and
+    // the band stops short of the corner triangles. 400-only (B6 stated-
+    // gap convention), composed onto over-span honesty (M2 rule).
+    const cjEndGapFlag =
+      spec.detail === '400'
+        ? `${label.toLowerCase()} end faces: rafter ties parallel to the end-face span + end-triangle stub joists not modeled — verify tie detail (R802.4.2)`
+        : undefined
+    const cjComposedFlag =
+      [cjFlag, cjEndGapFlag].filter((f): f is string => f !== undefined).join(' | ') || undefined
+    for (const u of cjStations) {
+      emit(
+        'ceiling-joist',
+        spec.ceilingJoistSize,
+        [cjLen, cjD, cjT],
+        spansZ ? [u, eaveY + cjD / 2, 0] : [0, eaveY + cjD / 2, u],
+        spansZ ? -Math.PI / 2 : 0,
+        0,
+        cjLen,
+        'lumber',
+        `Ceiling joist ${spec.ceilingJoistSize} — rafter tie (R802.4.2)${
+          spec.detail === '400' ? ', ends clipped to the roof slope' : ''
+        }`,
+        undefined,
+        cjComposedFlag,
+      )
+    }
+  }
 }
 
 /** Inner sections reuse the primary shapes without doubling 400 trim/ties. */
@@ -1883,6 +2099,7 @@ function frameMansard(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   // upper deck: a shallow hip over the inset rectangle
   const innerRun = minSpan / 2 - inset
   if (innerRun > 0.2 && upperRise > EPS) {
+    const beforeCrown = members.length
     frameHip(
       {
         ...roof,
@@ -1895,6 +2112,16 @@ function frameMansard(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
       innerSpec(spec),
       members,
     )
+    // B7 fix round (skeptic advisory): the crown's ceiling joists bear on
+    // NOTHING modeled at their ends — the skirt-top junction, not a plate.
+    // Say so on the label (the purlin-strut assumed-bearing convention;
+    // the dutch gablet ships the same class from the gable machinery).
+    for (let i = beforeCrown; i < members.length; i++) {
+      const m = members[i] as Member
+      if (m.role === 'ceiling-joist') {
+        m.label = `${m.label} (assumed bearing at skirt top — verify)`
+      }
+    }
   }
 
   // perimeter fascia — sub + finish (LOD 400)

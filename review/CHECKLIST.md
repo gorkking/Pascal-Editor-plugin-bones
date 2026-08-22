@@ -766,6 +766,75 @@ AND a gate — a checklist line without a test is a wish.
   schedule-cell pin + TX≡INTL paper + r2 cover DESIGN-CRITERIA pins with
   the without-option byte-equality) + `src/engines/takeoff.test.ts` (B11
   SKU shift + low-snow row pins + r2 supplier-line routing).
+- **S15 Every hip-family roof carries its thrust path.** A hip, mansard or
+  dutch segment models the R802.4.2 rafter ties the gable/gambrel always
+  had: ceiling joists at `ceilingJoistSpacing` o.c. span the SHORT
+  footprint axis at the eave line — labels cite R802.4.2 at every LOD,
+  span discipline rides the S10 `ceilingJoistFlag` (R802.5.1(2)), LOD 200
+  keeps the schematic full box — and the hip's ridge portion carries 2x4
+  collar ties in the upper third on every other common pair, labeled
+  'upper third (R802.4.6)' (tension members flag past 20-ft stock, S10).
+  Mansard/dutch model the MAIN ceiling under the skirts and inherit the
+  upper thrust story from their inner shapes (hip crown joists + R802.4.6
+  ties when steep enough; the dutch gablet's gable machinery). GEOMETRY
+  DISCIPLINE: joists sister BESIDE every parallel rafter plane (commons,
+  side-plane jacks, skirt rafters — snapped toward the center, snapped
+  pairs deduped: two stations beside one jack once emitted twin joists in
+  one volume at 25°), ends inscribe inside the B6 field clip so nothing
+  pokes the deck riding the rafter tops, and the station band stops where
+  the END planes' rafter undersides / hip boxes / arris hips descend to
+  joist-top height — and that gap PRINTS (fix round F1, the B6 stated-gap
+  class): at 400 every hip/skirt ceiling joist carries the end-plane
+  statement flag ('… rafter ties parallel to the end-plane/end-face span
+  + end-triangle stub joists not modeled … verify tie detail
+  (R802.4.2)'), COMPOSED ' | ' onto whatever over-span honesty the joist
+  already carries (M2 rule — never masked), reaching the takeoff Flags
+  rows and the P4 schedules block; the hip wording's parenthetical
+  ('collar ties ride the ridge portion only') subsumes the near-square
+  zero-tie case; 300 stays quiet (the shed-drip convention). The mansard
+  CROWN's joists bear on nothing modeled at their ends — their labels
+  append '(assumed bearing at skirt top — verify)' (the purlin-strut
+  convention; the dutch gablet ships the same class from the gable
+  machinery, pre-existing). HONESTY GUARDS: a near-flat hip
+  crown whose ridge-board underside descends into the joist band emits no
+  joists (an inner mansard crown computes ~5° from the host ratios); a
+  degenerate skirt whose planes never rise clear emits no ceiling frame;
+  near-square hips (no real ridge portion) carry no collar ties — all
+  pinned. BLAST RADIUS: gable/shed/flat/gambrel/valley outputs are pinned
+  byte-equal to master 779d70e by sha256 hash across 200/300/400 + windy;
+  the E5 baseline scene has no roof segments (recapture byte-identical) —
+  the hip-roofed computeLevel compose carries the end-to-end truth. The
+  takeoff rides EXISTING rows only: joists/ties book on the Roof lumber
+  pcs rows and the fastening schedule's shipped 10d rows (S4, no invented
+  rows).
+  Origin: LOD-400 audit BATCH 7 (2026-08-20) — hip 10×12 @40° emitted 12
+  commons + 4 hips + 64 jacks + 76 hurricane ties and ZERO
+  ceiling-joist/rafter-tie/collar-tie members: a non-structural ridge
+  board with unresisted thrust and no ceiling frame for the storey below;
+  mansard/dutch shared the core gap.
+  Gates: `src/engines/roof-framing.test.ts` (B7a describe: audit-repro
+  census vs span/spacing + band bound, clip-pinned length + short-axis
+  orientation, R802.4.2/R802.5.1 label+flag pins, besideRafter
+  separation, alongX variant, LOD-200 pins, compact flag-free case, 25°
+  station-collapse repro; B7b describe: every-other-common count +
+  upper-third height + ridge-portion band + R802.4.6 pins, endpoint
+  reconstruction ON the slope planes, near-square zero pin, 20-ft
+  tension-splice flag, S4 takeoff parity; B7c describe: mansard/dutch
+  band/clip/label/flag census, inner-story + steep-crown ties +
+  flat-crown zero pin, orientation, 3° degenerate zero pin, LOD-200 pin;
+  blast-radius describe: 12 sha256 hash pins; fix-round describe:
+  end-plane statement + ' | ' composition pins, near-square subsumption,
+  skirt-face statement both shapes, Flags-row quantity == joist census,
+  300-quiet + whole-flag pins, crown assumed-bearing label + main-joist
+  exclusion) +
+  `src/engines/interpenetration.test.ts` (B7 matrix: hip audit repro /
+  25–75° sweep / wide + z-span variants / mansard 25–55 / dutch 25–70 —
+  compose SAT-clean at 400, non-vacuous joist presence) +
+  `src/framing/compute.multistorey.test.ts` (B7 describe: hip-roofed
+  storey composes joists + ties end-to-end incl. the Roof lumber rows) +
+  `src/engines/roof-framing.spans.test.ts` (compact hip-family cases
+  carry cj-legal depths; the default 8×6 hip honestly flags its 6 m
+  one-piece joists).
 
 ## M — Mechanical (HVAC)
 
