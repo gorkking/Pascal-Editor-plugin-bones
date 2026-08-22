@@ -1425,6 +1425,41 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
     }
   }
 
+  // ---- collar ties on the ridge portion, upper third (LOD-400 B7b) ----
+  // R802.4.6: collar ties in the upper third of the attic space, 4 ft o.c.
+  // max — every other common pair on the ridge portion (the end planes'
+  // uplift resolves through the hips/kings at the ridge ends; the tie band
+  // stays between them so nothing reaches the hip boxes). Geometry mirrors
+  // the gable: face-nailed beside the rafter toward the roof center,
+  // clamped beneath the ridge bottom at low pitches (round-14 convention).
+  if (ridgeHalf > 0.05 && tan > EPS) {
+    const [ctT, ctD] = LUMBER_CROSS_SECTIONS['2x4']
+    const [, ctRdd] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
+    const ridgeBottom = ridgeY - ctRdd
+    const collarY = Math.min(eaveY + (2 / 3) * rise, ridgeBottom - ctD / 2 - 0.005)
+    const collarLen = (2 * (ridgeY - collarY)) / tan
+    if (collarLen > 0.3 && collarY > eaveY + 0.2) {
+      commons.forEach((u, i) => {
+        if (i % 2 !== 0) return
+        const cu = u + (u >= 0 ? -1 : 1) * (halfT + ctT / 2)
+        emit(
+          'collar-tie',
+          '2x4',
+          [collarLen, ctD, ctT],
+          alongX ? [cu, collarY, 0] : [0, collarY, cu],
+          alongX ? -Math.PI / 2 : 0,
+          0,
+          collarLen,
+          'lumber',
+          'Collar tie 2x4 — upper third (R802.4.6)',
+          undefined,
+          // a TENSION member cannot field-splice — over-stock ties flag
+          spec.detail === '200' ? undefined : onePieceFlag('Collar tie', collarLen),
+        )
+      })
+    }
+  }
+
   // ---- deck on the four planes (B6): strip-tiled tapered planes ----
   // Long planes: trapezoid ridge (2·ridgeHalf) → eave; end planes: triangle
   // off each ridge END. Strips stay INSIDE the 45° hip lines (each band's

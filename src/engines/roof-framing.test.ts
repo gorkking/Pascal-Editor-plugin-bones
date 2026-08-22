@@ -1118,6 +1118,77 @@ describe('LOD-400 B7a: hip ceiling joists across the short span (R802.4.2)', () 
 })
 
 // ---------------------------------------------------------------------------
+// LOD-400 B7b: hip collar ties on the ridge portion (R802.4.6)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B7b: hip collar ties on the ridge portion (R802.4.6)', () => {
+  const roof = seg({ roofType: 'hip', width: 10, depth: 12 }) // ridge on Z, ridgeHalf 1
+  const theta = roof.pitch
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  const ties = byRole(members, 'collar-tie')
+  const baseY = roof.position[1] + roof.wallHeight
+  const rise = 5 * Math.tan(theta)
+
+  test('every other common pair carries a tie in the upper third, on the ridge portion only', () => {
+    // commons on the 2 m ridge portion at 24" o.c. → 5 stations → 3 ties
+    expect(ties).toHaveLength(3)
+    for (const tie of ties) {
+      expect(tie.position[1]).toBeCloseTo(baseY + (2 / 3) * rise, 4)
+      // stationed along the ridge (Z here), never past the ridge ends
+      expect(Math.abs(tie.position[2] as number)).toBeLessThanOrEqual(1)
+      // spans between the two LONG planes (along X), centered
+      expect(Math.abs(longAxis(tie).x)).toBeCloseTo(1, 5)
+      expect(tie.position[0]).toBeCloseTo(0, 6)
+      expect(tie.length).toBeCloseTo((2 * (rise / 3)) / Math.tan(theta), 4)
+      expect(tie.label).toContain('R802.4.6')
+      expect(tie.label).toContain('upper third')
+    }
+  })
+
+  test('tie endpoints lie ON the long slope planes (regression-style reconstruction)', () => {
+    const ridgeY = baseY + rise
+    for (const tie of ties) {
+      const axis = longAxis(tie)
+      const e1 = new Vector3(...tie.position).add(axis.clone().multiplyScalar(tie.length / 2))
+      const e2 = new Vector3(...tie.position).sub(axis.clone().multiplyScalar(tie.length / 2))
+      for (const e of [e1, e2]) {
+        expect(ridgeY - Math.abs(e.x) * Math.tan(theta)).toBeCloseTo(e.y, 6)
+      }
+    }
+  })
+
+  test('near-square hips (no real ridge portion) carry no collar ties', () => {
+    expect(byRole(frameRoofs([seg({ roofType: 'hip', width: 6, depth: 6 })], [], DEFAULT_SPEC), 'collar-tie')).toHaveLength(0)
+    expect(byRole(frameRoofs([seg({ roofType: 'hip', width: 6.1, depth: 6 })], [], DEFAULT_SPEC), 'collar-tie')).toHaveLength(0)
+  })
+
+  test('a tension tie past 20 ft stock flags its impossible field splice', () => {
+    const monster = frameRoofs([seg({ roofType: 'hip', width: 26, depth: 20 })], [], DEFAULT_SPEC)
+    const bigTies = byRole(monster, 'collar-tie')
+    expect(bigTies.length).toBeGreaterThan(0)
+    for (const tie of bigTies) {
+      expect(tie.flag).toContain('exceeds 20 ft one-piece stock')
+    }
+  })
+
+  test('S4: joists + ties ride the existing Roof lumber rows (no invented rows)', () => {
+    const compact = frameRoofs([seg({ roofType: 'hip', depth: 3.8 })], [], DEFAULT_SPEC)
+    const rows = computeTakeoff(compact, [])
+    // the only 2x4s on a hip are the new collar ties — the rows ARE the
+    // census (lumber books per size × stock length)
+    const tieCount = byRole(compact, 'collar-tie').length
+    expect(tieCount).toBeGreaterThan(0)
+    const sum = (item: string) =>
+      rows
+        .filter((r) => r.section === 'Roof' && r.item === item && r.unit === 'pcs')
+        .reduce((s, r) => s + r.quantity, 0)
+    expect(sum('2x4')).toBe(tieCount)
+    // ceiling joists blend into the 2x6 stick count alongside rafters/hips
+    expect(sum('2x6')).toBe(compact.filter((m) => m.size === '2x6').length)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // LOD-400 B7 blast radius: untouched shapes byte-equal to master (pinned)
 // ---------------------------------------------------------------------------
 
