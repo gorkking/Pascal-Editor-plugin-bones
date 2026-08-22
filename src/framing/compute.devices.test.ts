@@ -53,7 +53,10 @@ describe('BYTE-EQUALITY vs master (zero device nodes/overrides)', () => {
       // and the ONLY meta delta really is deviceId, on device kinds only
       for (const f of result.fixtures) {
         const isDevice =
-          f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch'
+          f.kind === 'receptacle' ||
+          f.kind === 'receptacle-gfci' ||
+          f.kind === 'receptacle-wr-gfci' ||
+          f.kind === 'switch'
         expect(typeof f.meta?.deviceId === 'string').toBe(isDevice)
       }
     })
