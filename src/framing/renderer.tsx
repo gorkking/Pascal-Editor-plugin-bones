@@ -232,11 +232,126 @@ type Bucket = {
   treatment: BucketTreatment
 }
 
+/**
+ * STABLE MATERIAL IDENTITY (night-8 perf, F1): buildGroup used to mint a
+ * fresh MeshStandardMaterial per bucket per rebuild — ~347 unique material
+ * instances per compose. Under the host's WebGPU/TSL pipeline every fresh
+ * material is a full node-graph build + shader program compile, so each
+ * X-ray/Basement toggle (and every live-drag preview tick!) paid seconds of
+ * pure JS before the first pixel. A bucket material is fully determined by
+ * (color, render variant) — cache them at module level and every rebuild
+ * reuses the SAME object, so the renderer's program/pipeline caches hit.
+ *
+ * Consequences the disposal path must honor (F3): cached materials are
+ * SHARED across live groups and across rebuilds — never dispose them on
+ * group teardown (disposing shared materials freed textures other meshes
+ * still bind: 1229 'bindTexture: attempt to use a deleted object' warnings
+ * + ~2.9MB GC-resistant heap per toggle pair in the QA round).
+ *
+ * The cache is bounded by construction: colors come from the fixed palettes
+ * above (colorOf / FIXTURE_COLORS / circuit + pipe + duct tables) × four
+ * variants — dozens of entries for the life of the module, not a leak.
+ */
+type MaterialVariant = 'solid' | 'faint' | 'ghost' | 'ghost-field'
+
+const materialCache = new Map<string, MeshStandardMaterial>()
+
+export function acquireBucketMaterial(
+  color: string,
+  variant: MaterialVariant,
+): MeshStandardMaterial {
+  const key = `${color}|${variant}`
+  let material = materialCache.get(key)
+  if (!material) {
+    switch (variant) {
+      case 'solid':
+        material = new MeshStandardMaterial({ color, roughness: 0.82 })
+        break
+      case 'faint':
+        material = new MeshStandardMaterial({
+          color,
+          roughness: 0.82,
+          transparent: true,
+          opacity: FAINT_OPACITY,
+          depthWrite: false,
+        })
+        break
+      case 'ghost-field':
+        // The slab/vapor veil: translucent AND depth-silent — a depth-writing
+        // slab hid the whole under-slab drainage run in the overlay pass.
+        material = new MeshStandardMaterial({
+          color,
+          roughness: 0.82,
+          transparent: true,
+          opacity: SLAB_FIELD_OPACITY,
+          depthWrite: false,
+        })
+        break
+      case 'ghost':
+        // Self-occlusion inside the overlay pass needs the depth write that
+        // transparent materials normally skip.
+        material = new MeshStandardMaterial({
+          color,
+          roughness: 0.82,
+          transparent: true,
+          opacity: BELOW_GHOST_OPACITY,
+          depthWrite: true,
+        })
+        break
+    }
+    materialCache.set(key, material)
+  }
+  return material
+}
+
+/** Census hook for the identity/disposal gates: cache size = the TRUE
+ * distinct-(color, variant) count — flat across rebuilds by construction. */
+export function materialCensus(): number {
+  return materialCache.size
+}
+
+/** One shared unit-box geometry for every instanced bucket ever built —
+ * module-lifetime, never disposed. The per-group box bought nothing (the
+ * instance transforms carry all shape) and its dispose/recreate churn was
+ * one more per-rebuild GPU re-upload. */
+const UNIT_BOX = new BoxGeometry(1, 1, 1)
+
 /** Main group (the node's own level) + one group per FOREIGN source level
  * (cross-level roofs). Foreign groups hold level-LOCAL geometry and get
  * mounted into that level's Object3D by the renderer so the host's
  * stacked / exploded / solo level transforms apply natively. */
 export type BuiltGroups = { group: Group; foreign: Map<string, Group> }
+
+/** bucket key → the bucket's mesh set (solid [+ overlay ghost]) for every
+ * live built group — the in-place patch path (F2) looks meshes up by key
+ * instead of rebuilding. WeakMap: dies with the group, no teardown needed. */
+const bucketIndex = new WeakMap<Group, Map<string, InstancedMesh[]>>()
+
+/** Scratch objects for matrix composition — module-level singletons (the
+ * renderer is single-threaded; buildGroup/patchGroup never re-enter). */
+const scratchMatrix = new Matrix4()
+const scratchQuaternion = new Quaternion()
+const scratchScale = new Vector3()
+const scratchTranslation = new Vector3()
+const scratchEuler = new Euler()
+
+/** Write a bucket's instance matrices into its mesh set (solid + ghost copy
+ * share indices) and flag the GPU upload. */
+function writeMatrices(bucket: Bucket, meshes: InstancedMesh[]) {
+  bucket.entries.forEach((entry, i) => {
+    scratchEuler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
+    scratchQuaternion.setFromEuler(scratchEuler)
+    scratchTranslation.set(entry.position[0], entry.position[1], entry.position[2])
+    scratchScale.set(
+      Math.max(entry.dims[0], 0.001),
+      Math.max(entry.dims[1], 0.001),
+      Math.max(entry.dims[2], 0.001),
+    )
+    scratchMatrix.compose(scratchTranslation, scratchQuaternion, scratchScale)
+    for (const mesh of meshes) mesh.setMatrixAt(i, scratchMatrix)
+  })
+  for (const mesh of meshes) mesh.instanceMatrix.needsUpdate = true
+}
 
 export function buildGroups(
   members: Member[],
@@ -297,6 +412,16 @@ export function buildGroups(
  *    keeps the strong 'ghosted' copy.
  */
 export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMode): Group {
+  return groupFromBuckets(collectBuckets(members, fixtures, mode))
+}
+
+/** Pure bucketing pass — cheap JS grouping, shared by the full build and the
+ * in-place patch path (F2). */
+function collectBuckets(
+  members: Member[],
+  fixtures: Fixture[],
+  mode: ViewMode,
+): Map<string, Bucket> {
   const buckets = new Map<string, Bucket>()
   const push = (
     key: string,
@@ -371,14 +496,12 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
       mode === 'basement' ? (below ? 'ghosted-through' : 'faint') : 'solid'
     push(`${color}|fixture|${treatment}`, color, dims, fixture.position, [0, fixture.rotationY, 0], undefined, treatment)
   }
+  return buckets
+}
 
+function groupFromBuckets(buckets: Map<string, Bucket>): Group {
   const group = new Group()
-  const unitBox = new BoxGeometry(1, 1, 1)
-  const matrix = new Matrix4()
-  const quaternion = new Quaternion()
-  const scale = new Vector3()
-  const translation = new Vector3()
-  const euler = new Euler()
+  const index = new Map<string, InstancedMesh[]>()
 
   // 'ghosted' buckets (basement mode's below-floor stratum) = TWO passes
   // (round-11 regression: overlay-only members painted over a TREE standing
@@ -409,21 +532,18 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
   // but nothing disappears.
   const OVERLAY_LAYER = 1
 
-  for (const bucket of buckets.values()) {
+  for (const [key, bucket] of buckets) {
     // Normal depth-tested draws, so members occlude each other correctly —
     // the round-2 user-reported artifacts (footing over nearer studs, far
     // stud tops reading through the top plate) came from bypassing the
     // depth test. 'faint' buckets (basement's above-floor shell) skip the
     // depth WRITE so the barely-visible shell never occludes the solid
-    // below-floor content behind it.
+    // below-floor content behind it. Materials come from the module cache
+    // (F1) — same (color, variant) → the SAME object every rebuild.
     const faint = bucket.treatment === 'faint'
     const solid = new InstancedMesh(
-      unitBox,
-      new MeshStandardMaterial({
-        color: bucket.color,
-        roughness: 0.82,
-        ...(faint ? { transparent: true, opacity: FAINT_OPACITY, depthWrite: false } : {}),
-      }),
+      UNIT_BOX,
+      acquireBucketMaterial(bucket.color, faint ? 'faint' : 'solid'),
       bucket.entries.length,
     )
     if (bucket.face) solid.userData.face = bucket.face
@@ -434,41 +554,25 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
       bucket.treatment === 'ghosted-field' ||
       bucket.treatment === 'ghosted-through'
     ) {
+      // The slab/vapor veil stays clearly concrete but translucent and
+      // depth-SILENT — a depth-writing slab hid the whole under-slab
+      // drainage run in the overlay pass (QA round 3, 51-basement-34-sw.png
+      // — pipes only peeked out at the edges); the runs draw after it
+      // (renderOrder) and composite through. Structure and the buried
+      // network keep the strong depth-writing copy (self-occlusion inside
+      // the overlay pass needs the depth write transparent materials skip).
       const field = bucket.treatment === 'ghosted-field'
-      const ghostMaterial = new MeshStandardMaterial({
-        color: bucket.color,
-        roughness: 0.82,
-        transparent: true,
-        // The slab/vapor veil stays clearly concrete but translucent; the
-        // structure and the buried network keep the strong copy.
-        opacity: field ? SLAB_FIELD_OPACITY : BELOW_GHOST_OPACITY,
-      })
-      // Self-occlusion inside the overlay pass needs the depth write that
-      // transparent materials normally skip — EXCEPT the plane fields: a
-      // depth-writing slab hid the whole under-slab drainage run in the
-      // overlay pass (QA round 3, 51-basement-34-sw.png — pipes only
-      // peeked out at the edges). The field writes no depth; the runs
-      // draw after it (renderOrder) and composite through.
-      ghostMaterial.depthWrite = !field
-      const ghost = new InstancedMesh(unitBox, ghostMaterial, bucket.entries.length)
+      const ghost = new InstancedMesh(
+        UNIT_BOX,
+        acquireBucketMaterial(bucket.color, field ? 'ghost-field' : 'ghost'),
+        bucket.entries.length,
+      )
       ghost.layers.set(OVERLAY_LAYER)
       if (bucket.treatment === 'ghosted-through') ghost.renderOrder = THROUGH_RENDER_ORDER
       meshes.push(ghost)
     }
-    bucket.entries.forEach((entry, i) => {
-      euler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
-      quaternion.setFromEuler(euler)
-      translation.set(entry.position[0], entry.position[1], entry.position[2])
-      scale.set(
-        Math.max(entry.dims[0], 0.001),
-        Math.max(entry.dims[1], 0.001),
-        Math.max(entry.dims[2], 0.001),
-      )
-      matrix.compose(translation, quaternion, scale)
-      for (const mesh of meshes) mesh.setMatrixAt(i, matrix)
-    })
+    writeMatrices(bucket, meshes)
     for (const mesh of meshes) {
-      mesh.instanceMatrix.needsUpdate = true
       mesh.castShadow = mesh === solid && !faint
       mesh.receiveShadow = mesh === solid && !faint
       mesh.frustumCulled = false
@@ -482,8 +586,77 @@ export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMod
       mesh.raycast = () => {}
       group.add(mesh)
     }
+    index.set(key, meshes)
   }
+  bucketIndex.set(group, index)
   return group
+}
+
+/**
+ * The cheap common path (night-8 perf, F2): during a move-tool drag the
+ * bucket STRUCTURE barely changes — the same walls keep the same color
+ * buckets with the same member counts; only positions/dims move. When the
+ * fresh bucketing matches the group's existing meshes key-for-key and
+ * count-for-count, rewrite the instance matrices in place and keep every
+ * mesh (and its cached material, and the React tree) untouched — the
+ * preview tick costs matrix math, not group + material + program rebuilds.
+ * Any structural change (stud added, bucket appeared, wall rotated → face
+ * key moved) returns false and the caller does a full rebuild.
+ */
+export function patchGroup(
+  group: Group,
+  members: Member[],
+  fixtures: Fixture[],
+  mode: ViewMode,
+): boolean {
+  const index = bucketIndex.get(group)
+  if (!index) return false
+  const buckets = collectBuckets(members, fixtures, mode)
+  if (buckets.size !== index.size) return false
+  for (const [key, bucket] of buckets) {
+    const meshes = index.get(key)
+    if (!meshes || meshes[0]?.count !== bucket.entries.length) return false
+  }
+  for (const [key, bucket] of buckets) {
+    const meshes = index.get(key)
+    if (meshes) writeMatrices(bucket, meshes)
+  }
+  return true
+}
+
+/**
+ * Group-set level patch: split members by mount level exactly like
+ * buildGroups, then patch the main + every foreign group in place. False on
+ * ANY mismatch (level set changed, stratum tag flipped, bucket structure
+ * moved) — the caller rebuilds; a partially patched group is then discarded
+ * wholesale, so there is no torn state to unwind.
+ */
+export function patchGroups(
+  built: BuiltGroups,
+  members: Member[],
+  fixtures: Fixture[],
+  mode: ViewMode,
+): boolean {
+  const own: Member[] = []
+  const byLevel = new Map<string, Member[]>()
+  for (const m of members) {
+    const mount = m.levelId ?? m.mountLevelId
+    if (mount) {
+      const list = byLevel.get(mount) ?? []
+      list.push(m)
+      byLevel.set(mount, list)
+    } else own.push(m)
+  }
+  if (byLevel.size !== built.foreign.size) return false
+  for (const levelId of byLevel.keys()) if (!built.foreign.has(levelId)) return false
+  if (!patchGroup(built.group, own, fixtures, mode)) return false
+  for (const [levelId, list] of byLevel) {
+    const g = built.foreign.get(levelId)
+    if (!g) return false
+    if (g.userData.strataAbove !== list.some((m) => m.strataAbove === true)) return false
+    if (!patchGroup(g, list, [], mode)) return false
+  }
+  return true
 }
 
 /** Exploded-view stratum for a foreign roof group (day board A): drop the
@@ -509,16 +682,17 @@ export function explodedRoofOffset(
 }
 
 function disposeGroup(group: Group) {
-  // All meshes share one unit-box geometry — dispose each UNIQUE geometry
-  // exactly once.
-  const geometries = new Set<BoxGeometry>()
+  // mesh.dispose() releases the per-mesh GPU state (instance-matrix
+  // buffers) via the renderer's dispose listener — that is ALL a teardown
+  // may free. Materials are module-cache SHARED across live groups (F1)
+  // and the unit-box geometry is a module singleton: disposing either here
+  // freed resources other meshes still bind (F3: 1229 'bindTexture:
+  // attempt to use a deleted object' warnings + ~2.9MB retained heap per
+  // X-ray toggle pair) and forced the very shader recompiles the cache
+  // exists to prevent.
   for (const child of group.children) {
-    const mesh = child as InstancedMesh
-    mesh.dispose?.()
-    ;(mesh.material as MeshStandardMaterial | undefined)?.dispose?.()
-    if (mesh.geometry) geometries.add(mesh.geometry as BoxGeometry)
+    ;(child as InstancedMesh).dispose?.()
   }
-  for (const geometry of geometries) geometry.dispose()
 }
 
 export const FramingRenderer = ({ node }: { node: FramingNode }) => {
@@ -651,13 +825,23 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // OFF / X-RAY / BASEMENT — one field drives every treatment below
   // (legacy seeThrough nodes resolve through effectiveViewMode).
   const mode = effectiveViewMode(node)
-  const built = useMemo(
-    () => buildGroups(active.members, active.fixtures, mode),
+  // In-place fast path (night-8 perf, F2): when the fresh compute keeps the
+  // bucket structure (the common case for every live-drag preview tick and
+  // most single-member commits), patch the existing groups' instance
+  // matrices and return the SAME BuiltGroups reference — no mesh/material
+  // construction, no dispose, no React commit on the <primitive>. Structure
+  // changed → full rebuild; the [built] effect below disposes the old one.
+  const builtRef = useRef<BuiltGroups | null>(null)
+  const built = useMemo(() => {
+    const prev = builtRef.current
+    if (prev && patchGroups(prev, active.members, active.fixtures, mode)) return prev
+    const next = buildGroups(active.members, active.fixtures, mode)
+    builtRef.current = next
+    return next
     // `active` (NOT `result`): during a drag only the override store moves,
     // so a committed-only dep froze the scene graph — the whole feature was
     // visually inert (verify night-6 blocker).
-    [active, mode],
-  )
+  }, [active, mode])
   const group = built.group
   useEffect(() => {
     return () => {
