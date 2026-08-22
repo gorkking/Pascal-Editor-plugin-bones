@@ -52,6 +52,7 @@ import { layoutPlumbing, placeMeterSpot } from '../engines/plumbing'
 import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
+import { bracingWarnings, crossReferenceHoldDowns } from '../engines/wall-bracing'
 import { frameHints, frameWalls, specForWall, studSizeFor } from '../engines/wall-framing'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
@@ -568,7 +569,17 @@ function computeLevelUncached(
     // storeys bear on framed floors and keep untreated plates. Mixed CMU
     // walls are untouched — their framed zone bears on the PT seam sill,
     // which already books PT (cmu.ts).
-    members.push(...frameWalls(framed, spec, engineering, { slabBearing: isGroundLevel }))
+    // B9 round 2: the CS-PF portal minimum widens to 24" under a SECOND
+    // storey (Figure R602.10.6.4 first-of-two-storeys) — plumb the REAL
+    // storey context instead of assuming: a slabbed level above this one
+    // in the same building is a storey; an attic/roof level (no slabs)
+    // is not.
+    const levelAbove = levels[levelIndex + 1]
+    const storeyAbove =
+      levelAbove !== undefined && extractSlabs(nodes, levelAbove.id).length > 0
+    members.push(
+      ...frameWalls(framed, spec, engineering, { slabBearing: isGroundLevel, storeyAbove }),
+    )
     // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
     // face, jurisdiction-defaulted cladding + climate labels. The renderer's
     // dollhouse cut hides the camera-facing stacks. Probe slabs (widened to
@@ -589,6 +600,13 @@ function computeLevelUncached(
         `${mixed.length} mixed CMU/framed wall${mixed.length > 1 ? 's' : ''}: assembly layers follow the CMU treatment for the whole wall (v1)`,
       )
     }
+    // Wall bracing declaration (R602.10, LOD-400 B9): braced wall lines are
+    // identified from the FRAMED exterior graph and each declares CS-WSP as
+    // its method with an honest not-verified assumption flag — the required
+    // panel length/spacing is panel-schedule math (v2). CMU walls brace as
+    // reinforced masonry (cmu.ts), never CS-WSP, so they stay out of the
+    // lines. LOD 200 emits nothing (no code claims).
+    warnings.push(...bracingWarnings(framed, spec))
   }
 
   // Rooms with no flooring at all deserve a call-out regardless of level
@@ -760,6 +778,11 @@ function computeLevelUncached(
       }
     }
     members.push(...buildFoundation(activeWalls, slabs, spec, { cmu: cmuAnchorage, girderPosts }))
+    // B9c: tie the foundation's SDC-D hold-downs to the wall framing above
+    // them, both directions (a hold-down with no post above / a portal post
+    // with no hold-down below gets flagged). Only when BOTH systems are in
+    // this result — a toggled-off system is not missing hardware.
+    if (config.showWalls) crossReferenceHoldDowns(members)
   }
 
   // bones:service nodes on this level are AUTHORITATIVE — the engines route

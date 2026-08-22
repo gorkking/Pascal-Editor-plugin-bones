@@ -21,7 +21,12 @@
 import { LUMBER_CROSS_SECTIONS, type LumberSize } from '../lumber'
 import { DEFAULT_SPEC, type FramingSpec, headerFor } from '../core/spec'
 import type { Member, OpeningSlice, WallSlice } from '../core/types'
-import { feet, formatIn, inches } from '../core/units'
+import { feet, formatFtIn, formatIn, inches } from '../core/units'
+import {
+  BRACED_PANEL_MIN_LENGTH,
+  PORTAL_OPENING_MIN_SPAN,
+  portalMinPanelWidth,
+} from './wall-bracing'
 
 const EPS = 1e-6
 /** RO width beyond which each side gets a second trimmer (jack). Exported so
@@ -32,6 +37,10 @@ export const DOUBLE_TRIMMER_SPAN = feet(6)
 export const FIRE_BLOCK_HEIGHT = feet(10)
 /** Stock plate length — splices called out past this (min 24" lap, R602.3.2). */
 const PLATE_STOCK = feet(20)
+/** CS-PF portal strap: flat ~18ga steel, surface-mounted on the framing
+ * face — thinner than the 2 mm SAT skin so it never registers as an
+ * interpenetration against the studs it laps (checklist S1). */
+const PORTAL_STRAP_THICKNESS = 0.0012
 
 type WallFrame = {
   wall: WallSlice
@@ -129,6 +138,15 @@ export type FrameHints = {
    * audit B5).
    */
   slabBearing?: boolean
+  /**
+   * A slabbed storey exists ABOVE this wall's level: the CS-PF portal
+   * panel minimum widens to 24" (Figure R602.10.6.4, first-of-two-storeys
+   * column — B9 round 2). Plumbed from compute's level list via
+   * `FrameWallsOptions.storeyAbove`; ABSENT (standalone callers — tests,
+   * the mixed-wall framed zone) means UNKNOWN → single-storey assumed and
+   * the portal strap's advisory says so. `false` is a KNOWN single storey.
+   */
+  storeyAbove?: boolean
 }
 
 type Emit = (
@@ -260,17 +278,31 @@ export function frameWall(
   type KeepOut = { min: number; max: number }
   const keepOuts: KeepOut[] = []
 
-  for (const opening of wall.openings) {
+  // Frame geometry of every opening, resolved BEFORE the emission loop: the
+  // bracing pass (R602.10, LOD-400 B9) must know whether the segment between
+  // an opening and the run end contains ANOTHER opening — that segment is an
+  // inter-opening pier, not a return. Same math as before, computed once.
+  const openingFrames = wall.openings.flatMap((opening) => {
     const ro = Math.min(opening.roughWidth, runLen - 4 * t)
-    if (ro <= 0) continue
+    if (ro <= 0) return []
     // Openings past 6 ft bear on DOUBLE trimmers (jack studs) per side —
     // header reactions grow with span (R602.7.5 jack stud requirements).
-    const trimmersPerSide = ro > DOUBLE_TRIMMER_SPAN ? 2 : 1
+    const trimmersPerSide: 1 | 2 = ro > DOUBLE_TRIMMER_SPAN ? 2 : 1
     const frameSide = trimmersPerSide * t
     const u = Math.min(
       Math.max(opening.u, u0 + ro / 2 + frameSide + t),
       u1 - ro / 2 - frameSide - t,
     )
+    return [{ opening, ro, trimmersPerSide, frameSide, u }]
+  })
+  // Portal hold-down posts already placed on this wall (cross-opening
+  // conflict awareness) — see the bracing block below.
+  const portalPostUs: number[] = []
+  const clampedExtraStudUs = (hints.extraStuds ?? []).map((e) =>
+    Math.min(Math.max(e.u, u0 + halfT), u1 - halfT),
+  )
+
+  for (const { opening, ro, trimmersPerSide, frameSide, u } of openingFrames) {
     // The drawn opening doesn't fit where it was placed — the frame slid it
     // to clear the wall end / corner. Surface that instead of silently
     // moving the RO (round-10).
@@ -332,6 +364,107 @@ export function frameWall(
       engineered ? 'engineered' : undefined,
     )
 
+    // ---- wall bracing at the returns (R602.10, LOD-400 B9 v1) ----
+    // A wide opening (clear span ≥ 6 ft — where R602.10.6.4's CS-PF
+    // header-span range starts) whose RETURN to the run end is shorter than
+    // the 48" braced-panel minimum (Table R602.10.5, WSP baseline) is
+    // portal-frame territory. SDC D+ (spec.seismicHoldDowns) builds the
+    // CS-PF member set when the return can host it (≥ the Table R602.10.5
+    // CS-PF minimum: 16"/18"/20" by wall height, snapped up); anything the
+    // geometry can't host — or a low-seismic jurisdiction where v1 doesn't
+    // model the hardware — gets an explicit flag on the king stud. NEVER
+    // plain kings+trimmers silently.
+    type ReturnBracing = { kingFlag?: string; portal?: { postUs: number[] } }
+    const bracingOf = (side: -1 | 1): ReturnBracing => {
+      if (spec.detail === '200' || !wall.exterior || ro < PORTAL_OPENING_MIN_SPAN) return {}
+      const kingU = u + side * (ro / 2 + frameSide + halfT)
+      const edge = u + side * (ro / 2 + frameSide + t) // outer king face
+      const panelMin = side === -1 ? u0 : edge
+      const panelMax = side === -1 ? edge : u1
+      const panel = panelMax - panelMin
+      // Another opening inside the interval → inter-opening pier, not a
+      // return. v1 doesn't evaluate piers — say so instead of guessing.
+      const pier = openingFrames.some((f) => {
+        if (f.opening.id === opening.id) return false
+        const fMin = f.u - f.ro / 2 - f.frameSide - t
+        const fMax = f.u + f.ro / 2 + f.frameSide + t
+        return fMax > panelMin + EPS && fMin < panelMax - EPS
+      })
+      if (pier) {
+        return {
+          kingFlag: `wall ${wall.id}: bracing between adjacent openings not evaluated (v1) — verify R602.10 braced panel beside the ${formatIn(ro)} opening`,
+        }
+      }
+      if (panel >= BRACED_PANEL_MIN_LENGTH) return {} // a full braced panel fits
+      if (!spec.seismicHoldDowns) {
+        // Low-seismic v1: honest flag, no invented hardware — R602.10 still
+        // applies everywhere, but only SDC D+ models the portal set.
+        return {
+          kingFlag:
+            `wall ${wall.id}: narrow ${formatIn(panel)} return beside ${formatIn(ro)} opening — under the 48" ` +
+            `braced-panel minimum (Table R602.10.5); portal frame (R602.10.6.4) or engineered ` +
+            `bracing required — not modeled`,
+        }
+      }
+      // CS-PF DOMAIN (skeptic round 1): the portal method ends at 10-ft wall
+      // height — Table R602.10.5's column stops at 20" @ 10 ft and Figure
+      // R602.10.6.4 caps the frame there. A taller SDC-D wall gets the
+      // engineered flag, never extrapolated hardware (an unflagged portal
+      // set outside the table is an implicit compliance claim).
+      const minBase = portalMinPanelWidth(H)
+      if (minBase === null) {
+        return {
+          kingFlag:
+            `wall ${wall.id}: ⚠ portal frame required — not modeled: ${formatFtIn(H)} wall exceeds ` +
+            `the 10 ft CS-PF maximum height (Figure R602.10.6.4) — engineered shear wall required`,
+        }
+      }
+      // Figure R602.10.6.4, first-of-two-storeys column: under a SECOND
+      // storey the portal panel minimum widens to 24". compute plumbs the
+      // real storey context (FrameHints.storeyAbove); an ABSENT hint is a
+      // standalone caller — single-storey ASSUMED, stated on the strap
+      // advisory below.
+      const minW = hints.storeyAbove === true ? Math.max(minBase, inches(24)) : minBase
+      if (panel < minW) {
+        return {
+          kingFlag:
+            `wall ${wall.id}: ⚠ portal frame required — not modeled: ${formatIn(panel)} return beside ` +
+            `${formatIn(ro)} opening is under the ${formatIn(minW)} CS-PF minimum ` +
+            `(Table R602.10.5${hints.storeyAbove === true ? ' — 24" under a second storey, Figure R602.10.6.4' : ''}) — engineered shear wall required`,
+        }
+      }
+      // CS-PF portal set fits: hold-down end posts DOUBLE the existing panel
+      // edge studs — one new full-height post beside the king stud, one
+      // beside the run-end stud. Posts dodge California-corner backing studs
+      // and other portal posts by sliding one thickness toward the panel
+      // interior; a return too congested to host them flags instead.
+      const resolvePost = (start: number, dir: -1 | 1): number | null => {
+        let p = start
+        for (let tries = 0; tries < 4; tries++) {
+          const clash = [...clampedExtraStudUs, ...portalPostUs].some(
+            (o) => Math.abs(o - p) < 2 * halfT - EPS,
+          )
+          if (!clash && p > panelMin + halfT - EPS && p < panelMax - halfT + EPS) return p
+          p += dir * t
+        }
+        return null
+      }
+      const besideKing = resolvePost(kingU + side * t, side)
+      const endStudU = side === -1 ? u0 + halfT : u1 - halfT
+      const besideEnd = resolvePost(endStudU - side * t, -side as -1 | 1)
+      if (besideKing === null || besideEnd === null || Math.abs(besideKing - besideEnd) < t) {
+        return {
+          kingFlag: `wall ${wall.id}: ⚠ portal frame required — not modeled: ${formatIn(panel)} return too congested for CS-PF hold-down posts (R602.10.6.4) — verify detail`,
+        }
+      }
+      portalPostUs.push(besideKing, besideEnd)
+      return { portal: { postUs: [besideKing, besideEnd] } }
+    }
+    const bracing: Record<'-1' | '1', ReturnBracing> = {
+      '-1': bracingOf(-1),
+      '1': bracingOf(1),
+    }
+
     // Trimmers (jack studs): floor plate → header bottom, tight to the RO.
     const trimmerHeight = roTop - studBottom
     const trimmerDims: [number, number, number] = [t, trimmerHeight, wFit]
@@ -349,8 +482,11 @@ export function frameWall(
       }
     }
 
-    // King studs: full height, outside the trimmer pack.
+    // King studs: full height, outside the trimmer pack. A king at a
+    // bracing-flagged return CARRIES that flag (composed with the wall's
+    // aggregate compression flag — a flag silently dropped is a lie, P4).
     for (const side of [-1, 1] as const) {
+      const kingFlag = bracing[String(side) as '-1' | '1'].kingFlag
       emit(
         'king-stud',
         studSize,
@@ -358,7 +494,67 @@ export function frameWall(
         u + side * (ro / 2 + frameSide + halfT),
         studBottom + studHeight / 2,
         studHeight,
+        undefined,
+        kingFlag !== undefined && compressionFlag !== undefined
+          ? `${kingFlag} | ${compressionFlag}`
+          : kingFlag,
       )
+    }
+
+    // Portal member set (CS-PF, R602.10.6.4) where the analysis above fits
+    // one: hold-down end posts as doubled studs + the 1000-lb header-to-jack
+    // strap at the panel's opening edge. The strap is SURFACE hardware —
+    // ~1.2 mm flat steel against the framing face (under the 2 mm SAT skin,
+    // never inside a stud volume); its label carries the cite, its advisory
+    // says what v1 does not model.
+    for (const side of [-1, 1] as const) {
+      const portal = bracing[String(side) as '-1' | '1'].portal
+      if (!portal) continue
+      for (const pu of portal.postUs) {
+        emit(
+          'post',
+          studSize,
+          studDims,
+          pu,
+          studBottom + studHeight / 2,
+          studHeight,
+          'Portal hold-down post (doubled stud) — CS-PF (R602.10.6.4)',
+        )
+        // Grid studs yield to the posts (contact allowed, overlap never).
+        keepOuts.push({ min: pu - t + EPS, max: pu + t - EPS })
+      }
+      const kingU = u + side * (ro / 2 + frameSide + halfT)
+      const strapBottom = Math.max(studBottom, roTop - inches(12))
+      const strapTop = Math.min(studTop, roTop + Math.max(headerDepth, inches(3)))
+      const strapLen = strapTop - strapBottom
+      if (strapLen > inches(6)) {
+        members.push({
+          system: 'wall-framing',
+          role: 'strap',
+          dims: [inches(1.25), strapLen, PORTAL_STRAP_THICKNESS],
+          length: strapLen,
+          position: place(
+            kingU,
+            (strapBottom + strapTop) / 2,
+            -(wFit / 2 + PORTAL_STRAP_THICKNESS / 2),
+          ),
+          rotation: [0, yaw, 0],
+          material: 'steel',
+          sourceId: wall.id,
+          label: 'Portal strap 1000 lb — header to jack (CS-PF, R602.10.6.4)',
+          // Symbolic surface hardware (examiner round 1): the box mounts on
+          // the −v framing face regardless of which side is exterior and
+          // laps the king at the face plane — placement is schematic, the
+          // figure's nail schedule governs the install.
+          advisory:
+            'CS-PF v1 — surface strap, symbolic: install per the Figure R602.10.6.4 nail schedule; ' +
+            'panel sheathing nailing and header continuation to the wall end not modeled' +
+            (hints.storeyAbove === undefined
+              ? '; single-storey assumed (24" min panel under a second storey)'
+              : '') +
+            '; verify portal detail',
+        })
+      }
     }
 
     // Cripples above the header, continuing the common-stud rhythm.
@@ -702,6 +898,10 @@ export function frameHints(
 export type FrameWallsOptions = {
   /** Walls bear on a concrete slab (ground level) — see FrameHints.slabBearing. */
   slabBearing?: boolean
+  /** A slabbed storey exists above this level — see FrameHints.storeyAbove
+   * (CS-PF 24" first-of-two-storeys minimum, Figure R602.10.6.4). Leave
+   * undefined when unknown: single-storey is then ASSUMED and stated. */
+  storeyAbove?: boolean
 }
 
 /**
@@ -722,6 +922,12 @@ export function frameWalls(
   opts?: FrameWallsOptions,
 ): Member[] {
   const hints = frameHints(walls, spec, overrides)
+  // Level context folds into every wall's hints; nothing set = hints pass
+  // through untouched (byte-equal default path).
+  const level: Partial<FrameHints> = {}
+  if (opts?.slabBearing) level.slabBearing = true
+  if (opts?.storeyAbove !== undefined) level.storeyAbove = opts.storeyAbove
+  const hasLevelContext = Object.keys(level).length > 0
   const members: Member[] = []
   for (const wall of walls) {
     const h = hints.get(wall.id) ?? {}
@@ -729,7 +935,7 @@ export function frameWalls(
       ...frameWall(
         wall,
         specForWall(spec, overrides?.get(wall.id)),
-        opts?.slabBearing ? { ...h, slabBearing: true } : h,
+        hasLevelContext ? { ...h, ...level } : h,
       ),
     )
   }

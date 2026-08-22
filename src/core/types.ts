@@ -76,6 +76,10 @@ export type MemberRole =
   // fabrication (LOD 350/400)
   | 'rebar'
   | 'hanger'
+  /** Flat steel tension strap — the CS-PF portal frame's 1000-lb
+   * header-to-jack strap (R602.10.6.4, LOD-400 B9). Surface-mounted:
+   * ~1.2 mm thick against the framing face, under the 2 mm SAT skin. */
+  | 'strap'
   | 'plate-washer'
   | 'jack-rafter'
   | 'outlooker'
