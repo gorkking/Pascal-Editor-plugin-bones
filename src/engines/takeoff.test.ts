@@ -65,24 +65,26 @@ const find = (rows: TakeoffRow[], item: string, detail?: string): TakeoffRow | u
 describe('lumber stock rounding', () => {
   test('2.5 m stud (8.2 ft) rounds UP to 10 ft stock, not 8', () => {
     const rows = computeTakeoff([lumber('2x4', 2.5)], [])
-    expect(find(rows, '2x4', '10 ft stock')).toEqual({
+    // B21e: the quantity stays the exact member-derived count; the stated
+    // +5% cull/damage order figure prints in the detail, never the column.
+    expect(find(rows, '2x4', '10 ft stock — +5% waste ≈ 2 pcs')).toEqual({
       section: 'Wall framing',
       item: '2x4',
-      detail: '10 ft stock',
+      detail: '10 ft stock — +5% waste ≈ 2 pcs',
       quantity: 1,
       unit: 'pcs',
     })
-    expect(find(rows, '2x4', '8 ft stock')).toBeUndefined()
+    expect(rows.some((r) => r.item === '2x4' && r.detail.startsWith('8 ft stock'))).toBe(false)
   })
 
   test('an exactly-8-ft cut buys 8 ft stock (no float creep to 10)', () => {
     const rows = computeTakeoff([lumber('2x4', feet(8))], [])
-    expect(find(rows, '2x4', '8 ft stock')?.quantity).toBe(1)
+    expect(find(rows, '2x4', '8 ft stock — +5% waste ≈ 2 pcs')?.quantity).toBe(1)
   })
 
   test('an exactly-20-ft cut buys one 20 ft stick, no splice', () => {
     const rows = computeTakeoff([lumber('2x12', feet(20))], [])
-    expect(find(rows, '2x12', '20 ft stock')?.quantity).toBe(1)
+    expect(find(rows, '2x12', '20 ft stock — +5% waste ≈ 2 pcs')?.quantity).toBe(1)
     expect(rows.some((r) => r.detail.includes('splice'))).toBe(false)
   })
 
@@ -130,8 +132,8 @@ describe('lumber stock rounding', () => {
       ],
       [],
     )
-    expect(find(rows, '2x4', '8 ft stock')?.quantity).toBe(3)
-    expect(find(rows, '2x4', '14 ft stock')?.quantity).toBe(2)
+    expect(find(rows, '2x4', '8 ft stock — +5% waste ≈ 4 pcs')?.quantity).toBe(3)
+    expect(find(rows, '2x4', '14 ft stock — +5% waste ≈ 3 pcs')?.quantity).toBe(2)
   })
 
   test('every stock boundary rounds up correctly', () => {
@@ -144,7 +146,7 @@ describe('lumber stock rounding', () => {
     ]
     for (const [len, expected] of cuts) {
       const rows = computeTakeoff([lumber('2x6', len)], [])
-      expect(find(rows, '2x6', expected)?.quantity).toBe(1)
+      expect(find(rows, '2x6', `${expected} — +5% waste ≈ 2 pcs`)?.quantity).toBe(1)
     }
   })
 })
@@ -208,7 +210,11 @@ describe('lumber row ordering', () => {
     const rows = computeTakeoff([lumber('2x4', 2.5), lumber('2x4', 2.3)], []).filter(
       (r) => r.item === '2x4',
     )
-    expect(rows.map((r) => r.detail)).toEqual(['8 ft stock', '10 ft stock', 'board feet'])
+    expect(rows.map((r) => r.detail)).toEqual([
+      '8 ft stock — +5% waste ≈ 2 pcs',
+      '10 ft stock — +5% waste ≈ 2 pcs',
+      'board feet',
+    ])
   })
 
   test('pressure-treated mudsills count as lumber ON THEIR OWN PT row; steel and concrete never do', () => {
@@ -221,8 +227,10 @@ describe('lumber row ordering', () => {
       [],
     )
     // PT is a different SKU — never blended into the untreated count.
-    expect(find(rows, '2x6 PT', '8 ft stock (pressure-treated)')?.quantity).toBe(1)
-    expect(find(rows, '2x6', '8 ft stock')).toBeUndefined()
+    expect(
+      find(rows, '2x6 PT', '8 ft stock (pressure-treated) — +5% waste ≈ 2 pcs')?.quantity,
+    ).toBe(1)
+    expect(rows.some((r) => r.item === '2x6' && r.detail.startsWith('8 ft stock'))).toBe(false)
     // exactly one lumber size section (one board-feet row)
     expect(rows.filter((r) => r.detail === 'board feet')).toHaveLength(1)
   })
@@ -235,8 +243,10 @@ describe('lumber row ordering', () => {
       ],
       [],
     )
-    expect(find(rows, '2x6', '8 ft stock')?.quantity).toBe(1)
-    expect(find(rows, '2x6 PT', '8 ft stock (pressure-treated)')?.quantity).toBe(1)
+    expect(find(rows, '2x6', '8 ft stock — +5% waste ≈ 2 pcs')?.quantity).toBe(1)
+    expect(
+      find(rows, '2x6 PT', '8 ft stock (pressure-treated) — +5% waste ≈ 2 pcs')?.quantity,
+    ).toBe(1)
     const items = rows.filter((r) => r.detail.startsWith('8 ft stock')).map((r) => r.item)
     expect(items).toEqual(['2x6', '2x6 PT'])
     expect(rows.filter((r) => r.detail === 'board feet')).toHaveLength(2)
@@ -256,17 +266,20 @@ describe('concrete', () => {
   test('sums member volumes and converts m³ → yd³ at 1.30795, 1 decimal', () => {
     // two footing runs of exactly 1 m³ each → 2 m³ = 2.6159 yd³ → 2.6
     const rows = computeTakeoff([concrete([2, 0.5, 1]), concrete([2, 0.5, 1])], [])
+    // B21e: net pour in the quantity column, stated +5% order figure in the
+    // detail — CEILED to the 0.1 yd³ ready-mix batch (r1 F1): 2 m³ =
+    // 2.6159 yd³ → 2.6 net; × 1.05 = 2.7467 → 2.8 order, never 2.7.
     expect(find(rows, 'Concrete')).toEqual({
       section: 'Foundation',
       item: 'Concrete',
-      detail: 'footings',
+      detail: 'footings — +5% waste ≈ 2.8 yd³',
       quantity: 2.6,
       unit: 'yd³',
     })
   })
 
   test('foundation pours split by ELEMENT: footing / stemwall / slab field', () => {
-    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1)'
+    const SLAB_DETAIL = 'slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ 0.3 yd³'
     const rows = computeTakeoff(
       [
         concrete([2, 0.5, 1]), // footing, 1 m³
@@ -275,10 +288,12 @@ describe('concrete', () => {
       ],
       [],
     )
-    expect(find(rows, 'Concrete', 'footings')?.quantity).toBeCloseTo(1.3, 5)
-    expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBeCloseTo(0.5, 5)
+    expect(find(rows, 'Concrete', 'footings — +5% waste ≈ 1.4 yd³')?.quantity).toBeCloseTo(1.3, 5)
+    // stemwall 0.5232 yd³ net → ×1.05 = 0.5493 → batch-ceil 0.6 (round1
+    // would have printed 0.5 == net, a factor adding zero — r1 F1)
+    expect(find(rows, 'Concrete', 'stemwalls — +5% waste ≈ 0.6 yd³')?.quantity).toBeCloseTo(0.5, 5)
     expect(find(rows, 'Concrete', SLAB_DETAIL)?.quantity).toBeCloseTo(0.2, 5)
-    for (const detail of ['footings', 'stemwalls', SLAB_DETAIL]) {
+    for (const detail of ['footings — +5% waste ≈ 1.4 yd³', 'stemwalls — +5% waste ≈ 0.6 yd³', SLAB_DETAIL]) {
       expect(find(rows, 'Concrete', detail)?.section).toBe('Foundation')
     }
   })
@@ -299,8 +314,8 @@ describe('concrete', () => {
       ],
       [],
     )
-    expect(find(rows, 'Concrete', 'footings')?.section).toBe('Foundation')
-    const lintelRow = find(rows, 'Concrete', 'lintels/beams')
+    expect(find(rows, 'Concrete', 'footings — +5% waste ≈ 1.4 yd³')?.section).toBe('Foundation')
+    const lintelRow = find(rows, 'Concrete', 'lintels/beams — +5% waste ≈ 0.1 yd³')
     expect(lintelRow?.section).toBe('Wall framing')
     expect(lintelRow?.quantity).toBe(0.1) // 0.0433 m³ floors at the 0.1 yd³ batch
   })
@@ -358,10 +373,17 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
       .filter((m) => m.role === 'slab')
       .reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
     expect(vol).toBeGreaterThan(0)
-    const row = find(rows, 'Concrete', 'slab field (3-1/2" slab-on-grade, R506.1)')
+    const row = rows.find(
+      (r) => r.item === 'Concrete' && r.detail.startsWith('slab field (3-1/2" slab-on-grade, R506.1)'),
+    )
     expect(row?.section).toBe('Foundation')
     expect(row?.unit).toBe('yd³')
+    // quantity = NET member volume; the stated +5% order figure prints in
+    // the detail and derives from the same volume (B21e net preservation)
     expect(row?.quantity).toBe(Math.max(0.1, round1(vol * M3_TO_YD3)))
+    expect(row?.detail).toBe(
+      `slab field (3-1/2" slab-on-grade, R506.1) — +5% waste ≈ ${Math.ceil(vol * M3_TO_YD3 * 1.05 * 10) / 10} yd³`,
+    )
   })
 
   test('the vapor-retarder sqft row = member plan area × the STATED +10% lap factor', () => {
@@ -387,10 +409,12 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
       members
         .filter((m) => m.role === role)
         .reduce((sum, m) => sum + m.dims[0] * m.dims[1] * m.dims[2], 0)
-    expect(find(rows, 'Concrete', 'footings')?.quantity).toBe(
+    const pourRow = (prefix: string) =>
+      rows.find((r) => r.item === 'Concrete' && r.detail.startsWith(prefix))
+    expect(pourRow('footings')?.quantity).toBe(
       Math.max(0.1, round1(volOf('footing') * M3_TO_YD3)),
     )
-    expect(find(rows, 'Concrete', 'stemwalls')?.quantity).toBe(
+    expect(pourRow('stemwalls')?.quantity).toBe(
       Math.max(0.1, round1(volOf('stemwall') * M3_TO_YD3)),
     )
   })
@@ -401,7 +425,9 @@ describe('LOD-400 B17: slab field + vapor retarder booked == built (S4 parity)',
       [],
     )
     expect(find(bare, 'Vapor retarder 6-mil poly')).toBeUndefined()
-    expect(find(bare, 'Concrete', 'slab field (3-1/2" slab-on-grade, R506.1)')).toBeUndefined()
+    expect(
+      bare.some((r) => r.item === 'Concrete' && r.detail.startsWith('slab field')),
+    ).toBe(false)
   })
 })
 
@@ -561,7 +587,7 @@ describe('takeoffCsv', () => {
     const rows = computeTakeoff([lumber('2x4', 2.5)], [fixture('receptacle')])
     const lines = takeoffCsv(rows).split('\n')
     expect(lines[0]).toBe('section,item,detail,quantity,unit')
-    expect(lines).toContain('Wall framing,2x4,10 ft stock,1,pcs')
+    expect(lines).toContain('Wall framing,2x4,10 ft stock — +5% waste ≈ 2 pcs,1,pcs')
     expect(lines).toContain('Electrical,Receptacles,NEC 210.52 spacing,1,pcs')
   })
 })
@@ -1357,7 +1383,7 @@ describe('LOD-400 B6d: roof package rows are member-derived; wall gates filter b
     })
     const rows = computeTakeoff([alien], [], { drywallM2: 90 })
     const grossSheets = Math.ceil(90 / (32 / 10.7639))
-    expect(find(rows, 'Drywall 1/2"', '4x8 sheets, both faces of interior walls')?.quantity).toBe(
+    expect(find(rows, 'Drywall 1/2"', '4x8 sheets, gross — both faces of interior walls')?.quantity).toBe(
       grossSheets,
     )
   })
@@ -1699,5 +1725,198 @@ describe('LOD-400 B10: uplift hardware books member-derived (B4 convention)', ()
     )
     expect(members.filter((m) => m.role === 'strap').length).toBe(2)
     expect(members.filter((m) => m.role === 'uplift-strap').length).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B21e: stated waste factors + sheet-goods convention honesty
+// ---------------------------------------------------------------------------
+
+import { baselineConfig, baselineScene } from '../framing/baseline-scene'
+import { frameRoofs as frameRoofsB21e, type RoofSegmentSlice as RoofSegB21e } from './roof-framing'
+
+describe('LOD-400 B21e: stated waste factors never inflate member truth (S4)', () => {
+  const SQ = 1 / 0.09290304
+  const SHEET = 32 / 10.7639
+  const round1 = (n: number) => Math.round(n * 10) / 10
+  /** The ONE stated-waste shape every factor row prints: '+X% waste ≈ …'. */
+  const WASTE_RE = /\+\d+% waste ≈ /
+  const wallLayer = (role: 'sheathing' | 'drywall' | 'wrb', len = 3, h = 2.4): Member =>
+    mem({ role, size: undefined, dims: [len, h, 0.011], length: len, material: 'lumber' })
+  const deckPanel = (len = 1.2192, w = 2.4384): Member =>
+    mem({
+      system: 'floor-framing',
+      role: 'subfloor',
+      size: undefined,
+      dims: [len, 0.018, w],
+      length: len,
+      material: 'engineered',
+    })
+  const roofSeg = (overrides: Partial<RoofSegB21e> = {}): RoofSegB21e => ({
+    id: 'roofseg_b21e',
+    roofType: 'gable',
+    position: [0, 2.5, 0],
+    yaw: 0,
+    width: 8,
+    depth: 6,
+    pitch: (40 * Math.PI) / 180,
+    overhang: 0.3,
+    wallHeight: 0.5,
+    ...overrides,
+  })
+
+  test('wall sheathing + drywall member rows: NET quantity column, +10% buy DERIVED from the same net', () => {
+    const members = [
+      ...Array.from({ length: 10 }, () => wallLayer('sheathing')),
+      ...Array.from({ length: 14 }, () => wallLayer('drywall')),
+    ]
+    const rows = computeTakeoff(members, [], { wallSheathingM2: 100, drywallM2: 140 })
+    for (const [item, count] of [
+      ['Sheathing 7/16" WSP', 10],
+      ['Drywall 1/2"', 14],
+    ] as const) {
+      const netSqft = count * 3 * 2.4 * SQ
+      const row = find(rows, item)
+      // NET preservation: the quantity column IS the member arithmetic —
+      // a waste factor that silently scaled it would fail here
+      expect(row?.quantity).toBe(round1(netSqft))
+      // …and the stated order figure derives from the SAME net: net sheet
+      // count visible, buy = ceil(net × 1.10 / 32) — pinned at +10%
+      expect(row?.detail).toContain(`(~${Math.ceil(netSqft / 32)} 4x8 sheets)`)
+      expect(row?.detail).toContain(`+10% waste ≈ ${Math.ceil((netSqft * 1.1) / 32)} sheets`)
+    }
+  })
+
+  test('lumber pcs rows: exact member stick count in the column, +5% order figure in the detail', () => {
+    // 43 sticks: ceil(43 × 1.05) = 46 — the ceil really bites (45.15 → 46)
+    const rows = computeTakeoff(
+      Array.from({ length: 43 }, () => lumber('2x4', 2.3)),
+      [],
+    )
+    const row = find(rows, '2x4', '8 ft stock — +5% waste ≈ 46 pcs')
+    expect(row?.quantity).toBe(43)
+    // the bd-ft row stays factor-free: the drop is already bought via
+    // stock rounding, and the pcs rows carry the class's stated allowance
+    expect(find(rows, '2x4', 'board feet')?.detail).toBe('board feet')
+  })
+
+  test('concrete pour rows: NET yd³ in the column, +5% order CEILED to the 0.1 yd³ batch', () => {
+    const vol = 2 * 0.5 * 1 // 1 m³
+    const rows = computeTakeoff([concrete([2, 0.5, 1])], [])
+    const row = find(rows, 'Concrete')
+    expect(row?.quantity).toBe(Math.max(0.1, round1(vol * 1.30795)))
+    expect(row?.detail).toBe(
+      `footings — +5% waste ≈ ${Math.ceil(vol * 1.30795 * 1.05 * 10) / 10} yd³`,
+    )
+    // the batch-ceil is NON-VACUOUS (r1 F1): a pour whose +5% would round
+    // back DOWN onto the net figure must still buy the next 0.1 batch —
+    // 0.7354 m³ = 0.9619 yd³ → net prints 1.0; ×1.05 = 1.0100 → round1
+    // collapses to 1.0 (stated factor adds zero), batch-ceil buys 1.1
+    const tight = find(computeTakeoff([concrete([2, 0.3677, 1])], []), 'Concrete')
+    expect(tight?.quantity).toBe(1)
+    expect(tight?.detail).toBe('footings — +5% waste ≈ 1.1 yd³')
+  })
+
+  test('roof deck row: NET sqft quantity + stated +10% buy; LAP rows never say waste (B6 reconcile)', () => {
+    const members = frameRoofsB21e([roofSeg()], [], { ...DEFAULT_SPEC, detail: '400' })
+    const rows = computeTakeoff(members, [])
+    const deckM2 = members
+      .filter((m) => m.role === 'sheathing')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const deckRow = find(rows, 'Roof sheathing 7/16" WSP')
+    expect(deckRow?.quantity).toBeCloseTo(round1(deckM2 * SQ), 6)
+    expect(deckRow?.detail).toContain(
+      `+10% waste ≈ ${Math.ceil((deckM2 * SQ * 1.1) / 32)} sheets`,
+    )
+    // LAP ≠ WASTE: the underlayment quantity INCLUDES its +10% course laps
+    // (installed overlap) and the row says 'laps', never 'waste'
+    const underM2 = members
+      .filter((m) => m.role === 'wrb')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const underRow = find(rows, 'Roof underlayment')
+    expect(underRow?.quantity).toBeCloseTo(round1(underM2 * 1.1 * SQ), 6)
+    expect(underRow?.detail).toContain('+10% course laps')
+    expect(WASTE_RE.test(underRow?.detail ?? '')).toBe(false)
+  })
+
+  test('subfloor label fix: member path says net + stated waste; only the area fallback says gross', () => {
+    // MEMBER path (B3): net deck area, quantity = net sheet count, stated buy
+    const deck = Array.from({ length: 9 }, () => deckPanel())
+    const netM2 = 9 * 1.2192 * 2.4384
+    const memberRows = computeTakeoff(deck, [], { subfloorM2: 60 }) // decoy area ignored
+    const memberRow = find(memberRows, 'Subfloor 3/4" T&G')
+    expect(memberRow?.quantity).toBe(Math.ceil(netM2 / SHEET))
+    expect(memberRow?.detail).toBe(
+      `4x8 sheets from deck members, net — +10% waste ≈ ${Math.ceil((netM2 * 1.1) / SHEET)} sheets`,
+    )
+    // FALLBACK path (LOD-200): NOT gross — compute.ts deducts slab holes
+    // (stairwells), so the row states its net-of-floor-openings basis and
+    // carries the stated factor too (r1 F2: '4x8 sheets, gross' sat on a
+    // hole-deducted number — the same mislabel class as the member path)
+    const fallbackRow = find(computeTakeoff([], [], { subfloorM2: 30 }), 'Subfloor 3/4" T&G')
+    expect(fallbackRow?.detail).toBe(
+      `4x8 sheets from slab area, net of floor openings — +10% waste ≈ ${Math.ceil((30 * 1.1) / SHEET)} sheets`,
+    )
+    expect(fallbackRow?.quantity).toBe(Math.ceil(30 / SHEET))
+  })
+
+  test("header honesty: 'gross' prints ONLY on LOD-200 fallback rows, and those carry NO stacked factor", () => {
+    // fully member-derived demo compose → no row may claim a gross buy
+    const result = computeLevel(baselineScene(), baselineConfig('TX'))
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    expect(rows.some((r) => r.detail.includes('gross'))).toBe(false)
+    // LOD-200 fallback → 'gross' is exactly the WALL fallbacks (WSP +
+    // drywall faceArea sums, openings never deducted — the drywall row
+    // states that basis since B21e) and neither stacks a waste factor on
+    // the openings-not-deducted allowance
+    const fallback = computeTakeoff([], [], { wallSheathingM2: 60, subfloorM2: 30, drywallM2: 90 })
+    const grossRows = fallback.filter((r) => r.detail.includes('gross'))
+    expect(grossRows.map((r) => r.item).sort()).toEqual([
+      'Drywall 1/2"',
+      'Wall sheathing 7/16" WSP',
+    ])
+    for (const r of grossRows) {
+      expect(WASTE_RE.test(r.detail)).toBe(false)
+    }
+    // the SUBFLOOR fallback is hole-deducted NET (r1 F2), never 'gross' —
+    // it states its basis and carries the stated waste factor instead
+    const sub = fallback.find((r) => r.item === 'Subfloor 3/4" T&G')
+    expect(sub?.detail).toContain('net of floor openings')
+    expect(sub?.detail).not.toContain('gross')
+    expect(WASTE_RE.test(sub?.detail ?? '')).toBe(true)
+  })
+
+  test('expected-diff enumeration: on the demo compose the waste-stated rows are EXACTLY the enumerated classes', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('TX'))
+    const rows = computeTakeoff(result.members, result.fixtures, result.areas)
+    const stated = rows.filter((r) => WASTE_RE.test(r.detail))
+    const isLumberPcs = (r: TakeoffRow) =>
+      r.unit === 'pcs' && /^\d+x\d+( PT)?$/.test(r.item) && / ft stock/.test(r.detail)
+    const isBoardGood = (r: TakeoffRow) =>
+      r.item === 'Sheathing 7/16" WSP' || r.item === 'Drywall 1/2"'
+    const isPour = (r: TakeoffRow) => r.item === 'Concrete'
+    // every stated row belongs to an enumerated class…
+    for (const r of stated) {
+      expect(isLumberPcs(r) || isBoardGood(r) || isPour(r)).toBe(true)
+    }
+    // …and every row of those classes states its factor (uniform, both ways)
+    for (const r of rows) {
+      if (isLumberPcs(r) || isPour(r) || (isBoardGood(r) && r.section === 'Wall framing')) {
+        expect(WASTE_RE.test(r.detail)).toBe(true)
+      }
+    }
+    // the demo compose really exercises all three classes (non-vacuous)
+    expect(stated.some(isLumberPcs)).toBe(true)
+    expect(stated.some(isBoardGood)).toBe(true)
+    expect(stated.some(isPour)).toBe(true)
+    // LAP rows keep the opposite convention and never read as waste
+    const vapor = find(rows, 'Vapor retarder 6-mil poly')
+    expect(vapor?.detail).toContain('+10% seam laps')
+    expect(WASTE_RE.test(vapor?.detail ?? '')).toBe(false)
+    // net preservation, whole-compose: no factor row's quantity is a
+    // waste-scaled figure — the lumber pcs columns are integers (counts)
+    for (const r of stated.filter(isLumberPcs)) {
+      expect(Number.isInteger(r.quantity)).toBe(true)
+    }
   })
 })

@@ -763,11 +763,16 @@ describe('LOD-400 B6a: roof deck panels per slope plane (R803.2)', () => {
     const rows = computeTakeoff(members, [])
     const row = rows.find((r) => r.item === 'Roof sheathing 7/16" WSP')
     expect(row?.detail).toContain('conservatively under-tiled')
-    expect(row?.detail).toContain('buy waste factor separately')
-    // …and a rect-plane roof (full coverage) carries NO waste note
+    // B21e: the deck row now STATES a generic +10% waste — the under-tile
+    // caveat must say the exact scene-dependent shortfall sits ON TOP of it
+    expect(row?.detail).toContain('shortfall NOT covered by the stated waste')
+    expect(row?.detail).toContain('+10% waste')
+    // …and a rect-plane roof (full coverage) carries NO under-tile caveat,
+    // just the stated waste factor every deck row prints (B21e)
     const gable = frameRoofs([seg()], [], DEFAULT_SPEC)
     const gRow = computeTakeoff(gable, []).find((r) => r.item === 'Roof sheathing 7/16" WSP')
     expect(gRow?.detail).not.toContain('under-tiled')
+    expect(gRow?.detail).toContain('+10% waste')
   })
 
   test('flat: one dead-level panel over the platform, on the joist tops', () => {

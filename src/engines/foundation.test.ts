@@ -1293,7 +1293,11 @@ describe('buildFoundation — girder-post pad footings (B18d)', () => {
       {},
     )
     const footings = (r: { section: string; item: string; detail: string; quantity: number | string }[]) =>
-      r.find((x) => x.section === 'Foundation' && x.item === 'Concrete' && x.detail === 'footings')
+      // detail carries the stated B21e waste suffix — match the pour name
+      r.find(
+        (x) =>
+          x.section === 'Foundation' && x.item === 'Concrete' && x.detail.startsWith('footings'),
+      )
     expect(footings(rows)).toBeDefined()
     expect(Number(footings(rows)?.quantity)).toBeGreaterThan(Number(footings(withoutPads)?.quantity))
   })
