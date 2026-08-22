@@ -362,7 +362,7 @@ AND a gate — a checklist line without a test is a wish.
   rows/block, never a label-only aside). Stated trim gaps are flags too:
   SHED roofs model no fascia and therefore NO drip edge at 400 (deck
   flag, count pinned at zero); the gambrel rake-metal flag RETIRED when
-  B8d landed the rake ladder + rake drip edge as real members (S16d —
+  B8d landed the rake ladder + rake drip edge as real members (S17d —
   the retirement is pinned).
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
@@ -864,12 +864,15 @@ AND a gate — a checklist line without a test is a wish.
   result keeps the full ladder (toggle honesty, B9c). Interior
   partitions, LOD 200, upper storeys' plates (no slab bearing) and
   CMU-default walls (FL — masonry anchorage is the B18b grouted-cell
-  story) book nothing. THE FLAT-ROOF SEAM IS STATED, never silent
-  (B8b, roof-side, sibling-owned): connectors under a roof framing
+  story) book nothing. THE FLAT-ROOF SEAM IS CLOSED (B8b landed the
+  roof side — S17b pins ties present AND this warning absent on the
+  windy-LA flat compose); the GUARD remains for any future tie-less
+  shape: connectors under a roof framing
   rafters with ZERO steel ties raise exactly one level WARNING per such
   roof, naming it ('…R802.11 uplift path incomplete at the roof bearing,
   verify tie schedule' — P4 prints it); tied roofs, roofless results and
-  other-storey roofs stay silent. TAKEOFF (B4/S4 both directions): three
+  other-storey roofs stay silent (machinery non-vacuous via the
+  synthetic-member matrix). TAKEOFF (B4/S4 both directions): three
   dedicated member-derived rows counted by ROLE (three new roles — B9's
   `strap` census untouched), the foundation row stating the dedupe
   convention, NO invented nail poundage (B9's fastener rule).
@@ -897,21 +900,40 @@ AND a gate — a checklist line without a test is a wish.
 
 - **S17 Roof shape closures (B8): low-slope ridges, flat-roof uplift,
   unframed intersections and the gambrel break are never silent.**
-  (a) A gable ridge below 3:12 (tan θ < 0.25) is NOT upgraded to a beam
-  silently and NOT accepted silently: the ridge member carries 'ridge slope
-  < 3:12 — ridge beam required, R802.4.3 (…not modeled — verify design)' at
-  300+, reaching the takeoff Flags row and the P4 schedules block (flag
-  route, v1 — the beam+post member set is the follow-up; hip/crown ridges
-  are a queued residual). Slopes ≥ 3:12 and LOD 200 are byte-equal to
-  pre-B8.
+  (a) A ridge below 3:12 is NOT upgraded to a beam silently and NOT
+  accepted silently: the ridge member carries 'ridge slope < 3:12 — ridge
+  beam required, R802.4.3 (…not modeled — verify design)' at 300+, reaching
+  the takeoff Flags row and the P4 schedules block (flag route, v1 — the
+  beam+post member set is the follow-up). The slope that answers the
+  question is the one CARRYING the ridge: the gable's schema pitch, and
+  the GAMBREL main ridge's shallow UPPER planes' φ (fix-round advisory —
+  a 15° gambrel composes sub-3:12 uppers while its steep lowers sit above
+  3:12; flagged + pinned, break purlins excluded). Hip/crown ridges are
+  the remaining queued residual. Slopes ≥ 3:12 and LOD 200 are byte-equal
+  to pre-B8.
   (b) `spec.hurricaneTies` reaches FLAT roofs (R802.11 — shed tied both
   ends, frameFlat never called tieAt): every flat joist ties at BOTH
   bearing ends, at the plate line (footprint edge, never the overhung rim
   line) on the joist underside plane. The connector nails to the joist
-  FACE — beside-offset toward the roof center + rim inner-face clamp keep
-  the steel SAT-clean against joists and rims (zero-overhang included) —
-  and the takeoff books the ties for free (role+material+system). Non-windy
-  flat is byte-equal to pre-B8 (the flat-400 sha pin holds it).
+  FACE, and the offset direction resolves PER STATION (fix round, skeptic
+  F1): toward center first, flipped outward when any station sits inside
+  the clearance window (tieClear + tie half + t/2 — layout()'s guaranteed
+  END station can survive one joist thickness from its grid neighbor,
+  ~12% of widths per spacing period; the old fixed offset drove 1.5"
+  steel through the neighbor joist and overlapped the two end-side ties),
+  and a station blocked BOTH ways (the end joist butts the rim band)
+  OMITS its ties and says so ON the joist, composed ' | ' onto its span
+  honesty (M2) and printed via the Flags row — steel through lumber is
+  never an option, silence isn't either. Rim inner-face clamps hold every
+  placed tie SAT-clean against joists and rims (zero-overhang and
+  end-gap-window geometries included) — and the takeoff books the ties
+  for free (role+material+system). Non-windy flat is byte-equal to pre-B8
+  (the flat-400 sha pin holds it). SEAM CLOSED (B10, wall side): the
+  windy-LA flat compose carries ties at every joist bearing, so B10's
+  'R802.11 uplift path incomplete at the roof bearing' warning dies BY
+  CONSTRUCTION — pinned end-to-end (ties present AND warning absent);
+  B10's warning machinery stays non-vacuous via its synthetic-member
+  matrix.
   (c) An overlapping roof-segment pair the valley detector does NOT serve
   (a hip wing into a gable main; skewed/parallel/buried/eave-mismatched
   gable pairs) NEVER frames straight through silently:
@@ -950,9 +972,11 @@ AND a gate — a checklist line without a test is a wish.
   framing despite the overhang.
   Gates: `src/engines/roof-framing.test.ts` (B8a describe: 2.5:12 flag pin
   at 300/400 + ridge-only placement, 3:12 boundary + 40° clean, LOD-200
-  silence, takeoff Flags row; B8b describe: windy 2-per-joist census at the
+  silence, takeoff Flags row, 15°-gambrel upper-plane flag + 40° clean;
+  B8b describe: windy 2-per-joist census at the
   plate line + beside-a-joist placement, spansX orientation, free takeoff
-  tie row, non-windy byte-equality; B8c describe: hip-wing audit exhibit
+  tie row, non-windy byte-equality, fix-round window matrix — 6.9×5
+  omit+compose+clearance+Flags row, 2×2-zero whole-flag pin; B8c describe: hip-wing audit exhibit
   zero-members + warning, served-pair silence, parallel/buried/eave-
   mismatch matrix, abut/graze silence, cupola stacking, three-wing mix;
   B8d describe: strut census/foot-on-joist/top-at-purlin/snap pins,
@@ -962,12 +986,16 @@ AND a gate — a checklist line without a test is a wish.
   schematic pin, S4 2x4-row parity; F4-retirement pin in the B6 fix-round
   describe; gambrel-400 INTENDED repin with per-shape enumeration) +
   `src/engines/interpenetration.test.ts` (B8b windy-flat compose matrix
-  incl. zero overhang, non-vacuous; B8d gambrel compose matrix 25/40/60°
+  incl. zero overhang + the end-gap-window pair 6.9×5 / 2×2-zero,
+  non-vacuous; B8d gambrel compose matrix 25/40/60°
   + wide, struts/ladder/drip non-vacuous) +
   `src/framing/compute.multistorey.test.ts` (B8c describe: hip-wing scene
   warns end-to-end + no valley members, LOD-200 silence) +
   `src/engines/roof-framing.spans.test.ts` (compact gambrel byte-equal
-  gate enumerates the break struts as shape geometry).
+  gate enumerates the break struts as shape geometry) +
+  `src/engines/wall-framing.uplift.test.ts` (the B10 compose pin flipped
+  to the CLOSED seam: LA flat ties 2-per-joist end-to-end AND the roof-
+  bearing warning absent; INTL stays tie-less and silent).
 
 ## M — Mechanical (HVAC)
 

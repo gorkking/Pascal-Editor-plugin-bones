@@ -564,18 +564,25 @@ describe('B10 compute composes — the uplift path assembles end-to-end (LA)', (
     expect(fullLadder.length).toBeGreaterThan(straps.length)
   })
 
-  test('flat roof at LA: the wall-only path is STATED (warning), gable stays silent (ties exist)', () => {
+  test('B8b seam CLOSED: the LA flat compose ties every joist end — the B10 warning dies by construction', () => {
+    // B10 shipped this pin as 'the wall-only path is STATED (warning)' while
+    // frameFlat called no tieAt. B8b landed the roof side of the seam: the
+    // windy flat compose now carries real steel at BOTH bearing ends of
+    // every joist, so the wall connectors continue a path the roof STARTS —
+    // ties present AND the warning ABSENT, pinned end-to-end. The warning
+    // machinery itself stays non-vacuous via the synthetic-member matrix
+    // above (a future tie-less roof shape still prints).
     const flat = computeLevel(upliftScene('flat'), upliftConfig('LA'))
     expect(flat.members.some((m) => m.role === 'uplift-connector')).toBe(true)
-    expect(
-      flat.members.some(
-        (m) => m.system === 'roof-framing' && m.role === 'blocking' && m.material === 'steel',
-      ),
-    ).toBe(false)
-    const statements = flat.warnings.filter((w) => w.includes('high-wind uplift'))
-    expect(statements).toHaveLength(1)
-    expect(statements[0]).toContain('roofseg_1')
-    expect(statements[0]).toContain('R802.11')
+    const flatTies = flat.members.filter(
+      (m) => m.system === 'roof-framing' && m.role === 'blocking' && m.material === 'steel',
+    )
+    const flatJoists = flat.members.filter(
+      (m) => m.system === 'roof-framing' && m.role === 'rafter',
+    )
+    expect(flatJoists.length).toBeGreaterThan(0)
+    expect(flatTies.length).toBe(2 * flatJoists.length) // the B8b census, end-to-end
+    expect(flat.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
     // Gable: tieAt books per-rafter ties — the story is complete, no warning.
     const gable = computeLevel(upliftScene('gable'), upliftConfig('LA'))
     expect(
@@ -584,8 +591,13 @@ describe('B10 compute composes — the uplift path assembles end-to-end (LA)', (
       ),
     ).toBe(true)
     expect(gable.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
-    // INTL flat roof: no connectors, no statement (nothing claims a path).
+    // INTL flat roof: no connectors, no ties, no statement (nothing claims a path).
     const intlFlat = computeLevel(upliftScene('flat'), upliftConfig('INTL'))
+    expect(
+      intlFlat.members.some(
+        (m) => m.system === 'roof-framing' && m.role === 'blocking' && m.material === 'steel',
+      ),
+    ).toBe(false)
     expect(intlFlat.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
   })
 })

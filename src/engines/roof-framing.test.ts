@@ -1491,6 +1491,27 @@ describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', ()
     expect(row).toBeDefined()
     expect(row?.quantity).toBe(1) // one ridge, one statement
   })
+
+  test('fix round: a 15° GAMBREL rides sub-3:12 UPPER planes — its MAIN ridge flags, same code class', () => {
+    // The residual enumeration said hip/crown only, but the gambrel main
+    // ridge is carried by the shallow upper planes: tan φ ≈ 0.179 < 0.25 at
+    // a 15° schema pitch while the steep lowers sit above 3:12. Covered now.
+    const low15 = frameRoofs([seg({ roofType: 'gambrel', pitch: (15 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const main = byRole(low15, 'ridge').filter((r) => !r.label?.includes('gambrel break'))
+    expect(main).toHaveLength(1)
+    expect((main[0] as Member).flag).toBe(FLAG)
+    // the break purlins carry their OWN honesty class, never this one
+    for (const p of byRole(low15, 'ridge').filter((r) => r.label?.includes('gambrel break'))) {
+      expect(p.flag ?? '').not.toContain('R802.4.3')
+    }
+    // the default 40° gambrel's upper φ ≈ 40° — clean (the gambrel-400 sha
+    // pin holds the byte-equality side of this)
+    const ok = frameRoofs([seg({ roofType: 'gambrel' })], [], { ...DEFAULT_SPEC, detail: '400' })
+    for (const m of ok) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1547,6 +1568,52 @@ describe('LOD-400 B8b: flat-roof joists tie BOTH bearing ends under high wind (R
     expect(tiesOf(plain)).toHaveLength(0)
     // …and at 400, where the flat-400 sha pin above holds the whole story
     expect(tiesOf(frameRoofs([seg({ roofType: 'flat' })], [], { ...DEFAULT_SPEC, detail: '400' }))).toHaveLength(0)
+  })
+
+  test('fix round (skeptic F1): the end-gap window OMITS + FLAGS — never steel through lumber', () => {
+    // 6.9×5: layout's guaranteed END station survives 0.0705 m from its grid
+    // neighbor — inside the clearance window (tieClear + tie half + t/2 ≈
+    // 0.114). Toward-center would bury the tie in the neighbor joist AND
+    // overlap the neighbor's tie; outward is rim-blocked at the band end
+    // (the t/2 gap fits no 1.5" steel) — so the joist omits and SAYS SO.
+    const members = frameRoofs([seg({ roofType: 'flat', width: 6.9, depth: 5 })], [], windy)
+    const joists = byRole(members, 'rafter')
+    const ties = tiesOf(members)
+    const omitted = joists.filter((j) => j.flag?.includes('hurricane tie not placeable'))
+    expect(omitted).toHaveLength(1)
+    expect(ties.length).toBe(2 * (joists.length - 1))
+    // the omission COMPOSES onto the span honesty — never masks it (M2)
+    const flag = (omitted[0] as Member).flag as string
+    expect(flag).toContain('Flat roof joist over prescriptive span')
+    expect(flag).toContain(' | ')
+    expect(flag).toContain('R802.11')
+    // the finding's exact class, numerically: every placed tie keeps a full
+    // face clearance (≥ tieClear) to EVERY joist station on the offset axis
+    const tieClear = (1.5 / 2) * 0.0254 + 1.5 * 0.0254
+    const stations = joists.map((j) => j.position[0] as number)
+    for (const tie of ties) {
+      for (const v of stations) {
+        expect(Math.abs((tie.position[0] as number) - v)).toBeGreaterThanOrEqual(tieClear - 1e-9)
+      }
+    }
+    // …and the omission PRINTS (takeoff Flags row → P4)
+    const row = computeTakeoff(members, []).find(
+      (r) => r.section === 'Flags' && r.detail.includes('hurricane tie not placeable'),
+    )
+    expect(row?.quantity).toBe(1)
+  })
+
+  test('fix round: zero-overhang 2×2 flat (the tightest window) — 4 tied joists + 1 honest omission', () => {
+    const members = frameRoofs([seg({ roofType: 'flat', width: 2, depth: 2, overhang: 0 })], [], windy)
+    const joists = byRole(members, 'rafter')
+    expect(joists).toHaveLength(5)
+    expect(tiesOf(members).length).toBe(8)
+    const omitted = joists.filter((j) => j.flag?.includes('hurricane tie not placeable'))
+    expect(omitted).toHaveLength(1)
+    // span-legal joist: the omission is the WHOLE flag (nothing to compose)
+    expect((omitted[0] as Member).flag).toBe(
+      'hurricane tie not placeable at this joist — face blocked by the adjacent end joist and the rim band (R802.11) — strap on site, verify uplift path',
+    )
   })
 })
 

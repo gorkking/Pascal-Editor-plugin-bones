@@ -663,6 +663,13 @@ describe('interpenetration gate — structural members never share volume', () =
       ['flat', { roofType: 'flat' }],
       ['flatWide', { roofType: 'flat', width: 12, depth: 8 }],
       ['flatZeroOverhang', { roofType: 'flat', overhang: 0 }],
+      // fix round (skeptic F1): the end-gap WINDOW — layout's guaranteed end
+      // station can survive < tieClear + tieHalf + t/2 from its neighbor.
+      // 6.9×5 → gap 0.0705 (the skeptic repro: end tie 13 mm off the
+      // neighbor joist centerline + tie×tie 0.0705 < 0.0762); 2×2 @ zero
+      // overhang → gap 0.0571 (2 rafter×tie + 2 tie×tie hits pre-fix).
+      ['flatEndGapWindow', { roofType: 'flat', width: 6.9, depth: 5 }],
+      ['flatTightZero', { roofType: 'flat', width: 2, depth: 2, overhang: 0 }],
     ]
     for (const [name, over] of cases) {
       const members = frameRoofs([roofSeg(over)], [], windy400)

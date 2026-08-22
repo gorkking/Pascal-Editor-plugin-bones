@@ -152,6 +152,25 @@ export function extractRoofs(nodes: NodesRecord, levelId: string): RoofSegmentSl
 // Framing
 // ---------------------------------------------------------------------------
 
+/**
+ * B8a: a plain ridge BOARD is prescriptive only when the rafter slope
+ * carrying it is ≥ 3:12 — below that R802.4.3 requires a structural ridge
+ * BEAM with posts to bearing. No beam/post set is modeled v1 (nothing under
+ * a ridge is a verified bearing — even the purlin-strut machinery's own
+ * assumption stops at the ceiling joists), so the gap PRINTS instead of
+ * upgrading silently: the flag rides the ridge member to the takeoff Flags
+ * row and the P4 schedules block (the B6 stated-gap convention). Applies to
+ * the GABLE ridge (slope = the schema pitch) and the GAMBREL main ridge
+ * (slope = the shallow UPPER planes' φ — a 15° gambrel's upper faces fall
+ * under 3:12 while its steep lowers don't; fix-round advisory). Hip/crown
+ * ridges remain a queued residual. 200 stays schematic.
+ */
+function ridgeBeamFlagFor(spec: FramingSpec, slopeTan: number): string | undefined {
+  return spec.detail !== '200' && slopeTan < 3 / 12 - EPS
+    ? 'ridge slope < 3:12 — ridge beam required, R802.4.3 (plain ridge board modeled; structural ridge beam + posts to bearing not modeled — verify design)'
+    : undefined
+}
+
 /** Ridge stock: one size deeper than the rafters (practice: R802.3 ridge ≥ rafter cut depth). */
 function ridgeSizeFor(rafterSize: LumberSize): LumberSize {
   switch (rafterSize) {
@@ -849,17 +868,9 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
   }
 
   // ---- ridge board along X at the peak ----
-  // B8a: a plain ridge BOARD is prescriptive only at slopes ≥ 3:12 —
-  // below that R802.4.3 requires a structural ridge BEAM with posts to
-  // bearing. No beam/post set is modeled v1 (nothing under the ridge is a
-  // verified bearing — the purlin-strut machinery's own assumption stops at
-  // the ceiling joists), so the gap PRINTS instead of upgrading silently:
-  // the flag rides the ridge member to the takeoff Flags row and the P4
-  // schedules block (the B6 stated-gap convention). 200 stays schematic.
-  const ridgeBeamFlag =
-    spec.detail !== '200' && tan < 3 / 12 - EPS
-      ? 'ridge slope < 3:12 — ridge beam required, R802.4.3 (plain ridge board modeled; structural ridge beam + posts to bearing not modeled — verify design)'
-      : undefined
+  // B8a (see ridgeBeamFlagFor): sub-3:12 ridge boards PRINT the R802.4.3
+  // gap instead of upgrading to a beam silently. 200 stays schematic.
+  const ridgeBeamFlag = ridgeBeamFlagFor(spec, tan)
   const ridgeSize = ridgeSizeFor(spec.rafterSize)
   const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
   const ridgeLen = roof.width + 2 * roof.overhang
@@ -1424,8 +1435,9 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // The joists CROSS the ridge line at plan center — on a near-flat hip
   // (an inner mansard crown can compute a ~5° pitch) the ridge board's
   // underside descends INTO the joist band; no room = no fake wood (the
-  // collar-tie low-pitch skip convention; B8a flags sub-3:12 GABLE ridges —
-  // the hip/crown ridge's own R802.4.3 flag is a queued residual).
+  // collar-tie low-pitch skip convention; B8a flags sub-3:12 gable ridges
+  // and gambrel-main ridges via their upper-plane slope — the hip/crown
+  // ridge's own R802.4.3 flag is a queued residual).
   const [, cjRidgeD] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const cjClearsRidge = ridgeHalf <= 0.05 || eaveY + cjD + 0.002 <= ridgeY - cjRidgeD
   if (cjLen >= 0.3 && cjBandHalf > cjT && cjClearsRidge) {
@@ -1597,7 +1609,39 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
     Math.min(halfW, halfD) - t - inches(1.5),
   )
   const tieClear = t / 2 + inches(1.5)
-  for (const u of layout(-stationHalf, stationHalf, spec.rafterSpacing, t / 2)) {
+  // B8b fix round (skeptic F1): the beside-offset assumed the nearest joist
+  // is a full bay away, but layout()'s guaranteed END station can survive as
+  // close as one joist thickness to its grid neighbor — the end tie offset
+  // 'toward center' INTO the neighboring joist and the two end-side ties
+  // shared volume (~12% of widths per spacing period hit the window; repro
+  // 6.9×5). Direction resolves per STATION now: toward center first, flipped
+  // OUTWARD when any station sits inside the clearance window on that side;
+  // a station blocked both ways (the end joist butts the rim band — outward
+  // never fits the t/2 gap there) OMITS its ties and says so on the joist,
+  // composed ' | ' onto its span honesty (M2) — steel through lumber is
+  // never an option, and silence isn't either. Opposing-direction tie×tie
+  // would need stations straddling the center, which the o.c. grid keeps a
+  // full bay apart — the same-direction window is the only live class.
+  const tieHalf = inches(1.5)
+  const tieWindow = tieClear + tieHalf + t / 2
+  const rimInnerU = Math.max(halfW, halfD) - t / 2
+  const stations = layout(-stationHalf, stationHalf, spec.rafterSpacing, t / 2)
+  const tieSpotFor = (u: number): number | undefined => {
+    const inward = u >= 0 ? -1 : 1
+    for (const dir of [inward, -inward]) {
+      const blockedByJoist = stations.some(
+        (v) => v !== u && Math.sign(v - u) === dir && Math.abs(v - u) < tieWindow - EPS,
+      )
+      const spot = u + dir * tieClear
+      const blockedByRim = Math.abs(spot) + tieHalf > rimInnerU - 0.002
+      if (!blockedByJoist && !blockedByRim) return spot
+    }
+    return undefined
+  }
+  const tieOmitFlag =
+    'hurricane tie not placeable at this joist — face blocked by the adjacent end joist and the rim band (R802.11) — strap on site, verify uplift path'
+  for (const u of stations) {
+    const tieSpot = spec.hurricaneTies ? tieSpotFor(u) : null
     emit(
       'rafter',
       spec.rafterSize,
@@ -1609,13 +1653,14 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       'lumber',
       `Flat roof joist ${spec.rafterSize} — slope to drains with tapered insulation (¼:12 min, R903.4)`,
       undefined,
-      flatFlag,
+      tieSpot === undefined
+        ? [flatFlag, tieOmitFlag].filter((f): f is string => f !== undefined).join(' | ')
+        : flatFlag,
     )
-    if (spec.hurricaneTies) {
-      const beside = u + (u >= 0 ? -1 : 1) * tieClear
+    if (typeof tieSpot === 'number') {
       for (const side of [1, -1] as const) {
-        if (spansX) tieAt(emit, side * tieBear, beside, roof.wallHeight)
-        else tieAt(emit, beside, side * tieBear, roof.wallHeight)
+        if (spansX) tieAt(emit, side * tieBear, tieSpot, roof.wallHeight)
+        else tieAt(emit, tieSpot, side * tieBear, roof.wallHeight)
       }
     }
   }
@@ -1886,7 +1931,10 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   const ridgeSize = ridgeSizeFor(spec.rafterSize)
   const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
   const ridgeLen = roof.width + 2 * roof.overhang
-  emit('ridge', ridgeSize, [ridgeLen, rdd, rt], [0, ridgeY - rdd / 2, 0], 0, 0, ridgeLen, 'lumber', `Ridge ${ridgeSize}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`)
+  // B8a fix-round advisory: the gambrel MAIN ridge is carried by the shallow
+  // UPPER planes — their slope φ decides the R802.4.3 question, same code
+  // class as the gable (a 15° gambrel composes with sub-3:12 uppers).
+  emit('ridge', ridgeSize, [ridgeLen, rdd, rt], [0, ridgeY - rdd / 2, 0], 0, 0, ridgeLen, 'lumber', `Ridge ${ridgeSize}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`, undefined, ridgeBeamFlagFor(spec, tanPhi))
 
   // B8d: R802.5.1 — the break purlins carried EVERY rafter joint with ZERO
   // struts. 2x4 struts ≤ 4 ft o.c. drop from the purlin underside to the
