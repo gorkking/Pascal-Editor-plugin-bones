@@ -356,6 +356,14 @@ export function frameWall(
   // Portal hold-down posts already placed on this wall (cross-opening
   // conflict awareness) — see the bracing block below.
   const portalPostUs: number[] = []
+  /** Every co-planar surface-steel piece already emitted on this wall's
+   * face (B9 portal straps at kings, B10 opening straps at trimmers,
+   * placed connectors) — u plus vertical extent. The B10 stud-to-plate
+   * connector dodges pieces it would actually touch — two flat steel
+   * pieces never share a drawn spot (HI: seismic AND high-wind puts a
+   * portal strap on the exact king the connector would ride, reaching
+   * studTop when the header fills the depth). */
+  const surfaceSpots: { u: number; y0: number; y1: number }[] = []
   const clampedExtraStudUs = (hints.extraStuds ?? []).map((e) =>
     Math.min(Math.max(e.u, u0 + halfT), u1 - halfT),
   )
@@ -577,6 +585,7 @@ export function frameWall(
       const strapTop = Math.min(studTop, roTop + Math.max(headerDepth, inches(3)))
       if (strapTop - strapBottom > inches(6)) {
         for (const side of [-1, 1] as const) {
+          surfaceSpots.push({ u: u + side * (ro / 2 + halfT), y0: strapBottom, y1: strapTop })
           surfaceSteel(
             'uplift-strap',
             u + side * (ro / 2 + halfT),
@@ -618,6 +627,7 @@ export function frameWall(
       const strapTop = Math.min(studTop, roTop + Math.max(headerDepth, inches(3)))
       const strapLen = strapTop - strapBottom
       if (strapLen > inches(6)) {
+        surfaceSpots.push({ u: kingU, y0: strapBottom, y1: strapTop })
         members.push({
           system: 'wall-framing',
           role: 'strap',
@@ -717,11 +727,39 @@ export function frameWall(
     // (a) ONE stud-to-plate connector at every full-height vertical's top —
     // the wall-side mirror of the roof's per-rafter tieAt booking. Coverage
     // is therefore the stud rhythm itself (o.c. spacing), stated on the
-    // takeoff row.
+    // takeoff row. Co-planar surface steel never shares a drawn spot: a
+    // connector whose spot is taken (a B9 portal strap on that exact king,
+    // an opening strap, a neighbor's connector) walks a DETERMINISTIC
+    // ±1, ±2, ±3 strap-width ladder — away from the run middle first —
+    // until clear (the GES dodge-ladder convention); side-by-side is the
+    // real install. An undodgeable spot keeps its position (census over
+    // geometry — the S1 compose gate owns the proof that this never
+    // happens on real frames).
+    const cBottom = studTop - UPLIFT_CONNECTOR_HEIGHT / 2
+    const cTop = Math.min(H, studTop + UPLIFT_CONNECTOR_HEIGHT / 2)
+    const clearOf = (p: number): boolean =>
+      surfaceSpots.every(
+        (s) =>
+          Math.abs(s.u - p) >= UPLIFT_STRAP_WIDTH - EPS || s.y1 <= cBottom || s.y0 >= cTop,
+      ) &&
+      p >= u0 + UPLIFT_STRAP_WIDTH / 2 - EPS &&
+      p <= u1 - UPLIFT_STRAP_WIDTH / 2 + EPS
     for (const cu of upliftVerticalUs) {
+      let target = cu
+      if (!clearOf(target)) {
+        const dir = cu <= runMid ? -1 : 1
+        for (const k of [1, -1, 2, -2, 3, -3]) {
+          const candidate = cu + dir * k * UPLIFT_STRAP_WIDTH
+          if (clearOf(candidate)) {
+            target = candidate
+            break
+          }
+        }
+      }
+      surfaceSpots.push({ u: target, y0: cBottom, y1: cTop })
       surfaceSteel(
         'uplift-connector',
-        cu,
+        target,
         studTop - UPLIFT_CONNECTOR_HEIGHT / 2,
         Math.min(H, studTop + UPLIFT_CONNECTOR_HEIGHT / 2),
         'Stud-to-plate connector — high-wind uplift (R802.11 path / WFCM) — install per strapping schedule',

@@ -9,7 +9,7 @@ import { frameFloor } from './floor-framing'
 import { buildFoundation } from './foundation'
 import { layoutPlumbing } from './plumbing'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
-import { frameWall, frameWalls } from './wall-framing'
+import { dedupeFoundationStraps, frameWall, frameWalls } from './wall-framing'
 import { layoutWallLayers } from './wall-layers'
 import type { PlacedFixtureSlice } from '../core/wall-model'
 import type { RoomSlice } from '../core/types'
@@ -1628,5 +1628,106 @@ describe('under-floor DWV vs footings + floor platform (drainage gate)', () => {
     expect(drop).toBeDefined()
     // clear of the interior footing band: 16"/2 + 3"-pipe half
     expect(Math.abs(drop.position[0] - 5)).toBeGreaterThan(0.203 + 0.038)
+  })
+})
+
+describe('high-wind uplift hardware composes SAT-clean (LOD-400 B10 / S1)', () => {
+  const uplift400 = { ...spec400, highWindUplift: true }
+  const upliftRoles = new Set(['uplift-connector', 'uplift-strap', 'foundation-strap'])
+
+  test('LA walls + layers BOTH faces: connectors/straps under the skin, strictly clean', () => {
+    // The S13 convention under scrutiny: 1.2 mm surface steel on the
+    // framing face, drywall inside + sheathing/WRB/cladding outside — the
+    // hardware must never register against the studs it laps NOR the layer
+    // stacks on either face (scan vs wall layers both faces — no uplift
+    // allow-list pair exists).
+    const walls = [
+      wall({ id: 'w_s', start: [0, 0], end: [6, 0], openings: [door(2), window_(4.2)] }),
+      wall({ id: 'w_e', start: [6, 0], end: [6, 4] }),
+      wall({ id: 'w_n', start: [6, 4], end: [0, 4], openings: [window_(3)] }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms: RoomSlice[] = [
+      {
+        id: 'room_r',
+        name: 'room',
+        category: 'other',
+        polygon: [[0, 0], [6, 0], [6, 4], [0, 4]],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.7,
+      },
+    ]
+    const framing = frameWalls(walls, uplift400, undefined, { slabBearing: true })
+    expect(framing.some((m) => m.role === 'uplift-connector')).toBe(true)
+    expect(framing.some((m) => m.role === 'uplift-strap')).toBe(true)
+    expect(framing.some((m) => m.role === 'foundation-strap')).toBe(true)
+    const composed = [...framing, ...layoutWallLayers(walls, rooms, uplift400, 'LA')]
+    expect(violations(composed)).toEqual([])
+  })
+
+  test('+ foundation (post-dedupe): inherits ONLY the documented bolt-shank class', () => {
+    const walls = rectWalls()
+    const composed = [
+      ...buildFoundation(walls, [slab(rect(6, 4))], uplift400),
+      ...frameWalls(walls, uplift400, undefined, { slabBearing: true }),
+    ]
+    dedupeFoundationStraps(composed) // the compute order (B10b)
+    expect(composed.some((m) => m.role === 'foundation-strap')).toBe(true)
+    const v = violations(composed)
+    // No violation may involve the uplift hardware; the only residual is
+    // the S1 row's documented pre-existing anchor-bolt × stud class.
+    expect(v.filter((s) => [...upliftRoles].some((r) => s.includes(r)))).toEqual([])
+    expect(v.every((s) => s.includes('anchor-bolt') && s.includes('stud'))).toBe(true)
+  })
+
+  test('HI garage (seismic AND high-wind): portal set + uplift set coexist, no new classes', () => {
+    // Both hardware families on one wall: B9's portal strap owns the king
+    // line, the B10 opening strap rides the trimmer line, and the king's
+    // stud-to-plate connector SIDE-STEPS one strap width (co-planar surface
+    // steel never shares a drawn spot).
+    const hi = { ...spec400, seismicHoldDowns: true, highWindUplift: true }
+    const garageDoor = (u: number): OpeningSlice => ({
+      id: 'garage_door',
+      kind: 'door',
+      u,
+      width: 4.83,
+      roughWidth: 4.877,
+      height: 2.13,
+      roughHeight: 2.17,
+      sillHeight: 0,
+    })
+    const walls = [
+      wall({ id: 'w_s', start: [0, 0], end: [6.4, 0], openings: [garageDoor(3.2)] }),
+      wall({ id: 'w_e', start: [6.4, 0], end: [6.4, 4] }),
+      wall({ id: 'w_n', start: [6.4, 4], end: [0, 4] }),
+      wall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+    ]
+    const rooms: RoomSlice[] = [
+      {
+        id: 'room_g',
+        name: 'Garage',
+        category: 'garage',
+        polygon: [[0, 0], [6.4, 0], [6.4, 4], [0, 4]],
+        boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+        ceilingHeight: 2.44,
+      },
+    ]
+    const framing = frameWalls(walls, hi, undefined, { slabBearing: true })
+    expect(framing.filter((m) => m.role === 'strap')).toHaveLength(2) // B9 census intact
+    expect(framing.filter((m) => m.role === 'uplift-strap')).toHaveLength(2)
+    const withLayers = [...framing, ...layoutWallLayers(walls, rooms, hi, 'HI')]
+    expect(violations(withLayers)).toEqual([])
+    // + seismic foundation: post-dedupe, only the B9-named pre-existing
+    // classes may remain (bolt kit under grid studs, corner drywall × HDU)
+    // — never one involving the uplift hardware or the portal straps.
+    const composed = [...withLayers, ...buildFoundation(walls, [slab(rect(6.4, 4))], hi)]
+    dedupeFoundationStraps(composed)
+    const v = violations(composed)
+    expect(v.filter((s) => [...upliftRoles].some((r) => s.includes(r)))).toEqual([])
+    expect(v.filter((s) => s.includes('strap'))).toEqual([])
+    const boltKit = (s: string) =>
+      s.includes('stud') && (s.includes('anchor-bolt') || s.includes('plate-washer'))
+    const cornerLayer = (s: string) => s.includes('drywall') && s.includes('hold-down')
+    expect(v.filter((s) => !boltKit(s) && !cornerLayer(s))).toEqual([])
   })
 })
