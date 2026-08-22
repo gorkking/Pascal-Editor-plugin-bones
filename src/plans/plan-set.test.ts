@@ -609,9 +609,32 @@ describe('round-3 fixCheck2 — EM symbol, SE legend row, notes wrap', () => {
         sourceId,
         position: [2, 0.005, z],
       })
+    const rod = (i: number, x: number) =>
+      member({
+        system: 'electrical',
+        role: 'ground-rod',
+        size: undefined,
+        material: 'copper',
+        dims: [0.016, 2.4384, 0.016],
+        label: `Ground rod ${i}`,
+        sourceId: `ges-rod-${i}`,
+        position: [x, -0.05 - 2.4384 / 2, 3],
+      })
     const members = [
       wire('GES-1', 'GEC 8 AWG Cu — grounding electrode conductor (NEC 250.66) — grade run to rod 1', 1),
       wire('GES-2', 'Water-pipe bond 8 AWG Cu — metal water service (NEC 250.104(A))', 2),
+      rod(1, 1),
+      rod(2, 2.83),
+      member({
+        system: 'electrical',
+        role: 'equipment',
+        size: undefined,
+        material: 'steel',
+        dims: [0.1, 0.08, 0.04],
+        label: 'Intersystem bonding termination — ≥3 terminals at the service (NEC 250.94)',
+        sourceId: 'ges-ibt',
+        position: [2, 0.9, 0.1],
+      }),
     ]
     const elec = buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Electrical'))
     const svg = elec?.svg ?? ''
@@ -621,6 +644,13 @@ describe('round-3 fixCheck2 — EM symbol, SE legend row, notes wrap', () => {
     // and both swatches carry the shared 3D/paper family colors (E3)
     expect(svg).toContain(circuitColor('GES-1'))
     expect(svg).toContain(circuitColor('GES-2'))
+    // round-3 examiner keys: rods + IBT get SYMBOLS (one GR bubble per
+    // rod, one IB bubble) + legend rows (whose swatch repeats the tag) —
+    // they printed as unkeyed dots
+    expect(svg.match(/>GR<\/text>/g)?.length).toBe(3) // 2 plan bubbles + legend
+    expect(svg.match(/>IB<\/text>/g)?.length).toBe(2) // 1 plan bubble + legend
+    expect(svg).toContain('ground rod — driven electrode (NEC 250.52)')
+    expect(svg).toContain('intersystem bonding termination (NEC 250.94)')
   })
 
   test('characteristics notes line WRAPS at the column width — the tail never clips', () => {

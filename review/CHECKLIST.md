@@ -143,16 +143,41 @@ AND a gate — a checklist line without a test is a wish.
   LABELED 'water-pipe bond not modeled' AND the level warns — NEVER
   silent. GEC grade runs stay at/below the grade line (above the
   stemwall top — nothing bores the foundation; E4-legal as buried);
-  rods stand off the footing projection. The rows mirror the members:
-  rods pcs, clamps pcs (rod count + water clamp), GEC lf, bonding
-  jumper lf, termination pcs — GEC/bond lf NEVER book as NM-B. The
-  GES lands identically in all 51 jurisdictions (universal NEC).
+  rods stand off the footing projection. ROD SPOTS ARE SCENE-AWARE
+  (round 3): the pair must clear the buried SE street lateral (which
+  approaches the meter along its own normal — it BORED rod 1 on the
+  default scene), every wall's below-grade foundation band, and every
+  room footprint (a concave L-plan put rod 2 inside the wing), the
+  buried rod-to-rod leg scanned against the wall bands too; an
+  obstructed pair SLIDES along the wall axis (deterministic ± steps)
+  and an unplaceable pair keeps the default and FLAGS both rods.
+  GES conductors never run INSIDE the SE cable: parallel legs clear
+  the summed half-sections (crossings stay legal — one cable straps
+  over the other) via bay-step strap-outs at the meter, panel and
+  water-entry ends plus a bond plane a full section-sum above the
+  feed (round-3 F2: the panel-bay drop sat coincident with the feed
+  rise; the old plane embedded 12.5 mm). PER-STOREY HONESTY (the E6
+  class): compute mints one GES per storey with a service chain —
+  rod/GEC labels say 'per-storey model' and multi-storey scenes get
+  the level warning (NEC 250.53/250.58: ONE electrode system per
+  service). The rows mirror the members: rods pcs, clamps pcs (rod
+  count + water clamp), GEC lf, bonding jumper lf, termination pcs —
+  GEC/bond lf NEVER book as NM-B. On paper, rods + the termination
+  carry keyed symbols (GR/IB bubbles + legend rows — they printed as
+  unkeyed dots). The GES lands identically in all 51 jurisdictions
+  (universal NEC).
   Origin: LOD-400 audit BATCH 12 (wave-1 confirmed: regex for
-  ground/rod/electrode/GEC over composed members = zero).
+  ground/rod/electrode/GEC over composed members = zero); round-3
+  skeptic F1–F4 + examiner keys (2026-08-21).
   Gate: `src/engines/electrical.ges.test.ts` (census + 6-ft/8-ft/
   below-grade pins, E2-style GEC + bond continuity, E4 legality of
   bond legs, no-meter subset zero, takeoff parity matrix, 51-state
-  sweep, water-meter parity, override + warn/label matrix).
+  sweep, water-meter parity, override + warn/label matrix; round 3:
+  lateral×rod clearance on the DEFAULT scene, parallel-embedment scan
+  GES×SE, L-plan slide + wall-band/room scans, unplaceable-flag pin +
+  Flags row, per-storey warning matrix + label pins — all
+  mutation-checked) + the GR/IB key pins in
+  `src/plans/plan-set.test.ts`.
 
 ## S — Structure
 

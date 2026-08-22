@@ -427,3 +427,284 @@ describe('GES on every jurisdiction (universal NEC)', () => {
     expect(ibt?.label).toContain('water-pipe bond not modeled')
   })
 })
+
+// ---------------------------------------------------------------------------
+// Round-3 skeptic gates: F1 lateral × rod, F2 bond × feed embedment,
+// F3 scene-aware rod spots, F4 per-storey honesty
+// ---------------------------------------------------------------------------
+
+/** Min 3D distance between two member centerlines (21-sample sweep of one
+ * segment against the other via the shared point-to-segment helper). */
+function memberDist(a: Member, b: Member): number {
+  const [a1, a2] = endpointsOf(a)
+  const [b1, b2] = endpointsOf(b)
+  let min = Number.POSITIVE_INFINITY
+  for (let i = 0; i <= 20; i++) {
+    const p = a1.clone().lerp(a2, i / 20)
+    min = Math.min(min, segDist(p, b1, b2))
+    const q = b1.clone().lerp(b2, i / 20)
+    min = Math.min(min, segDist(q, a1, a2))
+  }
+  return min
+}
+
+const dirOf = (m: Member): Vector3 => {
+  const [a, b] = endpointsOf(m)
+  return b.clone().sub(a).normalize()
+}
+
+describe('round-3 F1 — the SE street lateral never bores a ground rod', () => {
+  test('DEFAULT baseline scene (the enshrined pair): every rod clears every SE member', () => {
+    // The skeptic repro: rod1 used to sit exactly ON the lateral approach
+    // line (x = meter x) with the lateral at y=-0.45 passing through the
+    // full 16 mm rod section. Rods are rigid — a cable cannot cross one.
+    const result = computeLevel(baselineScene(), baselineConfig('INTL'))
+    const rods = result.members.filter((m) => m.role === 'ground-rod')
+    const se = result.members.filter(
+      (m) => m.role === 'wire-run' && m.sourceId === 'service-entrance',
+    )
+    expect(rods.length).toBe(2)
+    expect(se.length).toBeGreaterThan(0)
+    const CLEAR = 0.035 / 2 + 0.016 / 2 + 0.001 // half sections, hard floor
+    for (const rod of rods) {
+      for (const cable of se) {
+        expect(
+          memberDist(rod, cable),
+          `${rod.sourceId} vs ${cable.label}`,
+        ).toBeGreaterThanOrEqual(CLEAR)
+      }
+    }
+    // …and the engine-level clearance target (sections + 2 cm skin) holds
+    // against the BURIED legs specifically (the boring class)
+    for (const rod of rods) {
+      for (const cable of se.filter((m) => m.position[1] < 0)) {
+        expect(memberDist(rod, cable)).toBeGreaterThanOrEqual(0.035 / 2 + 0.016 / 2 + 0.015)
+      }
+    }
+  })
+})
+
+describe('round-3 F2 — GES conductors never run INSIDE the SE cable', () => {
+  test('parallel GES legs keep section clearance of every service-entrance member', () => {
+    // The skeptic repro: the bond's panel-bay drop shared its exact plan
+    // point with the meter→panel feed rise (0.95 m of 14 mm conductor
+    // fully inside the 35 mm cable) and the old bond plane sat 12 mm off
+    // the feed plane — under the 24.5 mm half-section sum. Perpendicular
+    // CROSSINGS stay legal (one cable straps over the other); PARALLEL
+    // runs must clear the summed half-sections.
+    const { members } = route()
+    const ges = members.filter(
+      (m) => m.role === 'wire-run' && (m.sourceId === 'GES-1' || m.sourceId === 'GES-2'),
+    )
+    const se = members.filter(
+      (m) => m.role === 'wire-run' && m.sourceId === 'service-entrance',
+    )
+    expect(ges.length).toBeGreaterThan(0)
+    expect(se.length).toBeGreaterThan(0)
+    const EMBED = (0.035 + 0.014) / 2 // summed half-sections
+    for (const g of ges) {
+      for (const cable of se) {
+        if (Math.abs(dirOf(g).dot(dirOf(cable))) < 0.9) continue // crossing
+        expect(
+          memberDist(g, cable),
+          `${g.label} vs ${cable.label}`,
+        ).toBeGreaterThanOrEqual(EMBED)
+      }
+    }
+  })
+
+  test('the bond still walks panel → water entry after the strap-outs (continuity regression)', () => {
+    const { fixtures, members } = route()
+    const bond = members.filter((m) => m.sourceId === 'GES-2')
+    const panel = fixtures.find((f) => f.kind === 'panel')
+    expect(
+      connected(bond, new Vector3(...(panel?.position ?? [0, 0, 0])), new Vector3(...WATER_ENTRY)),
+    ).toBe(true)
+  })
+})
+
+describe('round-3 F3 — rod spots are scene-aware (concave L-plan)', () => {
+  /** The skeptic repro: main 8×4 + wing x∈[8,10] z∈[-3,4]; the meter lands
+   * near the reentrant corner of the south wall and the naive rod 2 fell
+   * INSIDE the wing footprint, the buried rod-to-rod leg boring the wing's
+   * stemwall. */
+  const lWalls = (): WallSlice[] => [
+    makeWall({
+      id: 'w_s_main',
+      start: [0, 0],
+      end: [8, 0],
+      openings: [
+        {
+          id: 'door_s',
+          kind: 'door',
+          u: 3.2,
+          width: 0.9,
+          roughWidth: 0.95,
+          height: 2.1,
+          roughHeight: 2.15,
+          sillHeight: 0,
+        },
+      ],
+    }),
+    makeWall({ id: 'w_wing_w', start: [8, 0], end: [8, -3] }),
+    makeWall({ id: 'w_wing_s', start: [8, -3], end: [10, -3] }),
+    makeWall({ id: 'w_wing_e', start: [10, -3], end: [10, 4] }),
+    makeWall({ id: 'w_n', start: [10, 4], end: [0, 4] }),
+    makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+  ]
+  const lRooms = (): RoomSlice[] => [
+    room('other', [[0, 0], [8, 0], [8, 4], [0, 4]], { id: 'room_main' }),
+    room('bedroom', [[8, -3], [10, -3], [10, 4], [8, 4]], { id: 'room_wing' }),
+  ]
+
+  test('no rod inside a room footprint; rods + buried leg clear every wall band; nothing flagged', () => {
+    const walls = lWalls()
+    const rooms = lRooms()
+    // Pin the meter at the skeptic's spot (service override — authoritative,
+    // A4): u=6.878 on the 8 m south wall, right at the reentrant corner —
+    // the NAIVE rod 2 (meter + 6 ft along the wall) lands at x≈8.79 INSIDE
+    // the wing footprint. Auto-placement would pick the 10 m north wall
+    // and never exercise the class.
+    const fixtures = layoutElectrical(walls, rooms, {
+      electricMeter: { wallId: 'w_s_main', wallT: 6.878 / 8 },
+    })
+    const meterFx = fixtures.find((f) => f.kind === 'electric-meter')
+    expect(meterFx?.sourceId).toBe('w_s_main')
+    expect(meterFx?.position[0] ?? 0).toBeCloseTo(6.878, 3)
+    const members = routeWiring(fixtures, walls, { waterEntry: null, rooms })
+    const rods = rodsOf(members)
+    expect(rods.length).toBe(2)
+    const inPoly = (p: readonly [number, number], poly: readonly (readonly [number, number])[]) => {
+      let inside = false
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, zi] = poly[i] as [number, number]
+        const [xj, zj] = poly[j] as [number, number]
+        if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi)
+          inside = !inside
+      }
+      return inside
+    }
+    const ptSeg = (
+      p: readonly [number, number],
+      a: readonly [number, number],
+      b: readonly [number, number],
+    ) => {
+      const abx = b[0] - a[0]
+      const abz = b[1] - a[1]
+      const l2 = abx * abx + abz * abz
+      const t =
+        l2 < 1e-12
+          ? 0
+          : Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * abz) / l2))
+      return Math.hypot(p[0] - (a[0] + abx * t), p[1] - (a[1] + abz * t))
+    }
+    for (const rod of rods) {
+      const p: [number, number] = [rod.position[0], rod.position[2]]
+      for (const r of rooms) expect(inPoly(p, r.polygon), `${rod.sourceId} in ${r.id}`).toBe(false)
+      for (const w of walls) {
+        expect(ptSeg(p, w.start, w.end), `${rod.sourceId} vs ${w.id}`).toBeGreaterThanOrEqual(0.25)
+      }
+    }
+    // the buried rod-to-rod GEC leg clears the wall bands (it bored the
+    // wing stemwall pre-fix) — sample it against every wall segment
+    const leg = members.find((m) => m.sourceId === 'GES-1' && m.label?.includes('rod 1 → rod 2'))
+    expect(leg).toBeDefined()
+    const [l1, l2] = endpointsOf(leg as Member)
+    for (const w of walls) {
+      for (let i = 0; i <= 20; i++) {
+        const s = l1.clone().lerp(l2, i / 20)
+        expect(ptSeg([s.x, s.z], w.start, w.end), w.id).toBeGreaterThanOrEqual(0.25)
+      }
+    }
+    // the pair slid, not degraded: still 6 ft apart, unflagged, GEC-connected
+    for (const rod of rods) expect(rod.flag).toBeUndefined()
+    const [r1, r2] = rods as [Member, Member]
+    expect(
+      Math.hypot(r2.position[0] - r1.position[0], r2.position[2] - r1.position[2]),
+    ).toBeCloseTo(feet(6), 5)
+    const gec = members.filter((m) => m.sourceId === 'GES-1')
+    const meter = fixtures.find((f) => f.kind === 'electric-meter')
+    for (const rod of rods) {
+      expect(connected(gec, new Vector3(...(meter?.position ?? [0, 0, 0])), rodTop(rod))).toBe(true)
+    }
+  })
+
+  test('UNPLACEABLE rods keep the default spot and FLAG — never silent', () => {
+    // A room footprint blanketing the whole slide range leaves no legal
+    // spot: the engine must keep the default pair and flag both rods (the
+    // flag surfaces as a takeoff Flags row).
+    const walls = houseWalls()
+    const fixtures = layoutElectrical(walls, houseRooms())
+    const everywhere = room('other', [[-30, -30], [30, -30], [30, 30], [-30, 30]], {
+      id: 'room_everywhere',
+    })
+    const members = routeWiring(fixtures, walls, { waterEntry: null, rooms: [everywhere] })
+    const rods = rodsOf(members)
+    expect(rods.length).toBe(2)
+    for (const rod of rods) {
+      expect(rod.flag).toContain('ground rods obstructed')
+      expect(rod.flag).toContain('250.53')
+    }
+    const flagRows = computeTakeoff(members, fixtures).filter(
+      (r) => r.section === 'Flags' && r.detail.includes('ground rods obstructed'),
+    )
+    expect(flagRows.length).toBe(1)
+    expect(flagRows[0]?.quantity).toBe(2)
+  })
+})
+
+describe('round-3 F4 — per-storey GES honesty (the E6 class)', () => {
+  const twoStoreyScene = (): Record<string, Record<string, unknown>> => {
+    const scene = baselineScene()
+    scene.level_2 = { id: 'level_2', type: 'level', level: 1, height: 2.5 }
+    scene.w2_s = {
+      id: 'w2_s',
+      type: 'wall',
+      parentId: 'level_2',
+      start: [0, 0],
+      end: [12, 0],
+      thickness: 0.15,
+      height: 2.5,
+      frontSide: 'exterior',
+      children: [],
+    }
+    scene.z2_bed = {
+      id: 'z2_bed',
+      type: 'zone',
+      parentId: 'level_2',
+      name: 'Bedroom up',
+      polygon: [
+        [0, 0],
+        [12, 0],
+        [12, 8],
+        [0, 8],
+      ],
+      boundaryWallIds: [],
+    }
+    return scene
+  }
+
+  test('sibling storey with rooms → level warning; single storey → silent', () => {
+    const warned = computeLevel(twoStoreyScene(), baselineConfig('INTL'))
+    expect(
+      warned.warnings.some((w) =>
+        w.includes('grounding electrode system modeled per storey'),
+      ),
+    ).toBe(true)
+    const single = computeLevel(baselineScene(), baselineConfig('INTL'))
+    expect(
+      single.warnings.some((w) => w.includes('grounding electrode system modeled per storey')),
+    ).toBe(false)
+  })
+
+  test('rod + GEC labels carry the per-storey scope unconditionally (B13 label precedent)', () => {
+    const { members } = route()
+    for (const rod of rodsOf(members)) {
+      expect(rod.label).toContain('per-storey model')
+      expect(rod.label).toContain('250.53')
+    }
+    const gec = members.find((m) => m.sourceId === 'GES-1')
+    expect(gec?.label).toContain('per-storey model')
+    expect(gec?.label).toContain('250.58')
+  })
+})

@@ -683,6 +683,32 @@ function planSheet(
     )
   }
 
+  // B12 examiner keys (round 3): the ground rods + the intersystem bonding
+  // termination are MEMBERS, not fixtures — without a symbol they printed
+  // as unkeyed dot-scale copper marks. Same bubble grammar + spiral
+  // de-collision as the device tags; legend rows join TAG_NAMES below.
+  if (def.key === 'electrical') {
+    const gesMarks = [
+      ...mine.filter((m) => m.role === 'ground-rod').map((m) => ({ m, tag: 'GR' })),
+      ...mine.filter((m) => m.sourceId === 'ges-ibt').map((m) => ({ m, tag: 'IB' })),
+    ]
+    for (const { m, tag } of gesMarks) {
+      let px = X(m.position[0])
+      let py = Z(m.position[2])
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const clash = placed.some((q) => Math.hypot(q.x - px, q.y - py) < 15)
+        if (!clash) break
+        const ang = (attempt * Math.PI) / 3
+        px = X(m.position[0]) + 16 * Math.cos(ang)
+        py = Z(m.position[2]) + 16 * Math.sin(ang)
+      }
+      placed.push({ x: px, y: py })
+      shapes.push(
+        `<g transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle r="7" fill="#fff" stroke="#a05c10" stroke-width="1.2"/><text y="3.5" font-size="8" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text></g>`,
+      )
+    }
+  }
+
   // Sleeve annotations (examiner P1: the engine labels every concrete
   // crossing 'sleeved … P2603.4' but the story never reached paper —
   // grep over all sheets found zero). Each sleeved DWV leg is intersected
@@ -1287,15 +1313,27 @@ function planSheet(
       AH: 'air handler',
       CO: 'cleanout',
       DS: 'AC disconnect',
+      GR: 'ground rod — driven electrode (NEC 250.52)',
+      IB: 'intersystem bonding termination (NEC 250.94)',
     }
+    // B12 examiner keys: the GES symbols are member-driven (rods + IBT are
+    // not fixtures) — their tags join the legend from `mine`.
+    const memberTags =
+      def.key === 'electrical'
+        ? [
+            ...(mine.some((m) => m.role === 'ground-rod') ? ['GR'] : []),
+            ...(mine.some((m) => m.sourceId === 'ges-ibt') ? ['IB'] : []),
+          ]
+        : []
     const usedTags = [
-      ...new Set(
-        devs.map((f) =>
+      ...new Set([
+        ...devs.map((f) =>
           f.kind === 'equipment' && f.meta?.equipment === 'condenser'
             ? 'CU'
             : (FIXTURE_TAG[f.kind] ?? '·'),
         ),
-      ),
+        ...memberTags,
+      ]),
     ]
     let trow = legendLines.length
     for (const tag of usedTags) {

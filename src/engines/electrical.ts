@@ -2017,9 +2017,55 @@ const GES_GRADE_Y = 0.005
 const GROUND_ROD_STANDOFF = 0.45
 /** Bare GEC / bonding jumper drawn thinner than the SE cable. */
 const GES_SECTION = 0.014
-/** The water-pipe bond's wall plane — one step above the meter→panel feed
- * (its own plane: the two share wall legs on panel-adjacent runs). */
-const GES_BOND_Y = WIRE_RUN_Y + 10 * 0.012
+/** The water-pipe bond's wall plane. Round-3 skeptic F2: one 12 mm step
+ * above the feed EMBEDDED the two conductors (half-sections sum to
+ * 24.5 mm) — the plane now clears the feed by the section sum + 10 mm
+ * skin, so shared wall legs run parallel, never inside each other. */
+const GES_BOND_Y = SERVICE_FEED_Y + (SERVICE_SECTION + GES_SECTION) / 2 + 0.01
+/** Bay-step strap-outs: the GES drops one step along the anchor wall so a
+ * drop never shares a plan point with the SE riser (meter end, round 2),
+ * the meter→panel feed rise (panel end, round-3 F2) or the plumbing cold
+ * riser (water-entry end). */
+const GES_STRAP_OUT = 0.08
+/** Rod clearance of the buried SE street lateral: half sections + skin
+ * (round-3 F1 — the lateral used to bore rod 1 through its full section). */
+const ROD_LATERAL_CLEAR = SERVICE_SECTION / 2 + GROUND_ROD_DIAMETER / 2 + 0.02
+/** Rod (and buried rod-to-rod GEC leg) clearance of any wall's below-grade
+ * band: footing half-width (16" → 0.203 m) + rod + skin (round-3 F3 —
+ * a concave L-plan put rod 2 inside the wing footprint). */
+const ROD_FOUNDATION_CLEAR = 0.25
+/** Slide search along the wall axis when the default rod spot is obstructed. */
+const ROD_SLIDE_STEP = 0.3
+const ROD_SLIDE_MAX = 3.0
+
+type PlanPt = readonly [number, number]
+
+/** Plan distance point → segment (rod-spot validity scans). */
+function planPointSegDist(p: PlanPt, a: PlanPt, b: PlanPt): number {
+  const abx = b[0] - a[0]
+  const abz = b[1] - a[1]
+  const l2 = abx * abx + abz * abz
+  const t =
+    l2 < 1e-12 ? 0 : Math.max(0, Math.min(1, ((p[0] - a[0]) * abx + (p[1] - a[1]) * abz) / l2))
+  return Math.hypot(p[0] - (a[0] + abx * t), p[1] - (a[1] + abz * t))
+}
+
+/** Plan distance segment → segment (0 when they properly cross). */
+function planSegSegDist(a1: PlanPt, a2: PlanPt, b1: PlanPt, b2: PlanPt): number {
+  const cross = (p: PlanPt, q: PlanPt, r: PlanPt): number =>
+    (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0])
+  const o1 = cross(a1, a2, b1)
+  const o2 = cross(a1, a2, b2)
+  const o3 = cross(b1, b2, a1)
+  const o4 = cross(b1, b2, a2)
+  if (o1 * o2 < 0 && o3 * o4 < 0) return 0
+  return Math.min(
+    planPointSegDist(b1, a1, a2),
+    planPointSegDist(b2, a1, a2),
+    planPointSegDist(a1, b1, b2),
+    planPointSegDist(a2, b1, b2),
+  )
+}
 
 /**
  * NEC 250.66 GEC size from the service rating, via the service-entrance
@@ -2047,6 +2093,9 @@ export function gecSizeAwg(serviceAmps: number): number {
  */
 export type ServiceCableContext = {
   waterEntry?: readonly [number, number, number] | null
+  /** Room footprints for the rod-spot validity scan (round-3 F3 — a rod
+   * must never land inside the house). */
+  rooms?: readonly RoomSlice[]
 }
 
 /**
@@ -2295,14 +2344,83 @@ export function routeServiceCable(
   const rodAxis: readonly [number, number] = meterAnchor
     ? meterAnchor.wall.dir
     : [-outN[1], outN[0]]
-  const rod1: readonly [number, number] = [
-    mx + outN[0] * GROUND_ROD_STANDOFF,
-    mz + outN[1] * GROUND_ROD_STANDOFF,
+  // The GEC drops one bay-step beside the SE riser (round 2 — a coincident
+  // drop buried the conductor inside the riser volume); the rod line keys
+  // off the SAME strap point so the default rod 1 already stands clear of
+  // the lateral's approach line through the meter.
+  const strap: readonly [number, number] = [
+    mx + rodAxis[0] * GES_STRAP_OUT,
+    mz + rodAxis[1] * GES_STRAP_OUT,
   ]
-  const rod2: readonly [number, number] = [
-    rod1[0] + rodAxis[0] * GROUND_ROD_SPACING,
-    rod1[1] + rodAxis[1] * GROUND_ROD_SPACING,
+
+  // ---- rod spots are SCENE-AWARE (round-3 skeptic F1 + F3) ----
+  // The default spot — out the meter wall beside the GEC strap — must
+  // clear (a) the buried SE street lateral, which approaches the meter
+  // along its own normal (rod 1 used to sit exactly ON that line and the
+  // lateral bored the full rod section on the DEFAULT scene), (b) every
+  // wall's below-grade foundation band, and (c) every room footprint (a
+  // concave L-plan put rod 2 INSIDE the wing). The buried rod-to-rod GEC
+  // leg is scanned against the wall bands too (it bored the wing's
+  // stemwall). Obstructed = the PAIR slides along the wall axis in
+  // deterministic ± steps; unplaceable = keep the default and FLAG both
+  // rods — never silent.
+  const lateralSegs: readonly [PlanPt, PlanPt][] = [
+    [[street[0], street[1]], [mx, street[1]]],
+    [[mx, street[1]], [mx, mz]],
   ]
+  const rooms = context.rooms ?? []
+  const rodPairAt = (slide: number): [PlanPt, PlanPt] => {
+    const bx = strap[0] + outN[0] * GROUND_ROD_STANDOFF + rodAxis[0] * slide
+    const bz = strap[1] + outN[1] * GROUND_ROD_STANDOFF + rodAxis[1] * slide
+    return [
+      [bx, bz],
+      [bx + rodAxis[0] * GROUND_ROD_SPACING, bz + rodAxis[1] * GROUND_ROD_SPACING],
+    ]
+  }
+  const rodPairClear = (pair: readonly [PlanPt, PlanPt]): boolean => {
+    for (const p of pair) {
+      for (const [a, b] of lateralSegs) {
+        if (planPointSegDist(p, a, b) < ROD_LATERAL_CLEAR) return false
+      }
+      for (const w of walls) {
+        if (w.curved) continue
+        if (planPointSegDist(p, w.start, w.end) < ROD_FOUNDATION_CLEAR) return false
+      }
+      for (const room of rooms) {
+        if (pointInPolygon(p, room.polygon)) return false
+      }
+    }
+    for (const w of walls) {
+      if (w.curved) continue
+      if (planSegSegDist(pair[0], pair[1], w.start, w.end) < ROD_FOUNDATION_CLEAR) return false
+    }
+    return true
+  }
+  let rodPair = rodPairAt(0)
+  let rodFlag: string | undefined
+  if (!rodPairClear(rodPair)) {
+    let found = false
+    for (let step = ROD_SLIDE_STEP; step <= ROD_SLIDE_MAX + 1e-9 && !found; step += ROD_SLIDE_STEP) {
+      for (const slide of [step, -step]) {
+        const candidate = rodPairAt(slide)
+        if (rodPairClear(candidate)) {
+          rodPair = candidate
+          found = true
+          break
+        }
+      }
+    }
+    if (!found) {
+      rodFlag =
+        'ground rods obstructed at the meter — verify electrode placement on site (NEC 250.53)'
+    }
+  }
+  const [rod1, rod2] = rodPair
+  // Per-storey scope (round-3 F4, the E6 honesty class): compute routes one
+  // LEVEL, so every storey with a service chain mints its own GES — while
+  // NEC 250.58 wants ONE electrode system per service. The labels say so;
+  // multi-storey scenes get the level warning (compute).
+  const storeyScope = ' — per-storey model: verify single GES per service (250.53/250.58)'
   ;[rod1, rod2].forEach(([rx, rz], i) => {
     members.push({
       system: 'electrical',
@@ -2314,21 +2432,19 @@ export function routeServiceCable(
       material: 'copper',
       sourceId: `ges-rod-${i + 1}`,
       label:
-        i === 0
+        (i === 0
           ? 'Ground rod 1 — 5/8" × 8 ft copper-clad, driven, top below grade (NEC 250.52(A)(5))'
-          : 'Ground rod 2 — supplemental, ≥ 6 ft from rod 1 (NEC 250.53(A)(2)/(B))',
+          : 'Ground rod 2 — supplemental, ≥ 6 ft from rod 1 (NEC 250.53(A)(2)/(B))') + storeyScope,
+      ...(rodFlag ? { flag: rodFlag } : {}),
     })
   })
 
-  // GEC: meter → a short strap-out beside the SE riser (the riser member
-  // stands on the SAME plan point — a coincident drop would bury the thin
-  // conductor inside its volume) → down the exterior face to the grade
+  // GEC: meter → the strap-out → down the exterior face to the grade
   // line → out to rod 1 → drop onto the rod → one CONTINUOUS run to rod 2
   // (250.53(C) — the rod-to-rod jumper is the same unbroken conductor).
   // The grade-line run sits above the stemwall top (y=0) so nothing bores
   // the foundation.
-  const gecLabel = `GEC ${gecAwg} AWG Cu — grounding electrode conductor (NEC 250.66)${ampNote}`
-  const strap: readonly [number, number] = [mx + rodAxis[0] * 0.08, mz + rodAxis[1] * 0.08]
+  const gecLabel = `GEC ${gecAwg} AWG Cu — grounding electrode conductor (NEC 250.66)${ampNote}${storeyScope}`
   gesFlagged('GES-1', [mx, my, mz], [strap[0], my, strap[1]], `${gecLabel} — meter strap-out`)
   gesFlagged(
     'GES-1',
@@ -2373,11 +2489,34 @@ export function routeServiceCable(
     if (bondRouted && panelAnchor && waterAnchor) {
       const pb = wallPlan(panelAnchor)
       const wa = wallPlan(waterAnchor)
-      gesFlagged('GES-2', [px, py, pz], [pb[0], py, pb[1]], `${bondLabel} — panel bridge`)
-      gesWire('GES-2', [pb[0], py, pb[1]], [pb[0], GES_BOND_Y, pb[1]], bondLabel)
+      // Strap-outs at BOTH bays (round-3 F2 — the panel-end drop shared
+      // its exact plan point with the meter→panel feed RISE: 0.95 m of
+      // 14 mm conductor fully inside the 35 mm SE cable; the same class
+      // round 2 fixed at the meter). The bond drops one bay-step along
+      // each anchor wall, then rejoins the wall run at the bond plane;
+      // the water-end step also dodges the plumbing cold riser standing
+      // on the entry's plan point.
+      const pd = panelAnchor.wall.dir
+      const wd = waterAnchor.wall.dir
+      const pb2: PlanPt = [pb[0] + pd[0] * GES_STRAP_OUT, pb[1] + pd[1] * GES_STRAP_OUT]
+      const wa2: PlanPt = [wa[0] + wd[0] * GES_STRAP_OUT, wa[1] + wd[1] * GES_STRAP_OUT]
+      gesFlagged('GES-2', [px, py, pz], [pb2[0], py, pb2[1]], `${bondLabel} — panel strap-out`)
+      gesWire('GES-2', [pb2[0], py, pb2[1]], [pb2[0], GES_BOND_Y, pb2[1]], bondLabel)
+      gesWire(
+        'GES-2',
+        [pb2[0], GES_BOND_Y, pb2[1]],
+        [pb[0], GES_BOND_Y, pb[1]],
+        `${bondLabel} — to the wall run`,
+      )
       emitWallPathWith(bondEmit, graph, panelAnchor, waterAnchor, GES_BOND_Y)
-      gesWire('GES-2', [wa[0], GES_BOND_Y, wa[1]], [wa[0], wy, wa[1]], bondLabel)
-      gesFlagged('GES-2', [wa[0], wy, wa[1]], [wx, wy, wz], `${bondLabel} — pipe clamp`)
+      gesWire(
+        'GES-2',
+        [wa[0], GES_BOND_Y, wa[1]],
+        [wa2[0], GES_BOND_Y, wa2[1]],
+        `${bondLabel} — to the entry bay`,
+      )
+      gesWire('GES-2', [wa2[0], GES_BOND_Y, wa2[1]], [wa2[0], wy, wa2[1]], bondLabel)
+      gesFlagged('GES-2', [wa2[0], wy, wa2[1]], [wx, wy, wz], `${bondLabel} — pipe clamp`)
     } else {
       // Disconnected islands / degenerate scenes: buried legs (NEC 300.5
       // convention, same as the feed fallback) — never living-height air.

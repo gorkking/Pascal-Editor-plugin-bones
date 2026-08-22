@@ -878,7 +878,21 @@ function computeLevelUncached(
           'water-pipe bond (NEC 250.104) not modeled — no water service entry visible; bond the metal water line at its entry',
         )
       }
-      members.push(...routeWiring(electrical, activeWalls, { waterEntry }))
+      members.push(...routeWiring(electrical, activeWalls, { waterEntry, rooms: activeRooms }))
+      // B12 round-3 F4 (the E6 honesty class): compute routes one LEVEL,
+      // so every storey with a service chain mints its own GES — while a
+      // dwelling service has ONE electrode system (NEC 250.53/250.58).
+      // Sibling storeys with rooms mint their own chains; say so — the
+      // exact mirror of the B13 per-storey interconnect warning above.
+      if (
+        panelFx &&
+        meterFx &&
+        levels.some((l, i) => i !== levelIndex && extractRooms(nodes, l.id).length > 0)
+      ) {
+        warnings.push(
+          'grounding electrode system modeled per storey — a dwelling service has ONE electrode system (NEC 250.53/250.58); verify the single grade-level GES',
+        )
+      }
     }
   }
 
