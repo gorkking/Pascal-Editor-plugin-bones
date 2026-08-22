@@ -836,6 +836,64 @@ AND a gate — a checklist line without a test is a wish.
   carry cj-legal depths; the default 8×6 hip honestly flags its 6 m
   one-piece joists).
 
+- **S15 The high-wind uplift path continues past the roof ties — or says
+  it can't (R802.11, R301.2.1/WFCM).** ≥ 130 mph design wind
+  (`spec.highWindUplift`, set by `applyJurisdiction` from the data's own
+  highWind overlay trigger `ultimateWindMph >= 130 && flags.hurricaneTies`
+  — DELIBERATELY narrower than `hurricaneTies`, whose sub-130 coastal
+  belt TX/AL/GA/NY… keeps roof ties with byte-equal walls) every framed
+  EXTERIOR wall books the continuation as S13 surface hardware (1.2 mm
+  symbolic steel on the framing face under the SAT skin, honest 'install
+  per strapping schedule' labels, WFCM capacity/nailing stated as not
+  modeled): (a) ONE `uplift-connector` at every full-height vertical's
+  top (grid studs / kings / portal posts / corner backing — the wall-side
+  mirror of the roof's per-rafter `tieAt`; coverage = the stud rhythm,
+  stated on the buy row); co-planar surface steel never shares a drawn
+  spot — a taken spot (HI: seismic AND high-wind puts B9's portal strap
+  on the exact king) side-steps via a deterministic ±1..3 strap-width
+  dodge ladder over a y-aware surface registry; (b) one `uplift-strap`
+  per opening side at the INNERMOST TRIMMER line (the stick the header
+  bears on — never B9's king line), lapping header + jack; (c)
+  `foundation-strap`s at 48" o.c. along SLAB-BEARING plates (ends
+  covered, door ROs skipped — a strap in a doorway anchors nothing, the
+  S12 lesson), DEDUPED by compute where a foundation R403.1.6 J-bolt/HDU
+  already anchors within the 12" window — one anchorage point, one
+  booking (the bolt is the modeled hardware and wins; HI's 4-ft seismic
+  bolt spacing visibly wins more spots than LA's 6-ft); a walls-only
+  result keeps the full ladder (toggle honesty, B9c). Interior
+  partitions, LOD 200, upper storeys' plates (no slab bearing) and
+  CMU-default walls (FL — masonry anchorage is the B18b grouted-cell
+  story) book nothing. THE FLAT-ROOF SEAM IS STATED, never silent
+  (B8b, roof-side, sibling-owned): connectors under a roof framing
+  rafters with ZERO steel ties raise exactly one level WARNING per such
+  roof, naming it ('…R802.11 uplift path incomplete at the roof bearing,
+  verify tie schedule' — P4 prints it); tied roofs, roofless results and
+  other-storey roofs stay silent. TAKEOFF (B4/S4 both directions): three
+  dedicated member-derived rows counted by ROLE (three new roles — B9's
+  `strap` census untouched), the foundation row stating the dedupe
+  convention, NO invented nail poundage (B9's fastener rule).
+  JURISDICTION TRUTH: the LA/HI-vs-INTL wall delta is EXACTLY the uplift
+  set (stripping the three roles → byte-equal, order included); INTL +
+  49 states incl. TX and FL byte-equal to master everywhere
+  (docs/plans/B10-EXPECTED-DIFF.md — 52-code × 3-scene sweep PASS); E5
+  baseline recaptured byte-identical.
+  Origin: LOD-400 audit BATCH 10 (2026-08-20) — LA walls byte-identical
+  to INTL; `hurricaneTies` consumed ONLY by roof-framing; the only
+  acknowledgment a disclaimer buried in data/fastening-schedule.json.
+  Gates: `src/engines/wall-framing.uplift.test.ts` (LA census 1:1 with
+  verticals + exact-placement floor, strap line/envelope pins,
+  foundation ladder spacing incl. the crossing-gap bound, dedupe matrix
+  incl. seam-sill exclusion + compute-level bolt-layout proof with the
+  walls-only strictly-more pin, flat/gable/INTL warning matrix naming
+  the roof, TX/INTL byte-equality pins, 51-state sweep with the derived
+  uplift set + FL framed-override inverse) + `src/engines/takeoff.test.ts`
+  B10 describe (row==role both directions, LA-delta-is-exactly-three-rows,
+  HI dual-family census split) + `src/engines/interpenetration.test.ts`
+  B10 describe (LA walls+layers BOTH faces strictly clean with NO uplift
+  allow-list pair; +foundation post-dedupe inherits only the documented
+  bolt-shank class; HI portal+uplift coexistence). All mutation-checked
+  (17 probes across B10a-e).
+
 ## M — Mechanical (HVAC)
 
 - **M1 Ducts never cross plate bands; interior storeys route in soffits.**

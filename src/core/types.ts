@@ -80,6 +80,17 @@ export type MemberRole =
    * header-to-jack strap (R602.10.6.4, LOD-400 B9). Surface-mounted:
    * ~1.2 mm thick against the framing face, under the 2 mm SAT skin. */
   | 'strap'
+  // high-wind wall uplift path (R802.11 continuation / WFCM — LOD-400 B10).
+  // Own roles so the takeoff counts each as a dedicated hardware line (the
+  // 'counted by ROLE, never label regex' doctrine) without perturbing B9's
+  // portal-strap census. All three follow the S13 surface-hardware
+  // convention: ~1.2 mm symbolic steel on the framing face, under the skin.
+  /** Stud-to-top-plate uplift connector (H2.5-class, WFCM stud-to-plate). */
+  | 'uplift-connector'
+  /** Header-to-jack uplift strap at an opening (WFCM coil-strap class). */
+  | 'uplift-strap'
+  /** Bottom-plate-to-foundation uplift strap (anchorage per schedule). */
+  | 'foundation-strap'
   | 'plate-washer'
   | 'jack-rafter'
   | 'outlooker'

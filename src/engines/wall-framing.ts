@@ -42,6 +42,31 @@ const PLATE_STOCK = feet(20)
  * interpenetration against the studs it laps (checklist S1). */
 const PORTAL_STRAP_THICKNESS = 0.0012
 
+// ---- high-wind wall uplift path (R802.11 / R301.2.1 WFCM — LOD-400 B10) --
+/** The B10 uplift hardware rides B9's surface-steel convention (S13):
+ * ~1.2 mm symbolic steel against the framing face, under the SAT skin. */
+const UPLIFT_STEEL_THICKNESS = PORTAL_STRAP_THICKNESS
+/** Flat-strap width (1-1/4" coil-strap class). */
+const UPLIFT_STRAP_WIDTH = inches(1.25)
+/** Stud-to-plate connector extent: laps the stud top AND the plate pack
+ * (H2.5-class connectors are ~5" of lap across the joint). */
+const UPLIFT_CONNECTOR_HEIGHT = inches(5)
+/** Plate-to-foundation strap spacing along slab-bearing plates. WFCM
+ * strapping schedules are wind/geometry-specific — 48" o.c. is the
+ * conservative layout convention here; the member labels route the real
+ * schedule to the installer. Exported for the gates. */
+export const FOUNDATION_STRAP_SPACING = feet(4)
+/** Foundation strap height above the slab line: laps the 1.5" plate and
+ * the stud foot; the concrete anchorage below y=0 is per schedule (the
+ * advisory says so — symbolic, never invented embedment geometry). */
+const FOUNDATION_STRAP_HEIGHT = inches(6)
+/** Plan distance under which a foundation strap and an existing foundation
+ * anchor (R403.1.6 J-bolt / seismic HDU) are ONE anchorage point — the
+ * R403.1.6 12" end-distance window. `dedupeFoundationStraps` drops the
+ * strap there: the bolt already clamps the plate, and two bookings of one
+ * spot would double-buy the anchor (B18/B9 cross-ref precedent). */
+export const UPLIFT_ANCHOR_DEDUPE_TOL = 0.3
+
 type WallFrame = {
   wall: WallSlice
   yaw: number
@@ -274,6 +299,39 @@ export function frameWall(
   const studDims: [number, number, number] = [t, studHeight, wFit]
   const halfT = t / 2
 
+  // ---- high-wind uplift path (LOD-400 B10) ----
+  // ≥130 mph (spec.highWindUplift, applyJurisdiction) the roof's hurricane
+  // ties are only the FIRST link — R802.11/WFCM want the uplift carried
+  // stud → plate → foundation. Exterior walls book the continuation as
+  // symbolic surface steel (S13, the B9 portal-strap convention): honest
+  // 'install per schedule' labels, capacity/nailing per WFCM stated as not
+  // modeled. Interior partitions carry no roof uplift — no hardware.
+  const uplift = spec.highWindUplift && wall.exterior
+  /** Every full-height vertical (grid stud / king / portal post / corner
+   * backing) collects here — one stud-to-plate connector each (census). */
+  const upliftVerticalUs: number[] = []
+  const surfaceSteel = (
+    role: Member['role'],
+    u: number,
+    y0: number,
+    y1: number,
+    label: string,
+    advisory: string,
+  ): void => {
+    members.push({
+      system: 'wall-framing',
+      role,
+      dims: [UPLIFT_STRAP_WIDTH, y1 - y0, UPLIFT_STEEL_THICKNESS],
+      length: y1 - y0,
+      position: place(u, (y0 + y1) / 2, -(wFit / 2 + UPLIFT_STEEL_THICKNESS / 2)),
+      rotation: [0, yaw, 0],
+      material: 'steel',
+      sourceId: wall.id,
+      label,
+      advisory,
+    })
+  }
+
   // ---- opening frames (kings / trimmers / header / sill / cripples) ----
   type KeepOut = { min: number; max: number }
   const keepOuts: KeepOut[] = []
@@ -298,6 +356,14 @@ export function frameWall(
   // Portal hold-down posts already placed on this wall (cross-opening
   // conflict awareness) — see the bracing block below.
   const portalPostUs: number[] = []
+  /** Every co-planar surface-steel piece already emitted on this wall's
+   * face (B9 portal straps at kings, B10 opening straps at trimmers,
+   * placed connectors) — u plus vertical extent. The B10 stud-to-plate
+   * connector dodges pieces it would actually touch — two flat steel
+   * pieces never share a drawn spot (HI: seismic AND high-wind puts a
+   * portal strap on the exact king the connector would ride, reaching
+   * studTop when the header fills the depth). */
+  const surfaceSpots: { u: number; y0: number; y1: number }[] = []
   const clampedExtraStudUs = (hints.extraStuds ?? []).map((e) =>
     Math.min(Math.max(e.u, u0 + halfT), u1 - halfT),
   )
@@ -492,11 +558,13 @@ export function frameWall(
     // aggregate compression flag — a flag silently dropped is a lie, P4).
     for (const side of [-1, 1] as const) {
       const kingFlag = bracing[String(side) as '-1' | '1'].kingFlag
+      const kingU = u + side * (ro / 2 + frameSide + halfT)
+      if (uplift) upliftVerticalUs.push(kingU)
       emit(
         'king-stud',
         studSize,
         studDims,
-        u + side * (ro / 2 + frameSide + halfT),
+        kingU,
         studBottom + studHeight / 2,
         studHeight,
         undefined,
@@ -504,6 +572,31 @@ export function frameWall(
           ? `${kingFlag} | ${compressionFlag}`
           : kingFlag,
       )
+    }
+
+    // Header/king uplift straps (B10 b): the header's uplift reaction lands
+    // on the jack pack — one strap per side at the INNERMOST trimmer line
+    // (the stick the header bears on), lapping header side and trimmer.
+    // Deliberately NOT at the king line: B9's CS-PF portal strap mounts
+    // there on SDC-D + high-wind states (HI) — two hardware pieces never
+    // share one drawn spot.
+    if (uplift) {
+      const strapBottom = Math.max(studBottom, roTop - inches(12))
+      const strapTop = Math.min(studTop, roTop + Math.max(headerDepth, inches(3)))
+      if (strapTop - strapBottom > inches(6)) {
+        for (const side of [-1, 1] as const) {
+          surfaceSpots.push({ u: u + side * (ro / 2 + halfT), y0: strapBottom, y1: strapTop })
+          surfaceSteel(
+            'uplift-strap',
+            u + side * (ro / 2 + halfT),
+            strapBottom,
+            strapTop,
+            `Header uplift strap over ${opening.kind} — high-wind (WFCM) — install per strapping schedule`,
+            'high-wind uplift v1 — surface hardware, symbolic: coil-strap-class header-to-jack tie ' +
+              'on the framing face; uplift capacity + nailing per the WFCM/manufacturer schedule, not modeled',
+          )
+        }
+      }
     }
 
     // Portal member set (CS-PF, R602.10.6.4) where the analysis above fits
@@ -516,6 +609,7 @@ export function frameWall(
       const portal = bracing[String(side) as '-1' | '1'].portal
       if (!portal) continue
       for (const pu of portal.postUs) {
+        if (uplift) upliftVerticalUs.push(pu)
         emit(
           'post',
           studSize,
@@ -533,6 +627,7 @@ export function frameWall(
       const strapTop = Math.min(studTop, roTop + Math.max(headerDepth, inches(3)))
       const strapLen = strapTop - strapBottom
       if (strapLen > inches(6)) {
+        surfaceSpots.push({ u: kingU, y0: strapBottom, y1: strapTop })
         members.push({
           system: 'wall-framing',
           role: 'strap',
@@ -616,13 +711,89 @@ export function frameWall(
   const studUs = studPositions(runLen, spec.studSpacing, halfT).map((su) => su + u0)
   for (const su of studUs) {
     if (keepOuts.some((k) => su > k.min && su < k.max)) continue
+    if (uplift) upliftVerticalUs.push(su)
     emit('stud', studSize, studDims, su, studBottom + studHeight / 2, studHeight)
   }
 
   // ---- cross-wall extras (California corner backing studs) ----
   for (const extra of hints.extraStuds ?? []) {
     const eu = Math.min(Math.max(extra.u, u0 + halfT), u1 - halfT)
+    if (uplift) upliftVerticalUs.push(eu)
     emit('stud', studSize, studDims, eu, studBottom + studHeight / 2, studHeight, extra.label)
+  }
+
+  // ---- high-wind uplift hardware (B10 a + c) ----
+  if (uplift) {
+    // (a) ONE stud-to-plate connector at every full-height vertical's top —
+    // the wall-side mirror of the roof's per-rafter tieAt booking. Coverage
+    // is therefore the stud rhythm itself (o.c. spacing), stated on the
+    // takeoff row. Co-planar surface steel never shares a drawn spot: a
+    // connector whose spot is taken (a B9 portal strap on that exact king,
+    // an opening strap, a neighbor's connector) walks a DETERMINISTIC
+    // ±1, ±2, ±3 strap-width ladder — away from the run middle first —
+    // until clear (the GES dodge-ladder convention); side-by-side is the
+    // real install. An undodgeable spot keeps its position (census over
+    // geometry — the S1 compose gate owns the proof that this never
+    // happens on real frames).
+    const cBottom = studTop - UPLIFT_CONNECTOR_HEIGHT / 2
+    const cTop = Math.min(H, studTop + UPLIFT_CONNECTOR_HEIGHT / 2)
+    const clearOf = (p: number): boolean =>
+      surfaceSpots.every(
+        (s) =>
+          Math.abs(s.u - p) >= UPLIFT_STRAP_WIDTH - EPS || s.y1 <= cBottom || s.y0 >= cTop,
+      ) &&
+      p >= u0 + UPLIFT_STRAP_WIDTH / 2 - EPS &&
+      p <= u1 - UPLIFT_STRAP_WIDTH / 2 + EPS
+    for (const cu of upliftVerticalUs) {
+      let target = cu
+      if (!clearOf(target)) {
+        const dir = cu <= runMid ? -1 : 1
+        for (const k of [1, -1, 2, -2, 3, -3]) {
+          const candidate = cu + dir * k * UPLIFT_STRAP_WIDTH
+          if (clearOf(candidate)) {
+            target = candidate
+            break
+          }
+        }
+      }
+      surfaceSpots.push({ u: target, y0: cBottom, y1: cTop })
+      surfaceSteel(
+        'uplift-connector',
+        target,
+        studTop - UPLIFT_CONNECTOR_HEIGHT / 2,
+        Math.min(H, studTop + UPLIFT_CONNECTOR_HEIGHT / 2),
+        'Stud-to-plate connector — high-wind uplift (R802.11 path / WFCM) — install per strapping schedule',
+        'high-wind uplift v1 — surface hardware, symbolic: H2.5-class stud-to-plate connector on the ' +
+          'framing face regardless of exterior side; uplift capacity + nailing per the WFCM/manufacturer ' +
+          'schedule, not modeled',
+      )
+    }
+    // (c) plate-to-foundation straps: only where the plate actually bears
+    // on concrete (hints.slabBearing — the same context that makes it a PT
+    // sole plate, B5). 48" o.c. with guaranteed end coverage
+    // (studPositions' own contract), skipping door ROs — the plate is
+    // interrupted there and a strap would anchor nothing (the S12 lesson).
+    // Straps that land where a foundation J-bolt/HDU already anchors are
+    // DEDUPED by compute (`dedupeFoundationStraps`) — one anchorage point,
+    // one booking.
+    if (hints.slabBearing) {
+      const doorSpans = openingFrames
+        .filter((f) => f.opening.kind === 'door')
+        .map((f) => [f.u - f.ro / 2, f.u + f.ro / 2] as const)
+      for (const su of studPositions(runLen, FOUNDATION_STRAP_SPACING, halfT)) {
+        const fu = su + u0
+        if (doorSpans.some(([a, b]) => fu > a && fu < b)) continue
+        surfaceSteel(
+          'foundation-strap',
+          fu,
+          0,
+          FOUNDATION_STRAP_HEIGHT,
+          'Plate-to-foundation uplift strap — high-wind (WFCM) — install per strapping schedule',
+          'high-wind uplift v1 — surface hardware, symbolic: plate-to-foundation strap drawn to the ' +
+            'slab line; concrete anchorage/embedment per the WFCM/manufacturer schedule, not modeled',
+        )
+      }
+    }
   }
 
   // ---- partition backing at tees (ladder blocking, flat 2x) ----
@@ -920,6 +1091,73 @@ export type FrameWallsOptions = {
  * `opts` carries level context (slab bearing → PT sole plates, R317.1);
  * absent options keep the output byte-equal.
  */
+/**
+ * Drop plate-to-foundation uplift straps that land where the FOUNDATION
+ * already anchors the plate — an R403.1.6 J-bolt or a seismic HDU within
+ * the 12" end-distance window is the SAME anchorage point, and booking a
+ * strap on top of it would double-buy one anchor (LOD-400 B10 c). The bolt
+ * wins (it is the modeled, embedded hardware); the surviving straps fill
+ * the runs between bolts. Runs from compute when BOTH systems are in the
+ * result (the B9c cross-ref convention — a toggled-off foundation is not
+ * missing hardware, so a walls-only result keeps its full strap ladder).
+ * Mutates in place; returns the number of straps removed.
+ */
+export function dedupeFoundationStraps(members: Member[]): number {
+  const anchors = members.filter(
+    (m) => m.system === 'foundation' && (m.role === 'anchor-bolt' || m.role === 'hold-down'),
+  )
+  if (anchors.length === 0) return 0
+  let removed = 0
+  for (let i = members.length - 1; i >= 0; i--) {
+    const m = members[i] as Member
+    if (m.role !== 'foundation-strap') continue
+    const doubled = anchors.some(
+      (a) =>
+        Math.hypot(a.position[0] - m.position[0], a.position[2] - m.position[2]) <=
+        UPLIFT_ANCHOR_DEDUPE_TOL,
+    )
+    if (doubled) {
+      members.splice(i, 1)
+      removed += 1
+    }
+  }
+  return removed
+}
+
+/**
+ * Uplift-path honesty at the roof seam (LOD-400 B10 / the B8b flat-roof
+ * gap): when the WALL side modeled its high-wind connectors but a roof in
+ * the same result frames rafters with ZERO hurricane ties (flat roofs call
+ * no tieAt today — roof-side work, sibling-owned), the path the connectors
+ * continue is never started at the roof bearing. That is a WARNING, not a
+ * label: it belongs to the level (P4 prints it on paper), not to any one of
+ * the hundreds of connectors. A result with no roof members stays silent —
+ * a missing system is a toggle, not missing hardware (B9c convention).
+ */
+export function upliftPathWarnings(members: Member[]): string[] {
+  if (!members.some((m) => m.role === 'uplift-connector')) return []
+  const byRoof = new Map<string, { rafters: number; ties: number }>()
+  for (const m of members) {
+    if (m.system !== 'roof-framing') continue
+    const entry = byRoof.get(m.sourceId) ?? { rafters: 0, ties: 0 }
+    if (m.role === 'rafter') entry.rafters += 1
+    if (m.role === 'blocking' && m.material === 'steel') entry.ties += 1
+    byRoof.set(m.sourceId, entry)
+  }
+  const out: string[] = []
+  for (const [roofId, e] of byRoof) {
+    if (e.rafters > 0 && e.ties === 0) {
+      out.push(
+        `high-wind uplift: roof ${roofId} frames rafters with NO hurricane ties ` +
+          `(flat roofs model no rafter/plate ties today) — the wall uplift connectors below ` +
+          `continue a path the roof never starts; R802.11 uplift path incomplete at the roof ` +
+          `bearing, verify tie schedule`,
+      )
+    }
+  }
+  return out
+}
+
 export function frameWalls(
   walls: WallSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
