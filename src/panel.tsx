@@ -20,6 +20,7 @@ import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeo
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
 import { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, type LumberSize } from './lumber'
+import { groupWarnings, warningCount } from './panel-warnings'
 import { useBonesStore } from './store'
 
 const LUMBER_KIND: string = 'bones:lumber'
@@ -111,6 +112,10 @@ function XraySection({
   const [guess, setGuess] = useState<{ code: string; reason: string } | null>(null)
   useEffect(() => setGuess(guessJurisdiction()), [])
   const options = useMemo(() => jurisdictionOptions(), [])
+  // Day-9 declutter: warnings fold into a collapsed drawer, repeated-class
+  // lines grouped — PANEL presentation only; result.warnings stays verbatim
+  // (the plan-set Flags block prints every line, always).
+  const warningLines = useMemo(() => groupWarnings(result?.warnings ?? []), [result])
 
   const toggle = (key: keyof FramingNode) => {
     if (!framingNode) return
@@ -175,9 +180,12 @@ function XraySection({
         </button>
       </div>
 
-      {/* OFF / X-RAY / BASEMENT — the control IS the switch: off↔on flips
+      {/* OFF / X-RAY / SUBFLOOR — the control IS the switch: off↔on flips
           also drive the host wall mode (Low on, restore off); between the
-          two active modes walls stay where the user put them. */}
+          two active modes walls stay where the user put them. Label reads
+          "Subfloor" (day-9: on upper storeys it's the floor framing below
+          THIS storey, not a basement) — the persisted schema value stays
+          'basement'; do NOT migrate it. */}
       <SegmentedControl
         onChange={(v: string) =>
           setXrayViewMode(
@@ -190,7 +198,7 @@ function XraySection({
         options={[
           { label: 'Normal', value: 'off' },
           { label: 'X-ray', value: 'xray' },
-          { label: 'Basement', value: 'basement' },
+          { label: 'Subfloor', value: 'basement' },
         ]}
         value={effectiveViewMode(framingNode)}
       />
@@ -265,13 +273,45 @@ function XraySection({
       </div>
 
       {result && (
-        <div className="text-[11px] text-sidebar-foreground/50">
-          {result.members.length} members · {result.fixtures.length} devices
-          {[...new Set(result.warnings)].map((warning) => (
-            <span className="block text-amber-500/80" key={warning}>
-              {warning}
-            </span>
-          ))}
+        <div className="flex flex-col gap-1 text-[11px] text-sidebar-foreground/50">
+          {/* the compact summary stays always visible — only the warning
+              text folds away (day-9: "we cannot have so much text on the
+              sidebar") */}
+          <span>
+            {result.members.length} members · {result.fixtures.length} devices
+          </span>
+          {warningLines.length > 0 && (
+            <details className="group">
+              <summary className="flex cursor-pointer items-center justify-between text-[11px]">
+                <span className="font-medium text-amber-500/90">Warnings</span>
+                <span className="text-[10px] text-sidebar-foreground/40">
+                  {warningCount(warningLines)}
+                </span>
+              </summary>
+              <div className="mt-0.5 flex flex-col gap-0.5 pl-1">
+                {warningLines.map((line) =>
+                  line.kind === 'single' ? (
+                    <span className="block text-amber-500/80" key={line.text}>
+                      {line.text}
+                    </span>
+                  ) : (
+                    <details key={line.message}>
+                      <summary className="cursor-pointer text-amber-500/80">
+                        {line.label} ({line.warnings.length}): {line.message}
+                      </summary>
+                      <div className="mt-0.5 flex flex-col gap-0.5 pl-2">
+                        {line.warnings.map((warning) => (
+                          <span className="block text-amber-500/60" key={warning}>
+                            {warning}
+                          </span>
+                        ))}
+                      </div>
+                    </details>
+                  ),
+                )}
+              </div>
+            </details>
+          )}
         </div>
       )}
     </div>
@@ -325,8 +365,10 @@ function TakeoffSection({ result }: { result: NonNullable<ReturnType<typeof comp
         </div>
       </div>
       <div className="flex max-h-80 flex-col gap-1 overflow-y-auto pr-1">
+        {/* Flags sort first but start COLLAPSED (day-9 declutter) — the
+            count badge keeps them visible; paper still prints them all. */}
         {sections.map(([section, sectionRows], index) => (
-          <details className="group" key={section} open={index === 0 || section === 'Flags'}>
+          <details className="group" key={section} open={index === 0 && section !== 'Flags'}>
             <summary className="flex cursor-pointer items-center justify-between text-[11px] text-sidebar-foreground/80">
               <span className={section === 'Flags' ? 'font-medium text-amber-500/90' : 'font-medium'}>
                 {section}

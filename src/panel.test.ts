@@ -44,6 +44,45 @@ describe('sidebar panel composition (source gates)', () => {
     expect(panel).not.toContain('seeThrough') // legacy toggle fully retired
     expect(panel).not.toContain('X-ray vision')
   })
+
+  // Day-9 round: 'Basement' misleads on upper storeys (the mode shows the
+  // floor framing below THIS storey) — the LABEL becomes 'Subfloor'.
+  // INTENDED-CHANGE: the persisted schema value 'basement' does NOT migrate
+  // (the `value: 'basement'` pin above still holds).
+  test("day-9 rename: the third view-mode option reads 'Subfloor', value stays 'basement'", () => {
+    expect(panel).toContain("{ label: 'Subfloor', value: 'basement' }")
+    expect(panel).not.toContain("label: 'Basement'")
+  })
+})
+
+describe('day-9 declutter: warnings + flags fold away, the summary stays', () => {
+  const panel = read('./panel.tsx')
+
+  test('warnings render through the pure grouping helper — no raw dump on the rail', () => {
+    expect(panel).toContain("from './panel-warnings'")
+    expect(panel).toContain('groupWarnings(')
+    expect(panel).toContain('warningCount(')
+    // the old always-expanded verbatim dump is gone
+    expect(panel).not.toContain('new Set(result.warnings)')
+  })
+
+  test('the warnings drawer is COLLAPSED by default (no open attribute anywhere static)', () => {
+    // the panel's only <details open…> is the takeoff's computed one — the
+    // warnings drawer (and every other section drawer) mounts closed
+    expect(panel).toContain('Warnings')
+    expect(panel).not.toContain('<details open')
+    const opens = panel.match(/<details[^>]*\bopen=/g) ?? []
+    expect(opens).toHaveLength(1) // TakeoffSection's index-0 expression only
+  })
+
+  test('takeoff Flags start collapsed too — no force-open special case', () => {
+    expect(panel).toContain("open={index === 0 && section !== 'Flags'}")
+    expect(panel).not.toContain("open={index === 0 || section === 'Flags'}")
+  })
+
+  test('the compact summary line stays always visible outside the drawer', () => {
+    expect(panel).toContain('{result.members.length} members · {result.fixtures.length} devices')
+  })
 })
 
 describe('floating inspector keeps the FULL wall engineering surface', () => {
