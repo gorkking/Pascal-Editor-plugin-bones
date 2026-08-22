@@ -4,7 +4,13 @@ import type { PlacedFixtureSlice } from '../core/wall-model'
 import { computeLevel } from '../framing/compute'
 import { FramingNode } from '../framing/schema'
 import { feet, inches } from '../core/units'
-import { layoutElectrical, openingSpans, pointInPolygon, streetEdgePoint } from './electrical'
+import {
+  applyDeviceOverrides,
+  layoutElectrical,
+  openingSpans,
+  pointInPolygon,
+  streetEdgePoint,
+} from './electrical'
 import { unreachableDevices } from './electrical.test-helpers'
 import { routeWiring } from './electrical'
 import { computeTakeoff } from './takeoff'
@@ -633,5 +639,262 @@ describe('B14d basin receptacles — NEC 210.52(D) from placed lavs', () => {
     expect(f.meta?.gfci).toBe(true)
     const members = routeWiring(fixtures, walls)
     expect(unreachableDevices(members, fixtures)).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B14 round 2 — F1/F2: counter-walk honesty under rough openings
+// ---------------------------------------------------------------------------
+
+describe('B14 round-2 F1 — a window over the counter must never gut the walk silently', () => {
+  /** kitchenScene + a window on w_s whose RO crosses the 44" band and spans
+   * u in [0.4, 3.6] — the canonical window-over-sink kitchen. */
+  function windowedKitchen(): { walls: WallSlice[]; rooms: RoomSlice[] } {
+    const { walls, rooms } = kitchenScene()
+    ;(walls[0] as WallSlice).openings.push({
+      id: 'win_counter',
+      kind: 'window',
+      u: 2,
+      width: 3.2 - RO_PAD,
+      height: 1.4 - RO_PAD,
+      sillHeight: 1.016, // 40" sill — RO crosses the counter band
+      roughWidth: 3.2,
+      roughHeight: 1.4,
+    })
+    return { walls, rooms }
+  }
+
+  test('boxes collapse to the RO edges AND the level warns the 24"/48" walk is broken', () => {
+    const { walls, rooms } = windowedKitchen()
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings, [sink]))
+    expect(ctr.length).toBeGreaterThanOrEqual(1) // the walk still places what it can
+    // the RO really did break the pitch (bite-proof: gap > 48" + faucet cut)
+    const us = ctr.map((f) => f.position[0]).sort((a, b) => a - b)
+    let maxGap = 0
+    for (let i = 0; i + 1 < us.length; i++) {
+      maxGap = Math.max(maxGap, (us[i + 1] as number) - (us[i] as number))
+    }
+    expect(maxGap).toBeGreaterThan(inches(48) + 0.7)
+    expect(
+      warnings.some(
+        (w) => w.includes('Kitchen') && w.includes('210.52(C)') && w.includes('rough-opening snap'),
+      ),
+    ).toBe(true)
+  })
+
+  test('bite direction: the unobstructed kitchen walk NEVER fires the coverage warning', () => {
+    const { walls, rooms } = kitchenScene()
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings, [sink]))
+    expect(ctr.length).toBeGreaterThanOrEqual(2)
+    expect(warnings.some((w) => w.includes('rough-opening snap'))).toBe(false)
+  })
+
+  test('the faucet-zone nudge alone never trips the coverage audit (behind-sink space is exempt)', () => {
+    const { walls, rooms } = kitchenScene(2.4)
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [0.6, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings, [sink]))
+    expect(ctr.length).toBeGreaterThanOrEqual(1)
+    expect(warnings.some((w) => w.includes('rough-opening snap'))).toBe(false)
+  })
+})
+
+describe('B14 round-2 F2 — a sinked kitchen with zero counter boxes is NEVER wordless', () => {
+  test('sink projecting into a door RO span: zero boxes + explicit 210.52(C) warning', () => {
+    const { walls, rooms } = kitchenScene()
+    ;(walls[0] as WallSlice).openings.push(door(2, 1.8, 'door_wide'))
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.6])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings, [sink]))
+    expect(ctr.length).toBe(0)
+    expect(
+      warnings.some(
+        (w) => w.includes('Kitchen') && w.includes('doorway span') && w.includes('210.52(C)'),
+      ),
+    ).toBe(true)
+  })
+
+  test('counter wall not facing its kitchen (degenerate zone): zero boxes + explicit warning', () => {
+    const { walls } = rectScene()
+    const kitchen = room(
+      'kitchen',
+      [
+        [1, 0.2],
+        [3, 0.2],
+        [3, 1.2],
+        [1, 1.2],
+      ],
+      { name: 'Kitchenette' },
+    )
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.9])
+    const ctr = counterBoxes(layoutElectrical(walls, [kitchen], undefined, warnings, [sink]))
+    expect(ctr.length).toBe(0)
+    expect(
+      warnings.some((w) => w.includes('Kitchenette') && w.includes('does not face its kitchen')),
+    ).toBe(true)
+  })
+
+  test('sub-12" counter strip: zero boxes + the 210.52(C)(1) exemption is labeled', () => {
+    const { walls } = rectScene()
+    const kitchen = room(
+      'kitchen',
+      [
+        [1.9, 0],
+        [2.1, 0],
+        [2.1, 0.5],
+        [1.9, 0.5],
+      ],
+      { name: 'Galley' },
+    )
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.25])
+    const ctr = counterBoxes(layoutElectrical(walls, [kitchen], undefined, warnings, [sink]))
+    expect(ctr.length).toBe(0)
+    expect(warnings.some((w) => w.includes('Galley') && w.includes('210.52(C)(1)'))).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B14 round 2 — F3 (stated conservative reach), F4 (obstructed WR flag),
+// F5 (counter/basin census exclusion)
+// ---------------------------------------------------------------------------
+
+describe('B14 round-2 F3 — the sink radius is straight-line BY DECISION, labeled on dry-room flips', () => {
+  test('a dry-room flip carries the conservative-reach assumption on its label', () => {
+    const { walls, rooms } = rectScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [4, 1])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [sink])
+    const flipped = fixtures.find(
+      (f) => f.kind === 'receptacle-gfci' && f.sourceId === 'w_s' && Math.abs(southU(f) - 4) < 0.1,
+    )
+    expect(flipped).toBeDefined()
+    expect(flipped?.label).toContain('210.8(A)(7)/(9)')
+    expect(flipped?.label).toContain('straight-line reach, conservative')
+  })
+
+  test('PINNED INTENT: the radius pierces walls — a box behind a partition still flips (over-protects, never under)', () => {
+    // partition between the lav and the south wall's boxes
+    const walls = [
+      wall('w_s', [0, 0], [8, 0]),
+      wall('w_e', [8, 0], [8, 6]),
+      wall('w_n', [8, 6], [0, 6]),
+      wall('w_w', [0, 6], [0, 0]),
+      wall('w_div', [0, 0.6], [8, 0.6], { exterior: false, thickness: 0.114 }),
+    ]
+    const rooms = [
+      room('other', [
+        [0, 0],
+        [8, 0],
+        [8, 6],
+        [0, 6],
+      ]),
+    ]
+    const lav = placedItem('lav_1', 'lavatory', [4, 1]) // other side of w_div from w_s's boxes
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [lav])
+    const southMid = fixtures.find(
+      (f) =>
+        (f.kind === 'receptacle' || f.kind === 'receptacle-gfci') &&
+        f.sourceId === 'w_s' &&
+        Math.abs(southU(f) - 4) < 0.35,
+    )
+    expect(southMid).toBeDefined()
+    expect(southMid?.kind).toBe('receptacle-gfci') // pierced the partition — intended
+    expect(southMid?.label).toContain('conservative')
+  })
+})
+
+describe('B14 round-2 F4 — a WR box that cannot clear the glazing is ⚠-flagged, never silent', () => {
+  test('near-full-width glazing: the box overlaps the RO edge → flag + meta + level warning', () => {
+    const walls = [
+      wall('w_s', [0, 0], [8, 0], {
+        openings: [
+          {
+            id: 'win_wall',
+            kind: 'window',
+            u: 4,
+            width: 7.8 - RO_PAD,
+            height: 1.4,
+            sillHeight: 0.2,
+            roughWidth: 7.8,
+            roughHeight: 1.4 + RO_PAD,
+          },
+        ],
+      }),
+      wall('w_e', [8, 0], [8, 6]),
+      wall('w_n', [8, 6], [0, 6]),
+      wall('w_w', [0, 6], [0, 0]),
+    ]
+    const rooms = [
+      room('other', [
+        [0, 0],
+        [8, 0],
+        [8, 6],
+        [0, 6],
+      ]),
+    ]
+    const warnings: string[] = []
+    const out = outdoor(layoutElectrical(walls, rooms, undefined, warnings))
+    const front = out.find((f) => f.meta?.outdoor === 'front')
+    expect(front?.sourceId).toBe('w_s')
+    expect(front?.meta?.obstructed).toBe(true)
+    expect(front?.label).toContain('⚠')
+    expect(front?.label).toContain('obstructed by glazing')
+    expect(
+      warnings.some((w) => w.includes('outdoor receptacle (front)') && w.includes('obstructed')),
+    ).toBe(true)
+  })
+
+  test('bite direction: clear walls carry NO obstruction flag', () => {
+    const { walls, rooms } = rectScene()
+    const warnings: string[] = []
+    for (const f of outdoor(layoutElectrical(walls, rooms, undefined, warnings))) {
+      expect(f.meta?.obstructed).toBeUndefined()
+      expect(f.label).not.toContain('⚠')
+    }
+    expect(warnings.some((w) => w.includes('obstructed'))).toBe(false)
+  })
+})
+
+describe('B14 round-2 F5 — counter boxes never satisfy the 210.52(A) floor-line census', () => {
+  test('interior counter wall: moving a floor box away fires the spacing warning DESPITE counter boxes in the gap', () => {
+    const walls = [
+      wall('w_s', [0, 0], [8, 0]),
+      wall('w_mid', [0, 3], [8, 3], { exterior: false, thickness: 0.114 }),
+      wall('w_far', [0, 6], [8, 6], { exterior: false, thickness: 0.114 }),
+    ]
+    const kitchen = room(
+      'kitchen',
+      [
+        [0, 3],
+        [8, 3],
+        [8, 5],
+        [0, 5],
+      ],
+      { name: 'Kitchen' },
+    )
+    const sink = placedItem('sink_1', 'kitchen-sink', [4, 3.4])
+    const fixtures = layoutElectrical(walls, [kitchen], undefined, undefined, [sink])
+    // the counter walk covered w_mid's kitchen face end to end
+    const ctr = counterBoxes(fixtures).filter((f) => f.sourceId === 'w_mid')
+    expect(ctr.length).toBeGreaterThanOrEqual(4)
+    // move w_mid's middle kitchen-face floor box to another wall
+    const moved = fixtures.find(
+      (f) => f.meta?.deviceId === 'recep-w_mid-1-p' && Math.abs(f.position[1] - inches(15)) < 1e-6,
+    )
+    expect(moved).toBeDefined()
+    const overrides = new Map([['recep-w_mid-1-p', { wallId: 'w_far', wallT: 0.5 }]])
+    const applied = applyDeviceOverrides(fixtures, walls, [kitchen], [], overrides)
+    // the floor-line gap on w_mid is real (>6 ft to the nearest FLOOR box)
+    // even though 44" counter GFCI boxes sit inside it — they never count
+    expect(
+      applied.warnings.some(
+        (w: string) => w.includes('w_mid') && w.includes('receptacle spacing exceeds NEC 210.52'),
+      ),
+    ).toBe(true)
   })
 })

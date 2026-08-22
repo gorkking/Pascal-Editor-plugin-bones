@@ -424,13 +424,28 @@ export function layoutElectrical(
           // dry rooms (a dining-room box 5 ft from the kitchen sink flips).
           // B14b closed the stale "once sink positions are extracted" gap —
           // compute has extracted placedFixtures since the plumbing rebuild.
-          const gfci = wetRooms.some((r) => pointInPolygon([x, z], r.polygon)) || nearSink(x, z)
+          // F3 DECISION (round 2, stated): the radius is STRAIGHT-LINE and
+          // pierces walls — NEC measures the cord path 'without piercing a
+          // wall', so this over-protects (a box behind a partition 0.2 m
+          // from a lav flips). Chosen deliberately: a same-room guard needs
+          // zone data both sides and would silently UNDER-protect exactly
+          // where scenes are weakest, and extra GFCI is always code-legal
+          // while a missed one is a violation. Dry-room flips carry the
+          // assumption on their LABEL; checklist E8 states it.
+          const wet = wetRooms.some((r) => pointInPolygon([x, z], r.polygon))
+          const sinkFlip = !wet && nearSink(x, z)
           fixtures.push({
             system: 'electrical',
-            kind: gfci ? 'receptacle-gfci' : 'receptacle',
+            kind: wet || sinkFlip ? 'receptacle-gfci' : 'receptacle',
             position: [x, RECEPTACLE_AFF, z],
             rotationY: face.rotationY,
             sourceId: wall.id,
+            ...(sinkFlip
+              ? {
+                  label:
+                    'GFCI \u2014 within 6 ft of sink/tub (NEC 210.8(A)(7)/(9); straight-line reach, conservative)',
+                }
+              : {}),
             meta: { deviceId: `recep-${wall.id}-${ordinal}-${face.side === 1 ? 'p' : 'm'}` },
           })
         }
@@ -1006,7 +1021,21 @@ function placeOutdoorReceptacles(
   const out: Fixture[] = []
   const mount = (wall: WallSlice, role: 'front' | 'back', u0: number): void => {
     const aff = Math.min(RECEPTACLE_AFF, OUTDOOR_MAX_AFF)
-    const u = snapBoxClearOfRo(wall, u0, aff - DEVICE_BOX_HALF_H, aff + DEVICE_BOX_HALF_H)
+    const y0 = aff - DEVICE_BOX_HALF_H
+    const y1 = aff + DEVICE_BOX_HALF_H
+    const u = snapBoxClearOfRo(wall, u0, y0, y1)
+    // F4 (round 2): near-full-width glazing defeats snapBoxClearOfRo (4-pass
+    // give-up + end clamp) — the box overlapped the RO edge SILENTLY. The
+    // E1 contract: an unroutable RO is ⚠-flagged, never silent.
+    const boxHalf = DEVICE_BOX_W / 2
+    const obstructed = openingSpans(wall, y0, y1).some(
+      (s) => u + boxHalf > s.lo && u - boxHalf < s.hi,
+    )
+    if (obstructed) {
+      warnings?.push(
+        `outdoor receptacle (${role}): mount position obstructed by glazing/rough openings — verify on site (NEC 210.52(E))`,
+      )
+    }
     const face = facing.get(wall.id) as WallFace
     const [x, z] = face.plan(u)
     out.push({
@@ -1015,12 +1044,15 @@ function placeOutdoorReceptacles(
       position: [x, aff, z],
       rotationY: face.rotationY,
       sourceId: wall.id,
-      label: `Outdoor receptacle (${role}) — WR GFCI, in-use cover (NEC 210.52(E), 406.9(B))`,
+      label: `Outdoor receptacle (${role}) — WR GFCI, in-use cover (NEC 210.52(E), 406.9(B))${
+        obstructed ? ' (⚠ position obstructed by glazing — verify on site)' : ''
+      }`,
       meta: {
         deviceId: `recep-${wall.id}-out-${role}`,
         outdoor: role,
         wr: true,
         inUseCover: true,
+        ...(obstructed ? { obstructed: true } : {}),
       },
     })
   }
@@ -1115,7 +1147,16 @@ function placeCounterReceptacles(
       const face = [faceOf(wall, 1), faceOf(wall, -1)].find((f) =>
         pointInPolygon(f.plan(uSink), kitchen.polygon),
       )
-      if (!face) continue // degenerate: the sink's wall doesn't face its kitchen
+      if (!face) {
+        // degenerate: neither face of the sink's nearest wall lies inside
+        // its kitchen — a sink with a wall but no counter face (F2 round 2:
+        // this bail exited SILENT, leaving a sinked kitchen with zero
+        // counter boxes and zero words).
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: counter wall does not face its kitchen \u2014 countertop receptacles (NEC 210.52(C)) not modeled; verify counter runs`,
+        )
+        continue
+      }
       const key = `${wall.id}|${face.side}`
       if (walked.has(key)) continue
       walked.add(key)
@@ -1133,7 +1174,15 @@ function placeCounterReceptacles(
         u <= wall.length &&
         !doors.some((s) => u > s.lo && u < s.hi) &&
         pointInPolygon(face.plan(u), kitchen.polygon)
-      if (!usable(uSink)) continue
+      if (!usable(uSink)) {
+        // the sink projects into a door RO span (or off the kitchen face) —
+        // there is no counter line to walk (F2 round 2: silent zero-box
+        // kitchen; the sink-less warning never covered this path).
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: sink sits in a doorway span \u2014 countertop receptacles (NEC 210.52(C)) not modeled; verify counter runs`,
+        )
+        continue
+      }
       // contiguous counter span around the sink (0.05 m march — drafting
       // resolution; the polygon clip is what keeps the run out of the hall)
       const step = 0.05
@@ -1141,7 +1190,13 @@ function placeCounterReceptacles(
       while (a - step >= 0 && usable(a - step)) a -= step
       let b = uSink
       while (b + step <= wall.length && usable(b + step)) b += step
-      if (b - a < COUNTER_MIN_WIDTH) continue // 210.52(C)(1): < 12" strip
+      if (b - a < COUNTER_MIN_WIDTH) {
+        // code-legal exemption, but never wordless (the F2 class)
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: counter strip narrower than 12" \u2014 no receptacle required (NEC 210.52(C)(1))`,
+        )
+        continue
+      }
 
       // even centers: pitch <= 48" AND end overhang (= pitch/2) <= 24"
       const count = Math.max(
@@ -1175,6 +1230,37 @@ function placeCounterReceptacles(
             counter: true,
           },
         })
+      }
+      // F1 (round 2): a WINDOW whose RO crosses the 44" band silently
+      // GUTTED the walk — snapBoxClearOfRo pushed every box to the RO
+      // edges, dedupe collapsed them, and a 4 m run kept two boxes 3.3 m
+      // apart with zero words. Audit the PLACED boxes against the walk's
+      // own contract on [a, b] (first box <= 24" of each end, <= 48"
+      // o.c.); gaps spanning the faucet zone subtract it — the
+      // behind-the-sink strip is exempt counter space
+      // (counterBehindSinkOrRangeExemptIfDepthLessThanIn). Violated (or
+      // empty) coverage warns — never silent.
+      const faucetLo = uSink - 0.35
+      const faucetHi = uSink + 0.35
+      const effGap = (lo: number, hi: number): number => {
+        const cut = Math.max(0, Math.min(hi, faucetHi) - Math.max(lo, faucetLo))
+        return hi - lo - cut
+      }
+      const sorted = [...used].sort((p, q) => p - q)
+      const tol = 0.11 // march resolution + box-margin slack
+      let broken = sorted.length === 0
+      if (!broken) {
+        broken =
+          effGap(a, sorted[0] as number) > COUNTER_FIRST_MAX + tol ||
+          effGap(sorted[sorted.length - 1] as number, b) > COUNTER_FIRST_MAX + tol
+        for (let i = 0; !broken && i + 1 < sorted.length; i++) {
+          broken = effGap(sorted[i] as number, sorted[i + 1] as number) > COUNTER_SPACING + tol
+        }
+      }
+      if (broken) {
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: counter receptacle spacing exceeds NEC 210.52(C)'s 24"/48" walk after rough-opening snap (window over the counter) \u2014 verify`,
+        )
       }
     }
   }
