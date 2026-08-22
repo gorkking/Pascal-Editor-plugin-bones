@@ -220,7 +220,8 @@ type BucketTreatment = 'solid' | 'ghosted' | 'ghosted-field' | 'ghosted-through'
 
 type Bucket = {
   color: string
-  /** Source wall id for face-carrying buckets — the cull exemption key. */
+  /** Source wall id for face-carrying buckets — the per-wall cut key
+   * (each wall classifies near/far against its OWN plane). */
   sourceId?: string
   entries: {
     dims: readonly [number, number, number]
@@ -469,9 +470,9 @@ function collectBuckets(
       // mode === 'xray'
       if (member.face) {
         // Assembly layers: bucket PER FACE NORMAL (quantized) AND per source
-        // wall, so the dollhouse cut can hide camera-facing stacks as whole
-        // meshes while the SELECTED wall's stacks stay visible (night-4:
-        // picking a cladding was invisible from every straight-on view).
+        // wall, so the dollhouse cut can classify each wall's near/far face
+        // against its OWN plane and toggle whole meshes (night-4 split,
+        // now load-bearing for the camera-position cut itself).
         const key = `${color}|${member.face[0].toFixed(2)},${member.face[1].toFixed(2)}|${member.sourceId}`
         push(key, color, member.dims, member.position, member.rotation, member.face, 'solid', member.sourceId)
         continue
@@ -779,28 +780,31 @@ export function updateWallSides(
  * exactly when they are the wall's NEAR face — face · wallNormal has the
  * same sign as the camera's side. The far face, framing, MEP, fixtures:
  * untouched. `.visible` is written ONLY when the value actually changes
- * (the side cache makes that "only on a flip"). The selected wall stays
- * fully visible (night-4 Engineering-card exemption); a face with no
- * classifiable plane stays visible — this pass may open ONE face of a wall,
- * never both.
+ * (the side cache makes that "only on a flip"). A face with no classifiable
+ * plane stays visible — this pass may open ONE face of a wall, never both.
+ *
+ * SELECTION never changes the cut (day-9 feedback #4). The retired night-4
+ * exemption kept BOTH faces of the selected wall visible so finish picks
+ * read under the old view-DIRECTION cull (which could blank both faces of
+ * a parallel wall); under the position cut that pathology is gone, and the
+ * exemption's only remaining effect was to CLOSE the near drywall over the
+ * in-wall wires/pipes at the exact moment the user opened the Engineering
+ * card to look inside ("electrical, plumbing, all the wires… disappear").
+ * A selected wall now reads open toward the camera like any other wall.
  */
 export function applyFaceCut(
   children: readonly { userData: unknown; visible: boolean }[],
   sides: ReadonlyMap<string, WallSide>,
-  selected?: readonly string[],
 ): void {
   for (const child of children) {
     const ud = child.userData as { face?: readonly [number, number]; sourceId?: string }
     const face = ud.face
     if (!face) continue
-    const sourceId = ud.sourceId
+    const wall = ud.sourceId ? sides.get(ud.sourceId) : undefined
     let visible = true
-    if (!(sourceId && selected?.includes(sourceId))) {
-      const wall = sourceId ? sides.get(sourceId) : undefined
-      if (wall) {
-        const toward = face[0] * wall.nx + face[1] * wall.nz
-        visible = toward * wall.side <= 0
-      }
+    if (wall) {
+      const toward = face[0] * wall.nx + face[1] * wall.nz
+      visible = toward * wall.side <= 0
     }
     if (child.visible !== visible) child.visible = visible
   }
@@ -852,7 +856,7 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // useFrame can't await, so attachForeign reads levelMode through this ref;
   // null until the import lands = treat as stacked.
   const viewerStore = useRef<{
-    getState: () => { levelMode?: string; selection?: { selectedIds?: readonly string[] } }
+    getState: () => { levelMode?: string }
   } | null>(null)
   useRegistry(node.id, node.type, ref)
 
@@ -1069,21 +1073,23 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
     group.updateWorldMatrix(true, false)
     group.worldToLocal(cam)
     updateWallSides(cutPlanes, cam.x, cam.z, wallSides.current)
-    // The SELECTED wall is exempt from the cut: the user is inspecting it
-    // (Engineering card flow), so its full stack — cladding included —
-    // must read from any angle. Everything else keeps the dollhouse cut.
-    // Selections resolve through the colinear-dedupe map: members carry
-    // the KEPT twin's sourceId, so selecting a dropped duplicate must
-    // exempt its twin (verify night-4 F5).
-    const selectedRaw = viewerStore.current?.getState().selection?.selectedIds
-    const selected = selectedRaw?.map((id) => active.duplicateOf[id] ?? id)
-    applyFaceCut(group.children, wallSides.current, selected)
+    // SELECTION does not change the cut (day-9 feedback #4): the user opens
+    // a wall's Engineering card precisely to look INSIDE it, so the selected
+    // wall keeps the same open-toward-the-camera read as every other wall —
+    // the near face stays off, the in-wall wires/pipes/framing stay in view.
+    // (The retired night-4 both-faces exemption closed the near drywall over
+    // the guts on selection; its finish-readability rationale belonged to
+    // the old direction cull. The host's selection outline is a post-
+    // processing pass over the WALL node's own Object3D — bones meshes are
+    // registered under the framing node and raycast-disabled, so it never
+    // needs these faces.)
+    applyFaceCut(group.children, wallSides.current)
     // Foreign groups (cross-level roofs, gable-wall layers) carry face
-    // buckets too — they were never culled NOR exemption-checked, leaving
-    // gable finishes permanently opaque from every angle (night-5 queue).
-    // Levels differ by Y only, so the owner-local plan camera classifies
-    // their walls identically.
-    for (const [, g] of built.foreign) applyFaceCut(g.children, wallSides.current, selected)
+    // buckets too — they were never culled, leaving gable finishes
+    // permanently opaque from every angle (night-5 queue). Levels differ by
+    // Y only, so the owner-local plan camera classifies their walls
+    // identically.
+    for (const [, g] of built.foreign) applyFaceCut(g.children, wallSides.current)
   })
 
   if (!node.visible) return null
