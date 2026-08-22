@@ -729,11 +729,21 @@ AND a gate — a checklist line without a test is a wish.
   rows ≙ solid 4x, 24-ft width column: 50-psf → 4x10 cap 71"; 70-psf →
   4x8 cap 53", 4x10 cap 63") clamped at the default's rounding — heavier
   snow never prints a shallower header, and no threshold exceeds the code
-  cell. The table also keys on BUILDING WIDTH, which the spec does not
+  cell — INCLUDING the terminal rule (round 2, skeptic): the band caps
+  `engineeredHeaderSpan` at its 2-2x12 cell (83" @ 50 psf / 74" @ 70), so
+  a past-cap span routes to the ENGINEERED path (supplier SKU +
+  'ENGINEERED BEAM REQUIRED' flag) and the open-ended 4x12 rule never
+  claims the table outside its domain; low-snow keeps the shipped 10-ft
+  threshold (its labels make no table claim — pre-existing gap, out of
+  scope). The table also keys on BUILDING WIDTH, which the spec does not
   carry: every band-sized header states the assumption on its label
   ('… — sized per Table R602.7(1) @ 70 psf ground snow — ≤ 24 ft building
   width, roof-and-ceiling loading assumed'), engineered headers included —
-  label, never a guess; low-snow labels carry nothing. Downstream mirrors
+  label, never a guess; low-snow labels carry nothing. The assumption
+  reaches PAPER too (round 2, examiner): deepened states' covers print it
+  as a DESIGN CRITERIA line (PlanSetOptions.headerAssumption ←
+  spec.headerAssumption via panel.tsx) — low-snow sheet sets stay
+  byte-equal to paper built without the option. Downstream mirrors
   move ONLY in the deepened states (50-band: AK ID MA MN MT ND NY SD UT
   WI WY; 70-band: ME NH VT — docs/plans/B11-EXPECTED-DIFF.md): the takeoff
   header stick shifts SKU, the B21d schedule cell prints the new size
@@ -746,12 +756,16 @@ AND a gate — a checklist line without a test is a wish.
   Gates: `src/jurisdiction/profiles.test.ts` (band identity pins incl.
   low-snow reference equality, threshold encodings, headerFor
   plumb-through, assumption matrix, 51-state sweep with the deepened set
-  enumerated) + `src/engines/wall-framing.test.ts` 'LOD-400 B11' describe
-  (per-span deepening matrix VT/MN vs INTL incl. the 53" boundary, honest
+  enumerated, r2 cap identity/value pins) +
+  `src/engines/wall-framing.test.ts` 'LOD-400 B11' describe (per-span
+  deepening matrix VT/MN vs INTL incl. the 53" boundary, honest
   full-depth geometry, exact label pins, engineered-label composition,
-  low-snow member byte-equality, spec↔band purity) +
-  `src/plans/plan-set.test.ts` (B11 schedule-cell pin + TX≡INTL paper) +
-  `src/engines/takeoff.test.ts` (B11 SKU shift + low-snow row pins).
+  low-snow member byte-equality, spec↔band purity, r2 past-cap exhibit —
+  76"/90"/110" engineered at VT / pre-B11 lumber at INTL, 74"/83"
+  boundaries prescriptive) + `src/plans/plan-set.test.ts` (B11
+  schedule-cell pin + TX≡INTL paper + r2 cover DESIGN-CRITERIA pins with
+  the without-option byte-equality) + `src/engines/takeoff.test.ts` (B11
+  SKU shift + low-snow row pins + r2 supplier-line routing).
 
 ## M — Mechanical (HVAC)
 
