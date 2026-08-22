@@ -164,7 +164,18 @@ AND a gate — a checklist line without a test is a wish.
   the scan looked only at the street lateral), and the bond fallback
   takes the same bay-step strap-outs at both ends (its naive panel
   drop was BYTE-IDENTICAL to the feed fallback's rise — ~1.9 m of
-  conductor coincident inside the cable). PER-STOREY HONESTY (the E6
+  conductor coincident inside the cable). The fallback MID-legs are
+  scanned too (round 5 / r3 residual — round 4 relocated the
+  coincidence to the buried x-leg: a PERPENDICULAR island wall put it
+  exactly on the feed's leg inside a 49 mm strap window, with the
+  symmetric water-end window against the street lateral): each strap
+  end walks a DETERMINISTIC multiple ladder (±1, ±2 … ±6 bay-steps)
+  until its buried legs clear every buried service element by the
+  summed half-sections + skin — parallel elements only, crossings
+  stay legal — and never run parallel inside a wall's below-grade
+  band (a dodge must not trade embedment for a stemwall bore); an
+  undodgeable end keeps the default step and CONFESSES the embedment
+  on the member labels. PER-STOREY HONESTY (the E6
   class): compute mints one GES per storey with a service chain —
   rod/GEC labels say 'per-storey model' and multi-storey scenes get
   the level warning (NEC 250.53/250.58: ONE electrode system per
@@ -177,7 +188,7 @@ AND a gate — a checklist line without a test is a wish.
   Origin: LOD-400 audit BATCH 12 (wave-1 confirmed: regex for
   ground/rod/electrode/GEC over composed members = zero); round-3
   skeptic F1–F4 + examiner keys; round-4 r2 skeptic fallback root
-  cause (2026-08-21).
+  cause; round-5 r3 mid-leg residual (2026-08-21).
   Gate: `src/engines/electrical.ges.test.ts` (census + 6-ft/8-ft/
   below-grade pins, E2-style GEC + bond continuity, E4 legality of
   bond legs, no-meter subset zero, takeoff parity matrix, 51-state
@@ -186,7 +197,9 @@ AND a gate — a checklist line without a test is a wish.
   GES×SE, L-plan slide + wall-band/room scans, unplaceable-flag pin +
   Flags row, per-storey warning matrix + label pins; round 4: island
   exhibits — buried-feed×rod clearance with the slide, double-fallback
-  bond embedment scan + continuity + rod×bond clearance — all
+  bond embedment scan + continuity + rod×bond clearance; round 5:
+  perpendicular-island 49 mm windows at BOTH ends — mid-leg embedment
+  scans + deterministic flip-step pins + no-confession pins — all
   mutation-checked) + the GR/IB key pins in
   `src/plans/plan-set.test.ts`.
 

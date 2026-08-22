@@ -2030,6 +2030,9 @@ const GES_STRAP_OUT = 0.08
 /** Rod clearance of the buried SE street lateral: half sections + skin
  * (round-3 F1 — the lateral used to bore rod 1 through its full section). */
 const ROD_LATERAL_CLEAR = SERVICE_SECTION / 2 + GROUND_ROD_DIAMETER / 2 + 0.02
+/** Parallel buried conductors must clear the summed half-sections + skin —
+ * the r3-residual mid-leg dodge target (the gate floor is the bare sum). */
+const GES_EMBED_FLOOR = (SERVICE_SECTION + GES_SECTION) / 2 + 0.01
 /** Rod (and buried rod-to-rod GEC leg) clearance of any wall's below-grade
  * band: footing half-width (16" → 0.203 m) + rod + skin (round-3 F3 —
  * a concave L-plan put rod 2 inside the wing footprint). */
@@ -2371,18 +2374,104 @@ export function routeServiceCable(
   // anchor is missing entirely): the fallback bond drop/rise must never
   // share a plan point with the feed fallback's byte-identical rise
   // (r2 EXHIBIT 2 — d = 0.0000 for ~1.9 m of vertical).
+  //
+  // r3 RESIDUAL (round 5): the single bay-step only separated the
+  // ENDPOINT drops/rises — the bond fallback's buried MID-legs were
+  // never scanned against the feed fallback's. A detached island wall
+  // PERPENDICULAR to the approach put the bond's buried x-leg EXACTLY
+  // on the feed's x-leg (pz + strap == mz, a 49 mm window; d ≈ 1.4e-17
+  // over ~7.9 m), with the symmetric water-end window against the
+  // street lateral. The exact leg lists are both in scope right here,
+  // so each strap end now searches a DETERMINISTIC multiple ladder
+  // (±1, ±2 … ±6 bay-steps) until its buried legs clear every buried
+  // service element by the summed half-sections + skin — parallel
+  // elements only; perpendicular crossings stay legal (cable straps
+  // over cable) — and never run PARALLEL inside a wall's below-grade
+  // band (a dodge must not trade embedment for a stemwall bore). An
+  // undodgeable end keeps the default step and the emission CONFESSES
+  // the embedment on the member labels — never silent.
   const panelStrapDir: PlanPt = panelAnchor ? panelAnchor.wall.dir : [1, 0]
   const waterStrapDir: PlanPt = waterAnchor ? waterAnchor.wall.dir : [1, 0]
-  const panelStrap: PlanPt = [
-    px + panelStrapDir[0] * GES_STRAP_OUT,
-    pz + panelStrapDir[1] * GES_STRAP_OUT,
+  type BuriedEl = { a: PlanPt; b: PlanPt; vertical: boolean }
+  const buriedServiceEls: BuriedEl[] = [
+    { a: [street[0], street[1]], b: [mx, street[1]], vertical: false },
+    { a: [mx, street[1]], b: [mx, mz], vertical: false },
+    { a: [mx, mz], b: [mx, mz], vertical: true }, // street riser at the meter
   ]
-  const waterStrap: PlanPt | null = waterEntry
-    ? [
-        waterEntry[0] + waterStrapDir[0] * GES_STRAP_OUT,
-        waterEntry[2] + waterStrapDir[1] * GES_STRAP_OUT,
-      ]
+  if (!routed) {
+    buriedServiceEls.push(
+      { a: [mx, mz], b: [px, mz], vertical: false },
+      { a: [px, mz], b: [px, pz], vertical: false },
+      { a: [px, pz], b: [px, pz], vertical: true }, // feed fallback rise
+    )
+  }
+  const planDirEl = (e: BuriedEl): PlanPt | null => {
+    const l = Math.hypot(e.b[0] - e.a[0], e.b[1] - e.a[1])
+    return l < 1e-9 ? null : [(e.b[0] - e.a[0]) / l, (e.b[1] - e.a[1]) / l]
+  }
+  const elementsEmbed = (g: BuriedEl, s: BuriedEl): boolean => {
+    if (g.vertical !== s.vertical) return false // a crossing, not an embedment
+    if (!g.vertical) {
+      const dg = planDirEl(g)
+      const ds = planDirEl(s)
+      if (dg && ds && Math.abs(dg[0] * ds[1] - dg[1] * ds[0]) > 0.1) return false // perpendicular
+    }
+    return planSegSegDist(g.a, g.b, s.a, s.b) < GES_EMBED_FLOOR
+  }
+  const legInWallBand = (a: PlanPt, b: PlanPt): boolean => {
+    const l = Math.hypot(b[0] - a[0], b[1] - a[1])
+    if (l < 1e-9) return false
+    const d: PlanPt = [(b[0] - a[0]) / l, (b[1] - a[1]) / l]
+    return walls.some((w) => {
+      if (w.curved) return false
+      if (Math.abs(d[0] * w.dir[1] - d[1] * w.dir[0]) > 0.1) return false // not parallel
+      return planSegSegDist(a, b, w.start, w.end) < w.thickness / 2 + GES_SECTION / 2 + 0.01
+    })
+  }
+  /** Panel-end buried elements (drop + x-leg — the pieces the panel strap
+   * scalar positions) and water-end elements (z-leg + rise) for one
+   * candidate pair. Cross-dependency is EXTENT-only (the shared corner),
+   * so each end's scalar can be searched on its own element set. */
+  const panelEls = (ps: PlanPt, ws: PlanPt): BuriedEl[] => [
+    { a: ps, b: ps, vertical: true }, // drop at the panel bay
+    { a: ps, b: [ws[0], ps[1]], vertical: false },
+  ]
+  const waterEls = (ps: PlanPt, ws: PlanPt): BuriedEl[] => [
+    { a: [ws[0], ps[1]], b: ws, vertical: false },
+    { a: ws, b: ws, vertical: true }, // rise at the entry bay
+  ]
+  const bondElsClear = (els: BuriedEl[]): boolean =>
+    els.every((g) => buriedServiceEls.every((s) => !elementsEmbed(g, s))) &&
+    els.every((g) => g.vertical || !legInWallBand(g.a, g.b))
+  const strapAt = (base: PlanPt, dir: PlanPt, mul: number): PlanPt => [
+    base[0] + dir[0] * GES_STRAP_OUT * mul,
+    base[1] + dir[1] * GES_STRAP_OUT * mul,
+  ]
+  /** Deterministic multiple ladder: the default single step first, then
+   * the flipped side, then wider steps. */
+  const STRAP_MULS = [1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6] as const
+  let panelStrap: PlanPt = strapAt([px, pz], panelStrapDir, 1)
+  let waterStrap: PlanPt | null = waterEntry
+    ? strapAt([waterEntry[0], waterEntry[2]], waterStrapDir, 1)
     : null
+  let bondEmbedConfessed = false
+  if (waterEntry && waterStrap && !bondRouted) {
+    // Two deterministic passes: the panel end searches its own elements
+    // with the water end at its default, then the water end searches
+    // against the chosen panel strap.
+    const waterDefault = waterStrap
+    const panelMul = STRAP_MULS.find((m) =>
+      bondElsClear(panelEls(strapAt([px, pz], panelStrapDir, m), waterDefault)),
+    )
+    panelStrap = strapAt([px, pz], panelStrapDir, panelMul ?? 1)
+    const waterMul = STRAP_MULS.find((m) =>
+      bondElsClear(
+        waterEls(panelStrap, strapAt([waterEntry[0], waterEntry[2]], waterStrapDir, m)),
+      ),
+    )
+    waterStrap = strapAt([waterEntry[0], waterEntry[2]], waterStrapDir, waterMul ?? 1)
+    bondEmbedConfessed = panelMul === undefined || waterMul === undefined
+  }
 
   // ---- rod spots are SCENE-AWARE (round-3 skeptic F1 + F3) ----
   // The default spot — out the meter wall beside the GEC strap — must
@@ -2574,7 +2663,13 @@ export function routeServiceCable(
       // the fallback drop/rise never share a plan point with the feed's;
       // the rod scan above already saw these exact legs.
       const ws = waterStrap as PlanPt
-      const bnote = `${bondLabel} (⚠ buried crossing — no wall path)`
+      // An undodgeable strap end (mid-leg ladder exhausted) is CONFESSED
+      // on every fallback leg — E7 forbids silent embedment.
+      const bnote = `${bondLabel} (⚠ buried crossing — no wall path)${
+        bondEmbedConfessed
+          ? ' (⚠ embeds alongside a buried service conductor — separate in the trench)'
+          : ''
+      }`
       gesFlagged(
         'GES-2',
         [px, py, pz],

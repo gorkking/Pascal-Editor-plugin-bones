@@ -811,3 +811,116 @@ describe('round-4 (r2 skeptic) — fallback SE legs join the clearance machinery
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Round-5 (r3 residual) — the fallback MID-legs join the embedment scan:
+// round 4 strapped only the endpoint drops/rises and relocated the
+// coincidence to the buried mid-leg
+// ---------------------------------------------------------------------------
+
+describe('round-5 (r3 residual) — fallback mid-legs never embed in the buried service legs', () => {
+  /** Main 8×4 + detached island wall PERPENDICULAR to the approach
+   * (along z at x=12): the bond fallback's buried x-leg runs at
+   * z = pz + GES_STRAP_OUT — the skeptic's 49 mm window puts it EXACTLY
+   * on the feed fallback's x-leg (z = mz, same depth, d ≈ 1.4e-17 over
+   * ~7.9 m). Wall thickness 0.114 → mz = −(0.057+0.01905) = −0.07605. */
+  const MZ = -(0.114 / 2 + 0.01905)
+  const PZ_WINDOW = MZ - 0.08 // pz + strap == mz exactly
+  const perpIslandScene = (): { walls: WallSlice[]; rooms: RoomSlice[] } => {
+    const walls = [
+      makeWall({ id: 'w_s', start: [0, 0], end: [8, 0] }),
+      makeWall({ id: 'w_e', start: [8, 0], end: [8, 4] }),
+      makeWall({ id: 'w_n', start: [8, 4], end: [0, 4] }),
+      makeWall({ id: 'w_w', start: [0, 4], end: [0, 0] }),
+      makeWall({ id: 'w_isl', start: [12, -2], end: [12, 2] }),
+    ]
+    const rooms = [room('other', [[0, 0], [8, 0], [8, 4], [0, 4]], { id: 'room_main' })]
+    return { walls, rooms }
+  }
+  const windowFixtures = (walls: WallSlice[], rooms: RoomSlice[]) =>
+    layoutElectrical(walls, rooms, {
+      electricMeter: { wallId: 'w_s', wallT: 0.5 },
+      panel: { wallId: 'w_isl', wallT: (PZ_WINDOW + 2) / 4 },
+    })
+  const EMBED = (0.035 + 0.014) / 2
+  const buriedBondLegs = (members: Member[]): Member[] =>
+    members.filter(
+      (m) =>
+        m.sourceId === 'GES-2' &&
+        Math.abs(m.position[1] - -0.45) < 1e-6 &&
+        m.dims[1] < 0.02, // horizontal buried legs only
+    )
+  const scanEmbedment = (members: Member[]): void => {
+    const bond = members.filter((m) => m.sourceId === 'GES-2')
+    const se = members.filter(
+      (m) => m.role === 'wire-run' && m.sourceId === 'service-entrance',
+    )
+    expect(bond.some((m) => m.label?.includes('buried crossing — no wall path'))).toBe(true)
+    expect(se.length).toBeGreaterThan(0)
+    for (const g of bond) {
+      for (const cable of se) {
+        if (Math.abs(dirOf(g).dot(dirOf(cable))) < 0.9) continue // crossing
+        expect(
+          memberDist(g, cable),
+          `${g.label} vs ${cable.label}`,
+        ).toBeGreaterThanOrEqual(EMBED)
+      }
+    }
+  }
+
+  test('perpendicular island at the 49 mm panel window: the buried x-leg dodges the feed leg (deterministic flip-side step)', () => {
+    const { walls, rooms } = perpIslandScene()
+    const fixtures = windowFixtures(walls, rooms)
+    const panelFx = fixtures.find((f) => f.kind === 'panel')
+    expect(panelFx?.position[2] ?? 0).toBeCloseTo(PZ_WINDOW, 6) // the window is real
+    const members = routeWiring(fixtures, walls, { waterEntry: [2, 0.3, 0], rooms })
+    scanEmbedment(members)
+    // determinism pin: the long x-leg sits ONE bay-step on the FLIPPED
+    // side (the +1 default hits the window; +2 would bore the w_s band)
+    const xLeg = buriedBondLegs(members).find((m) => m.dims[0] > 1)
+    expect(xLeg).toBeDefined()
+    expect(xLeg?.position[2] ?? 0).toBeCloseTo(PZ_WINDOW - 0.08, 9)
+    // no confession — the dodge succeeded
+    for (const m of members.filter((mm) => mm.sourceId === 'GES-2')) {
+      expect(m.label).not.toContain('embeds alongside')
+    }
+    // continuity survives the dodge: panel → water entry
+    expect(
+      connected(
+        members.filter((m) => m.sourceId === 'GES-2'),
+        new Vector3(...(panelFx?.position ?? [0, 0, 0])),
+        new Vector3(2, 0.3, 0),
+      ),
+    ).toBe(true)
+  })
+
+  test('symmetric water-end window vs the STREET lateral: the buried z-leg dodges too', () => {
+    // water entry at x = mx − strap (3.92): the default z-leg lands at
+    // x = 4.0 — colinear with the street lateral's z-run, overlapping it
+    // in z once the panel window pushes the corner south of the wall
+    const { walls, rooms } = perpIslandScene()
+    const fixtures = windowFixtures(walls, rooms)
+    const WATER: readonly [number, number, number] = [4 - 0.08, 0.3, 0]
+    const members = routeWiring(fixtures, walls, { waterEntry: WATER, rooms })
+    scanEmbedment(members)
+    // determinism pin: the z-leg sits one bay-step on the flipped side
+    // of the entry (wx − 0.08 = 3.84), clear of the lateral at x = 4
+    const zLeg = buriedBondLegs(members).find((m) => {
+      const [a, b] = endpointsOf(m)
+      return Math.abs(a.z - b.z) > 0.05
+    })
+    expect(zLeg).toBeDefined()
+    expect(zLeg?.position[0] ?? 0).toBeCloseTo(4 - 0.08 - 0.08, 9)
+    for (const m of members.filter((mm) => mm.sourceId === 'GES-2')) {
+      expect(m.label).not.toContain('embeds alongside')
+    }
+    const panelFx = fixtures.find((f) => f.kind === 'panel')
+    expect(
+      connected(
+        members.filter((m) => m.sourceId === 'GES-2'),
+        new Vector3(...(panelFx?.position ?? [0, 0, 0])),
+        new Vector3(...WATER),
+      ),
+    ).toBe(true)
+  })
+})
