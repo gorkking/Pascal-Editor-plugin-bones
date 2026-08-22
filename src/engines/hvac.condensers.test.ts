@@ -830,3 +830,58 @@ describe('condenser-always — AH present ⇒ outdoor unit present (never silent
     expect(composes).toBe(sizes.length * mixes.length * 2 * states.length * details.length)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Override honesty (condenser-honesty set — hunt 5a/5f)
+// ---------------------------------------------------------------------------
+
+describe('heat-pump override honesty — verbatim still WINS, mis-drags WARN (hunt 5a/5f)', () => {
+  // The override is authoritative (A4) and stays so; the RO-collision
+  // machinery guards every OTHER service point, but a heat-pump node in
+  // the LIVING ROOM (5a) or 13 m into the yard (5f) composed flag-free.
+  const INDOOR_RE = /heat-pump point is inside/
+  const FAR_RE = /beyond the 25 ft service reach \(NEC 210\.63\)/
+
+  test('override INSIDE an indoor zone warns, NAMES the room, and still wins (A4)', () => {
+    const { walls, rooms } = shell(10, 8)
+    const inside = layoutHvac(walls, rooms, LOD400, { heatPump: { position: [6, 0, 4] } })
+    expect(inside.warnings.some((w) => w.includes('heat-pump point is inside Living'))).toBe(true)
+    // A4 kept: the unit is still drawn exactly there — never silently relocated
+    const unit = condensersOf(inside.fixtures)[0]
+    expect(unit?.position[0]).toBeCloseTo(6, 6)
+    expect(unit?.position[2]).toBeCloseTo(4, 6)
+    // mutation: the SAME override moved 1 m outside the north wall is silent
+    const legit = layoutHvac(walls, rooms, LOD400, { heatPump: { position: [6, 0, 9] } })
+    expect(legit.warnings.some((w) => INDOOR_RE.test(w) || FAR_RE.test(w))).toBe(false)
+  })
+
+  test('override 13 m into the yard warns with the distance + basis; 1 m off the wall is silent', () => {
+    const { walls, rooms } = shell(10, 8)
+    const far = layoutHvac(walls, rooms, LOD400, { heatPump: { position: [5, 0, 21] } })
+    const warning = far.warnings.find((w) => FAR_RE.test(w))
+    expect(warning).toBeDefined()
+    expect(warning).toContain('13.0 m')
+    // authority: the unit still sits at the override, warned not relocated
+    const unit = condensersOf(far.fixtures)[0]
+    expect(unit?.position[2]).toBeCloseTo(21, 6)
+    // mutation: 1 m off the wall on the same bearing — a legitimate spot, silent
+    const near = layoutHvac(walls, rooms, LOD400, { heatPump: { position: [5, 0, 9] } })
+    expect(near.warnings.some((w) => FAR_RE.test(w) || INDOOR_RE.test(w))).toBe(false)
+  })
+
+  test('wall-anchored override (wallId/wallT) resolves ON the centerline — the band guard keeps it silent', () => {
+    // zone polygons trace wall centerlines, so without the wall-band guard
+    // the anchored point ray-casts "inside" an adjacent room (false positive)
+    const { walls, rooms } = shell(10, 8)
+    const anchored = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { wallId: 'w_south', wallT: 0.5 },
+    })
+    expect(anchored.warnings.some((w) => INDOOR_RE.test(w) || FAR_RE.test(w))).toBe(false)
+  })
+
+  test('auto placement stays silent (no override → no honesty warning)', () => {
+    const { walls, rooms } = shell(10, 8)
+    const auto = layoutHvac(walls, rooms, LOD400)
+    expect(auto.warnings.some((w) => INDOOR_RE.test(w) || FAR_RE.test(w))).toBe(false)
+  })
+})
