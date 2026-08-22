@@ -77,6 +77,30 @@ const SINK_RULE_KINDS: ReadonlySet<PlacedFixtureSlice['kind']> = new Set([
   'shower',
 ])
 
+// ---- counter + basin receptacles (B14c/d, NEC 210.52(C)/(D)) ---------------
+
+/** Counter receptacle center ~44" AFF: the 36" counter convention + 8" —
+ * inside 210.52(C)(3)'s 20"-above-counter cap (the data's
+ * counterReceptacleMaxAboveCounterIn). The height is convention, not NEC. */
+const COUNTER_RECEPTACLE_AFF = inches(44)
+/** 210.52(C)(1): first counter receptacle within 24" of each run end… */
+const COUNTER_FIRST_MAX = inches(
+  rules.layoutAlgorithmHints.countertopPlacement.firstReceptacleMaxFromEndIn,
+)
+/** …then every <= 48" along the counter wall line. */
+const COUNTER_SPACING = inches(
+  rules.layoutAlgorithmHints.countertopPlacement.subsequentSpacingMaxIn,
+)
+/** 210.52(C)(1): counter spaces narrower than 12" require no receptacle. */
+const COUNTER_MIN_WIDTH = inches(rules.receptacles.counterMinWidthRequiringReceptacleIn)
+/** Basin receptacle center ~40" AFF: above the 34" vanity convention, inside
+ * 210.52(D)'s 12"-below-countertop floor. Convention, not NEC. */
+const BASIN_RECEPTACLE_AFF = inches(40)
+/** 210.52(D): a receptacle within 3 ft of each basin's outside edge. */
+const BASIN_RADIUS = feet(3)
+/** A placed sink further than this from every wall reads as an ISLAND. */
+const ISLAND_WALL_DIST = 1.2
+
 // ---- small 2D helpers ------------------------------------------------------
 
 type Pt = readonly [number, number]
@@ -447,6 +471,9 @@ export function layoutElectrical(
       }
     }
   }
+
+  // ---- kitchen counter runs at 44" AFF (NEC 210.52(C), B14c) ----
+  fixtures.push(...placeCounterReceptacles(walls, rooms, placed, warnings))
 
   // ---- lights: one switched lighting outlet per habitable room (210.70(A)(1)) ----
   for (const room of rooms) {
@@ -1007,6 +1034,150 @@ function placeOutdoorReceptacles(
   return out
 }
 
+
+// ---------------------------------------------------------------------------
+// Kitchen counter runs (LOD-400 B14c, NEC 210.52(C))
+// ---------------------------------------------------------------------------
+
+/** Nearest straight wall to a plan point, raw projected u (NOT RO-snapped —
+ * counter/basin placement snaps box-edge-aware afterwards). Ties by id. */
+function nearestWallTo(
+  walls: WallSlice[],
+  p: Pt,
+): { wall: WallSlice; u: number; d: number } | null {
+  let best: { wall: WallSlice; u: number; d: number } | null = null
+  for (const wall of walls) {
+    if (wall.curved || wall.length < 0.1) continue
+    const raw = (p[0] - wall.start[0]) * wall.dir[0] + (p[1] - wall.start[1]) * wall.dir[1]
+    const u = Math.max(0, Math.min(wall.length, raw))
+    const q: Pt = [wall.start[0] + wall.dir[0] * u, wall.start[1] + wall.dir[1] * u]
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1])
+    const wins =
+      !best || d < best.d - 1e-9 || (d <= best.d + 1e-9 && wall.id.localeCompare(best.wall.id) < 0)
+    if (wins) best = { wall, u, d }
+  }
+  return best
+}
+
+/**
+ * NEC 210.52(C)(1) countertop receptacles — the counter-height walk the
+ * engine never had (every kitchen box sat at 15" AFF). The scene carries no
+ * casework runs, so the walk is HYBRID-honest (B14c decision):
+ *  - a PLACED kitchen-sink item pins its counter wall (nearest wall) — that
+ *    wall's kitchen-side face gets the 44"-AFF walk, first box within 24" of
+ *    each run end then every <= 48" (rules.json layoutAlgorithmHints);
+ *    ASSUMPTION (stated): the counter runs the full kitchen wall space
+ *    carrying the sink, clipped to the kitchen polygon and broken by door
+ *    ROs; no box lands in the faucet zone directly behind the bowl.
+ *  - a kitchen zone WITHOUT a placed sink has NO honest counter geometry —
+ *    the level warns per kitchen instead of inventing casework.
+ *  - an island sink (> ISLAND_WALL_DIST from every wall) requires no island
+ *    receptacle under NEC 2023 210.52(C)(2) — labeled, never silent.
+ * Counter boxes never count toward the 210.52(A) floor-line spacing census
+ * (doNotCountTowardWallSpacing — meta.counter keys the exclusion).
+ */
+function placeCounterReceptacles(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  placed: PlacedFixtureSlice[],
+  warnings?: string[],
+): Fixture[] {
+  const kitchens = rooms.filter((r) => r.category === 'kitchen')
+  if (kitchens.length === 0) return []
+  const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
+  const out: Fixture[] = []
+  const walked = new Set<string>() // `${wall.id}|${side}` — one walk per counter face
+  for (const kitchen of kitchens) {
+    const name = kitchen.name || kitchen.id
+    const sinks = placed
+      .filter((p) => p.kind === 'kitchen-sink' && pointInPolygon(p.plan, kitchen.polygon))
+      .sort((a, b) => a.id.localeCompare(b.id))
+    if (sinks.length === 0) {
+      warnings?.push(
+        `kitchen \u201c${name}\u201d: countertop receptacles (NEC 210.52(C)) not modeled \u2014 no placed counter/sink item pins the counter wall; verify counter runs`,
+      )
+      continue
+    }
+    for (const sink of sinks) {
+      const near = nearestWallTo(straight, sink.plan)
+      if (!near || near.d > ISLAND_WALL_DIST) {
+        warnings?.push(
+          `kitchen \u201c${name}\u201d: island sink \u2014 no island receptacle required (NEC 2023 210.52(C)(2)); future-provision outlet not modeled, verify`,
+        )
+        continue
+      }
+      const { wall, u: uSink } = near
+      // the kitchen-side FACE: whichever face's point at the sink's u lies
+      // inside THIS kitchen polygon
+      const face = [faceOf(wall, 1), faceOf(wall, -1)].find((f) =>
+        pointInPolygon(f.plan(uSink), kitchen.polygon),
+      )
+      if (!face) continue // degenerate: the sink's wall doesn't face its kitchen
+      const key = `${wall.id}|${face.side}`
+      if (walked.has(key)) continue
+      walked.add(key)
+
+      const y0 = COUNTER_RECEPTACLE_AFF - DEVICE_BOX_HALF_H
+      const y1 = COUNTER_RECEPTACLE_AFF + DEVICE_BOX_HALF_H
+      const doors = wall.openings
+        .filter((o) => o.kind === 'door')
+        .map((o) => ({
+          lo: Math.max(0, o.u - o.roughWidth / 2),
+          hi: Math.min(wall.length, o.u + o.roughWidth / 2),
+        }))
+      const usable = (u: number): boolean =>
+        u >= 0 &&
+        u <= wall.length &&
+        !doors.some((s) => u > s.lo && u < s.hi) &&
+        pointInPolygon(face.plan(u), kitchen.polygon)
+      if (!usable(uSink)) continue
+      // contiguous counter span around the sink (0.05 m march — drafting
+      // resolution; the polygon clip is what keeps the run out of the hall)
+      const step = 0.05
+      let a = uSink
+      while (a - step >= 0 && usable(a - step)) a -= step
+      let b = uSink
+      while (b + step <= wall.length && usable(b + step)) b += step
+      if (b - a < COUNTER_MIN_WIDTH) continue // 210.52(C)(1): < 12" strip
+
+      // even centers: pitch <= 48" AND end overhang (= pitch/2) <= 24"
+      const count = Math.max(
+        1,
+        Math.ceil((b - a) / COUNTER_SPACING),
+        Math.ceil((b - a) / (2 * COUNTER_FIRST_MAX)),
+      )
+      const pitch = (b - a) / count
+      const used: number[] = []
+      for (let i = 0; i < count; i++) {
+        let u = a + pitch * (i + 0.5)
+        // faucet zone: never directly behind the bowl
+        if (Math.abs(u - uSink) < 0.3) {
+          const shifted = u <= uSink ? uSink - 0.35 : uSink + 0.35
+          if (shifted > a && shifted < b) u = shifted
+        }
+        u = snapBoxClearOfRo(wall, u, y0, y1)
+        if (!usable(u)) continue // snapped off the counter run
+        if (used.some((v) => Math.abs(v - u) < 0.15)) continue // collapsed spots dedupe
+        used.push(u)
+        const [x, z] = face.plan(u)
+        out.push({
+          system: 'electrical',
+          kind: 'receptacle-gfci', // kitchen counters are GFCI in every adopted edition
+          position: [x, COUNTER_RECEPTACLE_AFF, z],
+          rotationY: face.rotationY,
+          sourceId: wall.id,
+          label: 'Counter receptacle \u2014 44" AFF (NEC 210.52(C)(1))',
+          meta: {
+            deviceId: `recep-${wall.id}-ctr-${i}-${face.side === 1 ? 'p' : 'm'}`,
+            counter: true,
+          },
+        })
+      }
+    }
+  }
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Movable devices (Q7): `bones:device` overrides with code-aware snapping
 // ---------------------------------------------------------------------------
@@ -1391,9 +1562,13 @@ export function applyDeviceOverrides(
     if (!wall || wall.curved || wall.length < 0.1) continue
     let violated = false
     for (const side of [1, -1] as const) {
-      // receptacle u-positions on this wall FACE (moved arrivals included)
+      // receptacle u-positions on this wall FACE (moved arrivals included).
+      // Counter + basin boxes never count toward 210.52(A) floor-line
+      // spacing (doNotCountTowardWallSpacing — they serve the counter, not
+      // the wall line); outdoor WR boxes are a different kind entirely.
       const us = out
         .filter((f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci')
+        .filter((f) => f.meta?.counter !== true && f.meta?.basin !== true)
         .filter((f) => {
           const off = wallSideOffset(wall, f.position)
           if (Math.sign(off) !== side) return false

@@ -383,3 +383,141 @@ describe('B14b sink-radius GFCI — NEC 210.8(A)(7)/(9) from placed fixtures (st
     expect(near(wet.fixtures).every((f) => f.kind === 'receptacle-gfci')).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// B14c — the kitchen counter run at 44" AFF (NEC 210.52(C))
+// ---------------------------------------------------------------------------
+
+const COUNTER_AFF = inches(44)
+const counterBoxes = (fixtures: Fixture[]): Fixture[] =>
+  fixtures.filter((f) => f.meta?.counter === true)
+
+/** rectScene + a kitchen zone on the west end of the south wall. */
+function kitchenScene(kitchenMaxX = 4): {
+  walls: WallSlice[]
+  rooms: RoomSlice[]
+  kitchen: RoomSlice
+} {
+  const { walls, rooms } = rectScene()
+  const kitchen = room(
+    'kitchen',
+    [
+      [0, 0],
+      [kitchenMaxX, 0],
+      [kitchenMaxX, 3],
+      [0, 3],
+    ],
+    { name: 'Kitchen' },
+  )
+  return { walls, rooms: [kitchen, ...rooms], kitchen }
+}
+
+describe('B14c counter run — hybrid: placed sink pins the walk, sink-less kitchens warn', () => {
+  test('a placed sink pins its counter wall: >= 2 counter GFCI boxes at 44" AFF on the kitchen face', () => {
+    const { walls, rooms, kitchen } = kitchenScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [sink])
+    const ctr = counterBoxes(fixtures)
+    expect(ctr.length).toBeGreaterThanOrEqual(2)
+    for (const f of ctr) {
+      expect(f.kind).toBe('receptacle-gfci')
+      expect(f.position[1]).toBeCloseTo(COUNTER_AFF, 5)
+      expect(f.sourceId).toBe('w_s')
+      expect(f.label).toContain('210.52(C)')
+      expect(pointInPolygon([f.position[0], f.position[2]], kitchen.polygon)).toBe(true)
+      expect(String(f.meta?.deviceId)).toMatch(/^recep-w_s-ctr-\d+-(p|m)$/)
+    }
+  })
+
+  test('counter spacing: every gap <= 48", run ends served within ~24" (layoutAlgorithmHints)', () => {
+    const { walls, rooms } = kitchenScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, undefined, [sink]))
+    const us = ctr.map((f) => f.position[0]).sort((a, b) => a - b)
+    expect(us.length).toBeGreaterThanOrEqual(2)
+    for (let i = 0; i + 1 < us.length; i++) {
+      expect((us[i + 1] as number) - (us[i] as number)).toBeLessThanOrEqual(inches(48) + 0.16)
+    }
+    // kitchen span is x in [0, 4] (march resolution + faucet nudge slack)
+    expect(us[0] as number).toBeLessThanOrEqual(inches(24) + 0.16)
+    expect(us[us.length - 1] as number).toBeGreaterThanOrEqual(4 - inches(24) - 0.16)
+  })
+
+  test('zone clipping: the counter walk never leaves the kitchen polygon (wall continues 4 m past it)', () => {
+    const { walls, rooms } = kitchenScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, undefined, [sink]))
+    for (const f of ctr) {
+      expect(f.position[0]).toBeLessThanOrEqual(4 + 0.01)
+    }
+  })
+
+  test('no box lands in the faucet zone directly behind the bowl', () => {
+    const { walls, rooms } = kitchenScene(2.4)
+    const sink = placedItem('sink_1', 'kitchen-sink', [0.6, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, undefined, [sink]))
+    expect(ctr.length).toBeGreaterThanOrEqual(1)
+    for (const f of ctr) {
+      expect(Math.abs(f.position[0] - 0.6)).toBeGreaterThanOrEqual(0.3 - 1e-9)
+    }
+  })
+
+  test('a door RO ends the counter run — no counter box on the far side of the door', () => {
+    const { walls, rooms } = kitchenScene()
+    ;(walls[0] as WallSlice).openings.push(door(1, 0.9, 'door_kitchen'))
+    const sink = placedItem('sink_1', 'kitchen-sink', [3, 0.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, undefined, [sink]))
+    expect(ctr.length).toBeGreaterThanOrEqual(1)
+    const doorHi = 1 + (0.9 + RO_PAD) / 2
+    for (const f of ctr) {
+      expect(f.position[0]).toBeGreaterThanOrEqual(doorHi - 1e-9)
+    }
+  })
+
+  test('sink-less kitchen: NO counter boxes, an explicit per-kitchen 210.52(C) warning names it', () => {
+    const { walls, rooms } = kitchenScene()
+    const warnings: string[] = []
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings))
+    expect(ctr.length).toBe(0)
+    expect(
+      warnings.some((w) => w.includes('Kitchen') && w.includes('210.52(C)') && w.includes('not modeled')),
+    ).toBe(true)
+  })
+
+  test('island sink (far from every wall): no counter walk, the 2023 island rule is labeled', () => {
+    const { walls, rooms } = kitchenScene()
+    const warnings: string[] = []
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 1.5])
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, warnings, [sink]))
+    expect(ctr.length).toBe(0)
+    expect(warnings.some((w) => w.includes('island sink') && w.includes('210.52(C)(2)'))).toBe(true)
+  })
+
+  test('counter boxes ride the small-appliance circuits (SA-n, 20 A) and stay E2-continuous', () => {
+    const { walls, rooms } = kitchenScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [sink])
+    for (const f of counterBoxes(fixtures)) {
+      expect(String(f.meta?.circuit)).toMatch(/^SA-[12]$/)
+      expect(f.meta?.breakerA).toBe(20)
+    }
+    const members = routeWiring(fixtures, walls)
+    expect(unreachableDevices(members, fixtures)).toEqual([])
+  })
+
+  test('counter-height census: the kitchen keeps its 15" wall-line walk AND gains the 44" counter tier', () => {
+    const { walls, rooms, kitchen } = kitchenScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [2, 0.5])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [sink])
+    const inKitchen = fixtures.filter(
+      (f) =>
+        (f.kind === 'receptacle' || f.kind === 'receptacle-gfci') &&
+        pointInPolygon([f.position[0], f.position[2]], kitchen.polygon),
+    )
+    const low = inKitchen.filter((f) => Math.abs(f.position[1] - inches(15)) < 1e-6)
+    const counter = inKitchen.filter((f) => Math.abs(f.position[1] - COUNTER_AFF) < 1e-6)
+    expect(low.length).toBeGreaterThan(0)
+    expect(counter.length).toBeGreaterThanOrEqual(2)
+    expect(low.length + counter.length).toBe(inKitchen.length)
+  })
+})
