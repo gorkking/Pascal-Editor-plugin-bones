@@ -836,7 +836,7 @@ AND a gate — a checklist line without a test is a wish.
   carry cj-legal depths; the default 8×6 hip honestly flags its 6 m
   one-piece joists).
 
-- **S15 The high-wind uplift path continues past the roof ties — or says
+- **S16 The high-wind uplift path continues past the roof ties — or says
   it can't (R802.11, R301.2.1/WFCM).** ≥ 130 mph design wind
   (`spec.highWindUplift`, set by `applyJurisdiction` from the data's own
   highWind overlay trigger `ultimateWindMph >= 130 && flags.hurricaneTies`
@@ -857,7 +857,7 @@ AND a gate — a checklist line without a test is a wish.
   `foundation-strap`s at 48" o.c. along SLAB-BEARING plates (ends
   covered, door ROs skipped — a strap in a doorway anchors nothing, the
   S12 lesson), DEDUPED by compute where a foundation R403.1.6 J-bolt/HDU
-  already anchors within the 12" window — one anchorage point, one
+  already anchors within the 0.3 m (~12") window — one anchorage point, one
   booking (the bolt is the modeled hardware and wins; HI's 4-ft seismic
   bolt spacing visibly wins more spots than LA's 6-ft); a walls-only
   result keeps the full ladder (toggle honesty, B9c). Interior

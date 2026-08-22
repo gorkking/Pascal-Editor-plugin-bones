@@ -56,7 +56,7 @@ fixtures, warnings, takeoff, all scenes.
   - `foundation-strap` — 48" o.c. along slab-bearing plates (ends
     covered, door ROs skipped — a strap in a doorway anchors nothing,
     S12), then DEDUPED by compute where a foundation R403.1.6 J-bolt or
-    HDU already anchors within the 12" window (one anchorage point, one
+    HDU already anchors within the 0.3 m (~12") window (one anchorage point, one
     booking; the bolt is the modeled hardware and wins). HI therefore
     books FEWER straps than LA on identical scenes — its seismic 4-ft
     bolt spacing wins more spots (7 vs 11 on the sweep scene). A
