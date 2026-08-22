@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { createHash } from 'node:crypto'
 import { Euler, Vector3 } from 'three'
-import { DEFAULT_SPEC } from '../core/spec'
+import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member } from '../core/types'
 import { birdsmouthSeat, extractRoofs, frameRoofs, type RoofSegmentSlice } from './roof-framing'
 import { computeTakeoff } from './takeoff'
@@ -992,5 +993,166 @@ describe('B6 fix round: trim gaps are flagged members, not commit-message asides
     const row = rows.find((r) => r.section === 'Flags' && r.detail.includes('trim to the valley line'))
     expect(row).toBeDefined()
     expect(row?.quantity).toBeGreaterThan(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B7a: hip ceiling joists — the R802.4.2 thrust path
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B7a: hip ceiling joists across the short span (R802.4.2)', () => {
+  const IN = 0.0254
+  const T = 1.5 * IN
+  const RD = 5.5 * IN // 2x6 rafter depth
+  const CJ_D = 5.5 * IN // 2x6 ceiling joist depth
+  const cjOf = (members: Member[]) => byRole(members, 'ceiling-joist')
+
+  // The audit repro: hip 10×12 @ 40° emitted 12 commons + 4 hips + 64 jacks
+  // + 76 hurricane ties and ZERO ceiling-joist/rafter-tie/collar-tie members
+  // — a non-structural ridge board with unresisted thrust and no ceiling
+  // frame for the storey below.
+  const roof = seg({ roofType: 'hip', width: 10, depth: 12 })
+  const theta = roof.pitch
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const members = frameRoofs([roof], [], at400)
+  const cjs = cjOf(members)
+  const baseY = roof.position[1] + roof.wallHeight
+
+  test('audit repro census: joists present at a sane count vs span/spacing', () => {
+    // stations at 16" o.c. along the long axis, band pulled off the end
+    // planes: 2·(longHalf − cjEndClear)/spacing ± the layout end snap
+    const cjEndClear = (CJ_D + RD / (2 * Math.cos(theta))) / Math.tan(theta) + T + 0.002
+    const bandHalf = 6 - cjEndClear
+    const floor = Math.floor((2 * bandHalf) / DEFAULT_SPEC.ceilingJoistSpacing) - 1
+    expect(cjs.length).toBeGreaterThanOrEqual(floor)
+    expect(cjs.length).toBeLessThanOrEqual(floor + 4)
+    // and every station stays inside the band (the end triangles carry no
+    // full-span joist — their stub ceiling rides the follow-up)
+    for (const cj of cjs) {
+      expect(Math.abs(cj.position[2] as number)).toBeLessThanOrEqual(bandHalf + 1e-9)
+    }
+  })
+
+  test('joists span the SHORT axis at the eave line, ends inscribed in the B6 clip', () => {
+    // width 10 < depth 12 → joists run along X (the commons span direction)
+    const clip = (CJ_D - RD / (2 * Math.cos(theta))) / Math.tan(theta) + 0.002
+    for (const cj of cjs) {
+      const axis = longAxis(cj)
+      expect(Math.abs(axis.x)).toBeCloseTo(1, 5)
+      expect(cj.length).toBeCloseTo(10 - 2 * clip, 6)
+      expect(cj.position[1]).toBeCloseTo(baseY + CJ_D / 2, 6)
+      expect(cj.position[0]).toBeCloseTo(0, 6)
+    }
+  })
+
+  test('labels cite R802.4.2 (+ the end-clip fabrication note at 400); the 12 m-class span flags per R802.5.1', () => {
+    for (const cj of cjs) {
+      expect(cj.label).toContain('rafter tie (R802.4.2)')
+      expect(cj.label).toContain('ends clipped to the roof slope')
+      // 10 m one-piece joists are far past the R802.5.1(2) table — honest flag
+      expect(cj.flag).toContain('Ceiling joist over prescriptive span')
+      expect(cj.flag).toContain('R802.5.1')
+    }
+    // at 300 the citation stays (code basis, the purlin-label convention)
+    // while the fabrication clip note is 400-only
+    const at300 = cjOf(frameRoofs([roof], [], DEFAULT_SPEC))
+    expect(at300.length).toBe(cjs.length)
+    for (const cj of at300) {
+      expect(cj.label).toContain('rafter tie (R802.4.2)')
+      expect(cj.label).not.toContain('ends clipped')
+    }
+  })
+
+  test('besideRafter snapping: no joist rides a common or side-jack plane', () => {
+    // parallel rafter stations: commons on ±ridgeHalf grid + side jacks past
+    // the ridge ends — every joist keeps at least side-by-side contact
+    const parallel = [
+      ...byRole(members, 'rafter'),
+      ...byRole(members, 'jack-rafter'),
+    ].filter((r) => Math.abs(longAxis(r).x) > 0.5) // runs along X, like the joists
+    for (const cj of cjs) {
+      for (const r of parallel) {
+        const gap = Math.abs((cj.position[2] as number) - (r.position[2] as number))
+        expect(gap).toBeGreaterThanOrEqual(T / 2 + T / 2 - 1e-9)
+      }
+    }
+  })
+
+  test('alongX orientation (width ≥ depth): joists run along Z, stationed on X', () => {
+    const wide = frameRoofs([seg({ roofType: 'hip', width: 12, depth: 10 })], [], at400)
+    const wideCjs = cjOf(wide)
+    expect(wideCjs.length).toBeGreaterThan(20)
+    for (const cj of wideCjs) {
+      expect(Math.abs(longAxis(cj).z)).toBeCloseTo(1, 5)
+      expect(cj.position[2]).toBeCloseTo(0, 6)
+    }
+  })
+
+  test('LOD 200 keeps the schematic full-span joists, unclipped and unflagged (gable convention)', () => {
+    const generic = cjOf(frameRoofs([roof], [], { ...DEFAULT_SPEC, detail: '200' }))
+    expect(generic.length).toBeGreaterThan(0)
+    for (const cj of generic) {
+      expect(cj.length).toBeCloseTo(10, 6)
+      expect(cj.flag).toBeUndefined()
+    }
+  })
+
+  test('compact hip joists fit the R802.5.1 table and stay flag-free', () => {
+    const compact = cjOf(frameRoofs([seg({ roofType: 'hip', depth: 3.8 })], [], DEFAULT_SPEC))
+    expect(compact.length).toBeGreaterThan(0)
+    for (const cj of compact) expect(cj.flag).toBeUndefined()
+  })
+
+  test('snapped stations never collapse onto each other (25° layout-end repro)', () => {
+    // at 25° the layout's guaranteed END station and its neighbor both snap
+    // beside the same side jack — the raw map emitted two joists at ONE spot
+    const m25 = cjOf(
+      frameRoofs([seg({ roofType: 'hip', pitch: (25 * Math.PI) / 180 })], [], DEFAULT_SPEC),
+    )
+    expect(m25.length).toBeGreaterThan(0)
+    const us = m25.map((cj) => cj.position[0] as number).sort((a, b) => a - b)
+    for (let i = 1; i < us.length; i++) {
+      expect((us[i] as number) - (us[i - 1] as number)).toBeGreaterThanOrEqual(T - 1e-9)
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B7 blast radius: untouched shapes byte-equal to master (pinned)
+// ---------------------------------------------------------------------------
+
+describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (hash pins)', () => {
+  // sha256 of the framed member JSON, captured at master 779d70e — the B7
+  // hip-family members must not perturb these shapes by a single byte.
+  const hashOf = (members: Member[]): string =>
+    createHash('sha256').update(JSON.stringify(members)).digest('hex').slice(0, 16)
+  const PINS: [string, Partial<RoofSegmentSlice>, Partial<FramingSpec>, string][] = [
+    ['gable-300', {}, {}, '0630b9f861ee5f6c'],
+    ['gable-400', {}, { detail: '400' }, '956ef4b91c7d838c'],
+    ['gable-200', {}, { detail: '200' }, '34f8a921c61c82e3'],
+    ['gable-400-windy', {}, { detail: '400', hurricaneTies: true }, 'cf188b8d03379ed1'],
+    ['gable-big-400', { width: 10, depth: 12 }, { detail: '400' }, '9488d2b7f7a2c3c9'],
+    ['shed-300', { roofType: 'shed' }, {}, '76e8a43f3f95a947'],
+    ['shed-400', { roofType: 'shed' }, { detail: '400' }, '56128ff5e8d68001'],
+    ['shed-200', { roofType: 'shed' }, { detail: '200' }, '4da5818e22a231e4'],
+    ['shed-big-400', { roofType: 'shed', depth: 8 }, { detail: '400' }, '0d54b38723e03603'],
+    ['flat-400', { roofType: 'flat' }, { detail: '400' }, 'e5d74f2bb9f51fd1'],
+    ['gambrel-400', { roofType: 'gambrel' }, { detail: '400' }, '7001177e55d8903e'],
+  ]
+
+  for (const [name, over, sp, pin] of PINS) {
+    test(`${name} reproduces the master bytes`, () => {
+      const members = frameRoofs([seg(over)], [], { ...DEFAULT_SPEC, ...sp })
+      expect(hashOf(members)).toBe(pin)
+    })
+  }
+
+  test('valley pair (gable × gable) reproduces the master bytes', () => {
+    const members = frameRoofs(
+      [seg(), seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })],
+      [],
+      { ...DEFAULT_SPEC, detail: '400' },
+    )
+    expect(hashOf(members)).toBe('2ef111d64bcdd8d9')
   })
 })

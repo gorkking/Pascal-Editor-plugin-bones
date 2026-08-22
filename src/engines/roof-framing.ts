@@ -1164,9 +1164,10 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   const cPlumbInset = (rd / 2) * tan
   const commonSlopeLen = run / cosT + roof.overhang - cRidgeFace / cosT - 2 * cPlumbInset
   const commonFaceY = ridgeY - cRidgeFace * tan
-  // Span discipline: hip commons/kings project `run` horizontally. No
-  // ceiling joists are modeled under a hip (LOD-400 audit batch 7), so
-  // struts have nothing real to bear on — flag only (S1).
+  // Span discipline: hip commons/kings project `run` horizontally. Ceiling
+  // joists exist under the ridge portion since B7, but the purlin+strut fix
+  // stays a follow-up (the gable machinery assumes full-width joist lines;
+  // the hip band stops short of the end planes) — flag only (S1).
   const commonFlag = slopeRafterFlag(spec, run, commonSlopeLen)
   const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
   for (const u of commons) {
@@ -1347,6 +1348,80 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           }
         }
       }
+    }
+  }
+
+  // ---- ceiling joists across the short span (LOD-400 B7a, R802.4.2) ----
+  // The gable machinery mirrored: joists at o.c. stations along the LONG
+  // axis span the short footprint dimension at the eave line — the rafter
+  // ties that resist the commons' thrust (the audit's hip modeled a
+  // non-structural ridge board with NO tie below it and no ceiling frame
+  // for the storey under, R802.4.2). Stations cover the ridge portion and
+  // continue into the end bands only while the END planes' rafters and the
+  // hip boxes stay clear above the joist top: past longHalf − cjEndClear a
+  // jack/king underside descends into the joist — the small triangular end
+  // ceilings ride a stub-joist follow-up (honesty over fake wood).
+  const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
+  const shortSpan = 2 * run
+  // Clearance vs the end-plane rafter UNDERSIDES (centerline − rd/(2cosθ)
+  // vertical, descending to the end eave at tanθ); + one hip thickness for
+  // the hip boxes' plan band crossing the joist line at the corner runs.
+  const cjEndClear = tan <= EPS ? longHalf : (cjD + rd / (2 * cosT)) / tan + t + 0.002
+  const cjBandHalf = longHalf - cjEndClear
+  // Sister BESIDE any parallel rafter plane — the long-plane commons AND
+  // the side-plane jacks past the ridge ends (both run with the joists) —
+  // snapped toward the roof center (the gable besideRafter convention).
+  const cjParallel: number[] = [...commons]
+  if (spec.detail !== '200') {
+    for (let d = spec.rafterSpacing; d < run - halfT; d += spec.rafterSpacing) {
+      cjParallel.push(ridgeHalf + d, -(ridgeHalf + d))
+    }
+  }
+  const besideRafter = (u0: number, half: number): number => {
+    const clash = cjParallel.find((ru) => Math.abs(ru - u0) < halfT + half - EPS)
+    if (clash === undefined) return u0
+    return clash + (clash >= 0 ? -1 : 1) * (halfT + half)
+  }
+  // B6 end-clip vs the LONG planes at the joists' own ends: the box
+  // inscribes inside the field clip to the rafter slope so its end top
+  // corner never pokes the deck riding the rafter TOPs. Span/flag math
+  // stays on the FULL short span (the buy length); LOD 200 has no deck and
+  // keeps the schematic full box (the gable cjClip convention).
+  const cjClip =
+    spec.detail === '200' || tan <= EPS
+      ? 0
+      : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
+  const cjLen = shortSpan - 2 * cjClip
+  const cjFlag = ceilingJoistFlag(spec, shortSpan)
+  if (cjLen >= 0.3 && cjBandHalf > cjT) {
+    // Two neighboring stations can snap beside the SAME jack (the layout's
+    // guaranteed end station lands next to a grid station at some pitches)
+    // — collapse any snapped pair closer than one joist thickness.
+    const snapped = layout(-cjBandHalf, cjBandHalf, spec.ceilingJoistSpacing, cjT / 2)
+      .map((u0) => besideRafter(u0, cjT / 2))
+      .sort((a, b) => a - b)
+    const cjStations: number[] = []
+    for (const u of snapped) {
+      const prev = cjStations[cjStations.length - 1]
+      if (prev !== undefined && u - prev < cjT - EPS) continue
+      cjStations.push(u)
+    }
+    for (const u of cjStations) {
+      emit(
+        'ceiling-joist',
+        spec.ceilingJoistSize,
+        [cjLen, cjD, cjT],
+        alongX ? [u, eaveY + cjD / 2, 0] : [0, eaveY + cjD / 2, u],
+        alongX ? -Math.PI / 2 : 0,
+        0,
+        cjLen,
+        'lumber',
+        `Ceiling joist ${spec.ceilingJoistSize} — rafter tie (R802.4.2)${
+          spec.detail === '400' ? ', ends clipped to the roof slope' : ''
+        }`,
+        undefined,
+        cjFlag,
+      )
     }
   }
 
