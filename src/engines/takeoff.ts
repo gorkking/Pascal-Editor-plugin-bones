@@ -549,10 +549,21 @@ export function computeTakeoff(
     .reduce((sum, m) => sum + m.dims[0] * m.dims[2], 0)
   if (roofDeckM2 > 0) {
     const roofSheets = Math.ceil((roofDeckM2 * SQFT) / 32)
+    // F2 (round-1 examiner): tapered planes tile conservatively INSIDE the
+    // hip/arris lines — the buy row says so like the underlayment states
+    // its lap factor, so a purchaser knows this number carries no waste.
+    const underTiled = members.some(
+      (m) =>
+        m.role === 'sheathing' &&
+        m.system === 'roof-framing' &&
+        m.label?.includes('under-tile'),
+    )
     push(
       'Roof',
       'Roof sheathing 7/16" WSP',
-      `deck panels, from members (~${roofSheets} 4x8 sheets, R803.2)`,
+      `deck panels, from members (~${roofSheets} 4x8 sheets, R803.2)${
+        underTiled ? ' — tapered planes conservatively under-tiled (see member labels); buy waste factor separately' : ''
+      }`,
       round1(roofDeckM2 * SQFT),
       'sqft',
     )

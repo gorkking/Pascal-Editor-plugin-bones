@@ -702,21 +702,65 @@ describe('LOD-400 B6a: roof deck panels per slope plane (R803.2)', () => {
     expect(ratio).toBeLessThanOrEqual(1)
   })
 
-  test('hip: strips tile all four planes ≥ 85% of the plane area, never past it', () => {
-    const roof = seg({ roofType: 'hip', width: 10, depth: 8 })
-    const members = frameRoofs([roof], [], DEFAULT_SPEC)
-    const cosT = Math.cos(roof.pitch)
-    const run = Math.min(roof.width, roof.depth) / 2
-    const ridgeHalf = Math.max(roof.width, roof.depth) / 2 - run
-    const R = run + roof.overhang * cosT
-    const planes = (2 * (2 * ridgeHalf + R) * R + 2 * R * R) / cosT
-    const deck = areaOf(members)
-    expect(deck).toBeGreaterThan(0.85 * planes)
-    expect(deck).toBeLessThan(planes) // strips stay INSIDE the hip lines
+  // DERIVED under-tile floor for uphill-width strip tiling (F2 — never a
+  // magic number): each tapered edge loses (Δ/2 + clear)·R (∫ of the
+  // per-strip wedge, taper slope 1); a hip has 8 tapered edges. A final
+  // partial strip below DECK_MIN vanishes whole: ≤ (MIN·cosθ + 4·gap) of
+  // plan height across each plane's eave width (also covers the drawn
+  // strips' ridge/eave gap trims). End-plane apexes skip ≤ their first
+  // strip (≤ 2·Δ² each). Everything /cosθ into slope area.
+  const hipFloor = (w: number, d: number, pitchDeg: number, o: number): { floor: number; planes: number } => {
+    const th = (pitchDeg * Math.PI) / 180
+    const cosT = Math.cos(th)
+    const run = Math.min(w, d) / 2
+    const rh = Math.max(w, d) / 2 - run
+    const R = run + o * cosT
+    const planes = (2 * (2 * rh + R) * R + 2 * R * R) / cosT
+    const D = 0.4 // DECK_STRIP
+    const C = 0.02 // DECK_CLEAR
+    const MIN = 0.1 // DECK_MIN
+    const gap = (((7 / 16) * IN) / 2) * Math.sin(th) + 0.002 // deckGap
+    const edgeLoss = (8 * (D / 2 + C) * R) / cosT
+    const eaveWidths = 2 * 2 * (rh + R) + 2 * 2 * R
+    const tailSeamLoss = ((MIN * cosT + 4 * gap) * eaveWidths) / cosT
+    const apexLoss = (4 * D * D) / cosT
+    return { floor: Math.max(0, 1 - (edgeLoss + tailSeamLoss + apexLoss) / planes), planes }
+  }
+
+  test('hip: strip coverage ≥ the DERIVED floor, never past the plane, EXACT pct on the label', () => {
+    // incl. the round-1 examiner counter-example (5×4 @ 30° booked 84.4%
+    // under the old 85% magic floor) and a spread of aspects/pitches
+    for (const [w, d, p] of [[10, 8, 40], [5, 4, 30], [16, 10, 25], [6, 6, 60]] as const) {
+      const roof = seg({ roofType: 'hip', width: w, depth: d, pitch: (p * Math.PI) / 180 })
+      const members = frameRoofs([roof], [], DEFAULT_SPEC)
+      const deck = areaOf(members)
+      const { floor, planes } = hipFloor(w, d, p, roof.overhang)
+      expect({ w, d, p, above: deck >= floor * planes }).toEqual({ w, d, p, above: true })
+      expect(deck).toBeLessThan(planes) // strips stay INSIDE the hip lines
+      // F2: the label states the EXACT coverage of THIS compose — 'slight
+      // under-tile' prose is gone
+      const pct = Math.round((deck / planes) * 1000) / 10
+      for (const m of deckOf(members)) {
+        expect(m.label).toContain(`conservative under-tile, ${pct.toFixed(1)}% of plane area`)
+        expect(m.label).toContain('trim to hip lines on site')
+      }
+    }
     // both plane families present (long faces + triangular end faces)
+    const members = frameRoofs([seg({ roofType: 'hip', width: 10, depth: 8 })], [], DEFAULT_SPEC)
     const yaws = new Set(deckOf(members).map((m) => m.rotation[1].toFixed(2)))
     expect(yaws.size).toBeGreaterThan(1)
-    for (const m of deckOf(members)) expect(m.label).toContain('trimmed at hips')
+  })
+
+  test('F2: the takeoff deck row states the under-tile beside the buy quantity', () => {
+    const members = frameRoofs([seg({ roofType: 'hip', width: 5, depth: 4, pitch: (30 * Math.PI) / 180 })], [], DEFAULT_SPEC)
+    const rows = computeTakeoff(members, [])
+    const row = rows.find((r) => r.item === 'Roof sheathing 7/16" WSP')
+    expect(row?.detail).toContain('conservatively under-tiled')
+    expect(row?.detail).toContain('buy waste factor separately')
+    // …and a rect-plane roof (full coverage) carries NO waste note
+    const gable = frameRoofs([seg()], [], DEFAULT_SPEC)
+    const gRow = computeTakeoff(gable, []).find((r) => r.item === 'Roof sheathing 7/16" WSP')
+    expect(gRow?.detail).not.toContain('under-tiled')
   })
 
   test('flat: one dead-level panel over the platform, on the joist tops', () => {

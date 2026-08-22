@@ -498,6 +498,41 @@ const UNDERLAYMENT_T = 0.002
 const UNDERLAYMENT_LABEL =
   'Roof underlayment — one layer felt/synthetic (R905.1.1); covering by finish schedule — not booked'
 
+type DeckPanelSpec = {
+  theta: number
+  side: 1 | -1
+  alongXAxis: boolean
+  u0: number
+  u1: number
+  zTop: number
+  zBot: number
+  yTop: number
+}
+
+/** Drawn area of a strip batch (deckPlane's own skip predicate mirrored)
+ * and the HONEST per-compose note: tapered planes state the EXACT coverage
+ * they achieve, so 'slight under-tile' can never paper over a
+ * scene-dependent shortfall (round-1 examiner F2: a 5×4 @ 30° hip books
+ * 84.4% while the 10×8 gate floor sat at 85%). */
+function tiledDeckNote(
+  panels: DeckPanelSpec[],
+  planeArea: number,
+  what: string,
+): { note: string; drawn: number } {
+  let drawn = 0
+  for (const p of panels) {
+    const len = p.u1 - p.u0
+    const slopeW = (p.zBot - p.zTop) / Math.cos(p.theta)
+    if (len < DECK_MIN || slopeW < DECK_MIN) continue
+    drawn += len * slopeW
+  }
+  const pct = planeArea > EPS ? Math.round((drawn / planeArea) * 1000) / 10 : 100
+  return {
+    drawn,
+    note: ` — strip-tiled: conservative under-tile, ${pct.toFixed(1)}% of plane area; trim to ${what} on site`,
+  }
+}
+
 /**
  * One deck panel on a slope plane. Geometry in the SEGMENT frame: the
  * plane's eave (level) direction runs along X when `alongXAxis` (downhill =
@@ -1317,7 +1352,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   if (spec.detail !== '200') {
     const deckR = run + roof.overhang * cosT
     const gap = deckGap(theta)
-    const hipNote = ' — tapered plane strip-tiled; trimmed at hips (slight under-tile)'
+    const panels: DeckPanelSpec[] = []
     for (let z0 = 0; z0 < deckR - EPS; z0 += DECK_STRIP) {
       const z1 = Math.min(z0 + DECK_STRIP, deckR)
       // ridge/eave seams: first strip clears the mirrored plane, last
@@ -1327,7 +1362,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
       const hwLong = ridgeHalf + z0 - DECK_CLEAR
       const hwEnd = z0 - DECK_CLEAR
       for (const side of [1, -1] as const) {
-        deckPlane(emit, spec, {
+        panels.push({
           theta,
           side,
           alongXAxis: alongX,
@@ -1336,10 +1371,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           zTop: zt,
           zBot: zb,
           yTop: ridgeY - zt * tan,
-          rafterDepth: rd,
-          note: hipNote,
         })
-        deckPlane(emit, spec, {
+        panels.push({
           theta,
           side,
           alongXAxis: !alongX,
@@ -1348,11 +1381,15 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           zTop: ridgeHalf + zt,
           zBot: ridgeHalf + zb,
           yTop: ridgeY - zt * tan,
-          rafterDepth: rd,
-          note: hipNote,
         })
       }
     }
+    // Plane truth: 2 trapezoids (ridge 2·ridgeHalf → eave) + 2 triangles
+    // off the ridge ends, overhang included — the note states the EXACT
+    // coverage the strips achieve on THIS compose (F2).
+    const planeArea = (2 * (2 * ridgeHalf + deckR) * deckR + 2 * deckR * deckR) / cosT
+    const { note } = tiledDeckNote(panels, planeArea, 'hip lines')
+    for (const p of panels) deckPlane(emit, spec, { ...p, rafterDepth: rd, note })
   }
 
   // ---- fascia (sub + finish) around all four eaves (LOD 400) ----
@@ -1733,8 +1770,8 @@ function frameSkirt(
   // endRun ≠ sideRun). Strips stay inside the arris lines — conservative
   // under-tile, stated on the label.
   if (spec.detail !== '200') {
-    const skirtNote =
-      ' — tapered plane strip-tiled; trimmed at arris hips (slight under-tile)'
+    const panels: DeckPanelSpec[] = []
+    let planeArea = 0
     const deckFace = (
       stationIsX: boolean,
       half: number,
@@ -1748,6 +1785,12 @@ function frameSkirt(
       const gap = deckGap(theta)
       const zTopEdge = half - runH
       const deckR = half + roof.overhang * cosT
+      // Plane truth per face PAIR (F2): each trapezoid's exact slope area
+      // incl. the overhang band, width interpolating along the arris slope:
+      // ∫ 2·hw(z) dz / cosθ with hw(z) = (crossHalf−crossRun) + z'·(crossRun/runH).
+      const L = deckR - zTopEdge
+      const oneFace = (2 * (crossHalf - crossRun) * L + (crossRun / runH) * L * L) / cosT
+      planeArea += 2 * oneFace
       for (let z0 = zTopEdge; z0 < deckR - EPS; z0 += DECK_STRIP) {
         const z1 = Math.min(z0 + DECK_STRIP, deckR)
         // seams: top strip clears the inner shape's deck at the knuckle,
@@ -1756,7 +1799,7 @@ function frameSkirt(
         const zb = Math.min(z1, deckR - gap)
         const hw = crossHalf - crossRun + (z0 - zTopEdge) * (crossRun / runH) - DECK_CLEAR
         for (const side of [1, -1] as const) {
-          deckPlane(emit, spec, {
+          panels.push({
             theta,
             side,
             alongXAxis: stationIsX,
@@ -1765,14 +1808,14 @@ function frameSkirt(
             zTop: zt,
             zBot: zb,
             yTop: eaveY + rise - (zt - zTopEdge) * Math.tan(theta),
-            rafterDepth: rd,
-            note: skirtNote,
           })
         }
       }
     }
     deckFace(true, roof.depth / 2, sideRun, endRun, roof.width / 2, sideTheta)
     deckFace(false, roof.width / 2, endRun, sideRun, roof.depth / 2, endTheta)
+    const { note } = tiledDeckNote(panels, planeArea, 'arris lines')
+    for (const p of panels) deckPlane(emit, spec, { ...p, rafterDepth: rd, note })
   }
 
   // four arris hips: footprint corner → top corner of the skirt, inscribed
