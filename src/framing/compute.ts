@@ -53,7 +53,14 @@ import { buildFoundation } from '../engines/foundation'
 import { frameFloor } from '../engines/floor-framing'
 import { frameRoofs, extractRoofs } from '../engines/roof-framing'
 import { bracingWarnings, crossReferenceHoldDowns } from '../engines/wall-bracing'
-import { frameHints, frameWalls, specForWall, studSizeFor } from '../engines/wall-framing'
+import {
+  dedupeFoundationStraps,
+  frameHints,
+  frameWalls,
+  specForWall,
+  studSizeFor,
+  upliftPathWarnings,
+} from '../engines/wall-framing'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
@@ -746,6 +753,14 @@ function computeLevelUncached(
     }
   }
 
+  // B10 uplift-path honesty at the roof seam: high-wind wall connectors
+  // under a roof that frames rafters with ZERO hurricane ties (flat roofs
+  // call no tieAt today — the B8 sibling seam) warn per roof — the wall
+  // continues a path the roof never starts, and that must be SAID (P4
+  // prints it), never implied. Results with no roof members stay silent
+  // (a toggled-off / other-storey roof is not missing hardware — B9c).
+  warnings.push(...upliftPathWarnings(members))
+
   if (config.showFoundation && isGroundLevel) {
     // B18b: CMU-based walls (full-CMU and mixed knee walls) carry no sole
     // plate at the foundation top — the foundation swaps their R403.1.6
@@ -782,7 +797,15 @@ function computeLevelUncached(
     // them, both directions (a hold-down with no post above / a portal post
     // with no hold-down below gets flagged). Only when BOTH systems are in
     // this result — a toggled-off system is not missing hardware.
-    if (config.showWalls) crossReferenceHoldDowns(members)
+    if (config.showWalls) {
+      crossReferenceHoldDowns(members)
+      // B10c: a plate-to-foundation uplift strap where the foundation's
+      // R403.1.6 J-bolt (or a seismic HDU) already clamps the plate is the
+      // SAME anchorage point — the bolt wins, the strap dedupes; surviving
+      // straps fill the runs between bolts. Walls-only results keep the
+      // full ladder (same toggle honesty as the cross-ref above).
+      dedupeFoundationStraps(members)
+    }
   }
 
   // bones:service nodes on this level are AUTHORITATIVE — the engines route

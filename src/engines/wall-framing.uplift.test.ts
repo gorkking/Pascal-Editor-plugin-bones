@@ -385,3 +385,197 @@ describe('B10 jurisdiction wiring — the spec flag follows the data trigger', (
     )
   })
 })
+
+// ---------------------------------------------------------------------------
+// B10 compute-level composes: the path assembles end-to-end through
+// computeLevel — census on a real scene, the foundation-anchor dedupe with
+// real R403.1.6 bolt layouts, and the flat-roof honesty statement.
+// ---------------------------------------------------------------------------
+
+import { FramingNode } from '../framing/schema'
+import { computeLevel } from '../framing/compute'
+
+const upliftScene = (
+  roofType?: 'flat' | 'gable',
+): Record<string, Record<string, unknown>> => {
+  const wall = (
+    id: string,
+    start: [number, number],
+    end: [number, number],
+    children: string[] = [],
+  ) => ({
+    id,
+    type: 'wall',
+    parentId: 'level_1',
+    start,
+    end,
+    thickness: 0.15,
+    height: 2.5,
+    frontSide: 'exterior',
+    children,
+  })
+  const nodes: Record<string, Record<string, unknown>> = {
+    level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+    w_s: wall('w_s', [0, 0], [8, 0], ['door_1']),
+    door_1: {
+      id: 'door_1',
+      type: 'door',
+      parentId: 'w_s',
+      position: [3, 0, 0],
+      width: 0.9,
+      height: 2.1,
+    },
+    w_e: wall('w_e', [8, 0], [8, 6], ['win_1']),
+    win_1: {
+      id: 'win_1',
+      type: 'window',
+      parentId: 'w_e',
+      position: [3, 0, 0],
+      width: 1.2,
+      height: 1.2,
+      sillHeight: 0.9,
+    },
+    w_n: wall('w_n', [8, 6], [0, 6]),
+    w_w: wall('w_w', [0, 6], [0, 0]),
+    slab_1: {
+      id: 'slab_1',
+      type: 'slab',
+      parentId: 'level_1',
+      polygon: [
+        [0, 0],
+        [8, 0],
+        [8, 6],
+        [0, 6],
+      ],
+      holes: [],
+    },
+    room_1: {
+      id: 'room_1',
+      type: 'zone',
+      parentId: 'level_1',
+      name: 'Room',
+      polygon: [
+        [0, 0],
+        [8, 0],
+        [8, 6],
+        [0, 6],
+      ],
+      boundaryWallIds: ['w_s', 'w_e', 'w_n', 'w_w'],
+    },
+  }
+  if (roofType) {
+    nodes.roof_1 = {
+      id: 'roof_1',
+      type: 'roof',
+      parentId: 'level_1',
+      position: [4, 2.5, 3],
+      rotation: 0,
+      children: ['roofseg_1'],
+    }
+    nodes.roofseg_1 = {
+      id: 'roofseg_1',
+      type: 'roof-segment',
+      parentId: 'roof_1',
+      position: [0, 0, 0],
+      rotation: 0,
+      roofType,
+      width: 8,
+      depth: 6,
+      pitch: roofType === 'flat' ? 0 : 35,
+      overhang: 0.3,
+      wallHeight: 0,
+    }
+  }
+  return nodes
+}
+
+const upliftConfig = (
+  jurisdiction: string,
+  overrides: Record<string, unknown> = {},
+): FramingNode =>
+  FramingNode.parse({
+    id: 'bonesframing_uplift',
+    parentId: 'level_1',
+    jurisdiction,
+    detail: '400',
+    studSpacingIn: 16,
+    showWalls: true,
+    showFoundation: true,
+    showFloor: false,
+    showRoof: true,
+    showElectrical: false,
+    showPlumbing: false,
+    showHvac: false,
+    ...overrides,
+  })
+
+describe('B10 compute composes — the uplift path assembles end-to-end (LA)', () => {
+  test('LA census: every wall full-height vertical carries its connector; INTL books zero', () => {
+    const la = computeLevel(upliftScene(), upliftConfig('LA'))
+    const connectors = la.members.filter((m) => m.role === 'uplift-connector')
+    const verticals = la.members.filter(
+      (m) =>
+        m.system === 'wall-framing' &&
+        (m.role === 'stud' || m.role === 'king-stud' || m.role === 'post') &&
+        m.dims[1] > 1,
+    )
+    expect(verticals.length).toBeGreaterThan(20)
+    expect(connectors.length).toBe(verticals.length)
+    // Opening straps on both walls with openings.
+    const straps = la.members.filter((m) => m.role === 'uplift-strap')
+    expect(straps).toHaveLength(4)
+    const intl = computeLevel(upliftScene(), upliftConfig('INTL'))
+    expect(intl.members.some((m) => UPLIFT_ROLES.has(m.role))).toBe(false)
+    expect(intl.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
+  })
+
+  test('foundation straps dedupe against the REAL R403.1.6 bolt layout — and survive between bolts', () => {
+    const both = computeLevel(upliftScene(), upliftConfig('LA'))
+    const straps = both.members.filter((m) => m.role === 'foundation-strap')
+    const anchors = both.members.filter(
+      (m) => m.system === 'foundation' && (m.role === 'anchor-bolt' || m.role === 'hold-down'),
+    )
+    expect(anchors.length).toBeGreaterThan(0)
+    expect(straps.length).toBeGreaterThan(0) // the ladder survives between bolts
+    for (const s of straps) {
+      for (const a of anchors) {
+        const d = Math.hypot(a.position[0] - s.position[0], a.position[2] - s.position[2])
+        expect(d).toBeGreaterThan(UPLIFT_ANCHOR_DEDUPE_TOL)
+      }
+    }
+    // The dedupe is NON-VACUOUS on this compose: a walls-only result (no
+    // foundation → no bolts known) keeps the full ladder — strictly more
+    // straps than the both-systems result.
+    const wallsOnly = computeLevel(
+      upliftScene(),
+      upliftConfig('LA', { showFoundation: false }),
+    )
+    const fullLadder = wallsOnly.members.filter((m) => m.role === 'foundation-strap')
+    expect(fullLadder.length).toBeGreaterThan(straps.length)
+  })
+
+  test('flat roof at LA: the wall-only path is STATED (warning), gable stays silent (ties exist)', () => {
+    const flat = computeLevel(upliftScene('flat'), upliftConfig('LA'))
+    expect(flat.members.some((m) => m.role === 'uplift-connector')).toBe(true)
+    expect(
+      flat.members.some(
+        (m) => m.system === 'roof-framing' && m.role === 'blocking' && m.material === 'steel',
+      ),
+    ).toBe(false)
+    const statements = flat.warnings.filter((w) => w.includes('high-wind uplift'))
+    expect(statements).toHaveLength(1)
+    expect(statements[0]).toContain('roofseg_1')
+    expect(statements[0]).toContain('R802.11')
+    // Gable: tieAt books per-rafter ties — the story is complete, no warning.
+    const gable = computeLevel(upliftScene('gable'), upliftConfig('LA'))
+    expect(
+      gable.members.some(
+        (m) => m.system === 'roof-framing' && m.role === 'blocking' && m.material === 'steel',
+      ),
+    ).toBe(true)
+    expect(gable.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
+    // INTL flat roof: no connectors, no statement (nothing claims a path).
+    const intlFlat = computeLevel(upliftScene('flat'), upliftConfig('INTL'))
+    expect(intlFlat.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
+  })
+})
