@@ -273,7 +273,11 @@ AND a gate — a checklist line without a test is a wish.
   buys the deck area at a STATED +10% course-lap factor; tapered
   hip/arris planes strip-tile conservatively INSIDE the hip lines with
   the under-tile stated on the member labels; valley-minor panels carry
-  the overlay-framing trim note.
+  the overlay-framing trim statement as a FLAG (it must PRINT — Flags
+  rows/block, never a label-only aside). Stated trim gaps are flags too:
+  SHED roofs model no fascia and therefore NO drip edge at 400 (deck
+  flag, count pinned at zero); gambrel rake metal rides with the B8d
+  rake-ladder follow-up (deck flag).
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
   framed exterior/CMU and the takeoff booked sheathing the layer engine never

@@ -3,6 +3,7 @@ import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member } from '../core/types'
 import { birdsmouthSeat, extractRoofs, frameRoofs, type RoofSegmentSlice } from './roof-framing'
+import { computeTakeoff } from './takeoff'
 
 const byRole = (members: Member[], role: string): Member[] => members.filter((m) => m.role === role)
 
@@ -777,15 +778,21 @@ describe('LOD-400 B6a: roof deck panels per slope plane (R803.2)', () => {
     expect(deckOf(members)).toHaveLength(0)
   })
 
-  test('valley MINOR deck carries the overlay trim note; the major stays clean', () => {
+  test('valley MINOR deck carries the overlay trim FLAG (prints in the Flags block); the major stays clean', () => {
     const major = seg()
     const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
     const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
     const minorDeck = deckOf(members).filter((m) => m.sourceId === 'roofseg_wing')
     const majorDeck = deckOf(members).filter((m) => m.sourceId === major.id)
     expect(minorDeck.length).toBeGreaterThan(0)
-    for (const m of minorDeck) expect(m.label).toContain('valley overlay')
-    for (const m of majorDeck) expect(m.label).not.toContain('valley overlay')
+    // FLAG, not a label suffix — round-1 examiner F3: the label note never
+    // printed anywhere across 13 sheets. Flags reach the takeoff Flags rows
+    // and the schedules flag block.
+    for (const m of minorDeck) {
+      expect(m.flag).toContain('trim to the valley line')
+      expect(m.label).not.toContain('valley overlay')
+    }
+    for (const m of majorDeck) expect(m.flag ?? '').not.toContain('valley')
   })
 })
 
@@ -836,7 +843,7 @@ describe('LOD-400 B6b: underlayment rides every deck panel 1:1 (R905.1.1)', () =
     }
   })
 
-  test('LOD 200 emits no membrane; valley minors carry the overlay note on the membrane too', () => {
+  test('LOD 200 emits no membrane; valley minors carry the overlay FLAG on the membrane too', () => {
     expect(
       frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '200' }).filter((m) => m.role === 'wrb'),
     ).toHaveLength(0)
@@ -845,7 +852,7 @@ describe('LOD-400 B6b: underlayment rides every deck panel 1:1 (R905.1.1)', () =
     const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
     const wingMembrane = members.filter((m) => m.role === 'wrb' && m.sourceId === 'roofseg_wing')
     expect(wingMembrane.length).toBeGreaterThan(0)
-    for (const u of wingMembrane) expect(u.label).toContain('valley overlay')
+    for (const u of wingMembrane) expect(u.flag).toContain('trim to the valley line')
   })
 })
 
@@ -890,5 +897,50 @@ describe('LOD-400 B6c: drip edge members at eaves + rakes (R905.2.8.5)', () => {
 
   test('LOD 300 books none (trim class, the fascia convention)', () => {
     expect(dripOf(frameRoofs([seg()], [], DEFAULT_SPEC))).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B6 fix round F3/F4: stated gaps live ON PAPER (flags), never only in prose
+// ---------------------------------------------------------------------------
+
+describe('B6 fix round: trim gaps are flagged members, not commit-message asides (F3/F4)', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+
+  test('shed at 400: ZERO drip edge is pinned AND stated as a deck flag', () => {
+    const members = frameRoofs([seg({ roofType: 'shed' })], [], at400)
+    expect(members.filter((m) => m.role === 'drip-edge')).toHaveLength(0)
+    const deck = members.filter((m) => m.role === 'sheathing')
+    expect(deck).toHaveLength(1)
+    expect(deck[0]?.flag).toContain('fascia + drip edge not modeled')
+    expect(deck[0]?.flag).toContain('R905.2.8.5')
+  })
+
+  test('gambrel at 400: rake-metal gap flagged on the deck panels (B8d follow-up)', () => {
+    const members = frameRoofs([seg({ roofType: 'gambrel' })], [], at400)
+    const deck = members.filter((m) => m.role === 'sheathing')
+    expect(deck.length).toBeGreaterThan(0)
+    for (const d of deck) expect(d.flag).toContain('rake framing + rake drip edge not modeled')
+  })
+
+  test('gable/hip at 400 carry NO trim-gap flag (their drip edge is real); 300 stays quiet everywhere', () => {
+    for (const roofType of ['gable', 'hip'] as const) {
+      const deck = frameRoofs([seg({ roofType })], [], at400).filter((m) => m.role === 'sheathing')
+      for (const d of deck) expect(d.flag ?? '').not.toContain('drip edge not modeled')
+    }
+    for (const roofType of ['shed', 'gambrel'] as const) {
+      const deck = frameRoofs([seg({ roofType })], [], DEFAULT_SPEC).filter((m) => m.role === 'sheathing')
+      for (const d of deck) expect(d.flag).toBeUndefined()
+    }
+  })
+
+  test('the valley overlay flag reaches the takeoff Flags section', () => {
+    const major = seg()
+    const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+    const rows = computeTakeoff(members, [])
+    const row = rows.find((r) => r.section === 'Flags' && r.detail.includes('trim to the valley line'))
+    expect(row).toBeDefined()
+    expect(row?.quantity).toBeGreaterThan(0)
   })
 })

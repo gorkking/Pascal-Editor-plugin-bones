@@ -201,12 +201,16 @@ export function frameRoofs(
     // B6: a valley MINOR's deck plane keeps running past the valley line
     // (the detector's stated overlay-framing assumption — its rafters
     // already overlay the main roof). Cheap honesty over expensive
-    // clipping: the panels carry the trim note instead of a carved hole.
+    // clipping — as a FLAG, not a label suffix: labels never print on the
+    // sheets, flags reach the takeoff Flags rows and the schedules flag
+    // block (round-1 examiner F3: zero paper hits while the un-clipped
+    // panels visibly overlaid the major).
     const minors = new Set(valleys.map((v) => v.minorId))
     if (minors.size > 0) {
       for (const m of members) {
         if ((m.role === 'sheathing' || m.role === 'wrb') && minors.has(m.sourceId)) {
-          m.label = `${m.label} — valley overlay: trim to the valley line on site`
+          m.flag =
+            'roof deck/underlayment overlays the main roof past the valley — trim to the valley line on site (overlay framing)'
         }
       }
     }
@@ -523,10 +527,12 @@ function deckPlane(
     yTop: number
     rafterDepth: number
     note?: string
+    /** Rides the DECK member only (one Flags row per statement class). */
+    flag?: string
   },
 ) {
   if (spec.detail === '200') return
-  const { theta, side, alongXAxis, u0, u1, zTop, zBot, yTop, rafterDepth, note = '' } = opts
+  const { theta, side, alongXAxis, u0, u1, zTop, zBot, yTop, rafterDepth, note = '', flag } = opts
   const cosT = Math.cos(theta)
   const len = u1 - u0
   const slopeW = (zBot - zTop) / cosT
@@ -551,6 +557,7 @@ function deckPlane(
     t: number,
     material: Member['material'],
     label: string,
+    memberFlag?: string,
   ) => {
     const y = ym + up / cosT
     emit(
@@ -564,9 +571,10 @@ function deckPlane(
       material,
       label,
       roll,
+      memberFlag,
     )
   }
-  layer('sheathing', rafterDepth / 2 + ROOF_DECK_T / 2, ROOF_DECK_T, 'engineered', DECK_LABEL + note)
+  layer('sheathing', rafterDepth / 2 + ROOF_DECK_T / 2, ROOF_DECK_T, 'engineered', DECK_LABEL + note, flag)
   layer(
     'wrb',
     rafterDepth / 2 + ROOF_DECK_T + UNDERLAYMENT_T / 2,
@@ -1010,6 +1018,14 @@ function frameShed(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
     zBot: roof.depth / 2 + roof.overhang * cosT - deckGap(theta),
     yTop: midY + (roof.depth / 2 + roof.overhang * cosT - deckGap(theta)) * Math.tan(theta),
     rafterDepth: rd,
+    // F4 (round-1 skeptic): the shed's zero-drip state is a STATED gap on
+    // paper, not a commit-message aside — no fascia is modeled on sheds at
+    // LOD 400, so the eave metal has nothing to cap (trim rides the
+    // eventual shed fascia work).
+    flag:
+      spec.detail === '400'
+        ? 'shed roof: fascia + drip edge not modeled at LOD 400 — eave/rake metal by trim schedule (R905.2.8.5)'
+        : undefined,
   })
 }
 
@@ -1534,6 +1550,12 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   // ridge apex (0, ridgeY); at the convex kink the normal offsets open a
   // gap exactly like the ridge vent gap.
   for (const side of [1, -1] as const) {
+    // F4: gambrel gable ends carry no rake framing (B8d) and so no rake
+    // drip either — stated on paper via the deck flag at 400.
+    const gambrelRakeFlag =
+      spec.detail === '400'
+        ? 'gambrel rake: rake framing + rake drip edge not modeled at LOD 400 — rides with the R802 rake-ladder follow-up (B8d)'
+        : undefined
     deckPlane(emit, spec, {
       theta,
       side,
@@ -1544,6 +1566,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
       zBot: run + roof.overhang * cosT - deckGap(theta),
       yTop: breakY - deckGap(theta) * tan,
       rafterDepth: rd,
+      flag: gambrelRakeFlag,
     })
     deckPlane(emit, spec, {
       theta: phi,
@@ -1555,6 +1578,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
       zBot: breakZ - deckGap(phi),
       yTop: ridgeY - deckGap(phi) * tanPhi,
       rafterDepth: rd,
+      flag: gambrelRakeFlag,
     })
   }
 
