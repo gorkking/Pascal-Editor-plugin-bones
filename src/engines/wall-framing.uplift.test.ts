@@ -23,7 +23,7 @@ import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member, OpeningSlice, WallSlice } from '../core/types'
 import { feet, inches } from '../core/units'
-import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
+import { applyJurisdiction, jurisdictionOptions, profileFor } from '../jurisdiction/profiles'
 import {
   FOUNDATION_STRAP_SPACING,
   UPLIFT_ANCHOR_DEDUPE_TOL,
@@ -587,5 +587,63 @@ describe('B10 compute composes — the uplift path assembles end-to-end (LA)', (
     // INTL flat roof: no connectors, no statement (nothing claims a path).
     const intlFlat = computeLevel(upliftScene('flat'), upliftConfig('INTL'))
     expect(intlFlat.warnings.some((w) => w.includes('high-wind uplift'))).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B10 jurisdiction sweep — every selectable code answers the uplift question.
+// The uplift set is DERIVED from the profiles' own data (B9's rule: no
+// hardcoded state lists in the predicate) — the final pin is a sanity
+// enumeration of what the data derives to today.
+// ---------------------------------------------------------------------------
+
+describe('jurisdiction sweep — the uplift path answered in every state', () => {
+  test('≥130 mph hurricaneTies profiles book the hardware; everyone else books ZERO; no throws', () => {
+    const upliftStates: string[] = []
+    const cmuHighWindStates: string[] = []
+    for (const { code } of jurisdictionOptions()) {
+      const profile = profileFor(code)
+      const expected = profile.hurricaneTies && profile.ultimateWindMph >= 130
+      const result = computeLevel(upliftScene(), upliftConfig(code))
+      const connectors = result.members.filter((m) => m.role === 'uplift-connector')
+      const straps = result.members.filter((m) => m.role === 'uplift-strap')
+      const fdn = result.members.filter((m) => m.role === 'foundation-strap')
+      if (expected && profile.exteriorWallDefault === 'cmu') {
+        // FL: exterior walls default to CMU — no framed studs to tie, and
+        // masonry anchorage is the grouted-cell/dowel story (B18b), not
+        // WFCM strapping. Zero framed hardware is the honest answer.
+        cmuHighWindStates.push(code)
+        expect([...connectors, ...straps, ...fdn], code).toEqual([])
+        continue
+      }
+      if (expected) {
+        upliftStates.push(code)
+        expect(connectors.length, code).toBeGreaterThan(20)
+        expect(straps.length, code).toBe(4)
+        expect(fdn.length, code).toBeGreaterThan(0)
+      } else {
+        expect([...connectors, ...straps, ...fdn], code).toEqual([])
+        expect(
+          result.warnings.some((w) => w.includes('high-wind uplift')),
+          code,
+        ).toBe(false)
+      }
+    }
+    // Sanity enumeration of what the data derives to TODAY (the predicate
+    // above stays data-driven; this pin just catches silent data drift).
+    expect(upliftStates.sort()).toEqual(['HI', 'LA'])
+    expect(cmuHighWindStates).toEqual(['FL'])
+  })
+
+  test('FL framed-override walls DO get the hardware (the CMU zero is construction, not jurisdiction)', () => {
+    // Same scene, walls forced to framed construction via wallOverrides —
+    // FL's 140 mph + hurricaneTies profile books the full set.
+    const config = upliftConfig('FL', {
+      wallOverrides: { w_s: 'framed', w_e: 'framed', w_n: 'framed', w_w: 'framed' },
+    })
+    const result = computeLevel(upliftScene(), config)
+    expect(result.members.filter((m) => m.role === 'uplift-connector').length).toBeGreaterThan(20)
+    expect(result.members.filter((m) => m.role === 'uplift-strap')).toHaveLength(4)
+    expect(result.members.filter((m) => m.role === 'foundation-strap').length).toBeGreaterThan(0)
   })
 })
