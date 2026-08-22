@@ -346,6 +346,10 @@ describe('takeoff — span flags surface, splices are never silent', () => {
     for (const members of scenes) {
       for (const m of members) {
         if (m.length <= feet(20) + 1e-9) continue
+        // Stock-buy universe = SIZE-bearing sticks: sheet goods (the B6
+        // deck panels, size-less) lap at panel joints — they book by the
+        // sqft row, never as '20 ft stock (field splice)'.
+        if (!m.size) continue
         // Spanning members FLAG; continuously-supported members (ridge
         // boards, rims, barges, purlins, fascia) name their splice bearing.
         const covered =

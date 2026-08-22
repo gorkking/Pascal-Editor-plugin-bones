@@ -325,7 +325,34 @@ AND a gate — a checklist line without a test is a wish.
   the vapor-retarder sqft row from the member areas (stated +10% lap
   factor) — no members, no rows; upper storeys grow deck framing, never
   a pour. The 4" base course is an assumption LABEL on the slab members
-  (R506.2.2), never invented geometry or a phantom row.
+  (R506.2.2), never invented geometry or a phantom row. The ROOF package
+  is member-truth from birth (B6): the roof engine BUILDS the 7/16" WSP
+  deck on every slope plane (R803.2) + the underlayment membrane 1:1 on
+  it (R905.1.1) + drip edge at fascia'd eaves and gable rakes
+  (R905.2.8.5), and the takeoff derives the Roof sheet/sqft/lf rows from
+  exactly those members — no members, no rows, no gross fallback. The
+  suppression gates FILTER BY SYSTEM (the B4 skeptic's advisory): only
+  WALL-framing sheathing/drywall members suppress the wall gross rows,
+  and the wall layer tallies skip non-wall systems — a roofed scene with
+  LOD-200 walls keeps its wall gross buy, and roof sqft never lands in a
+  wall row. Roof deck 8d nails book their OWN fastener row ('Nails 8d
+  common (roof deck)', roofSheathing-sheet connection) — Table R602.3(1)
+  keys roof and wall sheathing separately, and the pounds follow the
+  booked deck row's sheet count. The COVERING stays HOST cosmetic: the
+  top membrane and the underlayment row both state 'covering by finish
+  schedule — not booked' (the assumption-label contract); underlayment
+  buys the deck area at a STATED +10% course-lap factor; tapered
+  hip/arris planes strip-tile conservatively INSIDE the hip lines with
+  the EXACT per-compose coverage percentage stated on the member labels
+  (never 'slight' prose — the shortfall is scene-dependent) and the
+  waste caveat repeated on the buy row; the area gate floor is DERIVED
+  from the strip arithmetic (edge wedges + vanishing tail strips +
+  apexes), never a pinned magic number; valley-minor panels carry
+  the overlay-framing trim statement as a FLAG (it must PRINT — Flags
+  rows/block, never a label-only aside). Stated trim gaps are flags too:
+  SHED roofs model no fascia and therefore NO drip edge at 400 (deck
+  flag, count pinned at zero); gambrel rake metal rides with the B8d
+  rake-ladder follow-up (deck flag).
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
   an in-progress GROUND storey (no slabs anywhere, no rooms), partitions
   framed exterior/CMU and the takeoff booked sheathing the layer engine never
@@ -337,7 +364,13 @@ AND a gate — a checklist line without a test is a wish.
   warning-names-real-geometry pin, upper-storey exclusion) +
   `src/engines/takeoff.test.ts` ('one row per material' describe: one-row
   pin, fastener-basis pin, LOD-200 fallback, CMU scene books no drywall;
-  B17 describe: slab-field/vapor rows == member geometry exactly) +
+  B17 describe: slab-field/vapor rows == member geometry exactly; B6d
+  describe: roof rows == member geometry exactly, BOTH system-filter
+  directions, drywall-gate symmetry, 8d re-key non-vacuous, no-members-
+  no-rows) + `src/engines/roof-framing.test.ts` B6a/B6b/B6c describes
+  (per-shape deck presence + area≈plane bounds, deck-on-rafter-top pin,
+  underlayment 1:1 count/area/normal-offset parity, drip counts/lengths,
+  LOD-200/300 zeros, valley notes) +
   `src/engines/foundation.test.ts` B17 describe (field/membrane geometry,
   holes carved, carve bands)
 - **S5 A mixed CMU/framed wall seams on a whole course and tops out at its

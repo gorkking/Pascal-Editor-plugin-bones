@@ -1255,3 +1255,133 @@ describe('cavity-fit framing flags aggregate (night-4)', () => {
     expect(rows.filter((r) => r.section !== 'Flags').some((r) => r.item.includes('4.9') || r.detail.includes('4.9'))).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// LOD-400 B6d: roof deck/underlayment/drip rows + the SYSTEM filter on the
+// gross-row suppression gates (the B4 skeptic's advisory)
+// ---------------------------------------------------------------------------
+
+import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
+
+describe('LOD-400 B6d: roof package rows are member-derived; wall gates filter by system', () => {
+  const SQFT = 1 / 0.09290304
+  const roofSeg = (overrides: Partial<RoofSegmentSlice> = {}): RoofSegmentSlice => ({
+    id: 'roofseg_b6',
+    roofType: 'gable',
+    position: [0, 2.5, 0],
+    yaw: 0,
+    width: 8,
+    depth: 6,
+    pitch: (40 * Math.PI) / 180,
+    overhang: 0.3,
+    wallHeight: 0.5,
+    ...overrides,
+  })
+  const roofMembers = frameRoofs([roofSeg()], [], { ...DEFAULT_SPEC, detail: '400' })
+  const wallLayer = (role: 'sheathing' | 'drywall' | 'wrb', len = 3, h = 2.4): Member =>
+    mem({ role, size: undefined, dims: [len, h, 0.011], length: len, material: 'lumber' })
+
+  test('S4 parity: the roof sheet/underlayment/drip rows equal the member geometry exactly', () => {
+    const rows = computeTakeoff(roofMembers, [])
+    const deckM2 = roofMembers
+      .filter((m) => m.role === 'sheathing')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const underM2 = roofMembers
+      .filter((m) => m.role === 'wrb')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const dripLf = roofMembers
+      .filter((m) => m.role === 'drip-edge')
+      .reduce((s, m) => s + m.length / 0.3048, 0)
+    expect(deckM2).toBeGreaterThan(0)
+    const deckRow = find(rows, 'Roof sheathing 7/16" WSP')
+    expect(deckRow?.section).toBe('Roof')
+    expect(deckRow?.quantity).toBeCloseTo(Math.round(deckM2 * SQFT * 10) / 10, 6)
+    expect(deckRow?.unit).toBe('sqft')
+    expect(deckRow?.detail).toContain(`~${Math.ceil((deckM2 * SQFT) / 32)} 4x8 sheets`)
+    const underRow = find(rows, 'Roof underlayment')
+    expect(underRow?.section).toBe('Roof')
+    // +10% lap factor, STATED on the row
+    expect(underRow?.quantity).toBeCloseTo(Math.round(underM2 * 1.1 * SQFT * 10) / 10, 6)
+    expect(underRow?.detail).toContain('+10% course laps')
+    expect(underRow?.detail).toContain('covering by finish schedule, not booked')
+    const dripRow = find(rows, 'Drip edge')
+    expect(dripRow?.section).toBe('Roof')
+    expect(dripRow?.unit).toBe('lf')
+    expect(dripRow?.quantity).toBeCloseTo(Math.round(dripLf * 10) / 10, 6)
+  })
+
+  test('system filter direction 1: ROOF deck alone never suppresses the WALL gross rows', () => {
+    // A scene with a framed roof but LOD-200 walls (no wall layer members):
+    // before the filter the roof deck tripped hasSheathingMembers and the
+    // purchaser lost the wall sheathing buy entirely.
+    const rows = computeTakeoff(roofMembers, [], { wallSheathingM2: 60, drywallM2: 90 })
+    const grossSheets = Math.ceil(60 / (32 / 10.7639))
+    expect(find(rows, 'Wall sheathing 7/16" WSP')?.quantity).toBe(grossSheets)
+    expect(find(rows, 'Drywall 1/2"')?.section).toBe('Sheathing')
+    // the WALL 8d nails still key off the surviving gross row
+    expect(find(rows, 'Nails 8d common')?.detail).toContain(`${grossSheets * 44} nails`)
+  })
+
+  test('system filter direction 2: roof sqft never lands in the wall member rows', () => {
+    const walls = [
+      ...Array.from({ length: 10 }, () => wallLayer('sheathing')),
+      ...Array.from({ length: 4 }, () => wallLayer('wrb')),
+    ]
+    const rows = computeTakeoff([...walls, ...roofMembers], [], { wallSheathingM2: 100 })
+    // wall member rows book the WALL area only (10 × 3 × 2.4 m²)
+    const wallRow = find(rows, 'Sheathing 7/16" WSP')
+    expect(wallRow?.section).toBe('Wall framing')
+    expect(wallRow?.quantity).toBeCloseTo(Math.round(10 * 3 * 2.4 * SQFT * 10) / 10, 6)
+    const wrbRow = find(rows, 'WRB (housewrap/felt)')
+    expect(wrbRow?.quantity).toBeCloseTo(Math.round(4 * 3 * 2.4 * SQFT * 10) / 10, 6)
+    // gross row still suppressed by the WALL members (B4 unchanged)
+    expect(find(rows, 'Wall sheathing 7/16" WSP')).toBeUndefined()
+    // and the roof rows book the roof geometry, untouched by the walls
+    const deckM2 = roofMembers
+      .filter((m) => m.role === 'sheathing')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    expect(find(rows, 'Roof sheathing 7/16" WSP')?.quantity).toBeCloseTo(
+      Math.round(deckM2 * SQFT * 10) / 10,
+      6,
+    )
+  })
+
+  test('drywall gate symmetry: a non-wall drywall member never kills the gross drywall row', () => {
+    const alien = mem({
+      system: 'roof-framing',
+      role: 'drywall',
+      size: undefined,
+      dims: [3, 2.4, 0.0127],
+      length: 3,
+      material: 'lumber',
+    })
+    const rows = computeTakeoff([alien], [], { drywallM2: 90 })
+    const grossSheets = Math.ceil(90 / (32 / 10.7639))
+    expect(find(rows, 'Drywall 1/2"', '4x8 sheets, both faces of interior walls')?.quantity).toBe(
+      grossSheets,
+    )
+  })
+
+  test('8d re-key: roof deck nails book their OWN row, never merged into the wall 8d row', () => {
+    const walls = Array.from({ length: 9 }, () => wallLayer('sheathing'))
+    const rows = computeTakeoff([...walls, ...roofMembers], [])
+    const wall8d = find(rows, 'Nails 8d common')
+    const roof8d = find(rows, 'Nails 8d common (roof deck)')
+    const wallSheets = Math.ceil((9 * 3 * 2.4 * SQFT) / 32)
+    const deckM2 = roofMembers
+      .filter((m) => m.role === 'sheathing')
+      .reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+    const roofSheets = Math.ceil((deckM2 * SQFT) / 32)
+    expect(wall8d?.detail).toContain(`${wallSheets * 44} nails`)
+    expect(roof8d?.detail).toContain(`${roofSheets * 44} nails`)
+    // the counts genuinely differ — the split is proven, not vacuous
+    expect(wallSheets).not.toBe(roofSheets)
+  })
+
+  test('no roof members → no roof rows (member-derived, no gross fallback)', () => {
+    const rows = computeTakeoff([mem()], [], { wallSheathingM2: 60 })
+    expect(find(rows, 'Roof sheathing 7/16" WSP')).toBeUndefined()
+    expect(find(rows, 'Roof underlayment')).toBeUndefined()
+    expect(find(rows, 'Drip edge')).toBeUndefined()
+  })
+})

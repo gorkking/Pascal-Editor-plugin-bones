@@ -3400,3 +3400,201 @@ describe('B14 device tags — counter/basin/outdoor boxes read distinctly on pap
     expect(circuitColor('EXT-1')).not.toBe('#b0723d')
   })
 })
+
+// ---------------------------------------------------------------------------
+// B6 fix F1 — roll-aware plan projection + bounds; deck paper treatment
+// ---------------------------------------------------------------------------
+
+import { frameRoofs, type RoofSegmentSlice } from '../engines/roof-framing'
+
+describe('B6 fix F1 — rolled plates foreshorten on plan; deck is layer-0 translucent; roof legend rows', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const roofSeg = (over: Partial<RoofSegmentSlice> = {}): RoofSegmentSlice => ({
+    id: 'roofseg_f1',
+    roofType: 'gable',
+    position: [4, 2.5, 3],
+    yaw: 0,
+    width: 8,
+    depth: 6,
+    pitch: (40 * Math.PI) / 180,
+    overhang: 0.3,
+    wallHeight: 0.5,
+    ...over,
+  })
+  const roofMembers = frameRoofs([roofSeg()], [], at400)
+  const roofSvg = (members: Member[]): string =>
+    buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Roof'))?.svg ?? ''
+
+  test('printed deck extent == the TRUE plan band, foreshortened by cos(roll) — no eave spill, no ridge overlap', () => {
+    const svg = roofSvg(roofMembers)
+    // the deck rects are the only translucent shapes on the roof sheet
+    const deckRects = [...svg.matchAll(
+      /<rect x="[^"]*" y="[^"]*" width="([\d.]+)" height="([\d.]+)"[^>]*fill-opacity="0\.35"[^>]*translate\(([\d.-]+) ([\d.-]+)\)/g,
+    )]
+    expect(deckRects).toHaveLength(2) // one per slope — the membrane is NOT drawn
+    // recover the shared scale from the ridge rect (unrolled, known length)
+    const ridge = roofMembers.find((m) => m.role === 'ridge') as Member
+    const ridgeM = svg.match(
+      /<rect x="[^"]*" y="[^"]*" width="([\d.]+)" height="[\d.]+"[^>]*fill="#b98d4f"[^>]*translate\(([\d.-]+) ([\d.-]+)\)/,
+    )
+    expect(ridgeM).not.toBeNull()
+    const scale = Number(ridgeM?.[1]) / ridge.dims[0]
+    const ridgeTz = Number(ridgeM?.[3])
+    const theta = (40 * Math.PI) / 180
+    for (const r of deckRects) {
+      const hPx = Number(r[2])
+      const tz = Number(r[4])
+      const deck = roofMembers
+        .filter((m) => m.role === 'sheathing')
+        .find((m) => Math.sign(m.position[2] - 3) === Math.sign(tz - ridgeTz)) as Member
+      // height == slope width FORESHORTENED (was drawn raw: 0.53 m past the
+      // eave + 1.06 m of ridge overlap on this exact geometry)
+      expect(hPx).toBeCloseTo(deck.dims[2] * Math.cos(theta) * scale, 0)
+      // the band's plan center is the member's plan position
+      expect((tz - ridgeTz) / scale).toBeCloseTo(deck.position[2] - 3, 1)
+      // no ridge overlap: the uphill edge stays on its own side of the ridge
+      expect(Math.abs(tz - ridgeTz) - hPx / 2).toBeGreaterThan(-0.101) // ≥ 0 at 0.1px rounding
+      // no eave spill: downhill edge stays inside the rafter tip line
+      const tip = 3 + 0.3 * Math.cos(theta) // run + overhang·cosθ
+      expect((Math.abs(tz - ridgeTz) + hPx / 2) / scale).toBeLessThanOrEqual(tip + 0.01)
+    }
+  })
+
+  test('deck strips draw FIRST (layer 0): every structural stroke paints over them', () => {
+    const svg = roofSvg(roofMembers)
+    const lastDeck = svg.lastIndexOf('fill-opacity="0.35"')
+    // every structural member rect strokes '#444' (the deck's hairline is
+    // '#cfc4a6') — ALL of them must paint after the last deck strip
+    const firstStructural = svg.indexOf('stroke="#444"')
+    expect(lastDeck).toBeGreaterThan(-1)
+    expect(firstStructural).toBeGreaterThan(lastDeck)
+  })
+
+  test('the SHARED sheet transform is byte-stable when the roof package lands (F1b)', () => {
+    // wall + roof compose: adding deck/underlayment/drip must not move any
+    // OTHER sheet by a single 0.1 px — the round-1 examiner measured a
+    // uniform 16.1 px shift on foundation/electrical from the roll-blind
+    // bounds.
+    const walls = frameWalls(
+      [
+        {
+          id: 'w1',
+          start: [0, 0] as [number, number],
+          end: [8, 0] as [number, number],
+          dir: [1, 0] as [number, number],
+          length: 8,
+          thickness: 0.15,
+          height: 2.5,
+          openings: [],
+          exterior: true,
+        } as unknown as WallSlice,
+      ],
+      at400,
+    )
+    // the COMPOSE matters: on a yawed wing the legacy euler arithmetic
+    // garbles a rolled panel's extents (±0.37 m on this scene) — a plain
+    // gable's deck hides inside the rafters' own legacy over-reach
+    const compose = frameRoofs(
+      [
+        roofSeg({ width: 10, depth: 12 }),
+        roofSeg({ id: 'wing_b', width: 4, depth: 4, yaw: Math.PI / 2, position: [5, 2.5, 8] }),
+      ],
+      [],
+      at400,
+    )
+    const stripped = compose.filter(
+      (m) => !(m.role === 'sheathing' || m.role === 'wrb' || m.role === 'drip-edge'),
+    )
+    // the FOUNDATION sheet is the pure-transform witness (the wall plan
+    // also carries the A-A cut mark, whose slide is legitimately
+    // content-dependent — sectionCutX dodges parallel members, deck
+    // included)
+    const footing = member({
+      system: 'foundation',
+      role: 'footing',
+      size: undefined,
+      material: 'concrete',
+      dims: [4, 0.2, 0.4],
+      position: [4, -0.3, 3],
+    })
+    const fullSheets = buildPlanSet([...walls, footing, ...compose], [], {})
+    const strippedSheets = buildPlanSet([...walls, footing, ...stripped], [], {})
+    const pick = (sheets: { title: string; svg: string }[], t: string) =>
+      sheets.find((s) => s.title.startsWith(t))?.svg
+    expect(pick(fullSheets, 'Foundation')).toBeDefined()
+    expect(pick(fullSheets, 'Foundation')).toBe(pick(strippedSheets, 'Foundation') as string)
+  })
+
+  test('roof legend: deck/underlayment/drip rows print (13-row cap holds on a compose-grade sheet)', () => {
+    // gable big enough for the purlin fix + a crossing wing: 9 sized roles
+    // + the 3 size-less B6 rows — the old 10-cap dropped what it just added
+    const compose = frameRoofs(
+      [
+        roofSeg({ width: 10, depth: 12 }),
+        roofSeg({ id: 'wing_f1', width: 4, depth: 4, yaw: Math.PI / 2, position: [5, 2.5, 8] }),
+      ],
+      [],
+      at400,
+    )
+    const svg = roofSvg(compose)
+    expect(svg).toContain('sheathing — 7/16&quot; WSP roof deck (R803.2), drawn translucent')
+    expect(svg).toContain('wrb — roof underlayment under covering (R905.1.1) — not drawn')
+    expect(svg).toContain('drip-edge — drip edge — eave/rake metal (R905.2.8.5)')
+    // the sized roles the same sheet must keep naming
+    for (const role of ['rafter', 'ridge', 'ceiling-joist', 'valley', 'jack-rafter', 'post']) {
+      expect(svg).toContain(`${role} — 2x`)
+    }
+  })
+
+  test('the roof rows never leak onto the WALL sheet legend (role names collide)', () => {
+    const wall = member({
+      system: 'wall-framing',
+      role: 'sheathing',
+      size: undefined,
+      dims: [3, 2.4, 0.011],
+      length: 3,
+      material: 'lumber',
+    })
+    const svg =
+      buildPlanSet([wall, member({ system: 'wall-framing', role: 'stud', size: '2x4' })], [], {}).find(
+        (s) => s.title.startsWith('Wall'),
+      )?.svg ?? ''
+    expect(svg).not.toContain('WSP roof deck')
+  })
+})
+
+describe('B6 fix F5 — the section cuts a rolled plate as its TRUE sloped band, never a horizontal chord', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const roofSeg = (over: Partial<RoofSegmentSlice> = {}): RoofSegmentSlice => ({
+    id: 'roofseg_f5',
+    roofType: 'gable',
+    position: [4, 2.5, 3],
+    yaw: 0,
+    width: 8,
+    depth: 6,
+    pitch: (40 * Math.PI) / 180,
+    overhang: 0.3,
+    wallHeight: 0.5,
+    ...over,
+  })
+
+  test('deck poché rects rotate with the roll; no wide UN-rotated dark chord survives', () => {
+    const members = frameRoofs([roofSeg()], [], at400)
+    const svg =
+      buildPlanSet(members, [], {}).find((s) => s.title.startsWith('Section'))?.svg ?? ''
+    // the two slope panels cut as ±40°-rotated thin bands
+    const rotated = [...svg.matchAll(/<rect [^>]*fill="#222"[^>]*rotate\((-?40\.00)\)"\/>/g)]
+    expect(rotated.length).toBeGreaterThanOrEqual(2)
+    expect(new Set(rotated.map((r) => r[1])).size).toBe(2) // both slopes, both signs
+    // …and every plain axis-aligned dark rect stays a plausible stick
+    // cross-section: the pre-fix chord printed the FULL slope width
+    // (dims[2] ≈ 4.2 m) as one horizontal bar — nothing axis-aligned may
+    // come near that class. Bound: half the rotated band's length.
+    const bandPx = Math.max(
+      ...rotated.map((r) => Number((r[0].match(/width="([\d.]+)"/) ?? [])[1])),
+    )
+    for (const m of svg.matchAll(/<rect x="[^"]*" y="[^"]*" width="([\d.]+)"[^>]*fill="#222"(?![^>]*rotate)/g)) {
+      expect(Number(m[1])).toBeLessThan(bandPx / 2)
+    }
+  })
+})

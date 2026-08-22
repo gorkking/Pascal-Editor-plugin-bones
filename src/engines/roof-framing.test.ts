@@ -3,6 +3,7 @@ import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC } from '../core/spec'
 import type { Member } from '../core/types'
 import { birdsmouthSeat, extractRoofs, frameRoofs, type RoofSegmentSlice } from './roof-framing'
+import { computeTakeoff } from './takeoff'
 
 const byRole = (members: Member[], role: string): Member[] => members.filter((m) => m.role === role)
 
@@ -111,12 +112,18 @@ describe('frameRoofs — gable', () => {
     expect(longAxis(r).x).toBeCloseTo(1, 5) // along X
   })
 
-  test('ceiling joists span the depth at the eave line', () => {
+  test('ceiling joists span the depth at the eave line (ends clipped to the deck plane, B6)', () => {
     const cjs = byRole(members, 'ceiling-joist')
     expect(cjs.length).toBeGreaterThanOrEqual(20) // 8m / 16"
     const axis = longAxis(cjs[0] as Member)
     expect(Math.abs(axis.z)).toBeCloseTo(1, 5)
-    expect((cjs[0] as Member).length).toBeCloseTo(6, 5)
+    // The BOX inscribes inside the field clip to the rafter slope (a square
+    // end's top corner would poke through the B6 deck): each end pulls back
+    // (cjD − rd/(2cosθ))/tanθ (+2 mm seam). Flag math keeps the full 6 m.
+    const rd = 5.5 * 0.0254
+    const cjD = 5.5 * 0.0254
+    const clip = (cjD - rd / (2 * Math.cos(theta))) / Math.tan(theta) + 0.002
+    expect((cjs[0] as Member).length).toBeCloseTo(6 - 2 * clip, 5)
   })
 
   test('collar ties sit in the upper third, every other rafter', () => {
@@ -632,5 +639,358 @@ describe('frameRoofs — 400 cut-angle labels are pinned (round-3: deletable tex
     const members = frameRoofs([seg({ roofType: 'hip' })], [], DEFAULT_SPEC)
     expect((byRole(members, 'hip')[0] as Member).label).not.toContain('side cuts')
     expect((byRole(members, 'ridge')[0] as Member).label).not.toContain('plumb')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B6a: roof deck on every slope plane (R803.2)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B6a: roof deck panels per slope plane (R803.2)', () => {
+  const IN = 0.0254
+  const DECK_T = (7 / 16) * IN
+  const RD = 5.5 * IN // DEFAULT_SPEC 2x6 rafter depth
+  const deckOf = (members: Member[]) =>
+    members.filter((m) => m.role === 'sheathing' && m.system === 'roof-framing')
+  const areaOf = (members: Member[]) =>
+    deckOf(members).reduce((s, m) => s + m.dims[0] * m.dims[2], 0)
+
+  test('gable: one full panel per slope, area ≈ 2 slope planes (ridge-vent/eave seams only)', () => {
+    const roof = seg() // 8 × 6 @ 40°, 0.3 overhang (rake framed)
+    const members = frameRoofs([roof], [], DEFAULT_SPEC)
+    const deck = deckOf(members)
+    expect(deck).toHaveLength(2)
+    const cosT = Math.cos(roof.pitch)
+    const plane =
+      (roof.width + 2 * roof.overhang) * (roof.depth / 2 / cosT + roof.overhang)
+    const ratio = areaOf(members) / (2 * plane)
+    expect(ratio).toBeGreaterThan(0.99) // only the mm-scale edge seams missing
+    expect(ratio).toBeLessThanOrEqual(1)
+    for (const m of deck) expect(m.label).toContain('R803.2')
+    expect(deck[0]?.material).toBe('engineered')
+  })
+
+  test('deck panels ride the rafter TOP faces: normal offset from the centerline plane = rd/2 + t/2', () => {
+    const roof = seg()
+    const members = frameRoofs([roof], [], DEFAULT_SPEC)
+    const apex = new Vector3(
+      roof.position[0],
+      roof.position[1] + roof.wallHeight + (roof.depth / 2) * Math.tan(roof.pitch),
+      roof.position[2],
+    )
+    for (const m of deckOf(members)) {
+      const [rx, ry, rz] = m.rotation
+      const n = new Vector3(0, 1, 0).applyEuler(new Euler(rx, ry, rz, 'XYZ'))
+      // plane normal: (0, cosθ, ±sinθ)
+      expect(n.y).toBeCloseTo(Math.cos(roof.pitch), 6)
+      expect(Math.abs(n.z)).toBeCloseTo(Math.sin(roof.pitch), 6)
+      // the apex (ridge line) lies ON the rafter-centerline plane; the deck
+      // center sits exactly one half rafter + half deck up the normal
+      const d = new Vector3(...m.position).sub(apex).dot(n)
+      expect(d).toBeCloseTo(RD / 2 + DECK_T / 2, 6)
+    }
+  })
+
+  test('shed: one panel covering the full slope', () => {
+    const roof = seg({ roofType: 'shed' })
+    const members = frameRoofs([roof], [], DEFAULT_SPEC)
+    const deck = deckOf(members)
+    expect(deck).toHaveLength(1)
+    const slopeLen = roof.depth / Math.cos(roof.pitch) + 2 * roof.overhang
+    const ratio = areaOf(members) / (roof.width * slopeLen)
+    expect(ratio).toBeGreaterThan(0.99)
+    expect(ratio).toBeLessThanOrEqual(1)
+  })
+
+  // DERIVED under-tile floor for uphill-width strip tiling (F2 — never a
+  // magic number): each tapered edge loses (Δ/2 + clear)·R (∫ of the
+  // per-strip wedge, taper slope 1); a hip has 8 tapered edges. A final
+  // partial strip below DECK_MIN vanishes whole: ≤ (MIN·cosθ + 4·gap) of
+  // plan height across each plane's eave width (also covers the drawn
+  // strips' ridge/eave gap trims). End-plane apexes skip ≤ their first
+  // strip (≤ 2·Δ² each). Everything /cosθ into slope area.
+  const hipFloor = (w: number, d: number, pitchDeg: number, o: number): { floor: number; planes: number } => {
+    const th = (pitchDeg * Math.PI) / 180
+    const cosT = Math.cos(th)
+    const run = Math.min(w, d) / 2
+    const rh = Math.max(w, d) / 2 - run
+    const R = run + o * cosT
+    const planes = (2 * (2 * rh + R) * R + 2 * R * R) / cosT
+    const D = 0.4 // DECK_STRIP
+    const C = 0.02 // DECK_CLEAR
+    const MIN = 0.1 // DECK_MIN
+    const gap = (((7 / 16) * IN) / 2) * Math.sin(th) + 0.002 // deckGap
+    const edgeLoss = (8 * (D / 2 + C) * R) / cosT
+    const eaveWidths = 2 * 2 * (rh + R) + 2 * 2 * R
+    const tailSeamLoss = ((MIN * cosT + 4 * gap) * eaveWidths) / cosT
+    const apexLoss = (4 * D * D) / cosT
+    return { floor: Math.max(0, 1 - (edgeLoss + tailSeamLoss + apexLoss) / planes), planes }
+  }
+
+  test('hip: strip coverage ≥ the DERIVED floor, never past the plane, EXACT pct on the label', () => {
+    // incl. the round-1 examiner counter-example (5×4 @ 30° booked 84.4%
+    // under the old 85% magic floor) and a spread of aspects/pitches
+    for (const [w, d, p] of [[10, 8, 40], [5, 4, 30], [16, 10, 25], [6, 6, 60]] as const) {
+      const roof = seg({ roofType: 'hip', width: w, depth: d, pitch: (p * Math.PI) / 180 })
+      const members = frameRoofs([roof], [], DEFAULT_SPEC)
+      const deck = areaOf(members)
+      const { floor, planes } = hipFloor(w, d, p, roof.overhang)
+      expect({ w, d, p, above: deck >= floor * planes }).toEqual({ w, d, p, above: true })
+      expect(deck).toBeLessThan(planes) // strips stay INSIDE the hip lines
+      // F2: the label states the EXACT coverage of THIS compose — 'slight
+      // under-tile' prose is gone
+      const pct = Math.round((deck / planes) * 1000) / 10
+      for (const m of deckOf(members)) {
+        expect(m.label).toContain(`conservative under-tile, ${pct.toFixed(1)}% of plane area`)
+        expect(m.label).toContain('trim to hip lines on site')
+      }
+    }
+    // both plane families present (long faces + triangular end faces)
+    const members = frameRoofs([seg({ roofType: 'hip', width: 10, depth: 8 })], [], DEFAULT_SPEC)
+    const yaws = new Set(deckOf(members).map((m) => m.rotation[1].toFixed(2)))
+    expect(yaws.size).toBeGreaterThan(1)
+  })
+
+  test('F2: the takeoff deck row states the under-tile beside the buy quantity', () => {
+    const members = frameRoofs([seg({ roofType: 'hip', width: 5, depth: 4, pitch: (30 * Math.PI) / 180 })], [], DEFAULT_SPEC)
+    const rows = computeTakeoff(members, [])
+    const row = rows.find((r) => r.item === 'Roof sheathing 7/16" WSP')
+    expect(row?.detail).toContain('conservatively under-tiled')
+    expect(row?.detail).toContain('buy waste factor separately')
+    // …and a rect-plane roof (full coverage) carries NO waste note
+    const gable = frameRoofs([seg()], [], DEFAULT_SPEC)
+    const gRow = computeTakeoff(gable, []).find((r) => r.item === 'Roof sheathing 7/16" WSP')
+    expect(gRow?.detail).not.toContain('under-tiled')
+  })
+
+  test('flat: one dead-level panel over the platform, on the joist tops', () => {
+    const roof = seg({ roofType: 'flat' })
+    const members = frameRoofs([roof], [], DEFAULT_SPEC)
+    const deck = deckOf(members)
+    expect(deck).toHaveLength(1)
+    const halfW = roof.width / 2 + roof.overhang
+    const halfD = roof.depth / 2 + roof.overhang
+    expect(areaOf(members)).toBeCloseTo(4 * halfW * halfD, 6)
+    expect(deck[0]?.position[1]).toBeCloseTo(
+      roof.position[1] + roof.wallHeight + RD + DECK_T / 2,
+      6,
+    )
+  })
+
+  test('gambrel: four panels (steep + shallow per side), exact plane areas', () => {
+    const roof = seg({ roofType: 'gambrel' })
+    const members = frameRoofs([roof], [], DEFAULT_SPEC)
+    const deck = deckOf(members)
+    expect(deck).toHaveLength(4)
+    const theta = roof.pitch
+    const run = roof.depth / 2
+    const lowerRun = run * 0.5 // host default wr
+    const lowerRise = lowerRun * Math.tan(theta)
+    const upperRun = run - lowerRun
+    const upperRise = lowerRise / 0.6 - lowerRise // host default hr
+    const phi = Math.atan2(upperRise, upperRun)
+    const breakZ = upperRun
+    const lower =
+      roof.width * ((run + roof.overhang * Math.cos(theta) - breakZ) / Math.cos(theta))
+    const upper = roof.width * (breakZ / Math.cos(phi))
+    const ratio = areaOf(members) / (2 * (lower + upper))
+    expect(ratio).toBeGreaterThan(0.98) // kink/ridge/eave seams only
+    expect(ratio).toBeLessThanOrEqual(1)
+  })
+
+  test('mansard + dutch: skirt planes strip-tiled and the inner shapes deck too', () => {
+    // Area gate is presence + bounded (skirt geometry is tapered on both
+    // families — the exact-area check stays with the rectangular shapes).
+    for (const roofType of ['mansard', 'dutch'] as const) {
+      const roof = seg({ roofType, width: 10, depth: 8 })
+      const members = frameRoofs([roof], [], DEFAULT_SPEC)
+      const deck = deckOf(members)
+      expect(deck.length).toBeGreaterThan(4)
+      // skirt strips carry the under-tile note; the inner hip/gablet panels
+      // prove the recursion decks the upper shape as well
+      expect(deck.some((m) => m.label?.includes('arris'))).toBe(true)
+      expect(deck.some((m) => !m.label?.includes('arris'))).toBe(true)
+    }
+  })
+
+  test('LOD 200 emits no deck', () => {
+    const members = frameRoofs(
+      [seg(), seg({ id: 'h', roofType: 'hip', position: [30, 2.5, 0] })],
+      [],
+      { ...DEFAULT_SPEC, detail: '200' },
+    )
+    expect(deckOf(members)).toHaveLength(0)
+  })
+
+  test('valley MINOR deck carries the overlay trim FLAG (prints in the Flags block); the major stays clean', () => {
+    const major = seg()
+    const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+    const minorDeck = deckOf(members).filter((m) => m.sourceId === 'roofseg_wing')
+    const majorDeck = deckOf(members).filter((m) => m.sourceId === major.id)
+    expect(minorDeck.length).toBeGreaterThan(0)
+    // FLAG, not a label suffix — round-1 examiner F3: the label note never
+    // printed anywhere across 13 sheets. Flags reach the takeoff Flags rows
+    // and the schedules flag block.
+    for (const m of minorDeck) {
+      expect(m.flag).toContain('trim to the valley line')
+      expect(m.label).not.toContain('valley overlay')
+    }
+    for (const m of majorDeck) expect(m.flag ?? '').not.toContain('valley')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B6b: underlayment membrane 1:1 on the deck (R905.1.1)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B6b: underlayment rides every deck panel 1:1 (R905.1.1)', () => {
+  const IN = 0.0254
+  const DECK_T = (7 / 16) * IN
+  const shapes = ['gable', 'shed', 'hip', 'flat', 'gambrel', 'mansard', 'dutch'] as const
+
+  test('every shape: one membrane per deck panel, same area, one deck-thickness up the plane normal', () => {
+    for (const roofType of shapes) {
+      const members = frameRoofs([seg({ roofType, width: 10, depth: 8 })], [], DEFAULT_SPEC)
+      const deck = members.filter((m) => m.role === 'sheathing')
+      const membrane = members.filter((m) => m.role === 'wrb')
+      expect({ roofType, n: membrane.length }).toEqual({ roofType, n: deck.length })
+      expect(deck.length).toBeGreaterThan(0)
+      // deckPlane emits the pair back-to-back — pair by order
+      deck.forEach((d, i) => {
+        const u = membrane[i] as Member
+        expect(u.dims[0]).toBeCloseTo(d.dims[0], 9)
+        expect(u.dims[2]).toBeCloseTo(d.dims[2], 9)
+        // the membrane sits (deck/2 + membrane/2) further UP the deck's own
+        // normal — "mind the roof orientation": the offset follows the
+        // plane, not world Y
+        const [rx, ry, rz] = d.rotation
+        const n = new Vector3(0, 1, 0).applyEuler(new Euler(rx, ry, rz, 'XYZ'))
+        const delta = new Vector3(...u.position).sub(new Vector3(...d.position))
+        expect(delta.dot(n)).toBeCloseTo(DECK_T / 2 + 0.001, 6)
+        // the stack advances PLUMB (identical plan cover band — the
+        // in-plane slide convention): delta is vertical, Δy = Δup/cosθ,
+        // and cosθ is the deck normal's own y — orientation-derived
+        expect(delta.x).toBeCloseTo(0, 9)
+        expect(delta.z).toBeCloseTo(0, 9)
+        expect(delta.y).toBeCloseTo((DECK_T / 2 + 0.001) / n.y, 6)
+      })
+    }
+  })
+
+  test('the top membrane carries the assumption-label contract (covering stays HOST cosmetic)', () => {
+    const members = frameRoofs([seg()], [], DEFAULT_SPEC)
+    const membrane = members.filter((m) => m.role === 'wrb')
+    for (const u of membrane) {
+      expect(u.label).toContain('R905.1.1')
+      expect(u.label).toContain('covering by finish schedule — not booked')
+    }
+  })
+
+  test('LOD 200 emits no membrane; valley minors carry the overlay FLAG on the membrane too', () => {
+    expect(
+      frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '200' }).filter((m) => m.role === 'wrb'),
+    ).toHaveLength(0)
+    const major = seg()
+    const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+    const wingMembrane = members.filter((m) => m.role === 'wrb' && m.sourceId === 'roofseg_wing')
+    expect(wingMembrane.length).toBeGreaterThan(0)
+    for (const u of wingMembrane) expect(u.flag).toContain('trim to the valley line')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LOD-400 B6c: drip edge at eaves + rakes (R905.2.8.5)
+// ---------------------------------------------------------------------------
+
+describe('LOD-400 B6c: drip edge members at eaves + rakes (R905.2.8.5)', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const dripOf = (members: Member[]) => members.filter((m) => m.role === 'drip-edge')
+
+  test('gable: 2 eave runs cap the fascia + 4 rake runs ride the barges', () => {
+    const roof = seg()
+    const drips = dripOf(frameRoofs([roof], [], at400))
+    const eaves = drips.filter((m) => m.label?.includes('eave'))
+    const rakes = drips.filter((m) => m.label?.includes('rake'))
+    expect(eaves).toHaveLength(2)
+    expect(rakes).toHaveLength(4)
+    for (const e of eaves) expect(e.length).toBeCloseTo(roof.width + 2 * roof.overhang, 6)
+    const t = 1.5 * 0.0254 // rafter/barge thickness
+    for (const r of rakes) {
+      // rake drip length == the barge slope length
+      const barge = frameRoofs([roof], [], at400).find((m) => m.label?.includes('Barge'))
+      expect(r.length).toBeCloseTo((barge as Member).length, 6)
+      // outer edge FLUSH with the barge outer face (F1b: trim must never
+      // grow the plan envelope / the shared sheet transform)
+      expect(Math.abs(r.position[0]) + r.dims[2] / 2).toBeCloseTo(
+        roof.width / 2 + roof.overhang + t / 2,
+        6,
+      )
+    }
+    for (const d of drips) {
+      expect(d.material).toBe('steel')
+      expect(d.system).toBe('roof-framing')
+      expect(d.label).toContain('R905.2.8.5')
+    }
+  })
+
+  test('per-shape counts: hip/mansard/dutch cap 4 fascia eaves, gambrel 2, flat 4 perimeter', () => {
+    const count = (roofType: string) =>
+      dripOf(frameRoofs([seg({ roofType, width: 10, depth: 8 })], [], at400)).length
+    expect(count('hip')).toBe(4)
+    expect(count('mansard')).toBe(4)
+    expect(count('dutch')).toBe(4)
+    expect(count('gambrel')).toBe(2) // rakes unframed on gambrel ends (B8d) — stated
+    expect(count('flat')).toBe(4)
+  })
+
+  test('LOD 300 books none (trim class, the fascia convention)', () => {
+    expect(dripOf(frameRoofs([seg()], [], DEFAULT_SPEC))).toHaveLength(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B6 fix round F3/F4: stated gaps live ON PAPER (flags), never only in prose
+// ---------------------------------------------------------------------------
+
+describe('B6 fix round: trim gaps are flagged members, not commit-message asides (F3/F4)', () => {
+  const at400 = { ...DEFAULT_SPEC, detail: '400' as const }
+
+  test('shed at 400: ZERO drip edge is pinned AND stated as a deck flag', () => {
+    const members = frameRoofs([seg({ roofType: 'shed' })], [], at400)
+    expect(members.filter((m) => m.role === 'drip-edge')).toHaveLength(0)
+    const deck = members.filter((m) => m.role === 'sheathing')
+    expect(deck).toHaveLength(1)
+    expect(deck[0]?.flag).toContain('fascia + drip edge not modeled')
+    expect(deck[0]?.flag).toContain('R905.2.8.5')
+  })
+
+  test('gambrel at 400: rake-metal gap flagged on the deck panels (B8d follow-up)', () => {
+    const members = frameRoofs([seg({ roofType: 'gambrel' })], [], at400)
+    const deck = members.filter((m) => m.role === 'sheathing')
+    expect(deck.length).toBeGreaterThan(0)
+    for (const d of deck) expect(d.flag).toContain('rake framing + rake drip edge not modeled')
+  })
+
+  test('gable/hip at 400 carry NO trim-gap flag (their drip edge is real); 300 stays quiet everywhere', () => {
+    for (const roofType of ['gable', 'hip'] as const) {
+      const deck = frameRoofs([seg({ roofType })], [], at400).filter((m) => m.role === 'sheathing')
+      for (const d of deck) expect(d.flag ?? '').not.toContain('drip edge not modeled')
+    }
+    for (const roofType of ['shed', 'gambrel'] as const) {
+      const deck = frameRoofs([seg({ roofType })], [], DEFAULT_SPEC).filter((m) => m.role === 'sheathing')
+      for (const d of deck) expect(d.flag).toBeUndefined()
+    }
+  })
+
+  test('the valley overlay flag reaches the takeoff Flags section', () => {
+    const major = seg()
+    const minor = seg({ id: 'roofseg_wing', width: 4, depth: 4, yaw: Math.PI / 2, position: [1, 2.5, 4] })
+    const members = frameRoofs([major, minor], [], DEFAULT_SPEC)
+    const rows = computeTakeoff(members, [])
+    const row = rows.find((r) => r.section === 'Flags' && r.detail.includes('trim to the valley line'))
+    expect(row).toBeDefined()
+    expect(row?.quantity).toBeGreaterThan(0)
   })
 })

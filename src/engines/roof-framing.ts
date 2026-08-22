@@ -196,7 +196,24 @@ export function frameRoofs(
   }
   // Valleys where two gable segments cross (LOD 350).
   if (spec.detail !== '200') {
-    for (const valley of detectValleys(roofs)) emitValley(valley, spec, members)
+    const valleys = detectValleys(roofs)
+    for (const valley of valleys) emitValley(valley, spec, members)
+    // B6: a valley MINOR's deck plane keeps running past the valley line
+    // (the detector's stated overlay-framing assumption — its rafters
+    // already overlay the main roof). Cheap honesty over expensive
+    // clipping — as a FLAG, not a label suffix: labels never print on the
+    // sheets, flags reach the takeoff Flags rows and the schedules flag
+    // block (round-1 examiner F3: zero paper hits while the un-clipped
+    // panels visibly overlaid the major).
+    const minors = new Set(valleys.map((v) => v.minorId))
+    if (minors.size > 0) {
+      for (const m of members) {
+        if ((m.role === 'sheathing' || m.role === 'wrb') && minors.has(m.sourceId)) {
+          m.flag =
+            'roof deck/underlayment overlays the main roof past the valley — trim to the valley line on site (overlay framing)'
+        }
+      }
+    }
   }
   return members
 }
@@ -266,6 +283,9 @@ const MIN_RAKE_OVERHANG = 0.15
 const FASCIA_SIZE: LumberSize = '2x6'
 /** Finish fascia board — 1x8 (3/4" × 7-1/4" actual), face-nailed over the sub. */
 const FINISH_FASCIA_SIZE: LumberSize = '1x8'
+/** Drip edge profile approximated as a thin bar (flange width × metal). */
+const DRIP_W = 0.05
+const DRIP_T = 0.004
 
 /**
  * One eave edge = a 2x6 sub-fascia + a 1x8 FINISH fascia proud of its face
@@ -312,6 +332,24 @@ function fasciaPair(
     length,
     'lumber',
     `Fascia 1x8 (finish, over sub-fascia)${note}`,
+  )
+  // B6c: eave drip edge caps the finish fascia (R905.2.8.5) — one lf run
+  // per fascia'd eave, drawn as a thin bar on the finish board's top edge.
+  // Its OUTER edge stops flush with the finish board's outer face (the
+  // vertical leg lies ON that face; the flange runs INWARD over the deck
+  // edge) so the drip never grows the plan envelope the fascia already
+  // set — the shared sheet transform stays put (round-1 F1b).
+  const p = at(subCross + out + Math.sign(cross) * (nT / 2 - DRIP_W / 2))
+  emit(
+    'drip-edge',
+    undefined,
+    [length, DRIP_T, DRIP_W],
+    [p[0], p[1] + nD / 2 + DRIP_T / 2, p[2]],
+    yaw,
+    0,
+    length,
+    'steel',
+    'Drip edge — eave (R905.2.8.5)',
   )
 }
 
@@ -428,6 +466,161 @@ function ceilingJoistFlag(spec: FramingSpec, span: number): string | undefined {
     )
   }
   return onePieceFlag('Ceiling joist', span)
+}
+
+// ---------------------------------------------------------------------------
+// Roof deck (LOD-400 B6) — R803.2 sheathing on the rafter planes
+// ---------------------------------------------------------------------------
+
+/** 7/16" WSP roof deck (R803.2, fastened per Table R602.3(1)). */
+const ROOF_DECK_T = inches(7 / 16)
+/** Strip height (plan run) when tiling TAPERED planes (hip/skirt). Each
+ * strip takes its width at its UPHILL edge so it stays inside the hip/arris
+ * lines — the under-tile per hip edge is ≈ run·strip·taper/cosθ, so the
+ * strip pitch bounds the loss (~8% on a default hip at 0.4 m — stated on
+ * the members' labels; the takeoff books what renders, S4). */
+const DECK_STRIP = 0.4
+/** Panel clearance off hip/arris lines (strips stay inside the plane). */
+const DECK_CLEAR = 0.02
+/** Minimum panel dimension worth emitting. */
+const DECK_MIN = 0.1
+
+/** Edge gap at a panel's UP/DOWNHILL plan edges: the square-cut end faces
+ * tilt with the plane, so their corners reach (t/2)·sinθ past the plan edge
+ * — the gap keeps them clear of the mirrored panel at a ridge/kink and of
+ * the fascia band at the eave (the ridge-vent / drip-edge seams). */
+const deckGap = (theta: number): number => (ROOF_DECK_T / 2) * Math.sin(theta) + 0.002
+
+const DECK_LABEL =
+  'Roof sheathing 7/16" WSP — 8d @ 6"/12" edges/field (R803.2, Table R602.3(1))'
+
+/** Underlayment membrane drawn thickness — the wall-layers WRB convention
+ * (a thin box; real felt has no structural thickness). */
+const UNDERLAYMENT_T = 0.002
+/** The TOP membrane carries the assumption-label contract: the covering
+ * itself (shingles/metal/tile) stays HOST cosmetic and is never booked. */
+const UNDERLAYMENT_LABEL =
+  'Roof underlayment — one layer felt/synthetic (R905.1.1); covering by finish schedule — not booked'
+
+type DeckPanelSpec = {
+  theta: number
+  side: 1 | -1
+  alongXAxis: boolean
+  u0: number
+  u1: number
+  zTop: number
+  zBot: number
+  yTop: number
+}
+
+/** Drawn area of a strip batch (deckPlane's own skip predicate mirrored)
+ * and the HONEST per-compose note: tapered planes state the EXACT coverage
+ * they achieve, so 'slight under-tile' can never paper over a
+ * scene-dependent shortfall (round-1 examiner F2: a 5×4 @ 30° hip books
+ * 84.4% while the 10×8 gate floor sat at 85%). */
+function tiledDeckNote(
+  panels: DeckPanelSpec[],
+  planeArea: number,
+  what: string,
+): { note: string; drawn: number } {
+  let drawn = 0
+  for (const p of panels) {
+    const len = p.u1 - p.u0
+    const slopeW = (p.zBot - p.zTop) / Math.cos(p.theta)
+    if (len < DECK_MIN || slopeW < DECK_MIN) continue
+    drawn += len * slopeW
+  }
+  const pct = planeArea > EPS ? Math.round((drawn / planeArea) * 1000) / 10 : 100
+  return {
+    drawn,
+    note: ` — strip-tiled: conservative under-tile, ${pct.toFixed(1)}% of plane area; trim to ${what} on site`,
+  }
+}
+
+/**
+ * One deck panel on a slope plane. Geometry in the SEGMENT frame: the
+ * plane's eave (level) direction runs along X when `alongXAxis` (downhill =
+ * ±Z via `side`), else along Z (downhill = ±X). `zTop`→`zBot` is the
+ * panel's PLAN band on the downhill axis measured from the segment center
+ * (zTop uphill of zBot; negative allowed — the shed's high edge crosses the
+ * center); `yTop` is the RAFTER-CENTERLINE plane height at `zTop` (falling
+ * at tanθ downhill); `u0`→`u1` bound the panel along the eave axis. The
+ * deck rides the rafter TOP faces — `rafterDepth/2 + t/2` up the plane
+ * normal (the outlooker roll convention), SLID up-slope so the panel's plan
+ * extents equal [zTop, zBot] exactly: callers own the edge gaps (deckGap)
+ * that keep the tilted end faces clear of ridges, kinks and the fascia
+ * band, while adjacent strips in one plane meet edge-to-edge (coplanar
+ * exact contact — the stud-on-plate convention, zero shared volume).
+ */
+function deckPlane(
+  emit: Emit,
+  spec: FramingSpec,
+  opts: {
+    theta: number
+    side: 1 | -1
+    alongXAxis: boolean
+    u0: number
+    u1: number
+    zTop: number
+    zBot: number
+    yTop: number
+    rafterDepth: number
+    note?: string
+    /** Rides the DECK member only (one Flags row per statement class). */
+    flag?: string
+  },
+) {
+  if (spec.detail === '200') return
+  const { theta, side, alongXAxis, u0, u1, zTop, zBot, yTop, rafterDepth, note = '', flag } = opts
+  const cosT = Math.cos(theta)
+  const len = u1 - u0
+  const slopeW = (zBot - zTop) / cosT
+  if (len < DECK_MIN || slopeW < DECK_MIN) return
+  const along = (u0 + u1) / 2
+  const zm = (zTop + zBot) / 2
+  const ym = yTop - (zm - zTop) * Math.tan(theta)
+  // Roll spins the box about its long (+X) axis so its local +Y aligns with
+  // the plane normal — the outlooker convention. Along-Z panels yaw −π/2
+  // first (local +X → +Z, local +Z → −X), which flips the roll sign.
+  const roll = alongXAxis ? side * theta : -side * theta
+  const yaw = alongXAxis ? 0 : -Math.PI / 2
+  // Normal offset + in-plane slide back to the band: vertically that is
+  // up/cosθ (the dropped-gable olT/cosθ convention) with the plan center
+  // staying at zm — the panel covers [zTop, zBot] exactly. The membrane
+  // stacks 1:1 ON the deck, one thickness further up the normal — the
+  // wall-layers emitStack pattern (each layer advances its own thickness).
+  const cross = side * zm
+  const layer = (
+    role: Member['role'],
+    up: number,
+    t: number,
+    material: Member['material'],
+    label: string,
+    memberFlag?: string,
+  ) => {
+    const y = ym + up / cosT
+    emit(
+      role,
+      undefined,
+      [len, t, slopeW],
+      alongXAxis ? [along, y, cross] : [cross, y, along],
+      yaw,
+      0,
+      len,
+      material,
+      label,
+      roll,
+      memberFlag,
+    )
+  }
+  layer('sheathing', rafterDepth / 2 + ROOF_DECK_T / 2, ROOF_DECK_T, 'engineered', DECK_LABEL + note, flag)
+  layer(
+    'wrb',
+    rafterDepth / 2 + ROOF_DECK_T + UNDERLAYMENT_T / 2,
+    UNDERLAYMENT_T,
+    'lumber',
+    UNDERLAYMENT_LABEL + note,
+  )
 }
 
 /** Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path). */
@@ -624,6 +817,35 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     for (const side of [1, -1] as const) {
       fasciaPair(emit, true, fasciaLen, 0, side * (run + roof.overhang * cosT), fasciaY, splicedNote(spec, fasciaLen, 'rafter tails (scarf joints)'))
     }
+    // B6c: rake drip edge rides the deck edge over each barge — plumb-
+    // lifted to the deck TOP plane (+2 mm seam) so it caps the panel edge
+    // without sharing volume with barge or deck.
+    if (hasRake) {
+      const lift = (rd / 2 + ROOF_DECK_T + DRIP_T / 2) / cosT + 0.002
+      for (const sx of [1, -1] as const) {
+        for (const side of [1, -1] as const) {
+          const tipZ = side * (run + roof.overhang * cosT)
+          const tipY = eaveY - roof.overhang * Math.sin(theta)
+          emit(
+            'drip-edge',
+            undefined,
+            [slopeLen, DRIP_T, DRIP_W],
+            [
+              // outer edge flush with the BARGE's outer face — the rake
+              // metal never grows the plan envelope (round-1 F1b)
+              sx * (roof.width / 2 + roof.overhang + t / 2 - DRIP_W / 2),
+              (tipY + ridgeFaceY) / 2 + lift,
+              (tipZ + side * ridgeFaceZ) / 2,
+            ],
+            (side * Math.PI) / 2,
+            theta,
+            slopeLen,
+            'steel',
+            'Drip edge — rake (R905.2.8.5)',
+          )
+        }
+      }
+    }
   }
 
   // ---- ridge board along X at the peak ----
@@ -642,6 +864,25 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
     `Ridge ${ridgeSize}${spec.detail === '400' ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°` : ''}${splicedNote(spec, ridgeLen, 'rafter pairs (ridge board)')}`,
   )
 
+  // ---- deck on both slope planes (LOD-400 B6, R803.2) ----
+  // Full rectangles ridge line → eave tip; the rake overhang widens the
+  // plane past the barges when the ladder is framed. The panel's normal
+  // offset (rafter top + half deck) leaves the conventional vent gap at
+  // the ridge instead of crossing the centerline.
+  for (const side of [1, -1] as const) {
+    deckPlane(emit, spec, {
+      theta,
+      side,
+      alongXAxis: true,
+      u0: hasRake ? -(roof.width / 2 + roof.overhang) : -roof.width / 2,
+      u1: hasRake ? roof.width / 2 + roof.overhang : roof.width / 2,
+      zTop: deckGap(theta),
+      zBot: run + roof.overhang * cosT - deckGap(theta),
+      yTop: ridgeY - deckGap(theta) * tan,
+      rafterDepth: rd,
+    })
+  }
+
   // ---- ceiling joists across the depth at the eave line ----
   // Running parallel to the rafter span, they double as the RAFTER TIES of
   // R802.4.2 (thrust) — distinct from the collar ties below (uplift, upper
@@ -659,18 +900,30 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
   const cjStations = layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2).map(
     (x0) => besideRafter(x0, cjT / 2),
   )
+  // B6: the deck rides the rafter-TOP plane, and near the eave a square
+  // joist END would poke through it — real ends are field-clipped to the
+  // rafter slope (the R802.4.2 tie still reaches the plate), so the box
+  // INSCRIBES inside the clip exactly like the rafters' plumb-cut boxes.
+  // Span/flag math stays on the FULL depth (the buy length). LOD 200 has
+  // no deck and keeps the schematic full box.
+  const cjClip =
+    spec.detail === '200' || tan <= EPS
+      ? 0
+      : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
+  const cjLen = roof.depth - 2 * cjClip
   for (const x of cjStations) {
+    if (cjLen < 0.3) break
     // +X box yawed onto +Z: ψ = -π/2 (three: +X → (cosψ, 0, -sinψ)).
     emit(
       'ceiling-joist',
       spec.ceilingJoistSize,
-      [roof.depth, cjD, cjT],
+      [cjLen, cjD, cjT],
       [x, eaveY + cjD / 2, 0],
       -Math.PI / 2,
       0,
-      roof.depth,
+      cjLen,
       'lumber',
-      `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`,
+      `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2), ends clipped to the roof slope' : ''}`,
       undefined,
       cjFlag,
     )
@@ -793,6 +1046,28 @@ function frameShed(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       tieAt(emit, x, -roof.depth / 2, lowY + roof.depth * Math.tan(theta))
     }
   }
+
+  // ---- deck over the single plane (B6): high tip → low tip, both
+  // overhangs included (slopeLen spans them, plan extension o·cosθ each).
+  deckPlane(emit, spec, {
+    theta,
+    side: 1,
+    alongXAxis: true,
+    u0: -roof.width / 2,
+    u1: roof.width / 2,
+    zTop: -roof.depth / 2 - roof.overhang * cosT + deckGap(theta),
+    zBot: roof.depth / 2 + roof.overhang * cosT - deckGap(theta),
+    yTop: midY + (roof.depth / 2 + roof.overhang * cosT - deckGap(theta)) * Math.tan(theta),
+    rafterDepth: rd,
+    // F4 (round-1 skeptic): the shed's zero-drip state is a STATED gap on
+    // paper, not a commit-message aside — no fascia is modeled on sheds at
+    // LOD 400, so the eave metal has nothing to cap (trim rides the
+    // eventual shed fascia work).
+    flag:
+      spec.detail === '400'
+        ? 'shed roof: fascia + drip edge not modeled at LOD 400 — eave/rake metal by trim schedule (R905.2.8.5)'
+        : undefined,
+  })
 }
 
 function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) {
@@ -1005,11 +1280,17 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         const midLong = se * (ridgeHalf + kingSetback + (tipCross - kingSetback) / 2)
         // Inscribed: both ends are plumb cuts (hip junction + tail).
         const len = (run - kingSetback) / cosT + roof.overhang - 2 * cPlumbInset
+        // Center height at the box's own top cut (ridgeY − setback·tanθ),
+        // NOT the apex — averaging tipY with the full apex floated the box
+        // ~t·sinθ·√2/2 proud of the slope plane along its normal while the
+        // plan center honored the setback (latent round-14 residue the B6
+        // deck exposed: king × deck SAT hits on every hip).
+        const kingMidY = (tipY + ridgeY - kingSetback * tan) / 2
         emit(
           'rafter',
           spec.rafterSize,
           [len, rd, t],
-          alongX ? [midLong, (tipY + ridgeY) / 2, 0] : [0, (tipY + ridgeY) / 2, midLong],
+          alongX ? [midLong, kingMidY, 0] : [0, kingMidY, midLong],
           psi,
           theta,
           len,
@@ -1067,6 +1348,54 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         }
       }
     }
+  }
+
+  // ---- deck on the four planes (B6): strip-tiled tapered planes ----
+  // Long planes: trapezoid ridge (2·ridgeHalf) → eave; end planes: triangle
+  // off each ridge END. Strips stay INSIDE the 45° hip lines (each band's
+  // width taken at its UPHILL edge − clearance) — conservative under-tile
+  // at the hips, stated on the label.
+  if (spec.detail !== '200') {
+    const deckR = run + roof.overhang * cosT
+    const gap = deckGap(theta)
+    const panels: DeckPanelSpec[] = []
+    for (let z0 = 0; z0 < deckR - EPS; z0 += DECK_STRIP) {
+      const z1 = Math.min(z0 + DECK_STRIP, deckR)
+      // ridge/eave seams: first strip clears the mirrored plane, last
+      // strip clears the fascia band (in-plane strip joints stay exact).
+      const zt = Math.max(z0, gap)
+      const zb = Math.min(z1, deckR - gap)
+      const hwLong = ridgeHalf + z0 - DECK_CLEAR
+      const hwEnd = z0 - DECK_CLEAR
+      for (const side of [1, -1] as const) {
+        panels.push({
+          theta,
+          side,
+          alongXAxis: alongX,
+          u0: -hwLong,
+          u1: hwLong,
+          zTop: zt,
+          zBot: zb,
+          yTop: ridgeY - zt * tan,
+        })
+        panels.push({
+          theta,
+          side,
+          alongXAxis: !alongX,
+          u0: -hwEnd,
+          u1: hwEnd,
+          zTop: ridgeHalf + zt,
+          zBot: ridgeHalf + zb,
+          yTop: ridgeY - zt * tan,
+        })
+      }
+    }
+    // Plane truth: 2 trapezoids (ridge 2·ridgeHalf → eave) + 2 triangles
+    // off the ridge ends, overhang included — the note states the EXACT
+    // coverage the strips achieve on THIS compose (F2).
+    const planeArea = (2 * (2 * ridgeHalf + deckR) * deckR + 2 * deckR * deckR) / cosT
+    const { note } = tiledDeckNote(panels, planeArea, 'hip lines')
+    for (const p of panels) deckPlane(emit, spec, { ...p, rafterDepth: rd, note })
   }
 
   // ---- fascia (sub + finish) around all four eaves (LOD 400) ----
@@ -1134,6 +1463,41 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
     } else {
       emit('rim-joist', spec.rafterSize, [2 * halfW - 2 * t, rd, t], [0, centerY, side * halfD], 0, 0, 2 * halfW - 2 * t, 'lumber', rimLabel(2 * halfW - 2 * t))
       emit('rim-joist', spec.rafterSize, [2 * halfD, rd, t], [side * halfW, centerY, 0], -Math.PI / 2, 0, 2 * halfD, 'lumber', rimLabel(2 * halfD))
+    }
+  }
+
+  // ---- deck over the whole platform (B6) — dead level on the joist tops;
+  // drainage stays the tapered-insulation assumption the joists carry.
+  deckPlane(emit, spec, {
+    theta: 0,
+    side: 1,
+    alongXAxis: true,
+    u0: -halfW,
+    u1: halfW,
+    zTop: -halfD,
+    zBot: halfD,
+    yTop: centerY,
+    rafterDepth: rd,
+  })
+
+  // ---- B6c: perimeter drip (gravel-stop analog) at the deck edge, LOD 400.
+  // Long-axis runs full, short-axis runs BUTT between them — the rim
+  // convention (real corners lap; boxes can't share the corner volume).
+  if (spec.detail === '400') {
+    const dripY = centerY + rd / 2 + ROOF_DECK_T + UNDERLAYMENT_T + DRIP_T / 2 + 0.001
+    const label = 'Drip edge — eave (R905.2.8.5)'
+    // Outer edges flush with the RIM outer faces — the gravel stop never
+    // grows the plan envelope the rims already set (round-1 F1b).
+    const dz = halfD + t / 2 - DRIP_W / 2
+    const dx = halfW + t / 2 - DRIP_W / 2
+    for (const side of [1, -1] as const) {
+      if (longIsX) {
+        emit('drip-edge', undefined, [2 * halfW, DRIP_T, DRIP_W], [0, dripY, side * dz], 0, 0, 2 * halfW, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfD - 2 * DRIP_W, DRIP_T, DRIP_W], [side * dx, dripY, 0], -Math.PI / 2, 0, 2 * halfD - 2 * DRIP_W, 'steel', label)
+      } else {
+        emit('drip-edge', undefined, [2 * halfW - 2 * DRIP_W, DRIP_T, DRIP_W], [0, dripY, side * dz], 0, 0, 2 * halfW - 2 * DRIP_W, 'steel', label)
+        emit('drip-edge', undefined, [2 * halfD, DRIP_T, DRIP_W], [side * dx, dripY, 0], -Math.PI / 2, 0, 2 * halfD, 'steel', label)
+      }
     }
   }
 }
@@ -1228,6 +1592,43 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
     }
   }
 
+  // ---- deck on all four planes (B6): lower steep + upper shallow per side.
+  // The centerline planes extrapolate to the break (breakZ, breakY) and the
+  // ridge apex (0, ridgeY); at the convex kink the normal offsets open a
+  // gap exactly like the ridge vent gap.
+  for (const side of [1, -1] as const) {
+    // F4: gambrel gable ends carry no rake framing (B8d) and so no rake
+    // drip either — stated on paper via the deck flag at 400.
+    const gambrelRakeFlag =
+      spec.detail === '400'
+        ? 'gambrel rake: rake framing + rake drip edge not modeled at LOD 400 — rides with the R802 rake-ladder follow-up (B8d)'
+        : undefined
+    deckPlane(emit, spec, {
+      theta,
+      side,
+      alongXAxis: true,
+      u0: -roof.width / 2,
+      u1: roof.width / 2,
+      zTop: breakZ + deckGap(theta),
+      zBot: run + roof.overhang * cosT - deckGap(theta),
+      yTop: breakY - deckGap(theta) * tan,
+      rafterDepth: rd,
+      flag: gambrelRakeFlag,
+    })
+    deckPlane(emit, spec, {
+      theta: phi,
+      side,
+      alongXAxis: true,
+      u0: -roof.width / 2,
+      u1: roof.width / 2,
+      zTop: deckGap(phi),
+      zBot: breakZ - deckGap(phi),
+      yTop: ridgeY - deckGap(phi) * tanPhi,
+      rafterDepth: rd,
+      flag: gambrelRakeFlag,
+    })
+  }
+
   // ridge + a purlin under each kink (the classic gambrel joint support)
   const ridgeSize = ridgeSizeFor(spec.rafterSize)
   const [rt, rdd] = LUMBER_CROSS_SECTIONS[ridgeSize]
@@ -1250,11 +1651,19 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
   // ceiling joists at the eave + collar ties in the upper third
   const [cjT, cjD] = LUMBER_CROSS_SECTIONS[spec.ceilingJoistSize]
   const cjFlag = ceilingJoistFlag(spec, roof.depth)
+  // B6: end boxes inscribe inside the field clip to the STEEP lower plane
+  // (the gable convention above) — the deck rides the rafter tops.
+  const cjClip =
+    spec.detail === '200' || tan <= EPS
+      ? 0
+      : Math.max(0, (cjD - rd / (2 * cosT)) / tan + 0.002)
+  const cjLen = roof.depth - 2 * cjClip
   for (const x0 of layout(-roof.width / 2, roof.width / 2, spec.ceilingJoistSpacing, cjT / 2)) {
+    if (cjLen < 0.3) break
     // sister BESIDE a coincident rafter plane, toward the center (round-14)
     const clash = xs.find((rx) => Math.abs(rx - x0) < halfT + cjT / 2 - EPS)
     const x = clash === undefined ? x0 : clash + (clash >= 0 ? -1 : 1) * (halfT + cjT / 2)
-    emit('ceiling-joist', spec.ceilingJoistSize, [roof.depth, cjD, cjT], [x, eaveY + cjD / 2, 0], -Math.PI / 2, 0, roof.depth, 'lumber', `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2)' : ''}`, undefined, cjFlag)
+    emit('ceiling-joist', spec.ceilingJoistSize, [cjLen, cjD, cjT], [x, eaveY + cjD / 2, 0], -Math.PI / 2, 0, cjLen, 'lumber', `Ceiling joist ${spec.ceilingJoistSize}${spec.detail === '400' ? ' — rafter tie (R802.4.2), ends clipped to the roof slope' : ''}`, undefined, cjFlag)
   }
   const collarY = eaveY + (2 / 3) * activeRh
   if (collarY > breakY) {
@@ -1365,6 +1774,59 @@ function frameSkirt(
     endRun,
     endTheta,
   )
+
+  // ---- deck on the four skirt planes (B6): the hip strip pattern with the
+  // arris plan slope crossRun/runH (mansard/dutch arrises aren't 45° when
+  // endRun ≠ sideRun). Strips stay inside the arris lines — conservative
+  // under-tile, stated on the label.
+  if (spec.detail !== '200') {
+    const panels: DeckPanelSpec[] = []
+    let planeArea = 0
+    const deckFace = (
+      stationIsX: boolean,
+      half: number,
+      runH: number,
+      crossRun: number,
+      crossHalf: number,
+      theta: number,
+    ) => {
+      if (runH <= EPS) return
+      const cosT = Math.cos(theta)
+      const gap = deckGap(theta)
+      const zTopEdge = half - runH
+      const deckR = half + roof.overhang * cosT
+      // Plane truth per face PAIR (F2): each trapezoid's exact slope area
+      // incl. the overhang band, width interpolating along the arris slope:
+      // ∫ 2·hw(z) dz / cosθ with hw(z) = (crossHalf−crossRun) + z'·(crossRun/runH).
+      const L = deckR - zTopEdge
+      const oneFace = (2 * (crossHalf - crossRun) * L + (crossRun / runH) * L * L) / cosT
+      planeArea += 2 * oneFace
+      for (let z0 = zTopEdge; z0 < deckR - EPS; z0 += DECK_STRIP) {
+        const z1 = Math.min(z0 + DECK_STRIP, deckR)
+        // seams: top strip clears the inner shape's deck at the knuckle,
+        // bottom strip clears the fascia band.
+        const zt = Math.max(z0, zTopEdge + gap)
+        const zb = Math.min(z1, deckR - gap)
+        const hw = crossHalf - crossRun + (z0 - zTopEdge) * (crossRun / runH) - DECK_CLEAR
+        for (const side of [1, -1] as const) {
+          panels.push({
+            theta,
+            side,
+            alongXAxis: stationIsX,
+            u0: -hw,
+            u1: hw,
+            zTop: zt,
+            zBot: zb,
+            yTop: eaveY + rise - (zt - zTopEdge) * Math.tan(theta),
+          })
+        }
+      }
+    }
+    deckFace(true, roof.depth / 2, sideRun, endRun, roof.width / 2, sideTheta)
+    deckFace(false, roof.width / 2, endRun, sideRun, roof.depth / 2, endTheta)
+    const { note } = tiledDeckNote(panels, planeArea, 'arris lines')
+    for (const p of panels) deckPlane(emit, spec, { ...p, rafterDepth: rd, note })
+  }
 
   // four arris hips: footprint corner → top corner of the skirt, inscribed
   // between their plumb cuts (round-14)
@@ -1513,6 +1975,8 @@ function frameDutch(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
 
 export type ValleyLine = {
   major: RoofSegmentSlice
+  /** The penetrating segment's id — its deck overlays the major (B6 note). */
+  minorId: string
   /** Eave foot of the valley, in the MAJOR segment's frame. */
   foot: readonly [number, number, number]
   /** Apex where the minor ridge pierces the major slope (major frame). */
@@ -1561,6 +2025,7 @@ export function detectValleys(roofs: RoofSegmentSlice[]): ValleyLine[] {
       for (const s of [1, -1] as const) {
         out.push({
           major,
+          minorId: minor.id,
           foot: [cx + s * r2, major.wallHeight, sz * run1],
           apex: [cx, major.wallHeight + rise2, sz * zApex],
         })

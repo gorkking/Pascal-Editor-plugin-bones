@@ -205,8 +205,32 @@ function planBounds(members: Member[], fixtures: Fixture[]): Bounds | null {
     // Rotation-aware per-axis extents — a single max-dim radius inflated
     // the frame ~40% on elongated plans (quality C1).
     const yaw = m.rotation[1]
-    const ex = (Math.abs(Math.cos(yaw)) * m.dims[0] + Math.abs(Math.sin(yaw)) * m.dims[2]) / 2
-    const ez = (Math.abs(Math.sin(yaw)) * m.dims[0] + Math.abs(Math.cos(yaw)) * m.dims[2]) / 2
+    let ex: number
+    let ez: number
+    if (m.rotation[0] !== 0) {
+      // ROLLED members (deck panels, outlookers — B6 round-1 F1b): the
+      // yaw-only formula read dims[2] (SLOPE width) unforeshortened and a
+      // bogus cos(ry) on the axis, so the deck inflated the SHARED set
+      // transform and shifted every other sheet ~16 px. Exact plan
+      // projections of both local axes instead (the draw path's math);
+      // yaw-only members keep the legacy arithmetic byte-for-byte.
+      const [rx, ry, rz] = m.rotation
+      const cy = Math.cos(ry)
+      const sy = Math.sin(ry)
+      const cz = Math.cos(rz)
+      const sz = Math.sin(rz)
+      const cx = Math.cos(rx)
+      const sxr = Math.sin(rx)
+      const axX = Math.abs(cy * cz)
+      const axZ = Math.abs(sxr * sz - cx * sy * cz)
+      const crX = Math.abs(sy)
+      const crZ = Math.abs(cx * cy)
+      ex = (axX * m.dims[0] + crX * m.dims[2]) / 2
+      ez = (axZ * m.dims[0] + crZ * m.dims[2]) / 2
+    } else {
+      ex = (Math.abs(Math.cos(yaw)) * m.dims[0] + Math.abs(Math.sin(yaw)) * m.dims[2]) / 2
+      ez = (Math.abs(Math.sin(yaw)) * m.dims[0] + Math.abs(Math.cos(yaw)) * m.dims[2]) / 2
+    }
     minX = Math.min(minX, m.position[0] - ex)
     maxX = Math.max(maxX, m.position[0] + ex)
     minZ = Math.min(minZ, m.position[2] - ez)
@@ -471,7 +495,8 @@ function planSheet(
   // bay width (smallest on the sheet), so long-first alone painted 23
   // opaque rects LAST, over every joist, girder and stair header (examiner
   // round-5 blocker: the floor sheet was washed out).
-  const layerOf = (m: Member): number => (m.role === 'subfloor' ? 0 : 1)
+  const layerOf = (m: Member): number =>
+    m.role === 'subfloor' || (m.system === 'roof-framing' && m.role === 'sheathing') ? 0 : 1
   const sorted = [...mine].sort((a, b2) => layerOf(a) - layerOf(b2) || b2.dims[0] - a.dims[0])
   // DWV flow-arrow candidates (drawn AFTER the device bubbles, E2) and the
   // building-drain legs (the sewer-exit marker anchors to one, E3).
@@ -553,7 +578,11 @@ function planSheet(
     if (stroked.has(m)) continue
     // Slab field already printed as the layer-ZERO underlay above; the
     // vapor retarder is coincident under it (legend row only) — see B17.
+    // The ROOF underlayment joins the same convention (B6 round-1 F1): it
+    // tiles the deck 1:1, so drawing it only doubles the deck's opacity —
+    // the legend row states it instead.
     if (m.role === 'slab' || m.role === 'vapor-retarder') continue
+    if (m.system === 'roof-framing' && m.role === 'wrb') continue
     // Foundation hardware symbols (blueprint round-3): anchor bolts print as
     // FILLED dots, vertical rebar dowels as OPEN circles — identical gray
     // squares made the two anchorage systems indistinguishable on paper.
@@ -589,7 +618,14 @@ function planSheet(
     const yaw = Math.atan2(-az, ax)
     const planLen = Math.max(0.02, m.dims[0] * planFrac)
     const w = planLen * scale
-    const h = Math.max(1.2, m.dims[2] * scale)
+    // CROSS extent foreshortens exactly like the axis (B6 round-1 F1
+    // BLOCKER): dims[2] on a ROLLED plate is SLOPE width — drawn raw, the
+    // gable deck printed 0.53 m past the eave and the two slope panels
+    // overlapped 1.06 m at the ridge. Local +Z in plan = (sin ry, cx·cy):
+    // |…| = 1 for every yaw-only/tilted member (byte-equal), cos(roll) for
+    // rolled plates (deck, outlookers).
+    const crossFrac = Math.hypot(sy, cx * cy)
+    const h = Math.max(1.2, m.dims[2] * crossFrac * scale)
     // Per-member colors: wires by circuit; plumbing runs by system —
     // cold blue / hot red / DWV slate via the sourceId prefix (identical
     // to the 3D X-ray, invariant E3's spirit). HVAC line-set pipes join
@@ -606,7 +642,9 @@ function planSheet(
               : null) ?? (def.fill[m.role] ?? def.fill.default ?? '#ddd')
     // Deck strips print translucent with a hairline seam — same hue as the
     // legend swatch, but the framing linework stays legible through them.
-    const isDeck = m.role === 'subfloor'
+    // …and the ROOF deck joins it (B6 round-1 F1c: opaque slope panels
+    // painted over ridge/hips/jacks — the round-5 subfloor blocker class).
+    const isDeck = m.role === 'subfloor' || (m.system === 'roof-framing' && m.role === 'sheathing')
     // Line-set pair: the two pipes share one plan path (the 4 cm offset is
     // VERTICAL), so a truthful plan projection overprints them and the
     // last-drawn color wins — the suction line never showed a pixel
@@ -1203,14 +1241,25 @@ function planSheet(
     hanger: 'joist hanger',
     slab: '3-1/2" slab-on-grade, drawn translucent — on 4" base course (R506.1/R506.2.2)',
     'vapor-retarder': '6-mil vapor retarder under slab (R506.2.3) — not drawn',
+    // Roof sheet only (B6): 'sheathing'/'wrb' also name WALL layer roles —
+    // scoping keeps a wall sheet from claiming a roof-deck row.
+    ...(def.key === 'roof'
+      ? {
+          sheathing: '7/16" WSP roof deck (R803.2), drawn translucent',
+          wrb: 'roof underlayment under covering (R905.1.1) — not drawn',
+          'drip-edge': 'drip edge — eave/rake metal (R905.2.8.5)',
+        }
+      : {}),
   }
   for (const [role, desc] of Object.entries(SIZELESS_LEGEND)) {
     if (!roleSizes.has(role) && mine.some((m) => m.role === role)) roleSizes.set(role, desc)
   }
-  // Cap 10 (was 8): the size-less rows append LAST and a stair-holed floor
-  // sheet carries 9 roles — an 8-cap re-dropped the deck row it just gained.
+  // Cap 13 (was 10, was 8): the size-less rows append LAST — the compose
+  // roof sheet already carries 9 SIZED roles, so a 10-cap re-dropped the
+  // B6 deck/underlayment/drip rows it just gained (the same failure mode
+  // as the 8-cap, one batch later).
   const legendLines: string[] = [...roleSizes.entries()]
-    .slice(0, 10)
+    .slice(0, 13)
     .map(
       ([role, size], i) =>
         `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
@@ -1688,8 +1737,20 @@ const STROKE_LEGEND_NAMES: Record<string, string> = {
   hvac: 'HVAC',
 }
 
-/** Rotation-aware x half-extent of a member (yaw only — plan projection). */
+/** Rotation-aware x half-extent of a member (plan projection). Yaw-only
+ * members keep the legacy arithmetic byte-for-byte; ROLLED members (deck
+ * panels, outlookers) project both local axes exactly — the yaw-only read
+ * fed sectionCutX/crossesCut a garbage extent off a rolled panel's euler
+ * (B6 round-1 F1). */
 function xExtentOf(m: Member): number {
+  const [rx, ry, rz] = m.rotation
+  if (rx !== 0) {
+    const cy = Math.cos(ry)
+    const sy = Math.sin(ry)
+    return (
+      (Math.abs(cy * Math.cos(rz)) * m.dims[0] + Math.abs(sy) * m.dims[2]) / 2
+    )
+  }
   return (
     (Math.abs(Math.cos(m.rotation[1])) * m.dims[0] +
       Math.abs(Math.sin(m.rotation[1])) * m.dims[2]) /
@@ -2073,6 +2134,21 @@ function sectionSheet(members: Member[], opts: PlanSetOptions): PlanSheet | null
     const cz = a[2] + t * dz
     const cyW = a[1] + t * dy
     const dims = m.dims
+    // ROLLED plate members (roof deck/underlayment, outlookers — B6
+    // round-1 F5): the axis-aligned slice model printed the deck's cut as
+    // a false HORIZONTAL chord (slope width at mid-roof height). The true
+    // cut of a rolled plate is its local cross-section — a thin band
+    // [dims[2] × dims[1]] rotated by the roll about the crossing point,
+    // running eave → ridge exactly like the built panel (memberAxis's B17
+    // true-thickness convention, extended to the rolled case).
+    if (m.rotation[0] !== 0 && dims[1] <= dims[0] && dims[1] <= dims[2]) {
+      const wPx2 = Math.max(1.5, dims[2] * f.scale)
+      const hPx2 = Math.max(1.5, dims[1] * f.scale)
+      poche.push(
+        `<rect x="${(-wPx2 / 2).toFixed(1)}" y="${(-hPx2 / 2).toFixed(1)}" width="${wPx2.toFixed(1)}" height="${hPx2.toFixed(1)}" fill="#222" transform="translate(${f.sx(cz).toFixed(1)} ${f.sy(-cyW).toFixed(1)}) rotate(${deg(m.rotation[0]).toFixed(2)})"/>`,
+      )
+      continue
+    }
     const axis = dims[0] >= dims[1] && dims[0] >= dims[2] ? 0 : dims[1] >= dims[2] ? 1 : 2
     const hDim = axis === 0 ? dims[2] : dims[0] // plan cross thickness
     const vDim = axis === 1 ? Math.min(dims[0], dims[2]) : dims[1] // vertical thickness
