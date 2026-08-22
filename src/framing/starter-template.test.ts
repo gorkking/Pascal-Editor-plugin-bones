@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { classifyRoom } from '../core/wall-model'
 import type { Fixture, Member, RoomSlice, SlabSlice } from '../core/types'
-import { computeCharacteristics } from '../engines/characteristics'
+import {
+  characteristicsRows,
+  computeCharacteristics,
+  NO_CONDITIONED_NA,
+  NO_SLAB_NA,
+} from '../engines/characteristics'
 import { buildPlanSet } from '../plans/plan-set'
 import { buildServicePointNodes } from '../service/place'
 import { computeLevel } from './compute'
@@ -603,6 +608,124 @@ describe('outdoor-only level (a garden with fences, no house)', () => {
     const slabOnly = computeCharacteristics([], [], [patio])
     expect(slabOnly?.floorAreaM2).toBeCloseTo(24, 9)
     expect(slabOnly?.notes.some((n) => n.includes('no rooms/zones drawn'))).toBe(true)
+  })
+
+  test('the terrace-with-slab n/a states the TRUE reason on paper (round-4 F1)', () => {
+    // The zero figure used to route through the no-slab n/a — the schedules
+    // sheet printed 'Floor area & volume n/a — no floor slabs (see flags)'
+    // while the flag block ON THE SAME PAGE said the level IS slab-on-grade.
+    const terrace: RoomSlice = {
+      id: 'z_terrace',
+      name: 'Roof terrace',
+      category: 'outdoor',
+      polygon: [
+        [-6, -6],
+        [6, -6],
+        [6, 6],
+        [-6, 6],
+      ],
+      boundaryWallIds: [],
+      ceilingHeight: 2.7,
+    }
+    const slab: SlabSlice = {
+      id: 'slab_terrace',
+      polygon: [
+        [0, 0],
+        [6, 0],
+        [6, 4],
+        [0, 4],
+      ],
+      holes: [],
+      elevation: 0,
+      thickness: 0.1,
+    }
+    const c = computeCharacteristics([], [terrace], [slab])
+    expect(c?.allZonesOutdoor).toBe(true)
+    // rows (panel + CSV mint point): the honest reason, never the stale one
+    const rows = characteristicsRows(c as NonNullable<typeof c>)
+    const rowValue = (metric: string) => rows.find((r) => r.metric === metric)?.value ?? ''
+    for (const metric of ['Floor area', 'Volume', 'Cooling estimate (rule of thumb)']) {
+      expect(rowValue(metric)).toBe(NO_CONDITIONED_NA)
+      expect(rowValue(metric)).not.toContain('no floor slabs')
+    }
+    // paper (plan-set mint point): the honest n/a coexists with the slab
+    // flag, and the contradiction string is gone from the whole sheet
+    const svg = buildPlanSet(
+      [
+        {
+          system: 'foundation',
+          role: 'slab',
+          dims: [6, 0.1, 4],
+          length: 6,
+          position: [3, -0.05, 2],
+          rotation: [0, 0, 0],
+          material: 'concrete',
+          sourceId: 'slab_terrace',
+          label: 'Slab on grade 4"',
+        } as Member,
+      ],
+      [],
+      {
+        characteristics: c ?? undefined,
+        warnings: ['Ground floor is slab-on-grade — footings sized per R403'],
+      },
+    )
+      .filter((s) => s.title.startsWith('Schedules'))
+      .map((s) => s.svg)
+      .join('\n')
+    expect(svg).toContain('BUILDING CHARACTERISTICS')
+    expect(svg).toContain('no conditioned space on this level (all zones outdoor)')
+    expect(svg).not.toContain('no floor slabs')
+    expect(svg).toContain('slab-on-grade') // the flag still prints — no contradiction
+  })
+
+  test('sibling pin: a plain no-slab scene keeps the original no-slab n/a', () => {
+    // floorAreaM2 0 WITHOUT allZonesOutdoor (walls only, no zones at all)
+    // routes through the legacy string verbatim — rows AND sheet.
+    const c = computeCharacteristics(
+      [
+        {
+          id: 'w1',
+          start: [0, 0],
+          end: [6, 0],
+          length: 6,
+          dir: [1, 0],
+          thickness: 0.15,
+          height: 2.7,
+          exterior: true,
+          openings: [],
+          curved: false,
+        },
+      ],
+      [],
+      [],
+    )
+    expect(c?.floorAreaM2).toBe(0)
+    expect(c?.allZonesOutdoor).toBeUndefined()
+    const rows = characteristicsRows(c as NonNullable<typeof c>)
+    expect(rows.find((r) => r.metric === 'Floor area')?.value).toBe(NO_SLAB_NA)
+    const svg = buildPlanSet(
+      [
+        {
+          system: 'wall-framing',
+          role: 'stud',
+          dims: [0.04, 2.6, 0.09],
+          length: 2.6,
+          position: [1, 1.3, 0],
+          rotation: [0, 0, 0],
+          material: 'lumber',
+          sourceId: 'w1',
+          label: 'Stud 2x4',
+        } as Member,
+      ],
+      [],
+      { characteristics: c ?? undefined },
+    )
+      .filter((s) => s.title.startsWith('Schedules'))
+      .map((s) => s.svg)
+      .join('\n')
+    expect(svg).toContain('no floor slabs (see flags)')
+    expect(svg).not.toContain('no conditioned space')
   })
 })
 

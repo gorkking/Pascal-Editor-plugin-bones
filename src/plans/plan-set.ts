@@ -12,7 +12,7 @@
 
 import type { Fixture, Member, OpeningSlice, WallSlice } from '../core/types'
 import { formatFtIn, inches } from '../core/units'
-import type { BuildingCharacteristics } from '../engines/characteristics'
+import { type BuildingCharacteristics, zeroAreaNa } from '../engines/characteristics'
 import { openingSpans } from '../engines/electrical'
 import { computeTakeoff } from '../engines/takeoff'
 import {
@@ -2306,9 +2306,12 @@ function schedulesSheets(
     const c = opts.characteristics
     // A slab-less model has NO floor area — printing 'Floor area 0.0 m² …
     // Cooling ~0.0 ton' reads as computed fact (round-3 scorecard C5);
-    // the area-derived metrics say n/a and point at the no-slab flag.
+    // the area-derived metrics say n/a WITH THE TRUE REASON (round-4 F1:
+    // an all-outdoor roof terrace WITH its floor slab printed 'no floor
+    // slabs' beside the slab-on-grade flag on the same page — the string
+    // is single-sourced with characteristicsRows via zeroAreaNa now).
     const noSlab = c.floorAreaM2 <= 0
-    const na = 'n/a — no floor slabs (see flags)'
+    const na = zeroAreaNa(c)
     charBlockLines.push(
       noSlab
         ? `Floor area & volume ${na} · Envelope ${c.envelopeAreaM2.toFixed(1)} m² net of openings`

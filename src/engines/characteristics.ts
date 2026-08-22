@@ -74,6 +74,12 @@ export type BuildingCharacteristics = {
   coolingTonsEstimate: number
   /** Citations + assumptions for every derived number above. */
   notes: string[]
+  /** Set when floorAreaM2 is 0 BECAUSE every drawn zone is outdoor (round-4
+   * F1) — the display layers must say 'no conditioned space', not 'no floor
+   * slabs': a roof terrace WITH its floor slab printed the no-slab n/a next
+   * to the slab-on-grade flag on the same sheet (a stale reason turned lie
+   * once the all-outdoor branch stopped booking the patio slab). */
+  allZonesOutdoor?: boolean
 }
 
 /** Shoelace ring area, m² (same pattern as the takeoff areas block). */
@@ -122,6 +128,7 @@ export function computeCharacteristics(
     .filter((r) => r.category === 'outdoor')
     .reduce((sum, r) => sum + ringArea(r.polygon), 0)
   let floorAreaM2 = 0
+  const allZonesOutdoor = indoorRooms.length === 0 && rooms.length > 0
   if (indoorRooms.length > 0) {
     for (const room of indoorRooms) floorAreaM2 += ringArea(room.polygon)
     if (outdoorAreaM2 > 0) {
@@ -129,7 +136,7 @@ export function computeCharacteristics(
         `Floor area & volume are CONDITIONED space — ${outdoorAreaM2.toFixed(1)} m² of outdoor zones (garden/patio/yard) excluded`,
       )
     }
-  } else if (rooms.length > 0) {
+  } else if (allZonesOutdoor) {
     // EVERY drawn zone is outdoor (a garden level, a roof terrace with its
     // floor slab): there is NO conditioned space — the slab under open air
     // is paving, not conditioned floor. Booking it (skeptic round-2 corner:
@@ -262,25 +269,38 @@ export function computeCharacteristics(
     designHeatLossW,
     coolingTonsEstimate,
     notes,
+    ...(allZonesOutdoor ? { allZonesOutdoor: true } : {}),
   }
 }
 
 /** One display row per metric — the panel and the CSV share this shape.
  * Area-derived metrics on a slab-less model print 'n/a — no floor slabs'
  * instead of absurd zeros (round-3 scorecard C5: 'Floor area 0.0 m² …
- * Cooling ~0.0 ton' printed as fact). */
-const NO_SLAB_NA = 'n/a — no floor slabs (see flags)'
+ * Cooling ~0.0 ton' printed as fact). Exported: the plan-set schedules
+ * block prints the SAME strings (round-4 F1 — its inline twin drifted into
+ * a lie the moment the zero-area REASON stopped being 'no slabs'). */
+export const NO_SLAB_NA = 'n/a — no floor slabs (see flags)'
+/** The all-outdoor level: the figure is 0 because nothing is conditioned,
+ * not because flooring is missing — a roof terrace WITH its floor slab must
+ * never print 'no floor slabs' beside the slab-on-grade flag (round-4 F1). */
+export const NO_CONDITIONED_NA = 'n/a — no conditioned space on this level (all zones outdoor)'
+
+/** The truthful zero-area string for `c`: WHY the figure is 0. */
+export function zeroAreaNa(c: BuildingCharacteristics): string {
+  return c.allZonesOutdoor ? NO_CONDITIONED_NA : NO_SLAB_NA
+}
 
 export function characteristicsRows(
   c: BuildingCharacteristics,
 ): { metric: string; value: string; unit: string }[] {
   const noSlab = c.floorAreaM2 <= 0
+  const na = zeroAreaNa(c)
   return [
     noSlab
-      ? { metric: 'Floor area', value: NO_SLAB_NA, unit: '' }
+      ? { metric: 'Floor area', value: na, unit: '' }
       : { metric: 'Floor area', value: c.floorAreaM2.toFixed(1), unit: 'm2' },
     noSlab
-      ? { metric: 'Volume', value: NO_SLAB_NA, unit: '' }
+      ? { metric: 'Volume', value: na, unit: '' }
       : { metric: 'Volume', value: c.volumeM3.toFixed(1), unit: 'm3' },
     { metric: 'Envelope area (net)', value: c.envelopeAreaM2.toFixed(1), unit: 'm2' },
     { metric: 'Windows', value: String(c.windowCount), unit: 'count' },
@@ -295,7 +315,7 @@ export function characteristicsRows(
       unit: 'W',
     },
     noSlab
-      ? { metric: 'Cooling estimate (rule of thumb)', value: NO_SLAB_NA, unit: '' }
+      ? { metric: 'Cooling estimate (rule of thumb)', value: na, unit: '' }
       : {
           metric: 'Cooling estimate (rule of thumb)',
           value: c.coolingTonsEstimate.toFixed(1),

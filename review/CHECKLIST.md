@@ -1173,6 +1173,45 @@ AND a gate — a checklist line without a test is a wish.
   loud-fallback closet plan, doorway compose verbatim + no-solid variant +
   attic immunity, transfer labels + Flags row, takeoff mirror + true
   sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
+- **M4 Outdoor zones are OPEN AIR — classified, unserved by HVAC, and
+  honestly reported.** A zone named for the outdoors (garden/yard/patio/
+  terrace|terrasse|terraza — anchored forms, material adjectives like
+  'Terrazzo'/'Terracotta' never match — deck/porch/balcon/lanai/pergola/
+  jardin/outdoor/outside/exterior) classifies category 'outdoor'; compound
+  names resolve INDOOR-first ('Garden bedroom' is a bedroom and keeps its
+  R314 alarm) unless the outdoor word LEADS as a qualifier
+  (outdoor|outside|exterior|roof — 'Outdoor kitchen', 'Roof terrace'), and
+  a leading-qualifier reclassification of a sleeping-word name WARNS
+  ('reads as open-air — no smoke alarm placed (R314)'), never silent; the
+  'Winter garden'/'Garden room' conservatory class stays outdoor by
+  design. HVAC serves indoor rooms only (no supply register, no tonnage,
+  never the equipment room / thermostat / heat-pump anchor — filtered at
+  every exported rooms-boundary, A4 parity with seeding and the panel); an
+  outdoor-only level composes NO air handler, hence honestly no condenser
+  (M2's condenser-always contract). The exterior-wall election treats
+  INDOOR zone polygons as declared floor coverage when the whole building
+  has no flooring (the starter templates ship walls + zones + no slab —
+  the slab-only probe framed the shell interior and sent the outdoor unit
+  to the ⚠ fallback with no disconnect: prod heat-pump report 2026-08-22);
+  outdoor zones never count as coverage. BUILDING CHARACTERISTICS floor
+  area/volume/cooling size from CONDITIONED space (outdoor area excluded
+  with the basis stated in the notes); an all-outdoor level prints 0 with
+  the TRUE n/a reason — 'no conditioned space on this level (all zones
+  outdoor)', single-sourced (zeroAreaNa) across the panel rows, CSV and
+  the plan-set schedules block, so a roof terrace WITH its floor slab
+  never prints 'no floor slabs' beside the slab-on-grade flag; a room-less
+  slab keeps the legacy slab-outline fallback verbatim.
+  Origin: prod starter-template report 2026-08-22 ("I don't see the heat
+  pump standing outside the house") + skeptic/examiner rounds 1-4
+  (terrazzo harm class, R314 drop, yard-inflated sheet figure, terrace
+  slab-outdoor corner, stale n/a reason).
+  Gates: `src/framing/starter-template.test.ts` (starter-template compose
+  pin: whole-shell election, unflagged condenser outside the footprint +
+  NEC 440.14 disconnect + E2 line-set, no HVAC in the outdoor zone,
+  indoor-only tonnage, A4 seeding parity, B14 WR-GFCI + meter seam guard,
+  classifier witnesses incl. 'Terrazzo entry', R314 warning pair +
+  smoke-alarm compose pin, characteristics corners + paper n/a strings,
+  outdoor-only honesty).
 
 ## P — Plans (the exported document)
 
