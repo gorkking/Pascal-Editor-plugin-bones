@@ -715,6 +715,44 @@ AND a gate — a checklist line without a test is a wish.
   strap-row parity, lumber piece delta == member delta, flag
   aggregation, hold-down row parity).
 
+- **S14 Header sizing follows the ground-snow band; low snow stays
+  byte-equal (Table R602.7(1)).** `applyJurisdiction` selects the
+  spec's `headerRules` from the profile's ground snow load exactly beside
+  the rafter band swap: IRC 2021 Table R602.7(1) tabulates header spans at
+  30/50/70-psf columns and the band SNAPS UP (a column may not serve loads
+  above it; footnote e makes 30 psf the low-snow default) — ≤ 30 psf reads
+  the shipped default rules (REFERENCE-identical, so INTL/TX/CA/FL members,
+  takeoff and paper stay byte-equal to master, E5 baseline included),
+  30–50 the 50-psf column, above 50 the 70-psf column; past 70 psf the
+  assumption confesses 'engineered design required'. Band thresholds are
+  DERIVED from the encoded table cells (roof-and-ceiling condition, 2-ply
+  rows ≙ solid 4x, 24-ft width column: 50-psf → 4x10 cap 71"; 70-psf →
+  4x8 cap 53", 4x10 cap 63") clamped at the default's rounding — heavier
+  snow never prints a shallower header, and no threshold exceeds the code
+  cell. The table also keys on BUILDING WIDTH, which the spec does not
+  carry: every band-sized header states the assumption on its label
+  ('… — sized per Table R602.7(1) @ 70 psf ground snow — ≤ 24 ft building
+  width, roof-and-ceiling loading assumed'), engineered headers included —
+  label, never a guess; low-snow labels carry nothing. Downstream mirrors
+  move ONLY in the deepened states (50-band: AK ID MA MN MT ND NY SD UT
+  WI WY; 70-band: ME NH VT — docs/plans/B11-EXPECTED-DIFF.md): the takeoff
+  header stick shifts SKU, the B21d schedule cell prints the new size
+  (size verbatim — the label never leaks into the cell), cripples
+  re-derive above a resized stick; B9's bracing keys on RO spans + seismic
+  flags and is untouched everywhere.
+  Origin: LOD-400 audit BATCH 11 (2026-08-20) — VT (60 psf) headers
+  byte-equal to INTL; DEFAULT_SPEC.headerRules was the last static
+  prescriptive wall table.
+  Gates: `src/jurisdiction/profiles.test.ts` (band identity pins incl.
+  low-snow reference equality, threshold encodings, headerFor
+  plumb-through, assumption matrix, 51-state sweep with the deepened set
+  enumerated) + `src/engines/wall-framing.test.ts` 'LOD-400 B11' describe
+  (per-span deepening matrix VT/MN vs INTL incl. the 53" boundary, honest
+  full-depth geometry, exact label pins, engineered-label composition,
+  low-snow member byte-equality, spec↔band purity) +
+  `src/plans/plan-set.test.ts` (B11 schedule-cell pin + TX≡INTL paper) +
+  `src/engines/takeoff.test.ts` (B11 SKU shift + low-snow row pins).
+
 ## M — Mechanical (HVAC)
 
 - **M1 Ducts never cross plate bands; interior storeys route in soffits.**
