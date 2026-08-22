@@ -25,6 +25,7 @@ import type {
   WallSlice,
 } from '../core/types'
 import { feet, inches } from '../core/units'
+import type { PlacedFixtureSlice } from '../core/wall-model'
 
 // ---- rule constants (data/electrical-rules.json) --------------------------
 
@@ -59,6 +60,21 @@ const GFCI_CATEGORIES: ReadonlySet<RoomSlice['category']> = new Set([
   'bathroom',
   'garage',
   'laundry',
+])
+
+/** NEC 210.8(A)(7)/(9): receptacles within 6 ft of a sink bowl edge — or of
+ * a bathtub / shower stall — are GFCI. Measured here from the placed item's
+ * plan CENTER (the scene carries no bowl-edge geometry; the center is the
+ * conservative deterministic proxy). */
+const SINK_GFCI_RADIUS = feet(rules.gfci.sinkRuleFt)
+
+/** Placed sanitary kinds that trigger the 6-ft GFCI radius: sinks per
+ * 210.8(A)(7) (kitchen sinks + lavatories), tubs/showers per 210.8(A)(9). */
+const SINK_RULE_KINDS: ReadonlySet<PlacedFixtureSlice['kind']> = new Set([
+  'kitchen-sink',
+  'lavatory',
+  'bathtub',
+  'shower',
 ])
 
 // ---- small 2D helpers ------------------------------------------------------
@@ -346,9 +362,16 @@ export function layoutElectrical(
   rooms: RoomSlice[],
   overrides?: ServiceOverrides,
   warnings?: string[],
+  /** Placed sanitary items (compute's `extractPlacedFixtures` — the same
+   * slice plumbing consumes): sinks/tubs drive the 210.8(A)(7)/(9) GFCI
+   * radius and pin the B14c counter runs + B14d basin receptacles. */
+  placed: PlacedFixtureSlice[] = [],
 ): Fixture[] {
   const fixtures: Fixture[] = []
   const wetRooms = rooms.filter((r) => GFCI_CATEGORIES.has(r.category))
+  const sinkSpots = placed.filter((p) => SINK_RULE_KINDS.has(p.kind))
+  const nearSink = (x: number, z: number): boolean =>
+    sinkSpots.some((s) => Math.hypot(x - s.plan[0], z - s.plan[1]) <= SINK_GFCI_RADIUS)
 
   for (const wall of walls) {
     // Curved walls are flagged upstream (matches wall framing) — skip in v1.
@@ -371,10 +394,13 @@ export function layoutElectrical(
       for (const u of receptaclePositions(segment)) {
         for (const face of faces) {
           const [x, z] = face.plan(u)
-          // NEC 210.8(A): device lands in a kitchen/bath/garage/laundry zone → GFCI.
-          // LOD 400: add the within-6-ft-of-sink/tub test [210.8(A)(7)/(9)]
-          // once fixture (sink) positions are extracted from the scene.
-          const gfci = wetRooms.some((r) => pointInPolygon([x, z], r.polygon))
+          // NEC 210.8(A): device lands in a kitchen/bath/garage/laundry zone
+          // → GFCI — OR within 6 ft of a placed sink/tub/shower
+          // [210.8(A)(7)/(9)]: the radius reaches receptacles in ADJACENT
+          // dry rooms (a dining-room box 5 ft from the kitchen sink flips).
+          // B14b closed the stale "once sink positions are extracted" gap —
+          // compute has extracted placedFixtures since the plumbing rebuild.
+          const gfci = wetRooms.some((r) => pointInPolygon([x, z], r.polygon)) || nearSink(x, z)
           fixtures.push({
             system: 'electrical',
             kind: gfci ? 'receptacle-gfci' : 'receptacle',

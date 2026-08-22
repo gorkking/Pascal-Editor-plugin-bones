@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import type { Fixture, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
+import type { PlacedFixtureSlice } from '../core/wall-model'
+import { computeLevel } from '../framing/compute'
+import { FramingNode } from '../framing/schema'
 import { feet, inches } from '../core/units'
 import { layoutElectrical, openingSpans, pointInPolygon, streetEdgePoint } from './electrical'
 import { unreachableDevices } from './electrical.test-helpers'
@@ -244,5 +247,139 @@ describe('B14a outdoor receptacles — NEC 210.52(E) front + back, WR GFCI, in-u
       expect(f.position[1]).toBeLessThanOrEqual(feet(6.5))
       expect(f.position[1]).toBeGreaterThan(0)
     }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B14b — the 6-ft sink GFCI radius consumes placedFixtures NOW
+// ---------------------------------------------------------------------------
+
+function placedItem(
+  id: string,
+  kind: PlacedFixtureSlice['kind'],
+  plan: [number, number],
+): PlacedFixtureSlice {
+  const profiles: Record<string, { hot: boolean; dfu: number; drainIn: number }> = {
+    'kitchen-sink': { hot: true, dfu: 2, drainIn: 1.5 },
+    lavatory: { hot: true, dfu: 1, drainIn: 1.25 },
+    bathtub: { hot: true, dfu: 2, drainIn: 1.5 },
+    shower: { hot: true, dfu: 2, drainIn: 2 },
+    toilet: { hot: false, dfu: 3, drainIn: 3 },
+  }
+  return { id, kind, plan, yaw: 0, ...(profiles[kind] as { hot: boolean; dfu: number; drainIn: number }) }
+}
+
+/** u-coordinate of a fixture along the 8 m south wall (w_s runs +X). */
+const southU = (f: Fixture): number => f.position[0]
+
+describe('B14b sink-radius GFCI — NEC 210.8(A)(7)/(9) from placed fixtures (stale comment closed)', () => {
+  test('a receptacle within 6 ft of a placed kitchen sink flips to GFCI in a DRY room; its siblings outside the radius do not', () => {
+    const { walls, rooms } = rectScene()
+    // south wall (8 m, no openings) walks 3 receptacles at u = 1.33 / 4 / 6.67
+    const sink = placedItem('sink_1', 'kitchen-sink', [4, 1])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [sink])
+    const south = fixtures.filter(
+      (f) =>
+        (f.kind === 'receptacle' || f.kind === 'receptacle-gfci') && f.sourceId === 'w_s',
+    )
+    expect(south.length).toBe(3)
+    const mid = south.find((f) => Math.abs(southU(f) - 4) < 0.1)
+    const left = south.find((f) => southU(f) < 2)
+    const right = south.find((f) => southU(f) > 6)
+    expect(mid?.kind).toBe('receptacle-gfci') // ~0.9 m from the sink
+    expect(left?.kind).toBe('receptacle') // ~2.8 m away — outside 6 ft
+    expect(right?.kind).toBe('receptacle')
+  })
+
+  test('bite direction: the SAME scene with the sink 3 m off the wall flips nothing', () => {
+    const { walls, rooms } = rectScene()
+    const farSink = placedItem('sink_1', 'kitchen-sink', [4, 3])
+    const fixtures = layoutElectrical(walls, rooms, undefined, undefined, [farSink])
+    const south = fixtures.filter(
+      (f) =>
+        (f.kind === 'receptacle' || f.kind === 'receptacle-gfci') && f.sourceId === 'w_s',
+    )
+    expect(south.every((f) => f.kind === 'receptacle')).toBe(true)
+  })
+
+  test('tubs and showers trigger the radius too (210.8(A)(9)); toilets never do', () => {
+    const { walls, rooms } = rectScene()
+    const tub = placedItem('tub_1', 'bathtub', [4, 1])
+    const withTub = layoutElectrical(walls, rooms, undefined, undefined, [tub])
+    const midTub = withTub.find(
+      (f) => f.sourceId === 'w_s' && Math.abs(southU(f) - 4) < 0.1 && f.kind !== 'switch',
+    )
+    expect(midTub?.kind).toBe('receptacle-gfci')
+
+    const toilet = placedItem('wc_1', 'toilet', [4, 1])
+    const withWc = layoutElectrical(walls, rooms, undefined, undefined, [toilet])
+    const midWc = withWc.find(
+      (f) => f.sourceId === 'w_s' && Math.abs(southU(f) - 4) < 0.1 && f.kind !== 'switch',
+    )
+    expect(midWc?.kind).toBe('receptacle')
+  })
+
+  test('the flip changes the KIND only — deviceId stays byte-stable across the sink edit (E5 reconcile-safe)', () => {
+    const { walls, rooms } = rectScene()
+    const sink = placedItem('sink_1', 'kitchen-sink', [4, 1])
+    const dry = layoutElectrical(walls, rooms)
+    const wet = layoutElectrical(walls, rooms, undefined, undefined, [sink])
+    const idOf = (fx: Fixture[]) =>
+      fx.find((f) => f.sourceId === 'w_s' && Math.abs(southU(f) - 4) < 0.1 && f.kind !== 'switch')
+    expect(idOf(dry)?.kind).toBe('receptacle')
+    expect(idOf(wet)?.kind).toBe('receptacle-gfci')
+    expect(String(idOf(wet)?.meta?.deviceId)).toBe(String(idOf(dry)?.meta?.deviceId))
+  })
+
+  test('computeLevel passes placed fixtures through — a placed kitchen item flips the nearby box end to end', () => {
+    const nodes = (withSink: boolean): Record<string, Record<string, unknown>> => ({
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: {
+        id: 'w_s',
+        type: 'wall',
+        parentId: 'level_1',
+        start: [0, 0],
+        end: [8, 0],
+        thickness: 0.15,
+        height: 2.5,
+        frontSide: 'exterior',
+        children: [],
+      },
+      w_e: { id: 'w_e', type: 'wall', parentId: 'level_1', start: [8, 0], end: [8, 6], thickness: 0.15, height: 2.5, frontSide: 'exterior', children: [] },
+      w_n: { id: 'w_n', type: 'wall', parentId: 'level_1', start: [8, 6], end: [0, 6], thickness: 0.15, height: 2.5, frontSide: 'exterior', children: [] },
+      w_w: { id: 'w_w', type: 'wall', parentId: 'level_1', start: [0, 6], end: [0, 0], thickness: 0.15, height: 2.5, frontSide: 'exterior', children: [] },
+      ...(withSink
+        ? {
+            sink_item: {
+              id: 'sink_item',
+              type: 'item',
+              parentId: 'level_1',
+              asset: { id: 'kitchen' },
+              position: [4, 0, 1],
+              rotation: [0, 0, 0],
+            },
+          }
+        : {}),
+      bones: {
+        id: 'bonesframing_recept',
+        type: 'bones:framing',
+        parentId: 'level_1',
+        jurisdiction: 'INTL',
+        detail: '200',
+        showElectrical: true,
+      },
+    })
+    const dry = computeLevel(nodes(false), FramingNode.parse(nodes(false).bones))
+    const wet = computeLevel(nodes(true), FramingNode.parse(nodes(true).bones))
+    const near = (fx: Fixture[]) =>
+      fx.filter(
+        (f) =>
+          (f.kind === 'receptacle' || f.kind === 'receptacle-gfci') &&
+          Math.hypot(f.position[0] - 4, f.position[2] - 1) <= feet(6),
+      )
+    expect(near(dry.fixtures).length).toBeGreaterThan(0)
+    expect(near(dry.fixtures).every((f) => f.kind === 'receptacle')).toBe(true)
+    expect(near(wet.fixtures).length).toBeGreaterThan(0)
+    expect(near(wet.fixtures).every((f) => f.kind === 'receptacle-gfci')).toBe(true)
   })
 })
