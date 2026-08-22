@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { OpeningSlice, RoomSlice, WallSlice } from '../core/types'
+import type { Fixture, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import { feet, inches } from '../core/units'
 import { layoutElectrical, openingSpans, pointInPolygon, streetEdgePoint } from './electrical'
 import { unreachableDevices } from './electrical.test-helpers'
@@ -81,17 +81,17 @@ function rectScene(southDoorU?: number): { walls: WallSlice[]; rooms: RoomSlice[
     wall('w_w', [0, 6], [0, 0]),
   ]
   const rooms = [
-    room('living', [
+    room('other', [
       [0, 0],
       [8, 0],
       [8, 6],
       [0, 6],
-    ]),
+    ], { name: 'living' }),
   ]
   return { walls, rooms }
 }
 
-const outdoor = (fixtures: { kind: string }[]) =>
+const outdoor = (fixtures: Fixture[]): Fixture[] =>
   fixtures.filter((f) => f.kind === 'receptacle-wr-gfci')
 
 describe('B14a outdoor receptacles — NEC 210.52(E) front + back, WR GFCI, in-use covers', () => {
