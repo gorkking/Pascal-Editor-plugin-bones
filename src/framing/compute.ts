@@ -823,8 +823,9 @@ function computeLevelUncached(
   }
 
   // B10 uplift-path honesty at the roof seam: high-wind wall connectors
-  // under a roof that frames rafters with ZERO hurricane ties (flat roofs
-  // call no tieAt today — the B8 sibling seam) warn per roof — the wall
+  // under a roof that frames rafters with ZERO hurricane ties (every
+  // framed shape calls tieAt since B8b — this fires only on future
+  // tie-less shapes) warn per roof — the wall
   // continues a path the roof never starts, and that must be SAID (P4
   // prints it), never implied. Results with no roof members stay silent
   // (a toggled-off / other-storey roof is not missing hardware — B9c).

@@ -160,10 +160,14 @@ export function extractRoofs(nodes: NodesRecord, levelId: string): RoofSegmentSl
  * assumption stops at the ceiling joists), so the gap PRINTS instead of
  * upgrading silently: the flag rides the ridge member to the takeoff Flags
  * row and the P4 schedules block (the B6 stated-gap convention). Applies to
- * the GABLE ridge (slope = the schema pitch) and the GAMBREL main ridge
- * (slope = the shallow UPPER planes' φ — a 15° gambrel's upper faces fall
- * under 3:12 while its steep lowers don't; fix-round advisory). Hip/crown
- * ridges remain a queued residual. 200 stays schematic.
+ * the GABLE ridge (slope = the schema pitch — the dutch GABLET rides this
+ * route with its computed crown pitch), the GAMBREL main ridge (slope =
+ * the shallow UPPER planes' φ — a 15° gambrel's upper faces fall under
+ * 3:12 while its steep lowers don't; fix-round advisory), and the HIP
+ * ridge (slope = the long-plane commons' pitch — the MANSARD CROWN rides
+ * this route via the inner frameHip with its computed crown pitch, which
+ * sits sub-3:12 even on the default 40° mansard; NIGHT-10 residual
+ * closed). 200 stays schematic.
  */
 function ridgeBeamFlagFor(spec: FramingSpec, slopeTan: number): string | undefined {
   return spec.detail !== '200' && slopeTan < 3 / 12 - EPS
@@ -642,8 +646,17 @@ function deckPlane(
   )
 }
 
-/** Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path). */
-function tieAt(emit: Emit, x: number, z: number, y: number) {
+/**
+ * Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path).
+ * NIGHT-10 (the B10 skeptic's residual): the sub-130 mph coastal belt
+ * (`hurricaneTies` without `highWindUplift` — TX/AL/CT/DE/GA/MA/MS/NJ/NY/
+ * NC/RI/SC) books roof ties while the WALL engine deliberately models no
+ * continuation (S16 keeps those walls byte-equal to INTL), so the tie
+ * itself states its scope instead of implying a full path. ≥ 130 mph
+ * (`highWindUplift` — LA/HI/FL) keeps the plain label: B10's wall
+ * connectors/straps ARE the continuation there.
+ */
+function tieAt(emit: Emit, spec: FramingSpec, x: number, z: number, y: number) {
   emit(
     'blocking',
     undefined,
@@ -653,7 +666,9 @@ function tieAt(emit: Emit, x: number, z: number, y: number) {
     0,
     inches(3),
     'steel',
-    'hurricane tie',
+    spec.highWindUplift
+      ? 'hurricane tie'
+      : 'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)',
   )
 }
 
@@ -756,7 +771,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
         undefined,
         rafterFlag,
       )
-      if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
+      if (spec.hurricaneTies) tieAt(emit, spec, x, side * run, eaveY)
     }
   }
 
@@ -1066,8 +1081,8 @@ function frameShed(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       shedFlag,
     )
     if (spec.hurricaneTies) {
-      tieAt(emit, x, roof.depth / 2, lowY)
-      tieAt(emit, x, -roof.depth / 2, lowY + roof.depth * Math.tan(theta))
+      tieAt(emit, spec, x, roof.depth / 2, lowY)
+      tieAt(emit, spec, x, -roof.depth / 2, lowY + roof.depth * Math.tan(theta))
     }
   }
 
@@ -1128,6 +1143,12 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°`
           : ''
       }${splicedNote(spec, ridgeHalf * 2, 'rafter pairs (ridge board)')}`,
+      undefined,
+      // B8a extension (NIGHT-10): the slope CARRYING the hip ridge is the
+      // long-plane commons' pitch — sub-3:12 prints the R802.4.3 flag; the
+      // mansard crown inherits this via the inner frameHip (its computed
+      // crown pitch answers, not the schema pitch).
+      ridgeBeamFlagFor(spec, tan),
     )
   }
 
@@ -1141,11 +1162,34 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // of the square-ended box (round-10 gate).
   const [hipRidgeT] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const hipInset = Math.SQRT2 * (hipRidgeT / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
-  const hipLen = Math.hypot(run * Math.SQRT2, rise) - hipInset
-  // Hips carry jacks — table spans are a rafter concept, but a field-spliced
-  // hip is no more a structural member than a spliced common (one-piece check).
-  const hipFlag = spec.detail === '200' ? undefined : onePieceFlag('Hip', hipLen)
+  // Long-plane common stations (also consumed by the apex trim below and the
+  // collar-tie band): layout() guarantees an end station at ridgeHalf − halfT.
+  const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
+  // NIGHT-10 square-hip apex trim: with NO ridge board (ridgeHalf ≤ 0.05 —
+  // the degenerate pyramid apex, width ≈ depth and the square mansard crown)
+  // the hips' top cuts bear on the apex COMMON pair instead of a ridge end.
+  // layout()'s guaranteed end station snaps that pair OFF-CENTER (u =
+  // ridgeHalf − halfT, box overhanging one thickness past the negative ridge
+  // end), so the hips pointing at the overhung side must trim past the
+  // pair's FAR face — the exact mirror of the clearance the opposite hips
+  // already have (which SAT-pass). Plan per-axis overhang beyond each ridge
+  // end, converted to slope inset along the 45° diagonal. Rectangular hips
+  // (ridge board present) keep extra = 0 — byte-identical (the pre-existing
+  // class was 2 hip×common SAT pairs at the ridge point, never gated).
+  const apexExtra = (se: 1 | -1): number => {
+    if (ridgeHalf > 0.05) return 0
+    const overhang =
+      se === 1
+        ? Math.max(...commons) + halfT - ridgeHalf
+        : -ridgeHalf - (Math.min(...commons) - halfT)
+    return overhang > EPS ? (Math.SQRT2 * overhang) / Math.cos(hipTilt) : 0
+  }
   for (const se of [1, -1] as const) {
+    const insetSe = hipInset + apexExtra(se)
+    const hipLenSe = Math.hypot(run * Math.SQRT2, rise) - insetSe
+    // Hips carry jacks — table spans are a rafter concept, but a field-spliced
+    // hip is no more a structural member than a spliced common (one-piece check).
+    const hipFlagSe = spec.detail === '200' ? undefined : onePieceFlag('Hip', hipLenSe)
     for (const sc of [1, -1] as const) {
       // Ridge end (segment frame) and its corner.
       const end: [number, number] = alongX ? [se * ridgeHalf, 0] : [0, se * ridgeHalf]
@@ -1157,18 +1201,18 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
       const dz = corner[1] - end[1]
       const planLen = Math.hypot(dx, dz)
       // Slide the START point down the diagonal by the inset's plan component.
-      const slide = (hipInset * Math.cos(hipTilt)) / planLen
+      const slide = (insetSe * Math.cos(hipTilt)) / planLen
       const start: [number, number] = [end[0] + dx * slide, end[1] + dz * slide]
-      const startY = ridgeY - hipInset * Math.sin(hipTilt)
+      const startY = ridgeY - insetSe * Math.sin(hipTilt)
       const yawTo = Math.atan2(-dz, dx) // +X box onto the plan diagonal
       emit(
         'hip',
         spec.rafterSize,
-        [hipLen, rd, t],
+        [hipLenSe, rd, t],
         [(start[0] + corner[0]) / 2, (startY + eaveY) / 2, (start[1] + corner[1]) / 2],
         yawTo + Math.PI, // point downhill (from ridge end toward the corner)
         hipTilt,
-        hipLen,
+        hipLenSe,
         'lumber',
         `Hip ${spec.rafterSize}${
           spec.detail === '400'
@@ -1176,7 +1220,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
             : ''
         }`,
         undefined,
-        hipFlag,
+        hipFlagSe,
       )
     }
   }
@@ -1193,7 +1237,6 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // stays a follow-up (the gable machinery assumes full-width joist lines;
   // the hip band stops short of the end planes) — flag only (S1).
   const commonFlag = slopeRafterFlag(spec, run, commonSlopeLen)
-  const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
   for (const u of commons) {
     for (const side of [1, -1] as const) {
       const tipPlan = run + roof.overhang * cosT
@@ -1216,7 +1259,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         commonFlag,
       )
       if (spec.hurricaneTies) {
-        tieAt(emit, alongX ? u : side * run, alongX ? side * run : u, eaveY)
+        tieAt(emit, spec, alongX ? u : side * run, alongX ? side * run : u, eaveY)
       }
     }
   }
@@ -1288,7 +1331,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           // Uplift path applies to every bearing rafter — jacks included
           // (round-2 advisory: hip jacks had no ties in high-wind specs).
           if (spec.hurricaneTies) {
-            tieAt(emit, alongX ? long : sc * run, alongX ? sc * run : long, eaveY)
+            tieAt(emit, spec, alongX ? long : sc * run, alongX ? sc * run : long, eaveY)
           }
         }
       }
@@ -1327,6 +1370,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         if (spec.hurricaneTies) {
           tieAt(
             emit,
+            spec,
             alongX ? se * (ridgeHalf + run) : 0,
             alongX ? 0 : se * (ridgeHalf + run),
             eaveY,
@@ -1365,6 +1409,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           if (spec.hurricaneTies) {
             tieAt(
               emit,
+              spec,
               alongX ? se * (ridgeHalf + run) : sv * v,
               alongX ? sv * v : se * (ridgeHalf + run),
               eaveY,
@@ -1435,9 +1480,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // The joists CROSS the ridge line at plan center — on a near-flat hip
   // (an inner mansard crown can compute a ~5° pitch) the ridge board's
   // underside descends INTO the joist band; no room = no fake wood (the
-  // collar-tie low-pitch skip convention; B8a flags sub-3:12 gable ridges
-  // and gambrel-main ridges via their upper-plane slope — the hip/crown
-  // ridge's own R802.4.3 flag is a queued residual).
+  // collar-tie low-pitch skip convention; the hip/crown ridge's own
+  // R802.4.3 flag rides the ridge member itself — B8a extension, NIGHT-10).
   const [, cjRidgeD] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const cjClearsRidge = ridgeHalf <= 0.05 || eaveY + cjD + 0.002 <= ridgeY - cjRidgeD
   if (cjLen >= 0.3 && cjBandHalf > cjT && cjClearsRidge) {
@@ -1659,8 +1703,8 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
     )
     if (typeof tieSpot === 'number') {
       for (const side of [1, -1] as const) {
-        if (spansX) tieAt(emit, side * tieBear, tieSpot, roof.wallHeight)
-        else tieAt(emit, tieSpot, side * tieBear, roof.wallHeight)
+        if (spansX) tieAt(emit, spec, side * tieBear, tieSpot, roof.wallHeight)
+        else tieAt(emit, spec, tieSpot, side * tieBear, roof.wallHeight)
       }
     }
   }
@@ -1810,7 +1854,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         undefined,
         upperFlag,
       )
-      if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
+      if (spec.hurricaneTies) tieAt(emit, spec, x, side * run, eaveY)
     }
   }
 
@@ -2127,7 +2171,7 @@ function frameSkirt(
           undefined,
           faceFlag,
         )
-        if (spec.hurricaneTies) tieAt(emit, stationIsX ? u : side * half, stationIsX ? side * half : u, eaveY)
+        if (spec.hurricaneTies) tieAt(emit, spec, stationIsX ? u : side * half, stationIsX ? side * half : u, eaveY)
       }
     }
   }

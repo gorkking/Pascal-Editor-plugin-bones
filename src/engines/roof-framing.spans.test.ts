@@ -299,7 +299,21 @@ describe('compact roofs stay byte-equal (blast radius gate)', () => {
       const on = frameRoofs([seg(over)], [], DEFAULT_SPEC)
       const off = frameRoofs([seg(over)], [], noTables)
       expect(on).toEqual(off)
-      expect(flagged(on)).toHaveLength(0)
+      // INTENDED CHANGE (NIGHT-10, B8a extension): the mansard CROWN ridge
+      // carries the R802.4.3 sub-3:12 flag — SHAPE honesty (the crown pitch
+      // computes ~8.8° from the host ratios at any footprint), table-
+      // independent (`on == off` above proves it). This gate polices SPAN
+      // flags — the ridge-beam statement is carved out like the gambrel
+      // struts below, and pinned non-vacuous for the mansard.
+      const spanFlagged = flagged(on).filter((m) => !m.flag?.includes('R802.4.3'))
+      expect(spanFlagged).toHaveLength(0)
+      if (name === 'mansard') {
+        const crownRidge = on.filter((m) => m.role === 'ridge')
+        expect(crownRidge).toHaveLength(1)
+        expect(crownRidge[0]?.flag).toContain('ridge beam required, R802.4.3')
+      } else {
+        expect(flagged(on)).toHaveLength(0)
+      }
       expect(on.some((m) => m.label?.includes('Purlin ') && m.label?.includes('mid-span'))).toBe(
         false,
       )

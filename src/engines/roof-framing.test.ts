@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member } from '../core/types'
+import { applyJurisdiction, jurisdictionOptions, profileFor } from '../jurisdiction/profiles'
 import {
   birdsmouthSeat,
   detectUnframedRoofIntersections,
@@ -145,9 +146,11 @@ describe('frameRoofs — gable', () => {
   })
 
   test('no hurricane ties by default; present under a high-wind spec', () => {
-    expect(members.some((m) => m.label === 'hurricane tie')).toBe(false)
+    expect(members.some((m) => m.label?.startsWith('hurricane tie'))).toBe(false)
+    // hurricaneTies without highWindUplift = the sub-130 BELT — its ties
+    // carry the NIGHT-10 wall-path scope clause (dedicated describe below)
     const windy = frameRoofs([roof], [], { ...DEFAULT_SPEC, hurricaneTies: true })
-    const ties = windy.filter((m) => m.label === 'hurricane tie')
+    const ties = windy.filter((m) => m.label?.startsWith('hurricane tie'))
     // one tie per bearing rafter — barge rafters ride the rake, no plate below
     const bearing = byRole(windy, 'rafter').filter((r) => !r.label?.includes('Barge'))
     expect(ties.length).toBe(bearing.length)
@@ -202,6 +205,78 @@ describe('frameRoofs — hip', () => {
     expect(hip.length).toBeCloseTo(Math.hypot(run * Math.SQRT2, rise) - hipInset, 4)
     const axis = longAxis(hip)
     expect(Math.abs(axis.y)).toBeGreaterThan(0.3) // it climbs
+  })
+})
+
+describe('frameRoofs — SQUARE hip: degenerate pyramid apex trim (NIGHT-10 residual)', () => {
+  // width == depth → ridgeHalf 0: NO ridge board, the four hips converge at
+  // the apex where layout()'s guaranteed end station parks the single common
+  // pair OFF-CENTER (station u = −t/2, box spanning [−t, 0] on the long
+  // axis). The two hips pointing at the overhung side bear on the pair's
+  // FAR face — trimmed one common thickness per plan axis (√2·t/cos(tilt)
+  // along the slope) past the standard ridge-end inset; the two opposite
+  // hips keep the standard inset (the pair's near face sits ON the apex
+  // line, the exact mirror). Pre-existing class this closes: 2 hip×common
+  // SAT overlaps at the ridge point, byte-identical across 3 branches,
+  // never gated (the interpenetration matrix now composes the class).
+  const roof = seg({ roofType: 'hip', width: 8, depth: 8 })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  const run = 4
+  const theta = roof.pitch
+  const rise = run * Math.tan(theta)
+  const hipTilt = Math.atan2(rise, run * Math.SQRT2)
+  const t = 1.5 * 0.0254
+  const rd = 5.5 * 0.0254
+  const baseY = roof.position[1] + roof.wallHeight
+  const baseInset = Math.SQRT2 * ((1.5 * 0.0254) / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
+  const extra = (Math.SQRT2 * t) / Math.cos(hipTilt)
+  const fullDiag = Math.hypot(run * Math.SQRT2, rise)
+  const endpoints = (m: Member): [Vector3, Vector3] => {
+    const a = longAxis(m).multiplyScalar(m.length / 2)
+    const p = new Vector3(...m.position)
+    return [p.clone().add(a), p.clone().sub(a)]
+  }
+
+  test('no ridge board; ONE common pair parked at u = −t/2 (the trim reference)', () => {
+    expect(byRole(members, 'ridge')).toHaveLength(0)
+    const commons = members.filter((m) => m.label?.includes('(hip common)'))
+    expect(commons).toHaveLength(2)
+    for (const c of commons) expect(c.position[0]).toBeCloseTo(-t / 2, 6)
+  })
+
+  test('the two hips facing the pair trim √2·t/cos(tilt) further; the others keep the ridge-end inset', () => {
+    const hips = byRole(members, 'hip')
+    expect(hips).toHaveLength(4)
+    const cornersSeen = new Set<string>()
+    for (const h of hips) {
+      const [e1, e2] = endpoints(h)
+      const top = e1.y > e2.y ? e1 : e2
+      const bot = e1.y > e2.y ? e2 : e1
+      // corners stay EXACT — the trim moves only the apex end
+      expect(bot.y).toBeCloseTo(baseY, 6)
+      expect(Math.abs(bot.x)).toBeCloseTo(run, 6)
+      expect(Math.abs(bot.z)).toBeCloseTo(run, 6)
+      cornersSeen.add(`${Math.sign(bot.x)},${Math.sign(bot.z)}`)
+      const inset = bot.x < 0 ? baseInset + extra : baseInset
+      expect(h.length).toBeCloseTo(fullDiag - inset, 6)
+      expect(top.y).toBeCloseTo(baseY + rise - inset * Math.sin(hipTilt), 6)
+      // the far-face bearing: the trimmed hips' tops start PAST the common
+      // pair's far face plane (x = −t), never inside the pair
+      if (bot.x < 0) expect(top.x).toBeLessThanOrEqual(-t + 1e-9)
+      else expect(top.x).toBeGreaterThanOrEqual(0)
+    }
+    expect(cornersSeen.size).toBe(4)
+  })
+
+  test('rectangular hips keep extra = 0 — all four share the ridge-end inset (byte guard)', () => {
+    const rect = frameRoofs([seg({ roofType: 'hip' })], [], DEFAULT_SPEC) // 8×6
+    const runR = 3
+    const riseR = runR * Math.tan(theta)
+    const tiltR = Math.atan2(riseR, runR * Math.SQRT2)
+    const insetR = Math.SQRT2 * ((1.5 * 0.0254) / 2 + t / 2) + (rd / 2) * Math.tan(tiltR)
+    for (const h of byRole(rect, 'hip')) {
+      expect(h.length).toBeCloseTo(Math.hypot(runR * Math.SQRT2, riseR) - insetR, 6)
+    }
   })
 })
 
@@ -612,7 +687,7 @@ describe('frameRoofs — hip jacks carry hurricane ties in high-wind specs', () 
       ...DEFAULT_SPEC,
       hurricaneTies: true,
     })
-    const ties = windy.filter((m) => m.label === 'hurricane tie')
+    const ties = windy.filter((m) => m.label?.startsWith('hurricane tie'))
     const bearing =
       byRole(windy, 'rafter').length + byRole(windy, 'jack-rafter').length
     expect(ties.length).toBe(bearing)
@@ -1418,13 +1493,23 @@ describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (
   //    gable ridges (the pinned scenes sit at 40°), B8b gates flat ties on
   //    hurricaneTies (flat-400 is non-windy; gable-400-windy has no flat),
   //    B8c emits WARNINGS, never members (the valley pin proves it).
+  // NIGHT-10 INTENDED-CHANGE (per-shape enumeration, master db7ada2):
+  //  - gable-400-windy REPINNED (tie-label residual ONLY): the pin's spec
+  //    is hurricaneTies WITHOUT highWindUplift = the sub-130 mph BELT —
+  //    every 'hurricane tie' label gained the wall-path scope clause. The
+  //    geometry is untouched (the belt describe pins strip-label equality
+  //    against the highWindUplift spec). Recaptured at the tieAt change.
+  //  - EVERY other pin holds: the 10 non-windy pins book no ties at all;
+  //    the square-hip apex trim (residual 1) moves only width==depth
+  //    shapes (none pinned); the hip/crown R802.4.3 flag (residual 2)
+  //    moves only sub-3:12 hip ridges + the mansard crown (none pinned).
   const hashOf = (members: Member[]): string =>
     createHash('sha256').update(JSON.stringify(members)).digest('hex').slice(0, 16)
   const PINS: [string, Partial<RoofSegmentSlice>, Partial<FramingSpec>, string][] = [
     ['gable-300', {}, {}, '0630b9f861ee5f6c'],
     ['gable-400', {}, { detail: '400' }, '956ef4b91c7d838c'],
     ['gable-200', {}, { detail: '200' }, '34f8a921c61c82e3'],
-    ['gable-400-windy', {}, { detail: '400', hurricaneTies: true }, 'cf188b8d03379ed1'],
+    ['gable-400-windy', {}, { detail: '400', hurricaneTies: true }, 'a408ae61e9011a01'],
     ['gable-big-400', { width: 10, depth: 12 }, { detail: '400' }, '9488d2b7f7a2c3c9'],
     ['shed-300', { roofType: 'shed' }, {}, '76e8a43f3f95a947'],
     ['shed-400', { roofType: 'shed' }, { detail: '400' }, '56128ff5e8d68001'],
@@ -1448,6 +1533,116 @@ describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (
       { ...DEFAULT_SPEC, detail: '400' },
     )
     expect(hashOf(members)).toBe('2ef111d64bcdd8d9')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NIGHT-10: the sub-130 mph roof-tie belt states its wall-path scope
+// ---------------------------------------------------------------------------
+
+describe('NIGHT-10: sub-130 mph roof ties state their wall-path scope (B10 skeptic residual)', () => {
+  // The 115-129 mph coastal belt (hurricaneTies WITHOUT highWindUplift)
+  // books roof-to-wall ties while S16 deliberately keeps its walls
+  // byte-equal to INTL — no connectors, no straps, no foundation path. The
+  // tie member itself now says so; ≥ 130 mph keeps the plain label because
+  // B10's wall hardware IS the continuation there.
+  const PLAIN = 'hurricane tie'
+  const BELT =
+    'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)'
+  const beltSpec: FramingSpec = { ...DEFAULT_SPEC, detail: '400', hurricaneTies: true }
+  const fullSpec: FramingSpec = { ...beltSpec, highWindUplift: true }
+  const tiesOf = (ms: Member[]) => ms.filter((m) => m.label?.startsWith(PLAIN))
+  const SHAPES: [string, Partial<RoofSegmentSlice>][] = [
+    ['gable', {}],
+    ['shed', { roofType: 'shed' }],
+    ['hip', { roofType: 'hip' }],
+    ['flat', { roofType: 'flat' }],
+    ['gambrel', { roofType: 'gambrel' }],
+    ['mansard', { roofType: 'mansard' }], // skirt ties
+    ['dutch', { roofType: 'dutch' }],
+  ]
+
+  test('belt spec: EVERY tie on every tying shape carries the exact scope clause', () => {
+    for (const [name, over] of SHAPES) {
+      const ties = tiesOf(frameRoofs([seg(over)], [], beltSpec))
+      expect({ name, some: ties.length > 0 }).toEqual({ name, some: true })
+      for (const tie of ties) expect(tie.label).toBe(BELT)
+    }
+  })
+
+  test('≥130 spec (highWindUplift): ties keep the plain label — B10 walls continue the path', () => {
+    for (const [name, over] of SHAPES) {
+      const ties = tiesOf(frameRoofs([seg(over)], [], fullSpec))
+      expect({ name, some: ties.length > 0 }).toEqual({ name, some: true })
+      for (const tie of ties) expect(tie.label).toBe(PLAIN)
+    }
+  })
+
+  test('the label is the ONLY delta: normalizing belt tie labels reproduces the ≥130 bytes', () => {
+    for (const [name, over] of SHAPES) {
+      const belt = frameRoofs([seg(over)], [], beltSpec).map((m) =>
+        m.label === BELT ? { ...m, label: PLAIN } : m,
+      )
+      const full = frameRoofs([seg(over)], [], fullSpec)
+      expect({ name, eq: JSON.stringify(belt) === JSON.stringify(full) }).toEqual({
+        name,
+        eq: true,
+      })
+    }
+  })
+
+  test('jurisdiction truth: exactly 12 belt states — enumerated, derived, and labeled', () => {
+    // Derive the belt from the data itself (the B10 sweep discipline) and
+    // pin the enumeration: a jurisdiction drifting across the 130 boundary
+    // must show up HERE, not silently swap tie labels.
+    const belt: string[] = []
+    const full: string[] = []
+    for (const { code } of jurisdictionOptions()) {
+      const p = profileFor(code)
+      if (!p.hurricaneTies) continue
+      if (p.ultimateWindMph >= 130) full.push(code)
+      else belt.push(code)
+    }
+    expect(belt.sort()).toEqual(['AL', 'CT', 'DE', 'GA', 'MA', 'MS', 'NC', 'NJ', 'NY', 'RI', 'SC', 'TX'])
+    expect(full.sort()).toEqual(['FL', 'HI', 'LA'])
+    for (const code of belt) {
+      const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
+      expect({ code, ties: sp.hurricaneTies, uplift: sp.highWindUplift }).toEqual({
+        code,
+        ties: true,
+        uplift: false,
+      })
+      const ties = tiesOf(frameRoofs([seg()], [], sp))
+      expect(ties.length).toBeGreaterThan(0)
+      for (const tie of ties) expect(tie.label).toBe(BELT)
+    }
+    for (const code of full) {
+      const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
+      const ties = tiesOf(frameRoofs([seg()], [], sp))
+      expect(ties.length).toBeGreaterThan(0)
+      for (const tie of ties) expect(tie.label).toBe(PLAIN)
+    }
+    // INTL books no ties and stays byte-equal to the default spec
+    const intl = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor('INTL'))
+    const intlMembers = frameRoofs([seg()], [], intl)
+    expect(tiesOf(intlMembers)).toHaveLength(0)
+    expect(JSON.stringify(intlMembers)).toBe(
+      JSON.stringify(frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '400' })),
+    )
+  })
+
+  test('takeoff: the tie row counts by role+material+system — the clause books nothing new', () => {
+    const beltRows = computeTakeoff(frameRoofs([seg()], [], beltSpec), [])
+    const fullRows = computeTakeoff(frameRoofs([seg()], [], fullSpec), [])
+    const beltRow = beltRows.find((r) => r.item === 'Hurricane ties')
+    const fullRow = fullRows.find((r) => r.item === 'Hurricane ties')
+    expect(beltRow).toBeDefined()
+    expect(beltRow?.quantity).toBe(fullRow?.quantity as never)
+    expect(beltRow?.detail).toBe(fullRow?.detail as never)
+    // the clause is a LABEL, never a flag — no Flags row appears for it
+    expect(
+      beltRows.some((r) => r.section === 'Flags' && r.detail.includes('wall/foundation uplift path')),
+    ).toBe(false)
   })
 })
 
@@ -1517,6 +1712,96 @@ describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', ()
     const ok = frameRoofs([seg({ roofType: 'gambrel' })], [], { ...DEFAULT_SPEC, detail: '400' })
     for (const m of ok) expect(m.flag ?? '').not.toContain('R802.4.3')
   })
+
+  // NIGHT-10 (B8a's stated residual): hip ridges + mansard/dutch crown
+  // ridges join the flag route. The slope that answers is the one CARRYING
+  // the ridge: the hip's long-plane commons' pitch (= schema pitch), the
+  // mansard crown's COMPUTED pitch (sub-3:12 even at the default 40° schema
+  // — tan ≈ 0.154 from the host ratios), the dutch gablet's computed pitch
+  // (= schema pitch at default ratios, served by the gable route already).
+  test('NIGHT-10: a 10° hip ridge carries the flag at 300 and 400 — on the RIDGE only', () => {
+    for (const detail of ['300', '400'] as const) {
+      const members = frameRoofs([seg({ roofType: 'hip', pitch: (10 * Math.PI) / 180 })], [], {
+        ...DEFAULT_SPEC,
+        detail,
+      })
+      const ridge = byRole(members, 'ridge')
+      expect(ridge).toHaveLength(1)
+      expect((ridge[0] as Member).flag).toBe(FLAG)
+      for (const m of members) {
+        if (m.role !== 'ridge') expect(m.flag ?? '').not.toContain('R802.4.3')
+      }
+    }
+  })
+
+  test('NIGHT-10: hip boundary — exactly 3:12 and the default 40° stay clean; LOD 200 silent', () => {
+    for (const pitch of [Math.atan(3 / 12), (40 * Math.PI) / 180]) {
+      const members = frameRoofs([seg({ roofType: 'hip', pitch })], [], {
+        ...DEFAULT_SPEC,
+        detail: '400',
+      })
+      for (const m of members) expect(m.flag ?? '').not.toContain('R802.4.3')
+    }
+    const lod200 = frameRoofs([seg({ roofType: 'hip', pitch: (10 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '200',
+    })
+    for (const m of lod200) expect(m.flag ?? '').not.toContain('R802.4.3')
+    // a SQUARE sub-3:12 hip converges to a point — no ridge board exists,
+    // so there is nothing for R802.4.3 to govern (the flag rides ridge
+    // members only; the apex trim story is the NIGHT-10 sibling gate)
+    const square = frameRoofs(
+      [seg({ roofType: 'hip', width: 8, depth: 8, pitch: (10 * Math.PI) / 180 })],
+      [],
+      { ...DEFAULT_SPEC, detail: '400' },
+    )
+    expect(byRole(square, 'ridge')).toHaveLength(0)
+    for (const m of square) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('NIGHT-10: the default mansard CROWN flags (computed ~8.8°); a 55° mansard crown (~14.7°) is clean', () => {
+    const members = frameRoofs([seg({ roofType: 'mansard' })], [], { ...DEFAULT_SPEC, detail: '400' })
+    const crown = byRole(members, 'ridge')
+    expect(crown).toHaveLength(1)
+    expect((crown[0] as Member).flag).toBe(FLAG)
+    for (const m of members) {
+      if (m.role !== 'ridge') expect(m.flag ?? '').not.toContain('R802.4.3')
+    }
+    const steep = frameRoofs([seg({ roofType: 'mansard', pitch: (55 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    for (const m of steep) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('NIGHT-10: the dutch gablet rides the GABLE route — sub-3:12 dutch pins the flag (pre-existing coverage)', () => {
+    // At default ratios the gablet's computed pitch equals the schema pitch:
+    // a 10° dutch composes a sub-3:12 crown ridge — the gable machinery
+    // already flags it (verified byte-identical before/after NIGHT-10).
+    const members = frameRoofs([seg({ roofType: 'dutch', pitch: (10 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const crown = byRole(members, 'ridge')
+    expect(crown).toHaveLength(1)
+    expect((crown[0] as Member).flag).toBe(FLAG)
+    const steep = frameRoofs([seg({ roofType: 'dutch' })], [], { ...DEFAULT_SPEC, detail: '400' })
+    for (const m of steep) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('NIGHT-10: the hip/crown flag reaches a takeoff Flags row (P4 prints it)', () => {
+    for (const over of [
+      { roofType: 'hip' as const, pitch: (10 * Math.PI) / 180 },
+      { roofType: 'mansard' as const },
+    ]) {
+      const rows = computeTakeoff(frameRoofs([seg(over)], [], { ...DEFAULT_SPEC, detail: '400' }), [])
+      const row = rows.find(
+        (r) => r.section === 'Flags' && r.detail.includes('ridge beam required, R802.4.3'),
+      )
+      expect(row).toBeDefined()
+      expect(row?.quantity).toBe(1) // one ridge, one statement
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -1525,7 +1810,10 @@ describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', ()
 
 describe('LOD-400 B8b: flat-roof joists tie BOTH bearing ends under high wind (R802.11)', () => {
   const windy = { ...DEFAULT_SPEC, hurricaneTies: true }
-  const tiesOf = (members: Member[]) => members.filter((m) => m.label === 'hurricane tie')
+  // the B8b windy spec is the sub-130 BELT (hurricaneTies, no highWindUplift)
+  // — NIGHT-10 gave its ties the wall-path scope clause; prefix match here,
+  // the exact-label pins live in the NIGHT-10 belt describe
+  const tiesOf = (members: Member[]) => members.filter((m) => m.label?.startsWith('hurricane tie'))
 
   test('windy census: exactly two ties per joist, at the plate line on the joist underside plane', () => {
     const roof = seg({ roofType: 'flat' }) // 8 × 6 → joists run along Z, bearing at z = ±3

@@ -856,7 +856,20 @@ AND a gate — a checklist line without a test is a wish.
   joists (an inner mansard crown computes ~5° from the host ratios); a
   degenerate skirt whose planes never rise clear emits no ceiling frame;
   near-square hips (no real ridge portion) carry no collar ties — all
-  pinned. BLAST RADIUS: gable/shed/flat/gambrel/valley outputs are pinned
+  pinned. SQUARE-HIP APEX (NIGHT-10 residual closed): with NO ridge board
+  (width == depth, incl. the square mansard crown) the hips' top cuts bear
+  on the apex COMMON pair — layout()'s guaranteed end station parks that
+  pair OFF-CENTER (u = ridgeHalf − t/2, box overhanging one thickness past
+  the negative ridge end), so the two hips facing the overhung side trim
+  past the pair's FAR face (√2·overhang/cos(tilt) extra slope inset, the
+  exact mirror of the opposite hips' clearance); the extra derives from
+  the ACTUAL commons-box overhang, which is zero whenever a ridge board
+  exists — rectangular hips byte-identical by construction. The square-hip
+  compose joins the interpenetration matrix. SCOPE NOTE: windy SLOPED
+  roofs carry a distinct pre-existing class (tieAt centers the steel ON
+  the rafter station at every gable/shed/hip bearing — only FLAT got
+  B8b's beside-the-joist fix); board-queued, not this residual's class.
+  BLAST RADIUS: gable/shed/flat/gambrel/valley outputs are pinned
   byte-equal to master 779d70e by sha256 hash across 200/300/400 + windy;
   the E5 baseline scene has no roof segments (recapture byte-identical) —
   the hip-roofed computeLevel compose carries the end-to-end truth. The
@@ -882,10 +895,14 @@ AND a gate — a checklist line without a test is a wish.
   end-plane statement + ' | ' composition pins, near-square subsumption,
   skirt-face statement both shapes, Flags-row quantity == joist census,
   300-quiet + whole-flag pins, crown assumed-bearing label + main-joist
-  exclusion) +
+  exclusion; NIGHT-10 square-hip apex describe: no-ridge + pair-station
+  pin, per-side inset/length/top pins with far-face clearance + exact
+  corners, rect-hip equal-inset byte guard) +
   `src/engines/interpenetration.test.ts` (B7 matrix: hip audit repro /
   25–75° sweep / wide + z-span variants / mansard 25–55 / dutch 25–70 —
-  compose SAT-clean at 400, non-vacuous joist presence) +
+  compose SAT-clean at 400, non-vacuous joist presence; NIGHT-10 square
+  matrix: 8/6/10-steep/10-shallow squares + near-square sliver + square
+  mansard crown, non-vacuous hips + commons) +
   `src/framing/compute.multistorey.test.ts` (B7 describe: hip-roofed
   storey composes joists + ties end-to-end incl. the Roof lumber rows) +
   `src/engines/roof-framing.spans.test.ts` (compact hip-family cases
@@ -897,7 +914,16 @@ AND a gate — a checklist line without a test is a wish.
   (`spec.highWindUplift`, set by `applyJurisdiction` from the data's own
   highWind overlay trigger `ultimateWindMph >= 130 && flags.hurricaneTies`
   — DELIBERATELY narrower than `hurricaneTies`, whose sub-130 coastal
-  belt TX/AL/GA/NY… keeps roof ties with byte-equal walls) every framed
+  belt keeps roof ties with byte-equal walls — and since NIGHT-10 those
+  ties STATE the scope themselves: every belt tie is labeled 'hurricane
+  tie (roof-to-wall ties only — wall/foundation uplift path not modeled
+  below 130 mph design wind)', ≥130 ties keep the plain label because the
+  wall hardware IS the continuation; the belt is derived from the
+  profiles data and PINNED as exactly 12 states (AL CT DE GA MA MS NC NJ
+  NY RI SC TX vs FL HI LA full-path), geometry proven label-only by
+  strip-equality per tying shape, takeoff row-count/detail unchanged
+  (role-counted), label-not-flag (no Flags row), INTL tie-less byte-equal
+  — docs/plans/B10-EXPECTED-DIFF.md NIGHT-10 addendum) every framed
   EXTERIOR wall books the continuation as S13 surface hardware (1.2 mm
   symbolic steel on the framing face under the SAT skin, honest 'install
   per strapping schedule' labels, WFCM capacity/nailing stated as not
@@ -927,7 +953,11 @@ AND a gate — a checklist line without a test is a wish.
   roof, naming it ('…R802.11 uplift path incomplete at the roof bearing,
   verify tie schedule' — P4 prints it); tied roofs, roofless results and
   other-storey roofs stay silent (machinery non-vacuous via the
-  synthetic-member matrix). TAKEOFF (B4/S4 both directions): three
+  synthetic-member matrix). NIGHT-10 (residual 4): the warning's
+  parenthetical states the generic truth — 'this roof models no tie
+  members at its bearing' — the old 'flat roofs model no rafter/plate
+  ties today' claim was stale once B8b landed flat ties; new wording
+  pinned, stale wording banned (B10d gate). TAKEOFF (B4/S4 both directions): three
   dedicated member-derived rows counted by ROLE (three new roles — B9's
   `strap` census untouched), the foundation row stating the dedupe
   convention, NO invented nail poundage (B9's fastener rule).
@@ -951,7 +981,12 @@ AND a gate — a checklist line without a test is a wish.
   B10 describe (LA walls+layers BOTH faces strictly clean with NO uplift
   allow-list pair; +foundation post-dedupe inherits only the documented
   bolt-shank class; HI portal+uplift coexistence). All mutation-checked
-  (17 probes across B10a-e).
+  (17 probes across B10a-e). NIGHT-10 belt-label gates:
+  `src/engines/roof-framing.test.ts` belt describe (exact clause on every
+  tie × 7 tying shapes, ≥130 plain, strip-equality label-only proof,
+  12-state derived enumeration pin + per-state labels + INTL byte pin,
+  takeoff row parity + no-Flags-row pin; gable-400-windy sha REPINNED —
+  the pin's spec is the belt).
 
 - **S17 Roof shape closures (B8): low-slope ridges, flat-roof uplift,
   unframed intersections and the gambrel break are never silent.**
@@ -960,12 +995,22 @@ AND a gate — a checklist line without a test is a wish.
   beam required, R802.4.3 (…not modeled — verify design)' at 300+, reaching
   the takeoff Flags row and the P4 schedules block (flag route, v1 — the
   beam+post member set is the follow-up). The slope that answers the
-  question is the one CARRYING the ridge: the gable's schema pitch, and
-  the GAMBREL main ridge's shallow UPPER planes' φ (fix-round advisory —
+  question is the one CARRYING the ridge: the gable's schema pitch, the
+  GAMBREL main ridge's shallow UPPER planes' φ (fix-round advisory —
   a 15° gambrel composes sub-3:12 uppers while its steep lowers sit above
-  3:12; flagged + pinned, break purlins excluded). Hip/crown ridges are
-  the remaining queued residual. Slopes ≥ 3:12 and LOD 200 are byte-equal
-  to pre-B8.
+  3:12; flagged + pinned, break purlins excluded), and — NIGHT-10, B8a's
+  stated residual closed — the HIP ridge's long-plane commons' pitch (=
+  schema pitch) with the MANSARD CROWN riding the same route via the inner
+  frameHip at its COMPUTED crown pitch (sub-3:12 even on the default 40°
+  mansard, tan ≈ 0.154 from the host ratios — the default mansard now
+  states it; the compact-mansard spans gate carves the statement out as
+  shape honesty, table-independent) and the DUTCH GABLET served by the
+  gable route at its computed pitch (pre-existing coverage, now pinned).
+  A SQUARE sub-3:12 hip converges to a point — no ridge board exists, so
+  nothing for R802.4.3 to govern (pinned). Slopes ≥ 3:12 and LOD 200 are
+  byte-equal to pre-B8 (hip 3:12 boundary + default 40° hip + 55° mansard
+  crown pinned clean; moved shapes = sub-3:12 hip 300/400 + default
+  mansard crown only).
   (b) `spec.hurricaneTies` reaches FLAT roofs (R802.11 — shed tied both
   ends, frameFlat never called tieAt): every flat joist ties at BOTH
   bearing ends, at the plate line (footprint edge, never the overhung rim
@@ -1028,6 +1073,11 @@ AND a gate — a checklist line without a test is a wish.
   Gates: `src/engines/roof-framing.test.ts` (B8a describe: 2.5:12 flag pin
   at 300/400 + ridge-only placement, 3:12 boundary + 40° clean, LOD-200
   silence, takeoff Flags row, 15°-gambrel upper-plane flag + 40° clean;
+  NIGHT-10 hip/crown tests: 10° hip ridge-only flag at 300/400, hip 3:12
+  boundary + 40° clean + 200 silent + square-no-ridge pin, default-mansard
+  crown flag + 55° clean, sub-3:12 dutch gablet pin, hip+mansard takeoff
+  Flags rows; `roof-framing.spans.test.ts` compact-mansard INTENDED
+  carve-out with the crown-flag non-vacuous pin;
   B8b describe: windy 2-per-joist census at the
   plate line + beside-a-joist placement, spansX orientation, free takeoff
   tie row, non-windy byte-equality, fix-round window matrix — 6.9×5
