@@ -57,7 +57,16 @@
  *    routed separately). A run longer than ~15 m carries a 'verify
  *    manufacturer max line-set length / oil return' advisory (mfr specs
  *    govern). The heat-pump service node still wins unit #1's
- *    position verbatim (checklist A4) and the row re-anchors to it. A
+ *    position verbatim (checklist A4) and the row re-anchors to it. The
+ *    AUTO anchor wall is ELECTED WITH VALIDATION (Julien-scene root cause
+ *    2026-08-22): wall.exterior is input, not truth — host floor-coverage
+ *    gaps flip interior partitions exterior=true, and trusting the nearest
+ *    one pushed the pad 0.6 m 'outward' INTO the Bathroom. The election
+ *    walks exterior candidates by distance until one's pad spot validates
+ *    OUTDOORS (not inside an indoor zone, not under floor coverage, not in
+ *    a wall body — outdoor zones like a courtyard garden are legitimate);
+ *    an exhausted walk keeps the least-bad (nearest) spot, flags every
+ *    pad/cabinet and warns — never silent. A
  *    footprint with NO straight exterior wall anchors the row at the
  *    least-bad spot near the AH instead of skipping — warned and every
  *    pad/cabinet '⚠ verify condenser placement' flagged, never silent.
@@ -201,6 +210,15 @@ const DISCONNECT_ABOVE_UNIT = COND?.disconnectAboveUnitM ?? 0.3
 /** Pad + cabinet flag when the row anchors WITHOUT an exterior wall (the
  * least-bad fallback — condenser-always fix): never a silent guess. */
 const COND_VERIFY_FLAG = '⚠ verify condenser placement — no exterior wall anchors the row'
+/** Pad + cabinet flag when NO exterior-wall candidate yields a pad spot
+ * that validates OUTDOORS (Julien-scene class: floor-coverage gaps flip
+ * interior partitions exterior=true and every candidate's spot lands
+ * inside a room or under cover) — the row keeps the least-bad (nearest)
+ * election; the flag + level warning say so, never silent. */
+const COND_UNVALIDATED_FLAG =
+  '⚠ verify condenser placement — auto spot could not be validated outdoors'
+const COND_UNVALIDATED_WARNING =
+  'condenser auto spot could not be validated outdoors — every exterior-wall candidate lands inside a room or under floor coverage (exterior wall classification suspect); verify placement'
 /**
  * A verbatim heat-pump override farther (plan) than this from EVERY
  * exterior wall warns — almost certainly a mis-drag into the yard.
@@ -839,21 +857,111 @@ export function placeThermostatSpot(
   return { wall: spot.wall, u, heightAff: TSTAT_AFF }
 }
 
+/** Floor-coverage polygons the outdoor-spot validation probes — compute's
+ * probe slabs (this level's slabs, else the storey-below footprint, else
+ * indoor-zone pseudo-slabs; probeSlabsFor owns the widening). Structural:
+ * only `polygon` (+ `holes`) is read, so SlabSlice threads straight in. */
+export type CoverageSlice = {
+  polygon: readonly Pt[]
+  holes?: readonly (readonly Pt[])[]
+}
+
+/**
+ * True when a condenser pad spot stands in OPEN AIR (the B12 rod-scan
+ * precedent — validate against the SCENE, not the wall label):
+ *  (a) not inside any INDOOR room polygon — a pad in a bathroom is never
+ *      right; an OUTDOOR zone (courtyard garden / patio / yard) IS open
+ *      air, so it legitimizes the spot — a courtyard condenser is a real
+ *      install (decided here: outdoor zones validate, they never block);
+ *  (b) not inside any wall's body (checked before the outdoor-zone pass —
+ *      zone polygons trace wall centerlines, and a spot in the wall band
+ *      is in the WALL, whatever zone claims the area);
+ *  (c) not under floor coverage — a covered-but-zoneless mid-plan void is
+ *      still INSIDE the building (the Julien-scene gap region); slab HOLES
+ *      are courtyards and don't count as cover.
+ */
+function spotIsOutdoors(
+  spot: Pt,
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  coverage: readonly CoverageSlice[],
+): boolean {
+  let outdoorZone = false
+  for (const room of rooms) {
+    if (!pointInPolygon(spot, room.polygon)) continue
+    if (room.category !== 'outdoor') return false
+    outdoorZone = true
+  }
+  if (wallBandAt(spot, walls, 0) !== null) return false
+  if (outdoorZone) return true
+  for (const cover of coverage) {
+    if (!pointInPolygon(spot, cover.polygon)) continue
+    if (cover.holes?.some((h) => h.length >= 3 && pointInPolygon(spot, h))) continue
+    return false
+  }
+  return true
+}
+
+/**
+ * CONDENSER ELECTION (Julien-scene root cause, 2026-08-22): wall.exterior
+ * is INPUT, not truth — host floor-coverage gaps classify interior
+ * partitions exterior=true, and trusting the NEAREST one pushed the pad
+ * 0.6 m "outward" into the Bathroom at (-2.6, 3.25). Candidates walk BY
+ * DISTANCE from the equipment room (shortest line-set among the walls
+ * whose pad spot really is outdoors — spotIsOutdoors); when EVERY exterior
+ * wall fails, the nearest (least-bad) election is kept with
+ * `validated: false` so layoutHvac can flag the units + warn (never
+ * silent). `rooms` is the UNFILTERED zone list — outdoor zones legitimize
+ * a courtyard spot. The false-exterior classification itself is a separate
+ * election-INPUT problem (its fix has its own byte-equality blast radius,
+ * board-noted); the election is merely robust to it.
+ */
+export function electHeatPumpExit(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  coverage: readonly CoverageSlice[] = [],
+): { wall: WallSlice; at: Pt; spot: Pt; validated: boolean } | null {
+  const served = hvacServedRooms(rooms)
+  if (served.length === 0) return null
+  const equipAt = centroid(equipmentRoomOf(served).polygon)
+  const candidates: { wall: WallSlice; at: Pt; d: number }[] = []
+  for (const wall of walls) {
+    if (!wall.exterior || wall.curved) continue
+    const at = projectOnto([wall.start[0], wall.start[1]], [wall.end[0], wall.end[1]], equipAt)
+    candidates.push({ wall, at, d: Math.hypot(at[0] - equipAt[0], at[1] - equipAt[1]) })
+  }
+  if (candidates.length === 0) return null
+  // Stable sort keeps wall order on ties — the same wall nearestExteriorExit
+  // (strict <, iteration order) elected before validation existed.
+  candidates.sort((a, b) => a.d - b.d)
+  const spotOf = (at: Pt): Pt => {
+    const ox = at[0] - equipAt[0]
+    const oz = at[1] - equipAt[1]
+    const n = Math.max(1e-6, Math.hypot(ox, oz))
+    return [at[0] + (ox / n) * PAD_OFFSET, at[1] + (oz / n) * PAD_OFFSET]
+  }
+  for (const cand of candidates) {
+    const spot = spotOf(cand.at)
+    if (spotIsOutdoors(spot, walls, rooms, coverage)) {
+      return { wall: cand.wall, at: cand.at, spot, validated: true }
+    }
+  }
+  const nearest = candidates[0] as { wall: WallSlice; at: Pt; d: number }
+  return { wall: nearest.wall, at: nearest.at, spot: spotOf(nearest.at), validated: false }
+}
+
 /**
  * AUTO plan point of the heat-pump / condenser pad: 0.6 m outside the
- * exterior wall nearest the air handler (shortest lineset, off the wall so
- * service clearance survives). Exported for the Bones panel action.
+ * nearest exterior wall whose spot VALIDATES as outdoors (shortest lineset
+ * among walls that are really exterior — electHeatPumpExit; off the wall
+ * so service clearance survives). Exported for the Bones panel action.
  */
-export function placeHeatPumpSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
-  rooms = hvacServedRooms(rooms)
-  if (rooms.length === 0) return null
-  const equipAt = centroid(equipmentRoomOf(rooms).polygon)
-  const exit = nearestExteriorExit(walls, equipAt)?.at
-  if (!exit) return null
-  const ox = exit[0] - equipAt[0]
-  const oz = exit[1] - equipAt[1]
-  const n = Math.max(1e-6, Math.hypot(ox, oz))
-  return [exit[0] + (ox / n) * PAD_OFFSET, exit[1] + (oz / n) * PAD_OFFSET]
+export function placeHeatPumpSpot(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  coverage: readonly CoverageSlice[] = [],
+): Pt | null {
+  return electHeatPumpExit(walls, rooms, coverage)?.spot ?? null
 }
 
 /** Plan point on a wall centerline at distance `u` from its start. */
@@ -886,23 +994,34 @@ type CondenserSlot = {
  * parity, night-4 narrow round). equipAt only matters for the degenerate
  * on-wall-anchor fallback, so the anchor itself is a safe stand-in.
  */
-export function placeCondenserSeedSpot(walls: WallSlice[], rooms: RoomSlice[]): Pt | null {
-  rooms = hvacServedRooms(rooms)
-  const anchor = placeHeatPumpSpot(walls, rooms)
-  if (!anchor) return null
+export function placeCondenserSeedSpot(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  coverage: readonly CoverageSlice[] = [],
+): Pt | null {
+  const election = electHeatPumpExit(walls, rooms, coverage)
+  if (!election) return null
+  const anchor = election.spot
+  const served = hvacServedRooms(rooms)
   // The REAL equipAt (dawn review 1d: passing `anchor` let the degenerate
   // on-wall fallback pick the opposite out-normal and seed inside-out).
-  const equipAt = rooms.length > 0 ? centroid(equipmentRoomOf(rooms).polygon) : anchor
-  const row = condenserRow(walls, anchor, false, 1, equipAt)
+  const equipAt = served.length > 0 ? centroid(equipmentRoomOf(served).polygon) : anchor
+  const row = condenserRow(walls, anchor, false, 1, equipAt, election.wall)
   const slid = row.slots[0]?.at
   if (!slid) return anchor
-  // Corner-flip guard (dawn review 1e): if the slid spot's nearest exterior
-  // wall differs from the raw anchor's, seeding there would re-derive the
-  // whole row on the OTHER wall — keep the raw anchor in that case (the
-  // engine's own slide still applies at compute time).
-  const rawExit = nearestExteriorExit(walls, anchor)
-  const slidExit = nearestExteriorExit(walls, slid)
-  if (rawExit && slidExit && rawExit.wall.id !== slidExit.wall.id) return anchor
+  // Corner-flip guard (dawn review 1e, re-oracled round 2): the slid spot
+  // must still DERIVE from the elected wall — its along-wall projection
+  // stays within the wall's span; a slide that ran off the wall keeps the
+  // raw anchor. The old oracle asked nearestExteriorExit(slid) — the exact
+  // wrong-wall race the row fix retired: a garden fence 0.4 m from the pad
+  // ALWAYS beats the elected wall (0.6 m by construction), so the guard
+  // bailed to the raw anchor and the seeded node recomposed dead-center on
+  // the very RO the engine had slid past (round-2 finding). Compose-time
+  // coherence for the seeded node is layoutHvac's ε-anchor.
+  const u =
+    (slid[0] - election.wall.start[0]) * election.wall.dir[0] +
+    (slid[1] - election.wall.start[1]) * election.wall.dir[1]
+  if (u < 0 || u > election.wall.length) return anchor
   return slid
 }
 
@@ -912,9 +1031,23 @@ function condenserRow(
   anchorVerbatim: boolean,
   count: number,
   equipAt: Pt,
+  /** Pre-elected anchor wall (the VALIDATED election): the row must anchor
+   * to the same wall the spot validated against — re-deriving by nearest
+   * could re-elect a false-exterior partition standing closer to the pad.
+   * Verbatim overrides keep the nearest-exit derivation (unchanged). */
+  electedWall?: WallSlice,
 ): { wall: WallSlice | null; slots: CondenserSlot[]; warnings: string[] } {
   const warnings: string[] = []
-  const exit = nearestExteriorExit(walls, anchor)
+  const exit = electedWall
+    ? {
+        at: projectOnto(
+          [electedWall.start[0], electedWall.start[1]],
+          [electedWall.end[0], electedWall.end[1]],
+          anchor,
+        ),
+        wall: electedWall,
+      }
+    : nearestExteriorExit(walls, anchor)
   if (!exit) {
     // No exterior wall at all — stack the row along +X from the anchor.
     const pitch = COND_PAD_SIDE + COND_UNIT_CLEAR
@@ -1010,7 +1143,14 @@ export function layoutHvac(
   rooms: RoomSlice[],
   spec: FramingSpec = DEFAULT_SPEC,
   overrides?: Pick<ServiceOverrides, 'thermostat' | 'heatPump'>,
-  context?: { hasLevelAbove?: boolean; stateCode?: string },
+  context?: {
+    hasLevelAbove?: boolean
+    stateCode?: string
+    /** Floor coverage for the condenser-spot validation — compute threads
+     * its probe slabs (probeSlabsFor); direct callers may omit it and the
+     * election validates on zones + wall bands alone. */
+    coverage?: readonly CoverageSlice[]
+  },
 ): { members: Member[]; fixtures: Fixture[]; warnings: string[] } {
   const members: Member[] = []
   const fixtures: Fixture[] = []
@@ -1018,6 +1158,10 @@ export function layoutHvac(
   // Outdoor zones drop out entirely: a level with ONLY a garden/patio has no
   // AH — and per the condenser-always contract (no AH ⇒ no outdoor unit,
   // nothing silent about it) that is the honest compose.
+  // The UNFILTERED zone list survives for the condenser-spot validation:
+  // an OUTDOOR zone (courtyard garden) legitimizes a pad spot there, and
+  // the election must see it (hvacServedRooms drops it).
+  const zonesAll = rooms
   rooms = hvacServedRooms(rooms)
   if (rooms.length === 0) return { members, fixtures, warnings }
   const fab = spec.detail !== '200'
@@ -1559,7 +1703,39 @@ export function layoutHvac(
     // the whole row), else unit #1 takes the auto pad spot; units 2..N step
     // along the same exterior wall. Sizing is a labeled ASSUMPTION
     // (1 ton per 450/550/650 sqft by climate-zone band — Manual J/S govern).
-    let anchor = hpPlan ?? placeHeatPumpSpot(walls, rooms)
+    // AUTO election is VALIDATED (Julien-scene root cause 2026-08-22):
+    // wall.exterior is input, not truth — the election walks exterior
+    // candidates by distance until one's pad spot really is outdoors; an
+    // exhausted walk keeps the least-bad spot and says so (flag + warning
+    // below). A verbatim override still wins its POSITION outright (A4) —
+    // the election runs anyway to recognize the machine's own seed (below).
+    const election = electHeatPumpExit(walls, zonesAll, context?.coverage ?? [])
+    let anchor = hpPlan ?? election?.spot ?? null
+    const electionUnvalidated = hpPlan == null && election !== null && !election.validated
+    // MACHINE-SEEDED OVERRIDE COHERENCE (round-2 finding — the fence+RO
+    // compound): the seed action writes the engine's own unit-#1 anchor
+    // back as a bones:service node, and every activated scene seeds
+    // automatically — so the default lifecycle turns the auto anchor into
+    // a verbatim override on the very next compose. Re-deriving that row's
+    // wall by nearest flipped the disconnect onto a garden fence 0.4 m
+    // from the pad (the elected wall stands 0.6 m away BY CONSTRUCTION, so
+    // any exterior segment beyond the shell wins the race). DECISION: an
+    // override standing within ε of the election spot or of the engine's
+    // own slid unit-#1 spot IS the machine's point — its row keeps the
+    // ELECTED wall (post-seed compose == auto compose, byte). Any other
+    // point is a real user drag and stays verbatim-nearest (A4: never
+    // silently re-anchored); ε is a float round-trip tolerance, not a
+    // snap radius — a deliberate drag lands metres away, not nanometres.
+    let rowWall = hpPlan ? undefined : election?.wall
+    if (hpPlan && election) {
+      const near = (p: Pt, q: Pt): boolean =>
+        Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9
+      const autoUnit1 = condenserRow(walls, election.spot, false, 1, equipAt, election.wall)
+        .slots[0]?.at
+      if (near(hpPlan, election.spot) || (autoUnit1 && near(hpPlan, autoUnit1))) {
+        rowWall = election.wall
+      }
+    }
     // CONTRACT (never silent): placeHeatPumpSpot fails only when the level
     // has no straight EXTERIOR wall (hosts marking both wall faces
     // 'interior', all-curved shells). Skipping here used to drop the whole
@@ -1586,8 +1762,17 @@ export function layoutHvac(
     }
     {
       const plan = condenserPlan(areaM2, context?.stateCode)
-      const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt)
+      const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt, rowWall)
       warnings.push(...row.warnings)
+      if (electionUnvalidated) warnings.push(COND_UNVALIDATED_WARNING)
+      // ⚠ flag on every pad + cabinet when the anchor is a guess: the
+      // no-exterior-wall fallback keeps its legacy class; an exhausted
+      // validation walk carries its own (never silent, never overloaded).
+      const rowFlag = anchorFallback
+        ? COND_VERIFY_FLAG
+        : electionUnvalidated
+          ? COND_UNVALIDATED_FLAG
+          : null
       const unitTopY = COND_PAD_T + COND_DIMS[1]
       // Line-set rails: the wall graph + the air handler's wall anchor are
       // shared by every unit's run (the coil is one point).
@@ -1634,7 +1819,7 @@ export function layoutHvac(
           material: 'concrete',
           sourceId: equipRoom.id,
           label: 'Condenser pad 4" — concrete (per mfr clearance + IRC M1403)',
-          ...(anchorFallback ? { flag: COND_VERIFY_FLAG } : {}),
+          ...(rowFlag ? { flag: rowFlag } : {}),
         })
         members.push({
           system: 'hvac',
@@ -1646,7 +1831,7 @@ export function layoutHvac(
           material: 'steel',
           sourceId: equipRoom.id,
           label: `AC condenser #${n} — ${plan.unitTons} tons outdoor unit`,
-          ...(anchorFallback ? { flag: COND_VERIFY_FLAG } : {}),
+          ...(rowFlag ? { flag: rowFlag } : {}),
         })
         fixtures.push({
           system: 'hvac',

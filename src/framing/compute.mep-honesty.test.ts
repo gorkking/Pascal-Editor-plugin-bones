@@ -310,3 +310,67 @@ describe('F2: upper-storey condenser at facade height warns; ground storeys unch
     expect(upper.warnings.some((w) => NO_ZONES_RE.test(w))).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// F3 — condenser ELECTION validation reaches computeLevel (Julien scene,
+// prod ef093760, 2026-08-22): the host declared several INTERIOR partitions
+// exterior=true (its own floor-coverage gaps), the election trusted the
+// label and pushed the pad INTO the Bathroom. computeLevel must thread its
+// probe slabs (probeSlabsFor) into layoutHvac as the coverage the spot
+// validation probes — without them the walk validates a covered zoneless
+// mid-plan void at (5, 1.9).
+// ---------------------------------------------------------------------------
+
+describe('F3: condenser election validated at the computeLevel boundary (coverage threaded)', () => {
+  /** Node-graph twin of the hvac.condensers misclassifiedScene repro —
+   * declared faces exactly as the exhibit ships them. */
+  function misclassifiedNodes(): Nodes {
+    const nodes: Nodes = {}
+    nodes.lvl0 = { id: 'lvl0', type: 'level', level: 0, height: 2.5 }
+    const w = (
+      id: string,
+      start: [number, number],
+      end: [number, number],
+      face: 'exterior' | 'interior',
+    ) => {
+      nodes[id] = { ...wall(id, 'lvl0', start, end), frontSide: face, backSide: 'interior' }
+    }
+    w('w_south', [0, 0], [10, 0], 'exterior')
+    w('w_east', [10, 0], [10, 8], 'exterior')
+    w('w_north', [10, 8], [0, 8], 'exterior')
+    w('w_west', [0, 8], [0, 0], 'exterior')
+    // the FALSE exteriors — interior partitions the host mislabeled
+    w('w_bathLaundry', [4, 2.5], [4, 4.5], 'exterior')
+    w('w_voidNorth', [4, 2.5], [6, 2.5], 'exterior')
+    // honest interior partitions (line-set rails to the shell)
+    w('w_laundryNorth', [4, 4.5], [6, 4.5], 'interior')
+    w('w_laundryEast', [6, 2.5], [6, 4.5], 'interior')
+    w('w_spine', [6, 0], [6, 2.5], 'interior')
+    nodes.z_bath = zone('z_bath', 'lvl0', 'Bathroom', rect(1, 2.5, 4, 4.5))
+    nodes.z_laundry = zone('z_laundry', 'lvl0', 'Laundry', rect(4, 2.5, 6, 4.5))
+    nodes.z_bed = zone('z_bed', 'lvl0', 'Bedroom', rect(1, 4.5, 9, 7))
+    nodes.z_living = zone('z_living', 'lvl0', 'Living', rect(6, 0.5, 9, 4.5))
+    nodes.slab0 = { id: 'slab0', type: 'slab', parentId: 'lvl0', polygon: rect(0, 0, 10, 8), holes: [] }
+    return nodes
+  }
+
+  test('the condenser lands truly OUTSIDE — south of the shell, no zone, no slab, no flag', () => {
+    const nodes = misclassifiedNodes()
+    const result = computeLevel(nodes, bones('lvl0'))
+    const unit = result.fixtures.find((f) => /AC Condenser #1/.test(f.label ?? ''))
+    expect(unit).toBeDefined()
+    // pre-fix: (3.4, 3.5) — inside the Bathroom zone; coverage-blind
+    // mutation: (5, 1.9) — the covered mid-plan void. The honest spot is
+    // 0.6 m SOUTH of the south wall.
+    expect(unit?.position[0]).toBeCloseTo(5, 6)
+    expect(unit?.position[2]).toBeCloseTo(-0.6, 6)
+    // unflagged + silent (the healthy validated path), disconnect present
+    const boxes = result.members.filter(
+      (m) => m.system === 'hvac' && m.role === 'equipment',
+    )
+    expect(boxes.length).toBeGreaterThan(0)
+    for (const m of boxes) expect(m.flag).toBeUndefined()
+    expect(result.warnings.some((w) => w.includes('could not be validated'))).toBe(false)
+    expect(result.fixtures.some((f) => f.kind === 'disconnect')).toBe(true)
+  })
+})

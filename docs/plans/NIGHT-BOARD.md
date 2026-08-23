@@ -1,3 +1,56 @@
+# CONDENSER ELECTION FIX — fix/condenser-election (2026-08-22, pilot)
+
+## SHIPPED ON BRANCH: validated condenser election (Julien exhibit root cause)
+Exhibit: Julien's prod scene — floor-coverage gaps made the HOST declare
+several interior partitions exterior=true (bathroom block + mid-plan
+walls); nearestExteriorExit trusted wall.exterior, elected the nearest
+false-exterior wall to the Laundry and PAD_OFFSET pushed the pad INTO
+the Bathroom at (-2.6, 3.25) — the auto election itself, silent once
+the override was deleted (the honesty fast-follow only guards the
+OVERRIDE path). Fix: electHeatPumpExit walks exterior candidates by
+distance until the pad spot validates OUTDOORS (not in an indoor zone;
+not under probeSlabsFor coverage — holes are courtyards; not in a wall
+body; outdoor zones legitimize — courtyard condensers are real);
+exhausted walk keeps the least-bad spot + ⚠ pad/cabinet flag + level
+warning. Row anchors to the ELECTED wall; override verbatim + warn
+unchanged (byte-equal); seeding threads the same coverage (A4).
+Gates: 16 hunt shapes byte-equal, E5 recapture byte-identical, 9/9
+mutation probes bite, suite 1618. Exhibit auto spot now (-1.5, 8.1) —
+0.6 m north of the true north wall.
+
+## ROUND 2 (REVISE verdict, one finding): seed guard wrong-oracle retired
+The fence+RO compound broke A4 seed parity: placeCondenserSeedSpot's
+corner-flip guard still asked nearestExteriorExit(slid) — a garden fence
+0.4 m from the pad always beats the elected wall (0.6 m by construction),
+so the guard bailed to the RAW anchor; the seeded node fed back as a
+verbatim override and recomposed dead-center on the window the engine had
+slid past, disconnect re-hosted to the fence, silent. Fix: (a) guard now
+tests the slid spot's projection-in-span on the ELECTED wall; (b) DECIDED
+— machine-seeded override coherence via ε-anchor: an override within 1e-9
+of the election spot or the engine's slid unit-#1 spot is the machine's
+own point and keeps the elected row wall (post-seed compose == auto
+compose, byte); anything farther is a real user drag and stays
+verbatim-nearest (A4). ε is float round-trip tolerance, not a snap radius
+— chosen over board-noting because every activated scene seeds
+automatically, so the wrong-wall recompose was the DEFAULT lifecycle, not
+an edge. Gates: fence+RO compound (seed == engine unit #1 + post-seed
+byte-equality), fence-only disconnect pin + user-drag arm, off-wall-slide
+bail arm; mutants G1/G2/E1/E2 all bite. Byte gates re-held (16 shapes,
+exhibit override path, E5 recapture).
+
+## QUEUED: the FALSE-EXTERIOR classification itself (election-input class)
+The exhibit's wall.exterior lies come from the HOST's own coverage-gap
+classification (declared frontSide/backSide) — and Bones' geometric
+fallback (wall-model applyExteriorFallback) has the same gap exposure
+on undeclared scenes. Fixing classification (e.g. probing slab
+coverage against DECLARED faces too, or gap-filling the probe union)
+re-classifies walls across every engine — sheathing/WRB/cladding,
+stemwall hardware, device sides, CMU, takeoff areas — a byte-equality
+blast radius that needs its own hunt + baseline set. The election is
+now robust to the lie; the classifier still tells it. Keep the
+misclassifiedScene repros (hvac.condensers / mep-honesty F3 /
+place.test) as the gates when this lands.
+
 # CONDENSER HONESTY SET — fix/condenser-honesty (2026-08-24)
 
 ## Queued: upper-storey condenser GRADE MOUNTING (the F2 truth route)
