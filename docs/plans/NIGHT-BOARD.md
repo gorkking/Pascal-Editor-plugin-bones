@@ -1,3 +1,23 @@
+# LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
+
+## THE ASK: LGS framing option + machine profile libraries
+"Can it be configured to use light gauge steel framing? … the main
+LGS rolling machines such as FRAMECAD, Howick, etc could be selected
+and their profiles populate the framing."
+CODE ANCHORS: IRC R603 (steel walls), R505 (floors), R804 (roofs),
+AISI S240 (designation system, e.g. 350S162-33). Per-wall material
+override channel exists (the CMU precedent). MEP marquee integration:
+punch-aligned routing (steel studs' pre-punched service holes replace
+drilled bores).
+PHASES: 0 data model + catalog (PILOT LAUNCHED, feat/lgs-phase0 —
+verified-or-labeled-fallback vendor data, additive spec fields, pure
+profile module, zero behavior change, E5 byte-parity gated) →
+1 walls @400 (C-studs/tracks/R603 assemblies, screw+strap takeoff by
+length/weight, box-envelope members with profile-truth labels first)
+→ 2 machine selection UX (panel selector + can't-roll warnings) →
+3 floors/roofs + machine-export research (FRAMECAD/Howick production
+formats — stated non-goal v1).
+
 # HP FIRST-CLASS SHIPPED TO PROD 2026-08-23 (evening)
 
 ## SHIP RECORD: private-editor #399 → (see deploy state above this run)
