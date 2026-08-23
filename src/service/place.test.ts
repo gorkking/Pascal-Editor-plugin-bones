@@ -423,3 +423,72 @@ describe('servicePresentation — signs respect the view mode', () => {
     expect(servicePresentation(nodes, svc('sewer-exit'))).toEqual({ body: true, sign: true })
   })
 })
+
+describe('heat-pump seed election validation (Julien scene, 2026-08-22)', () => {
+  test('a false-exterior partition never seeds the pad indoors — coverage rides the seed', () => {
+    // Node twin of the misclassified exhibit: the host declared interior
+    // partitions exterior=true (its floor-coverage gaps); the seed action
+    // must elect like the engine — probeSlabs threaded — or creation alone
+    // would park the heat-pump node in the Bathroom (A4 parity break).
+    const wall = (
+      id: string,
+      start: [number, number],
+      end: [number, number],
+      face: 'exterior' | 'interior',
+    ) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      thickness: 0.2,
+      height: 2.5,
+      frontSide: face,
+      backSide: 'interior',
+      children: [],
+    })
+    const zone = (id: string, name: string, polygon: [number, number][]) => ({
+      id,
+      type: 'zone',
+      parentId: 'level_1',
+      name,
+      polygon,
+      boundaryWallIds: [],
+    })
+    const rect = (x0: number, z0: number, x1: number, z1: number): [number, number][] => [
+      [x0, z0],
+      [x1, z0],
+      [x1, z1],
+      [x0, z1],
+    ]
+    const nodes: Record<string, Record<string, unknown>> = {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_south: wall('w_south', [0, 0], [10, 0], 'exterior'),
+      w_east: wall('w_east', [10, 0], [10, 8], 'exterior'),
+      w_north: wall('w_north', [10, 8], [0, 8], 'exterior'),
+      w_west: wall('w_west', [0, 8], [0, 0], 'exterior'),
+      // FALSE exteriors nearest the laundry equipment room
+      w_bathLaundry: wall('w_bathLaundry', [4, 2.5], [4, 4.5], 'exterior'),
+      w_voidNorth: wall('w_voidNorth', [4, 2.5], [6, 2.5], 'exterior'),
+      z_bath: zone('z_bath', 'Bathroom', rect(1, 2.5, 4, 4.5)),
+      z_laundry: zone('z_laundry', 'Laundry', rect(4, 2.5, 6, 4.5)),
+      z_bed: zone('z_bed', 'Bedroom', rect(1, 4.5, 9, 7)),
+      z_living: zone('z_living', 'Living', rect(6, 0.5, 9, 4.5)),
+      slab0: {
+        id: 'slab0',
+        type: 'slab',
+        parentId: 'level_1',
+        polygon: rect(0, 0, 10, 8),
+        holes: [],
+      },
+    }
+    const created = buildServicePointNodes(nodes, 'level_1')
+    const hp = created.find((n) => n.serviceType === 'heat-pump')
+    expect(hp).toBeDefined()
+    // the honest spot: 0.6 m SOUTH of the true south wall — outside the
+    // Bathroom (pre-fix: 3.4, 3.5) and outside the covered void (coverage-
+    // blind: 5, 1.9)
+    expect(hp?.position?.[0]).toBeCloseTo(5, 6)
+    expect(hp?.position?.[2]).toBeCloseTo(-0.6, 6)
+  })
+})

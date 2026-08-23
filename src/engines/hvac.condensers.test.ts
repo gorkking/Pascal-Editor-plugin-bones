@@ -885,3 +885,249 @@ describe('heat-pump override honesty — verbatim still WINS, mis-drags WARN (hu
     expect(auto.warnings.some((w) => INDOOR_RE.test(w) || FAR_RE.test(w))).toBe(false)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Condenser ELECTION validation (Julien-scene root cause, 2026-08-22)
+// ---------------------------------------------------------------------------
+
+/**
+ * Prod scene ef093760 (anonymized minimal repro): the host's floor-coverage
+ * gaps declared several INTERIOR partitions exterior=true. The old election
+ * trusted wall.exterior, picked the nearest false-exterior wall to the
+ * equipment room (the laundry↔bathroom partition) and PAD_OFFSET pushed the
+ * pad 'outward' — INTO the Bathroom. The fix walks exterior candidates BY
+ * DISTANCE until one's pad spot validates OUTDOORS: not inside an indoor
+ * zone, not under floor coverage (probe slabs; holes = courtyards), not in
+ * a wall body — an outdoor zone (courtyard garden) legitimizes. When ALL
+ * candidates fail, the least-bad (nearest) spot is kept, every pad/cabinet
+ * carries the ⚠ flag and the level warns — never silent.
+ *
+ * Geometry (10×8 shell, laundry mid-plan, mirrors the exhibit shape):
+ *  - w_bathLaundry (4,2.5)→(4,4.5) FALSE-exterior: its outward spot
+ *    (3.4, 3.5) is inside the Bathroom — the exhibit's exact class;
+ *  - w_voidNorth (4,2.5)→(6,2.5) FALSE-exterior: its spot (5, 1.9) has NO
+ *    zone but sits UNDER the slab — a covered mid-plan void, still inside
+ *    the building (only the coverage probe can catch it);
+ *  - the true south wall (d=3.5) is the nearest candidate whose spot
+ *    (5, −0.6) really is outdoors.
+ */
+function misclassifiedScene(perimeterExterior = true) {
+  const walls = [
+    wall('w_south', [0, 0], [10, 0], perimeterExterior),
+    wall('w_east', [10, 0], [10, 8], perimeterExterior),
+    wall('w_north', [10, 8], [0, 8], perimeterExterior),
+    wall('w_west', [0, 8], [0, 0], perimeterExterior),
+    // FALSE exteriors — interior partitions the host classified exterior
+    wall('w_bathLaundry', [4, 2.5], [4, 4.5], true),
+    wall('w_voidNorth', [4, 2.5], [6, 2.5], true),
+    // honest interior partitions — connect the laundry block to the shell
+    // so the line-set has wall rails to the pad (E2 continuity)
+    wall('w_laundryNorth', [4, 4.5], [6, 4.5]),
+    wall('w_laundryEast', [6, 2.5], [6, 4.5]),
+    wall('w_spine', [6, 0], [6, 2.5]),
+  ]
+  const rooms = [
+    room('r_bath', 'Bathroom', 'bathroom', [[1, 2.5], [4, 2.5], [4, 4.5], [1, 4.5]]),
+    room('r_laundry', 'Laundry', 'laundry', [[4, 2.5], [6, 2.5], [6, 4.5], [4, 4.5]]),
+    room('r_bed', 'Bedroom', 'bedroom', [[1, 4.5], [9, 4.5], [9, 7], [1, 7]]),
+    room('r_living', 'Living', 'other', [[6, 0.5], [9, 0.5], [9, 4.5], [6, 4.5]]),
+  ]
+  // the slab covers the whole footprint — including the zoneless void
+  const coverage = [{ polygon: [[0, 0], [10, 0], [10, 8], [0, 8]] as [number, number][] }]
+  return { walls, rooms, coverage }
+}
+
+const inPoly = (p: readonly [number, number], poly: readonly (readonly [number, number])[]) => {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, zi] = poly[i] as readonly [number, number]
+    const [xj, zj] = poly[j] as readonly [number, number]
+    if (zi > p[1] !== zj > p[1] && p[0] < ((xj - xi) * (p[1] - zi)) / (zj - zi) + xi) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+describe('condenser election validation — false-exterior walls never place the pad indoors', () => {
+  test('the auto spot walks PAST both false-exterior candidates to real outdoors', () => {
+    const { walls, rooms, coverage } = misclassifiedScene()
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBe(1)
+    const unit = units[0] as Fixture
+    const plan: [number, number] = [unit.position[0], unit.position[2]]
+    // the validated property: OUTSIDE every room polygon and OUTSIDE the
+    // slab footprint (the pre-fix election landed in the Bathroom; without
+    // the coverage probe it lands in the covered mid-plan void at (5,1.9))
+    for (const r of rooms) expect(inPoly(plan, r.polygon)).toBe(false)
+    for (const c of coverage) expect(inPoly(plan, c.polygon)).toBe(false)
+    // the nearest wall that validates is the true SOUTH wall — pad 0.6 m out
+    expect(plan[0]).toBeCloseTo(5, 6)
+    expect(plan[1]).toBeCloseTo(-0.6, 6)
+    // clean election: no ⚠ flags, no election warning — this is the healthy path
+    for (const m of [...padsOf(out.members), ...cabinetsOf(out.members)]) {
+      expect(m.flag).toBeUndefined()
+    }
+    expect(out.warnings.some((w) => /condenser|heat.?pump/i.test(w))).toBe(false)
+    // disconnect present, mounted on the elected wall's face
+    expect(out.fixtures.filter((f) => f.kind === 'disconnect').length).toBe(1)
+    // E2 line-set continuity: the suction pair reaches the air handler AND
+    // the unit on WALL rails (no AIR RUN legs, no long-run advisory)
+    const handler = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    const suction = out.members.filter(
+      (m) => m.sourceId === 'lineset-suction-1' && m.role === 'pipe-run',
+    )
+    expect(suction.length).toBeGreaterThan(0)
+    expect(suction.every((m) => m.flag === undefined)).toBe(true)
+    const reaches = (target: readonly [number, number, number]) =>
+      suction.some((m) =>
+        endpointsOf(m).some((e) => Math.hypot(e.x - target[0], e.z - target[2]) < 0.06),
+      )
+    expect(reaches(handler.position)).toBe(true)
+    expect(reaches(unit.position)).toBe(true)
+  })
+
+  test('the coverage probe is what catches the covered zoneless void (election-input honesty)', () => {
+    // Without coverage the walk cannot see that (5, 1.9) is under the slab:
+    // rooms alone validate the mid-plan void. The threaded probe is load-
+    // bearing — this pins WHY compute must pass probeSlabs.
+    const { walls, rooms, coverage } = misclassifiedScene()
+    const blind = placeHeatPumpSpot(walls, rooms)
+    expect(blind?.[0]).toBeCloseTo(5, 6)
+    expect(blind?.[1]).toBeCloseTo(1.9, 6) // in-plan void — wrong
+    const sighted = placeHeatPumpSpot(walls, rooms, coverage)
+    expect(sighted?.[0]).toBeCloseTo(5, 6)
+    expect(sighted?.[1]).toBeCloseTo(-0.6, 6) // truly outdoors
+  })
+
+  test('a verbatim override still WINS and warns (fast-follow machinery unchanged)', () => {
+    // The exhibit as saved: the seeded override sits at the bathroom spot.
+    const { walls, rooms, coverage } = misclassifiedScene()
+    const out = layoutHvac(walls, rooms, LOD400, { heatPump: { position: [3.4, 0, 3.5] } }, {
+      coverage,
+    })
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    expect(unit.position[0]).toBeCloseTo(3.4, 6)
+    expect(unit.position[2]).toBeCloseTo(3.5, 6)
+    expect(out.warnings.some((w) => w.includes('heat-pump point is inside Bathroom'))).toBe(true)
+    // the election never ran — no unvalidated flag/warning class
+    expect(out.warnings.some((w) => w.includes('could not be validated'))).toBe(false)
+    for (const m of [...padsOf(out.members), ...cabinetsOf(out.members)]) {
+      expect(m.flag).toBeUndefined()
+    }
+  })
+
+  test('seed parity (A4): placeCondenserSeedSpot with coverage matches the engine unit #1', () => {
+    const { walls, rooms, coverage } = misclassifiedScene()
+    const seed = placeCondenserSeedSpot(walls, rooms, coverage)
+    const cab = cabinetsOf(layoutHvac(walls, rooms, LOD400, undefined, { coverage }).members)[0]
+    expect(seed?.[0]).toBeCloseTo(cab?.position[0] as number, 6)
+    expect(seed?.[1]).toBeCloseTo(cab?.position[2] as number, 6)
+  })
+
+  test('walk exhaustion: every candidate fails → least-bad spot kept, ⚠ flagged + warned', () => {
+    // The whole shell mis-marked interior; ONLY the two false partitions say
+    // exterior — every candidate's spot is indoors, the walk exhausts.
+    const { walls, rooms, coverage } = misclassifiedScene(false)
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBe(1)
+    // least-bad = the nearest election (the pre-fix spot), kept — not dropped
+    expect(units[0]?.position[0]).toBeCloseTo(3.4, 6)
+    expect(units[0]?.position[2]).toBeCloseTo(3.5, 6)
+    // NEVER silent: every pad + cabinet carries the unvalidated ⚠ class …
+    const boxes = [...padsOf(out.members), ...cabinetsOf(out.members)]
+    expect(boxes.length).toBe(2)
+    for (const m of boxes) {
+      expect(m.flag).toContain('⚠ verify condenser placement — auto spot could not be validated')
+    }
+    // … the level says so …
+    expect(
+      out.warnings.some((w) => w.includes('condenser auto spot could not be validated outdoors')),
+    ).toBe(true)
+    // … and it is NOT the legacy no-exterior-wall class (that arm still has
+    // its own words — distinct truths stay distinct)
+    expect(out.warnings.some((w) => w.includes('no exterior wall'))).toBe(false)
+    for (const m of boxes) expect(m.flag).not.toContain('no exterior wall anchors the row')
+  })
+
+  test('the row anchors to the ELECTED wall — never re-derived from whatever is nearest the pad', () => {
+    // A detached garden wall just outside the shell (exterior=true, z=-1):
+    // the validated spot (5, -0.6) is NEARER the fence (0.4 m) than the
+    // elected south wall (0.6 m). Re-deriving the row wall by nearest would
+    // hang the disconnect + line-set penetration on the FENCE with the out-
+    // normal pointing back at the house; the election's wall must win.
+    const { walls, rooms, coverage } = misclassifiedScene()
+    walls.push(wall('w_fence', [2, -1], [8, -1], true))
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
+    const unit = condensersOf(out.fixtures)[0] as Fixture
+    expect(unit.position[0]).toBeCloseTo(5, 6)
+    expect(unit.position[2]).toBeCloseTo(-0.6, 6)
+    const disc = out.fixtures.find((f) => f.kind === 'disconnect') as Fixture
+    expect(disc.sourceId).toBe('w_south')
+  })
+
+  test('courtyard decision: an OUTDOOR zone legitimizes a pad even over a patio slab', () => {
+    // Court walls face real open air; the slab still runs under the court
+    // (patio pour). DECIDED: outdoor zones validate — a courtyard condenser
+    // is a real install; only indoor zones / bare coverage invalidate.
+    const courtScene = (withCourtZone: boolean, slabHole = false) => {
+      const walls = [
+        wall('w_south', [0, 0], [10, 0], true),
+        wall('w_east', [10, 0], [10, 8], true),
+        wall('w_north', [10, 8], [0, 8], true),
+        wall('w_west', [0, 8], [0, 0], true),
+        wall('cy_east', [6, 3], [6, 5], true),
+        wall('cy_north', [4, 5], [6, 5], true),
+        wall('cy_west', [4, 3], [4, 5], true),
+        wall('cy_south', [4, 3], [6, 3], true),
+      ]
+      const rooms = [
+        room('r_laundry', 'Laundry', 'laundry', [[6, 3], [8, 3], [8, 5], [6, 5]]),
+        room('r_living', 'Living', 'other', [[0, 0.5], [10, 0.5], [10, 3], [0, 3]]),
+        room('r_bed', 'Bedroom', 'bedroom', [[0, 5], [10, 5], [10, 7.5], [0, 7.5]]),
+        ...(withCourtZone
+          ? [room('r_court', 'Courtyard garden', 'outdoor', [[4, 3], [6, 3], [6, 5], [4, 5]])]
+          : []),
+      ]
+      const coverage = [
+        {
+          polygon: [[0, 0], [10, 0], [10, 8], [0, 8]] as [number, number][],
+          holes: slabHole ? [[[4, 3], [6, 3], [6, 5], [4, 5]] as [number, number][]] : [],
+        },
+      ]
+      return { walls, rooms, coverage }
+    }
+    // (1) outdoor zone present → the nearest candidate (court east wall)
+    // validates INTO the courtyard, silent + unflagged
+    const withZone = courtScene(true)
+    const a = layoutHvac(withZone.walls, withZone.rooms, LOD400, undefined, {
+      coverage: withZone.coverage,
+    })
+    const unitA = condensersOf(a.fixtures)[0] as Fixture
+    expect(unitA.position[0]).toBeCloseTo(5.4, 6)
+    expect(unitA.position[2]).toBeCloseTo(4, 6)
+    expect(a.warnings.some((w) => w.includes('could not be validated'))).toBe(false)
+    for (const m of [...padsOf(a.members), ...cabinetsOf(a.members)]) {
+      expect(m.flag).toBeUndefined()
+    }
+    // (2) mutation arm: NO outdoor zone → the covered court reads as inside
+    // the building, the walk continues to the true east perimeter
+    const noZone = courtScene(false)
+    const b = layoutHvac(noZone.walls, noZone.rooms, LOD400, undefined, {
+      coverage: noZone.coverage,
+    })
+    const unitB = condensersOf(b.fixtures)[0] as Fixture
+    expect(unitB.position[0]).toBeCloseTo(10.6, 6)
+    expect(unitB.position[2]).toBeCloseTo(4, 6)
+    // (3) a slab HOLE under the court is a courtyard too — uncovered, valid
+    const holed = courtScene(false, true)
+    const c = layoutHvac(holed.walls, holed.rooms, LOD400, undefined, {
+      coverage: holed.coverage,
+    })
+    const unitC = condensersOf(c.fixtures)[0] as Fixture
+    expect(unitC.position[0]).toBeCloseTo(5.4, 6)
+    expect(unitC.position[2]).toBeCloseTo(4, 6)
+  })
+})
