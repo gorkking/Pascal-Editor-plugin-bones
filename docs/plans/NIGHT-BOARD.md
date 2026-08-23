@@ -1,3 +1,55 @@
+# NIGHT-10 ROOF RESIDUALS — feat/roof-residuals (2026-08-23, pilot)
+
+## SHIPPED ON BRANCH (base db7ada2, suite 1644 → 1658, 4 commits): the
+## roof-framing/wall-framing residual queue items, one commit each.
+1. SQUARE-HIP APEX TRIM (b72d36e, GEOMETRY fix): width==depth hips (and
+   the square mansard crown) had 2 pre-existing hip×common SAT overlaps
+   at the ridge point — no ridge board at ridgeHalf 0, and layout()'s end
+   station parks the apex common pair OFF-CENTER (u = −t/2); the two hips
+   facing the overhung side drove through it. Fix: apexExtra derives the
+   pair's plan overhang past each ridge end from the ACTUAL commons
+   stations → extra slope inset along the 45° diagonal (mirror of the
+   opposite hips' clearance). Rect hips derive extra = 0 — byte-identical
+   (hash-swept; only square hip/mansard hashes move). Square class joins
+   the interpenetration matrix (6 cases). Mutants 3/4 bite; the 4th is
+   equivalent (overhang self-limits to 0 under any ridge board). S15.
+2. HIP/CROWN SUB-3:12 RIDGE FLAGS (02a3285, B8a's stated residual, S17a):
+   hip ridges answer with the commons' pitch; the MANSARD CROWN rides the
+   same route via the inner frameHip at its COMPUTED pitch — sub-3:12
+   even at the default 40° schema (tan ≈ 0.154), so the default mansard
+   now states R802.4.3 honestly (compact-mansard spans gate carved out as
+   INTENDED, non-vacuous crown pin). Dutch gablet was already served by
+   the gable route — pinned. Byte movement: sub-3:12 hip 300/400 +
+   default mansard ONLY (3:12 boundary, 40° hip, 200, 55° mansard, dutch
+   all pinned clean). 3 mutants bite.
+3. SUB-130 TIE WALL-PATH LABEL (031cc1f, the B10 skeptic's residual,
+   S16): every belt tie (hurricaneTies without highWindUplift) now reads
+   'hurricane tie (roof-to-wall ties only — wall/foundation uplift path
+   not modeled below 130 mph design wind)'; ≥130 keeps the plain label
+   (B10's wall hardware IS the continuation). Expected diff: tie LABELS
+   in exactly 12 states (AL CT DE GA MA MS NC NJ NY RI SC TX — derived
+   from profiles data + pinned; FL HI LA full-path plain; INTL tie-less
+   byte-equal). Geometry label-only by strip-equality × 7 tying shapes;
+   paper/takeoff byte-equal (labels never print; rows count by role).
+   gable-400-windy sha REPINNED (its spec IS the belt) — the other 11
+   hold. B10-EXPECTED-DIFF.md NIGHT-10 addendum. 3 mutants bite.
+4. B10 STALE PARENTHETICAL (wall-framing.ts, one string): the uplift
+   warning read 'flat roofs model no rafter/plate ties today' — stale
+   since B8b landed flat ties. Now the generic truth: 'this roof models
+   no tie members at its bearing' (the warning is the GUARD for future
+   tie-less shapes, synthetic-matrix non-vacuous). New wording pinned +
+   stale wording banned (B10d gate); warning never fires in composed
+   scenes today → zero byte movement. 2 mutants bite. S16 amended.
+E5 baseline byte-identical throughout (no square hips / sub-3:12 ridges /
+high-wind ties on the baseline scene — confirmed per item).
+NEW QUEUE OBSERVATION (found gating item 1): windy SLOPED roofs tie ON
+the rafter station — tieAt centers the 1.5" steel inside the rafter
+volume at every gable/shed/hip bearing (28-44 SAT pairs on the rect
+defaults, pre-existing, never composed in the SAT matrix; only FLAT got
+B8b's beside-the-joist offset). The square-hip matrix runs non-windy
+because of it; candidate next residual: port the B8b per-station offset
+to tieAt's sloped consumers.
+
 # DAY-9 LIVE QUEUE (evening)
 - Z-FIGHT at duct×air-handler junction (Julien screenshots, day-9):
   the supply trunk's end face is COPLANAR with the AH/plenum cabinet

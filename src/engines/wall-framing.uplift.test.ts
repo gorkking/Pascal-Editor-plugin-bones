@@ -344,6 +344,13 @@ describe('B10d — flat-roof honesty (the B8b seam): a wall-only path is stated'
     expect(warnings[0]).toContain('roof roof_flat')
     expect(warnings[0]).toContain('NO hurricane ties')
     expect(warnings[0]).toContain('R802.11')
+    // NIGHT-10 INTENDED-CHANGE (residual 4): the parenthetical used to read
+    // 'flat roofs model no rafter/plate ties today' — stale since B8b
+    // landed flat ties (every shipped shape ties under high wind now; this
+    // warning is the guard for FUTURE tie-less shapes, exercised here
+    // synthetically). The generic truth is pinned; the stale claim banned.
+    expect(warnings[0]).toContain('(this roof models no tie members at its bearing)')
+    expect(warnings[0]).not.toContain('flat roofs model no rafter/plate ties')
   })
 
   test('a tied roof is a complete story — silent; per-roof judgment on mixed scenes', () => {

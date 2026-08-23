@@ -1125,14 +1125,17 @@ export function dedupeFoundationStraps(members: Member[]): number {
 }
 
 /**
- * Uplift-path honesty at the roof seam (LOD-400 B10 / the B8b flat-roof
- * gap): when the WALL side modeled its high-wind connectors but a roof in
- * the same result frames rafters with ZERO hurricane ties (flat roofs call
- * no tieAt today — roof-side work, sibling-owned), the path the connectors
- * continue is never started at the roof bearing. That is a WARNING, not a
- * label: it belongs to the level (P4 prints it on paper), not to any one of
- * the hundreds of connectors. A result with no roof members stays silent —
- * a missing system is a toggle, not missing hardware (B9c convention).
+ * Uplift-path honesty at the roof seam (LOD-400 B10): when the WALL side
+ * modeled its high-wind connectors but a roof in the same result frames
+ * rafters with ZERO hurricane ties, the path the connectors continue is
+ * never started at the roof bearing. B8b closed the flat-roof instance
+ * (every shipped shape ties now — the S17b compose pins ties present AND
+ * this warning absent), so this is the GUARD for any future tie-less
+ * shape, kept non-vacuous by the synthetic-member matrix below. It is a
+ * WARNING, not a label: it belongs to the level (P4 prints it on paper),
+ * not to any one of the hundreds of connectors. A result with no roof
+ * members stays silent — a missing system is a toggle, not missing
+ * hardware (B9c convention).
  */
 export function upliftPathWarnings(members: Member[]): string[] {
   if (!members.some((m) => m.role === 'uplift-connector')) return []
@@ -1149,7 +1152,7 @@ export function upliftPathWarnings(members: Member[]): string[] {
     if (e.rafters > 0 && e.ties === 0) {
       out.push(
         `high-wind uplift: roof ${roofId} frames rafters with NO hurricane ties ` +
-          `(flat roofs model no rafter/plate ties today) — the wall uplift connectors below ` +
+          `(this roof models no tie members at its bearing) — the wall uplift connectors below ` +
           `continue a path the roof never starts; R802.11 uplift path incomplete at the roof ` +
           `bearing, verify tie schedule`,
       )

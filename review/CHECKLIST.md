@@ -929,7 +929,11 @@ AND a gate — a checklist line without a test is a wish.
   roof, naming it ('…R802.11 uplift path incomplete at the roof bearing,
   verify tie schedule' — P4 prints it); tied roofs, roofless results and
   other-storey roofs stay silent (machinery non-vacuous via the
-  synthetic-member matrix). TAKEOFF (B4/S4 both directions): three
+  synthetic-member matrix). NIGHT-10 (residual 4): the warning's
+  parenthetical states the generic truth — 'this roof models no tie
+  members at its bearing' — the old 'flat roofs model no rafter/plate
+  ties today' claim was stale once B8b landed flat ties; new wording
+  pinned, stale wording banned (B10d gate). TAKEOFF (B4/S4 both directions): three
   dedicated member-derived rows counted by ROLE (three new roles — B9's
   `strap` census untouched), the foundation row stating the dedupe
   convention, NO invented nail poundage (B9's fastener rule).
