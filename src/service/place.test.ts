@@ -5,7 +5,12 @@ import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
 import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
 import { buildServicePointNodes, placedServiceTypes, planServiceSeeding } from './place'
-import { levelViewMode, PHYSICAL_SERVICE_TYPES, servicePresentation } from './placement'
+import {
+  ENGINE_RENDERED_SERVICE_TYPES,
+  levelViewMode,
+  PHYSICAL_SERVICE_TYPES,
+  servicePresentation,
+} from './placement'
 import { ServiceNode } from './schema'
 
 /**
@@ -374,13 +379,49 @@ describe('servicePresentation — signs respect the view mode', () => {
     'electric-meter',
   ] as const
 
-  test('xray and basement: box + sign for every type', () => {
-    for (const viewMode of ['xray', 'basement']) {
-      const nodes = withFraming({ viewMode })
-      for (const t of ALL_TYPES) {
-        expect(servicePresentation(nodes, svc(t))).toEqual({ body: true, sign: true })
+  /** The three kinds whose physical counterpart the ENGINES render at the
+   * same anchor (heat-pump A/B 2026-08-22) — X-ray drops the placeholder
+   * body, the sign stays. */
+  const ENGINE_KINDS = ['heat-pump', 'water-heater', 'electric-meter'] as const
+
+  test('xray: engine-rendered kinds drop the body, KEEP the sign; all others box + sign', () => {
+    const nodes = withFraming({ viewMode: 'xray' })
+    for (const t of ALL_TYPES) {
+      const expected = ENGINE_KINDS.includes(t as (typeof ENGINE_KINDS)[number])
+        ? { body: false, sign: true }
+        : { body: true, sign: true }
+      expect(servicePresentation(nodes, svc(t))).toEqual(expected)
+    }
+    // The suppression map is exactly the discovered engine-anchor set.
+    expect(Object.keys(ENGINE_RENDERED_SERVICE_TYPES).sort()).toEqual([...ENGINE_KINDS].sort())
+  })
+
+  test('basement: box + sign for every type (unchanged — documented design)', () => {
+    const nodes = withFraming({ viewMode: 'basement' })
+    for (const t of ALL_TYPES) {
+      expect(servicePresentation(nodes, svc(t))).toEqual({ body: true, sign: true })
+    }
+  })
+
+  test('xray toggle arm: engine hidden (show* false) → the body RETURNS as the visual anchor', () => {
+    const arms = [
+      ['heat-pump', 'showHvac'],
+      ['water-heater', 'showPlumbing'],
+      ['electric-meter', 'showElectrical'],
+    ] as const
+    for (const [t, toggle] of arms) {
+      const nodes = withFraming({ viewMode: 'xray', [toggle]: false })
+      expect(servicePresentation(nodes, svc(t))).toEqual({ body: true, sign: true })
+      // The toggles are per-engine — flipping one never un-suppresses the others.
+      for (const [other] of arms) {
+        if (other === t) continue
+        expect(servicePresentation(nodes, svc(other))).toEqual({ body: false, sign: true })
       }
     }
+    // Absent toggle field = schema default TRUE (legacy nodes never
+    // re-parse) → suppression active; explicit true matches.
+    const explicit = withFraming({ viewMode: 'xray', showHvac: true })
+    expect(servicePresentation(explicit, svc('heat-pump'))).toEqual({ body: false, sign: true })
   })
 
   test("'off': all signs hide; only PHYSICAL equipment keeps its body", () => {
@@ -408,6 +449,9 @@ describe('servicePresentation — signs respect the view mode', () => {
   test('no framing node on the level → pre-automation presentation (box + sign)', () => {
     expect(levelViewMode(scene(), 'level_1')).toBeNull()
     expect(servicePresentation(scene(), svc('sewer-exit'))).toEqual({ body: true, sign: true })
+    // No framing node ⇒ no engines render on this level ⇒ the engine-anchor
+    // kinds keep their body too (nothing else would draw the equipment).
+    expect(servicePresentation(scene(), svc('heat-pump'))).toEqual({ body: true, sign: true })
   })
 
   test('a FOREIGN level’s framing node never gates this level', () => {

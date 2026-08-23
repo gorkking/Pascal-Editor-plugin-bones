@@ -79,10 +79,14 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
     () => resolveServicePlacement(nodes as Record<string, Record<string, unknown>>, node),
     [nodes, node],
   )
-  // View-mode presentation (advisory 2026-08-21): in the level's 'off'
-  // (finished house) mode the hazard-yellow sign plates hide everywhere and
-  // only PHYSICAL equipment keeps its body (placement.ts states the call);
-  // xray/basement — and levels with no X-ray node — show box + sign.
+  // View-mode presentation (advisory 2026-08-21; heat-pump A/B 2026-08-22):
+  // in the level's 'off' (finished house) mode the hazard-yellow sign plates
+  // hide everywhere and only PHYSICAL equipment keeps its body; in 'xray'
+  // the kinds whose physical counterpart the ENGINE renders at the same
+  // anchor (heat-pump condenser / WH tank / meter socket) drop the
+  // placeholder body — the engine's render owns the spot, the sign plate
+  // stays (placement.ts states the call); basement — and levels with no
+  // X-ray node — show box + sign.
   const presentation = useMemo(
     () => servicePresentation(nodes as Record<string, Record<string, unknown>>, node),
     [nodes, node],
@@ -104,9 +108,12 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
   }, [texture])
 
   if (node.visible === false) return null
-  // Finished house: a hidden body means the whole node steps aside (switch
-  // to X-ray/Basement to see or manage it — nothing here is pickable).
-  if (!presentation.body) return null
+  // Nothing to draw at all (finished-house conceptual markers: body AND
+  // sign hidden) → the whole node steps aside (switch to X-ray/Basement to
+  // see or manage it — nothing here is pickable). An X-ray-suppressed body
+  // with its sign still up stays IN the tree: the sign plates keep the node
+  // pickable where the engine draws the physical equipment.
+  if (!presentation.body && !presentation.sign) return null
 
   // Unresolvable anchor (missing/curved/foreign wall + never-moved position):
   // render only a small selectable stub — the node stays pickable/deletable
@@ -150,10 +157,12 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
       rotation={[0, placement.rotationY, 0]}
       {...handlers}
     >
-      <mesh castShadow position={[0, position[1], 0]} receiveShadow>
-        <boxGeometry args={[body.dims[0], body.dims[1], body.dims[2]]} />
-        <meshStandardMaterial color={body.color} roughness={0.7} />
-      </mesh>
+      {presentation.body && (
+        <mesh castShadow position={[0, position[1], 0]} receiveShadow>
+          <boxGeometry args={[body.dims[0], body.dims[1], body.dims[2]]} />
+          <meshStandardMaterial color={body.color} roughness={0.7} />
+        </mesh>
+      )}
       {presentation.sign &&
         texture &&
         signPlates.map(({ offset: [sx, sy, sz], rotY }, i) => (
