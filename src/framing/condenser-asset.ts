@@ -140,20 +140,50 @@ let inflight: Promise<Object3D | null> | null = null
 /** The normalized, module-cached asset — loaded at most once per session. */
 let resolvedAsset: Object3D | null = null
 
+/** True when the scene holds at least one renderable mesh. A GLB whose
+ * default scene has none would normalize to an INVISIBLE wrapper — the box
+ * gone, nothing mounted: exactly the hole the fallback contract forbids. */
+function containsMesh(scene: Object3D): boolean {
+  let found = false
+  scene.traverse((obj) => {
+    if ((obj as Mesh).isMesh) found = true
+  })
+  return found
+}
+
 /**
  * Load (once) and normalize the AC block asset. NEVER rejects: any failure
  * resolves `null` and the caller keeps rendering the box — the swap is a
  * progressive enhancement. A failed attempt clears the in-flight slot so
  * the next activation retries (transient network); callers only re-invoke
  * on mode/member changes, so there is no retry storm.
+ *
+ * RESOLVE-THEN-THROW ARM (round-1 skeptic): loadImpl can RESOLVE with a
+ * useless payload — a spec-valid GLB may carry NO default scene
+ * (`gltf.scene === undefined` lands here despite the type) or a scene
+ * with zero meshes. Normalizing the former used to throw in this
+ * onFulfilled arm, REJECTING the cached in-flight promise with no clear —
+ * every retry wedged forever; the latter mounted an empty wrapper (a
+ * hole). Both are load failures like any other: resolve null, clear the
+ * slot for retry. The try/catch keeps the no-rejection contract even for
+ * exotic payloads that crash traverse/Box3.
  */
 export function loadCondenserAsset(): Promise<Object3D | null> {
   if (resolvedAsset) return Promise.resolve(resolvedAsset)
   if (!inflight) {
     inflight = loadImpl().then(
       (scene) => {
-        resolvedAsset = normalizeToUnitBox(scene)
-        return resolvedAsset
+        try {
+          if (!scene || !containsMesh(scene)) {
+            inflight = null
+            return null
+          }
+          resolvedAsset = normalizeToUnitBox(scene)
+          return resolvedAsset
+        } catch {
+          inflight = null
+          return null
+        }
       },
       () => {
         inflight = null

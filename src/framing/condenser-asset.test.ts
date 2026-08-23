@@ -1,6 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { Box3, BoxGeometry, Group, InstancedMesh, Matrix4, Mesh, MeshStandardMaterial } from 'three'
+import {
+  Box3,
+  BoxGeometry,
+  Group,
+  InstancedMesh,
+  Matrix4,
+  Mesh,
+  MeshStandardMaterial,
+  type Object3D,
+} from 'three'
 import type { Member } from '../core/types'
+import { jurisdictionOptions } from '../jurisdiction/profiles'
+import { baselineConfig, baselineScene } from './baseline-scene'
+import { computeLevel } from './compute'
 import baseline from './master-baseline.json'
 import {
   __setCondenserAssetLoaderForTests,
@@ -141,6 +153,35 @@ describe('cabinet identification (structural, no engine change)', () => {
     expect(isCondenserCabinet(CABINET)).toBe(true)
     expect(isCondenserCabinet(PAD)).toBe(false)
     expect(isCondenserCabinet(STUD)).toBe(false)
+  })
+
+  test('uniqueness sweep: 52 jurisdictions × {baseline, garage-variant} — the triple ⇔ the cabinet, no collision from ANY engine', () => {
+    // Round-1 advisory: the skeptic swept 52 jurisdictions × 3 scene
+    // shapes with zero collisions; this pins the class as a live gate over
+    // the two cheap shapes (~110ms — the garage variant exercises the
+    // AH-in-garage arm, M1602.2(1), where equipment placement differs).
+    // Full computeLevel so EVERY engine's members join the census — a
+    // future steel `role: 'equipment'` member from electrical / plumbing /
+    // hvac collides here loudly instead of silently swapping to a heat
+    // pump in the viewport.
+    const garageVariant = () => {
+      const scene = baselineScene()
+      scene.z_hall = { ...(scene.z_hall as Record<string, unknown>), name: 'Garage' }
+      return scene
+    }
+    for (const { code } of jurisdictionOptions()) {
+      for (const scene of [baselineScene, garageVariant]) {
+        const result = computeLevel(scene(), baselineConfig(code))
+        // triple ⇔ 'AC condenser #' label — one census, zero mismatches
+        const mismatches = result.members.filter(
+          (m) => isCondenserCabinet(m) !== (m.label ?? '').startsWith('AC condenser #'),
+        )
+        expect(mismatches).toEqual([])
+        // …and the swap target exists in every run (non-vacuous; the
+        // condenser-always contract keeps this true at every LOD).
+        expect(result.members.some((m) => isCondenserCabinet(m))).toBe(true)
+      }
+    }
   })
 })
 
@@ -339,6 +380,55 @@ describe('the loader — never a rejection into the renderer', () => {
     expect(await loadCondenserAsset()).not.toBeNull()
     expect(calls).toBe(2)
     expect(condenserAssetSnapshot()).not.toBeNull()
+  })
+
+  test('resolve-then-throw arm: a SCENE-LESS GLB resolves null and never wedges the retry slot', async () => {
+    // Round-1 skeptic exhibit: a spec-valid GLB with no default scene made
+    // loadImpl RESOLVE with gltf.scene === undefined; normalize then threw
+    // in the onFulfilled arm, the cached in-flight promise REJECTED and
+    // was never cleared — call1 rejected, call2 rejected, loader
+    // invocations stuck at 1. Contract: call1 null (not a rejection),
+    // call2 RETRIES (invocation count 2) and may heal.
+    let calls = 0
+    __setCondenserAssetLoaderForTests(async () => {
+      calls++
+      if (calls === 1) return undefined as unknown as Object3D
+      return fakeAssetScene().scene
+    })
+    await expect(loadCondenserAsset()).resolves.toBeNull()
+    expect(condenserAssetSnapshot()).toBeNull()
+    expect(await loadCondenserAsset()).not.toBeNull()
+    expect(calls).toBe(2)
+  })
+
+  test('mesh-less GLB scene: null — the box stays, never an EMPTY wrapper (no hole)', async () => {
+    let calls = 0
+    __setCondenserAssetLoaderForTests(async () => {
+      calls++
+      if (calls === 1) return new Group() // present but renders nothing
+      return fakeAssetScene().scene
+    })
+    expect(await loadCondenserAsset()).toBeNull()
+    expect(condenserAssetSnapshot()).toBeNull()
+    // the renderer path sees null → the cabinet keeps its box, zero wrappers
+    const group = buildGroup([CABINET], [], 'xray', condenserAssetSnapshot())
+    expect(assetWrappers(group)).toHaveLength(0)
+    expect(totalInstances(group)).toBe(1)
+    // and the slot is clear: the next call retries and heals
+    expect(await loadCondenserAsset()).not.toBeNull()
+    expect(calls).toBe(2)
+  })
+
+  test('exotic payload that crashes normalize: caught → null, slot cleared for retry', async () => {
+    let calls = 0
+    __setCondenserAssetLoaderForTests(async () => {
+      calls++
+      if (calls === 1) return {} as unknown as Object3D // no traverse → throws inside the arm
+      return fakeAssetScene().scene
+    })
+    await expect(loadCondenserAsset()).resolves.toBeNull()
+    expect(await loadCondenserAsset()).not.toBeNull()
+    expect(calls).toBe(2)
   })
 
   test('concurrent callers share one in-flight load', async () => {
