@@ -20,8 +20,8 @@ import { levelFramingNode, type ServicePlacementNode } from './placement'
  * footprint, standing exactly where the unit renders. Hover/click/move all
  * ride the existing service-node machinery — useNodeEvents on the group,
  * useRegistry → host SelectionManager → merged-outline pass (which
- * re-renders silhouettes with its own mask material, so an opacity-≈0 mesh
- * still outlines) — zero cross-renderer coupling, and the framing meshes
+ * re-renders silhouettes with its own mask material, so a colorWrite:false
+ * mesh still outlines) — zero cross-renderer coupling, and the framing meshes
  * keep their raycast no-op (the proxy is a SERVICE mesh: the one stated
  * exception to "bones meshes never raycast", documented at the mount).
  *
@@ -36,9 +36,11 @@ import { levelFramingNode, type ServicePlacementNode } from './placement'
  * sign plate stays the handle there (the stated engine-silence trade).
  */
 
-/** The proxy box exceeds the cabinet by 4% so its faces never sit coplanar
- * with the asset's surfaces (a 0.03-alpha shimmer class) while the hover
- * outline still hugs the unit within ~2 cm. */
+/** The proxy box exceeds the cabinet by 4%: a slightly generous grab
+ * volume, with the hover outline still hugging the unit within ~2 cm.
+ * (The original anti-coplanar rationale — a 0.03-alpha shimmer class —
+ * died with the colorWrite:false material, QA round 2026-08-23; the
+ * inflate stays for the grab tolerance.) */
 export const HP_PROXY_INFLATE = 1.04
 
 export type HeatPumpProxySpec = {
