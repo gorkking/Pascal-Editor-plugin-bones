@@ -91,9 +91,15 @@ AND a gate — a checklist line without a test is a wish.
   interconnect is pullable cable.** Placement (IRC R314.3/R315.3): every
   bedroom alarms; the outside-sleeping-area alarm NEVER silently drops —
   a missing hallway falls back to a bedroom-ADJACENT room (polygon
-  adjacency, garage/bathroom last) and an impossible proxy is a LEVEL
-  WARNING; every story with rooms carries at least one alarm
-  (R314.3(3)); a level with an attached garage + bedrooms places a
+  adjacency, garage/bathroom last — OUTDOOR zones NEVER host: R314
+  covers the dwelling interior, so a garden sharing the bedroom's wall
+  is open air, not "outside the sleeping area"; night-10) and an
+  impossible proxy is a LEVEL WARNING; every story with rooms carries
+  at least one alarm (R314.3(3)) hosted by the largest INDOOR room —
+  a bigger garden never outranks the living room, and an outdoor-only
+  level warns ('all zones on this level are outdoor — … R314.3(3) not
+  placed…') instead of hanging the alarm in the yard (night-10 close
+  of the day-9 residual family); a level with an attached garage + bedrooms places a
   `co-alarm` outside the sleeping area (R315.3 — the fuel-appliance
   condition rides the same garage trigger as the plumbing tank-WH
   assumption); centroid nudges clamp INTO the host polygon (narrow-
@@ -125,7 +131,10 @@ AND a gate — a checklist line without a test is a wish.
   one-circuit pin, 14/3 interconnect walk, traveler continuity, takeoff
   row split, 3-storey cross-storey warning matrix + scoped labels,
   corridor nudge-clamp repro, duplicate-zone/face-twin traveler
-  exhibits + legitimate-pair keep, ceiling-box census).
+  exhibits + legitimate-pair keep, ceiling-box census) +
+  `src/engines/electrical.outdoor.test.ts` (garden-only warning pair,
+  indoor-only per-story election, garden-vs-den proxy exhibit,
+  proxy-fail bedroom+garden scene — all mutation-checked night-10).
 - **E7 Every service chain carries its grounding electrode system.**
   A meter + panel imply the GES (NEC 250.50 — every build orders it):
   TWO driven 5/8" × 8 ft rods below grade AT the meter, exactly 6 ft
@@ -255,7 +264,22 @@ AND a gate — a checklist line without a test is a wish.
   (pre-existing, documented not fixed): the census's
   `us.length===0 && wall.exterior` skip makes the exclusion reachable
   only on INTERIOR counter walls — an exterior counter wall's faces
-  skip the 210.52(A) census entirely. On paper the B14 boxes print as
+  skip the 210.52(A) census entirely. OUTDOOR ZONES ARE OPEN AIR
+  (night-10, the day-9 M4 residual): a wall face opening onto an
+  'outdoor' zone with no indoor room at the same point is NEVER a
+  210.52(A) mounting face — interior-style 15" receptacles used to
+  mint on the yard side of shell walls (winning the face election
+  from the indoor side on some orientations) and on garden fences; an
+  exterior wall resolves its interior side against INDOOR rooms only,
+  a wall whose only resolved side is outdoor (fences, freestanding
+  garden walls) gets NO faces at all, and the moved-device spacing
+  census skips open-air faces exactly like exterior faces (a
+  courtyard partition's outdoor side is a by-design zero, not a >12ft
+  gap). `exteriorFaceOf` reads an outdoor zone as the OUTSIDE when no
+  indoor room resolves a side, so the meter/WR boxes stop flipping
+  indoors on garden-backed walls. Outdoor coverage stays the B14a WR
+  machinery's job — the two required WR boxes are UNAFFECTED by the
+  open-air skip. On paper the B14 boxes print as
   their OWN tags — GC (44" AFF) / GB (40" AFF) / WR — with legend
   rows naming the heights and a tag-keyed bubble dedupe (a counter box
   plan-stacks exactly over the wall-line box below it); EXT-1 carries
@@ -272,7 +296,11 @@ AND a gate — a checklist line without a test is a wish.
   sub-invariants mutation-checked) + the GC/GB/WR/EXT-1 paper pins in
   `src/plans/plan-set.test.ts` + the EXT family floor (incl. the
   explicit `service-entrance` id) in
-  `src/plans/circuit-colors.test.ts`.
+  `src/plans/circuit-colors.test.ts` + the open-air face gates in
+  `src/engines/electrical.outdoor.test.ts` (garden/fence/courtyard
+  sweeps, indoor-first face election, meter-side pins incl. the
+  un-zoned-interior fallback, census skip, indoor-overlap
+  conservatism — all mutation-checked night-10).
 
 ## S — Structure
 
@@ -1217,7 +1245,19 @@ AND a gate — a checklist line without a test is a wish.
   a leading-qualifier reclassification of a sleeping-word name WARNS
   ('reads as open-air — no smoke alarm placed (R314)'), never silent; the
   'Winter garden'/'Garden room' conservatory class stays outdoor by
-  design. HVAC serves indoor rooms only (no supply register, no tonnage,
+  design. ELECTRICAL honesty (night-10, closing the day-9 residual
+  family): NO ceiling light composes in an outdoor zone ('Light —
+  Garden' floated at y=2.7 over the grass) — the zone's honest lighting
+  is NEC 210.70(A)(2)(2)'s own requirement, a wall-mounted 'Exterior
+  light — <zone> entrance' on the OUTDOOR face above each dwelling
+  door into the zone (riding the served indoor room's LTG circuit;
+  the door's interior latch-side switch is the control), and a zone no
+  dwelling door opens into carries the level warning 'outdoor zone
+  "<name>": open air — ceiling lighting not modeled; exterior fixtures
+  by site plan' — garden gates in fences are not dwelling entrances;
+  outdoor zones pack no phantom 220.12 lighting VA and never form
+  3-way groups; smoke-alarm + receptacle-face honesty per E6/E8.
+  HVAC serves indoor rooms only (no supply register, no tonnage,
   never the equipment room / thermostat / heat-pump anchor — filtered at
   every exported rooms-boundary, A4 parity with seeding and the panel); an
   outdoor-only level composes NO air handler, hence honestly no condenser
@@ -1244,7 +1284,9 @@ AND a gate — a checklist line without a test is a wish.
   indoor-only tonnage, A4 seeding parity, B14 WR-GFCI + meter seam guard,
   classifier witnesses incl. 'Terrazzo entry', R314 warning pair +
   smoke-alarm compose pin, characteristics corners + paper n/a strings,
-  outdoor-only honesty).
+  outdoor-only honesty) + `src/engines/electrical.outdoor.test.ts`
+  (the night-10 electrical slice: entrance-light pins + E2 wiring
+  reach, garden-only warning pair, open-air face sweeps).
 
 ## P — Plans (the exported document)
 
