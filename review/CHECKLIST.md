@@ -1208,16 +1208,24 @@ AND a gate — a checklist line without a test is a wish.
   sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
 - **M4 Outdoor zones are OPEN AIR — classified, unserved by HVAC, and
   honestly reported.** A zone named for the outdoors (garden/yard/patio/
-  terrace|terrasse|terraza — anchored forms, material adjectives like
-  'Terrazzo'/'Terracotta' never match — deck/porch/balcon/lanai/pergola/
+  terrace|terrasse|terraza|terrazza — anchored forms, material adjectives
+  like 'Terrazzo'/'Terracotta' never match; garden/yard are WORD-anchored
+  (day-9 misfire list — 'Kindergarden'/'Vineyard cellar' never classify)
+  with courtyard/backyard/frontyard + plurals as their own anchored
+  compounds — deck/porch/balcon/lanai/pergola/
   jardin/outdoor/outside/exterior) classifies category 'outdoor'; compound
-  names resolve INDOOR-first ('Garden bedroom' is a bedroom and keeps its
-  R314 alarm) unless the outdoor word LEADS as a qualifier
-  (outdoor|outside|exterior|roof — 'Outdoor kitchen', 'Roof terrace'), and
-  a leading-qualifier reclassification of a sleeping-word name WARNS
-  ('reads as open-air — no smoke alarm placed (R314)'), never silent; the
+  names resolve by HEAD NOUN — the LAST matching word is the thing the
+  room IS (day-9 refinement: 'Garden bedroom' is a bedroom and keeps its
+  R314 alarm; 'Master terrace'/'Bedroom terrace' are terraces, open air) —
+  and an outdoor word LEADING as a qualifier flips outdoors regardless
+  (outdoor|outside|exterior|roof — 'Outdoor kitchen', 'Roof terrace');
+  EVERY path that lands a sleeping-word name in 'outdoor' WARNS
+  ('reads as open-air — no smoke alarm placed (R314)') — the check keys on
+  the RESULT (category + SLEEPING_NAME_RE), never on one branch; the
   'Winter garden'/'Garden room' conservatory class stays outdoor by
-  design. HVAC serves indoor rooms only (no supply register, no tonnage,
+  design. An outdoor zone needs NO floor slab — the room-coverage warning
+  ('has no floor slab under it') is indoor-only, while an indoor room
+  without flooring still warns. HVAC serves indoor rooms only (no supply register, no tonnage,
   never the equipment room / thermostat / heat-pump anchor — filtered at
   every exported rooms-boundary, A4 parity with seeding and the panel); an
   outdoor-only level composes NO air handler, hence honestly no condenser
@@ -1237,14 +1245,19 @@ AND a gate — a checklist line without a test is a wish.
   Origin: prod starter-template report 2026-08-22 ("I don't see the heat
   pump standing outside the house") + skeptic/examiner rounds 1-4
   (terrazzo harm class, R314 drop, yard-inflated sheet figure, terrace
-  slab-outdoor corner, stale n/a reason).
+  slab-outdoor corner, stale n/a reason) + day-9 skeptic misfire list
+  (head-noun tie-break both directions, terrazza, Kindergarden/Vineyard
+  substring traps, outdoor slab-warning exclusion — night-10).
   Gates: `src/framing/starter-template.test.ts` (starter-template compose
   pin: whole-shell election, unflagged condenser outside the footprint +
   NEC 440.14 disconnect + E2 line-set, no HVAC in the outdoor zone,
   indoor-only tonnage, A4 seeding parity, B14 WR-GFCI + meter seam guard,
-  classifier witnesses incl. 'Terrazzo entry', R314 warning pair +
-  smoke-alarm compose pin, characteristics corners + paper n/a strings,
-  outdoor-only honesty).
+  classifier witnesses incl. 'Terrazzo entry' + head-noun/anchoring
+  matrix, R314 warning pair + smoke-alarm compose pin + 'Master terrace'
+  speaks / 'Garden bedroom' silent pair, characteristics corners + paper
+  n/a strings, outdoor-only honesty),
+  `src/framing/compute.multistorey.test.ts` (outdoor slab-warning
+  exclusion, both directions).
 
 ## P — Plans (the exported document)
 

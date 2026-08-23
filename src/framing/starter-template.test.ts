@@ -342,11 +342,12 @@ describe('classifyRoom — outdoor zones', () => {
     expect(classifyRoom('Terracotta foyer')).toBe('other')
   })
 
-  test('compound names: the indoor category wins unless the outdoor word LEADS', () => {
+  test('compound names: the HEAD NOUN wins unless the outdoor word LEADS', () => {
     // 'Garden bedroom' is a bedroom — it keeps its R314 smoke alarm
     expect(classifyRoom('Garden bedroom')).toBe('bedroom')
     expect(classifyRoom('Patio kitchen')).toBe('kitchen')
     expect(classifyRoom('Garden bath')).toBe('bathroom')
+    expect(classifyRoom('Terrace bedroom')).toBe('bedroom')
     // leading qualifier flips outdoors
     expect(classifyRoom('Outdoor kitchen')).toBe('outdoor')
     expect(classifyRoom('Exterior hall')).toBe('outdoor')
@@ -355,6 +356,35 @@ describe('classifyRoom — outdoor zones', () => {
     // user renames or re-zones it
     expect(classifyRoom('Winter garden')).toBe('outdoor')
     expect(classifyRoom('Garden room')).toBe('outdoor')
+  })
+
+  test('head-noun tie-break (day-9 misfire list): a trailing outdoor word IS the room', () => {
+    // both directions of the compound class: the LAST matching word is the
+    // thing the room is — a 'Master terrace' is a terrace (open air; the
+    // R314 warning speaks for the dropped alarm, gated below), a
+    // 'Garden bedroom' a bedroom (pinned above)
+    expect(classifyRoom('Master terrace')).toBe('outdoor')
+    expect(classifyRoom('Bedroom terrace')).toBe('outdoor')
+    expect(classifyRoom('Bedroom balcony')).toBe('outdoor')
+    expect(classifyRoom('Kitchen garden')).toBe('outdoor') // the vegetable plot
+    // the indoor CATEGORY keeps ROOM_PATTERNS order, not name order
+    expect(classifyRoom('Master bath')).toBe('bathroom')
+  })
+
+  test('Italian terrazza is an anchored terrace form; Terrazzo still is not', () => {
+    expect(classifyRoom('Terrazza')).toBe('outdoor')
+    expect(classifyRoom('Terrazza coperta')).toBe('outdoor')
+    expect(classifyRoom('Terrazzo entry')).toBe('other') // material adjective
+  })
+
+  test('garden/yard are word-anchored — substrings never classify (day-9 traps)', () => {
+    expect(classifyRoom('Kindergarden')).toBe('other') // a child's room, not a garden
+    expect(classifyRoom('Vineyard cellar')).toBe('other') // a cellar, not a yard
+    expect(classifyRoom('Gardenia room')).toBe('other')
+    // …while the legitimate one-word compounds + plurals keep matching
+    expect(classifyRoom('Courtyard')).toBe('outdoor')
+    expect(classifyRoom('Backyard')).toBe('outdoor')
+    expect(classifyRoom('Gardens')).toBe('outdoor')
   })
 
   test('a Garden bedroom KEEPS its smoke alarms in the compose (R314 pin)', () => {
@@ -790,5 +820,38 @@ describe('R314 open-air warning (round-2 advisory — E6 spirit)', () => {
     ;(nodes.zone_bed as Record<string, unknown>).name = 'Outdoor kitchen'
     const result = computeLevel(nodes, config())
     expect(result.warnings.some((w) => w.includes('reads as open-air'))).toBe(false)
+  })
+
+  test('a "Master terrace" (head-noun outdoor) SPEAKS: warning fires, alarm honestly gone', () => {
+    // the day-9 head-noun tie-break opens a SECOND path to category
+    // 'outdoor' with a sleeping word in the name — the warning keys on the
+    // RESULT (category + SLEEPING_NAME_RE), so it must fire here too
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Master terrace'
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes('Master terrace') && w.includes('reads as open-air') && w.includes('R314'),
+      ),
+    ).toBe(true)
+    // the warning tells the truth: no alarm was placed for it
+    expect(
+      result.fixtures.some(
+        (f) => f.kind === 'smoke-alarm' && f.label?.includes('Master terrace'),
+      ),
+    ).toBe(false)
+  })
+
+  test('a "Garden bedroom" (head noun indoor) keeps its alarm and stays warning-free', () => {
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Garden bedroom'
+    const result = computeLevel(nodes, config())
+    expect(result.warnings.some((w) => w.includes('reads as open-air'))).toBe(false)
+    expect(
+      result.fixtures.some(
+        (f) => f.kind === 'smoke-alarm' && f.label?.includes('Garden bedroom'),
+      ),
+    ).toBe(true)
   })
 })

@@ -488,11 +488,13 @@ function computeLevelUncached(
     )
   }
   const rooms = extractRooms(nodes, levelId)
-  // R314 never drops silently (round-2 advisory): a LEADING outdoor
-  // qualifier can reclassify a sleeping-word name outdoors ('Outdoor
-  // bedroom' → open air), which strips its smoke alarm — the only path to
-  // category 'outdoor' with a sleeping word in the name, since the
-  // compound-name precedence keeps 'Garden bedroom' indoors. Say so.
+  // R314 never drops silently (round-2 advisory + day-9 head-noun): a
+  // LEADING outdoor qualifier ('Outdoor bedroom') OR an outdoor HEAD NOUN
+  // ('Master terrace', 'Bedroom terrace') can classify a sleeping-word
+  // name outdoors, which strips its smoke alarm — the check keys on the
+  // RESULT (category + name), so every path that lands a sleeping-word
+  // name in 'outdoor' speaks; 'Garden bedroom' stays indoors (head noun)
+  // and stays silent. Say so.
   for (const room of rooms) {
     if (room.category === 'outdoor' && SLEEPING_NAME_RE.test(room.name)) {
       warnings.push(
