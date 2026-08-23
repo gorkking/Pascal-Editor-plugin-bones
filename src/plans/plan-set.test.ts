@@ -3668,3 +3668,403 @@ describe('B6 fix F5 — the section cuts a rolled plate as its TRUE sloped band,
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// NIGHT-10 — plan-set legend grammar for surface-steel hardware (the paper
+// debt B9/B10/B12 examiners each flagged: unkeyed hardware ink) + the C5
+// LOD-200 areas-fallback takeoff rows.
+// ---------------------------------------------------------------------------
+
+describe('NIGHT-10 — keyed hardware glyphs + derived legend rows (B9/B10 debt)', () => {
+  // Exact glyph markup pins (content-addressed: the legend swatch must key
+  // the SAME symbol the plan draws — P2. A drift in either side fails here.)
+  const GLYPH = {
+    strap: '<path d="M0 -3 L3 0 L0 3 L-3 0 Z" fill="#444"/>',
+    'uplift-strap':
+      '<path d="M0 -3.4 L3.4 0 L0 3.4 L-3.4 0 Z" fill="none" stroke="#444" stroke-width="0.9"/>',
+    'uplift-connector':
+      '<path d="M0 -3.6 L3.2 2.6 L-3.2 2.6 Z" fill="none" stroke="#444" stroke-width="0.9"/>',
+    'foundation-strap': '<path d="M0 3.4 L3 -2.4 L-3 -2.4 Z" fill="#444"/>',
+    'hold-down': '<rect x="-2.5" y="-2.5" width="5" height="5" fill="#444"/>',
+    'portal-post':
+      '<rect x="-3.5" y="-3.5" width="7" height="7" fill="none" stroke="#444" stroke-width="0.9"/>',
+  } as const
+  /** Plan-area ink only — everything before the chrome border, so the
+   * legend swatches (which reuse the exact glyph markup) never inflate a
+   * census. */
+  const drawingOf = (svg: string): string => svg.slice(0, svg.indexOf('<rect x="8" y="8"'))
+  /** Drawn glyph spots of one kind: translate coords in the plan area. */
+  const glyphSpots = (svg: string, kind: keyof typeof GLYPH): { x: number; y: number }[] =>
+    [
+      ...drawingOf(svg).matchAll(
+        new RegExp(
+          `<g transform="translate\\((-?[\\d.]+) (-?[\\d.]+)\\)">${GLYPH[kind].replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}</g>`,
+          'g',
+        ),
+      ),
+    ].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
+  const wall = (
+    id: string,
+    start: [number, number],
+    end: [number, number],
+    openings: WallSlice['openings'] = [],
+  ): WallSlice => {
+    const dx = end[0] - start[0]
+    const dz = end[1] - start[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start,
+      end,
+      dir: [dx / length, dz / length],
+      length,
+      thickness: 0.15,
+      height: 2.5,
+      exterior: true,
+      curved: false,
+      openings,
+    }
+  }
+  const T2 = 0.038
+  /** Garage front: 16-ft door RO centered — both returns take the CS-PF
+   * portal set on SDC-D (the B9 exhibit). */
+  const garage = (): WallSlice =>
+    wall('garage_front', [0, 0], [6.1, 0], [
+      {
+        id: 'gd',
+        kind: 'door',
+        u: 3.05,
+        width: feet(16) - T2,
+        height: 2.13,
+        sillHeight: 0,
+        roughWidth: feet(16),
+        roughHeight: 2.13 + T2,
+      },
+    ])
+  const caSpec = () =>
+    applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor('CA'))
+  const laSpec = () =>
+    applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor('LA'))
+  const sheetOf = (sheets: { title: string; svg: string }[], title: string): string =>
+    sheets.find((s) => s.title === title)?.svg ?? ''
+  const legendTexts = (svg: string): string =>
+    [...svg.matchAll(/>([^<>]+)<\/text>/g)].map((m) => m[1]).join(' | ')
+  /** Independent fit of the ONE shared set transform (P1) from the
+   * anchor-bolt dots on the foundation sheet — the dots draw at their
+   * TRUE member positions, so min/max extremes pair up under the
+   * monotonic map. Lets the gates check glyphs on ANY sheet against
+   * member positions without re-implementing planBounds. */
+  const fitTransform = (
+    fndSvg: string,
+    bolts: Member[],
+  ): { X: (x: number) => number; Z: (z: number) => number } => {
+    const dots = [
+      ...drawingOf(fndSvg).matchAll(
+        /<circle cx="(-?[\d.]+)" cy="(-?[\d.]+)" r="2\.2" fill="#444"\/>/g,
+      ),
+    ].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
+    expect(dots).toHaveLength(bolts.length)
+    const xs = bolts.map((b) => b.position[0])
+    const zs = bolts.map((b) => b.position[2])
+    const px = dots.map((d) => d.x)
+    const py = dots.map((d) => d.y)
+    const scaleX = (Math.max(...px) - Math.min(...px)) / (Math.max(...xs) - Math.min(...xs))
+    const scaleZ = (Math.max(...py) - Math.min(...py)) / (Math.max(...zs) - Math.min(...zs))
+    const ox = Math.min(...px) - Math.min(...xs) * scaleX
+    const oz = Math.min(...py) - Math.min(...zs) * scaleZ
+    return { X: (x) => ox + x * scaleX, Z: (z) => oz + z * scaleZ }
+  }
+  /** Every member of `group` has a drawn glyph within the deterministic
+   * dodge budget (ring max 12 px + 0.1 px coordinate rounding + fit
+   * slack) of its TRUE projected position — symbols never wander. */
+  const anchoredToTruth = (
+    spots: { x: number; y: number }[],
+    group: Member[],
+    t: { X: (x: number) => number; Z: (z: number) => number },
+  ): void => {
+    for (const m of group) {
+      const gx = t.X(m.position[0])
+      const gy = t.Z(m.position[2])
+      const d = Math.min(...spots.map((s) => Math.hypot(s.x - gx, s.y - gy)))
+      expect(d).toBeLessThanOrEqual(12.6)
+    }
+  }
+
+  test('CA-seismic compose: portal strap + post censuses match; rows derive label + cite; the roleSizes post accident is gone', () => {
+    const walls = [garage(), wall('w_side', [0, 0], [0, 5])]
+    const members = [
+      ...frameWalls(walls, caSpec(), undefined, { slabBearing: true }),
+      ...buildFoundation(walls, [], caSpec()),
+    ]
+    const straps = members.filter((m) => m.role === 'strap')
+    const posts = members.filter(
+      (m) => m.role === 'post' && (m.label ?? '').includes('R602.10.6.4'),
+    )
+    expect(straps.length).toBe(2) // the exhibit is real: both returns portal
+    expect(posts.length).toBe(4)
+    const sheets = buildPlanSet(members, [], { walls })
+    const svg = sheetOf(sheets, 'Wall framing plan')
+    // symbol census == member census per role (a glyph must ALWAYS print)
+    expect(glyphSpots(svg, 'strap')).toHaveLength(straps.length)
+    expect(glyphSpots(svg, 'portal-post')).toHaveLength(posts.length)
+    // each glyph sits at (or within the deterministic dodge ring of) its
+    // member's TRUE plan position — transform fit independently from the
+    // foundation sheet's bolt dots (P1: one transform for the whole set)
+    const t = fitTransform(
+      sheetOf(sheets, 'Foundation plan'),
+      members.filter((m) => m.role === 'anchor-bolt'),
+    )
+    anchoredToTruth(glyphSpots(svg, 'strap'), straps, t)
+    anchoredToTruth(glyphSpots(svg, 'portal-post'), posts, t)
+    // legend rows: keyed swatch + derived name/cite/count (P2 — pulled
+    // from the member labels, never hardcoded)
+    expect(svg).toContain(esc2('Portal strap 1000 lb (CS-PF, R602.10.6.4) — 2 pcs'))
+    expect(svg).toContain(esc2('Portal hold-down post (doubled 2x6) — R602.10.6.4 — 4 pcs'))
+    // the swatch in the legend uses the SAME markup as the plan glyph
+    expect(svg.split(GLYPH.strap).length - 1).toBe(straps.length + 1) // plan + 1 key
+    expect(svg.split(GLYPH['portal-post']).length - 1).toBe(posts.length + 1)
+    // the accidental generic roleSizes row is replaced by the keyed row
+    expect(legendTexts(svg)).not.toContain('post — 2x6')
+    // posts are real lumber: their rects still draw at the post positions
+    // (the open square is a MARKER over the stick, not a replacement)
+    for (const p of posts) {
+      const rx = t.X(p.position[0])
+      const rects = [
+        ...drawingOf(svg).matchAll(/<rect [^>]*transform="translate\((-?[\d.]+) (-?[\d.]+)\)/g),
+      ].map((m) => Number(m[1]))
+      expect(rects.some((x) => Math.abs(x - rx) <= 1.5)).toBe(true)
+    }
+  })
+
+  test('CA-seismic foundation sheet: HDU squares keyed + de-collided against the bolt-dot registry (crowded sheet)', () => {
+    const walls = [garage(), wall('w_side', [0, 0], [0, 5])]
+    const members = buildFoundation(walls, [], caSpec())
+    const hdus = members.filter((m) => m.role === 'hold-down')
+    expect(hdus.length).toBeGreaterThanOrEqual(4)
+    const svg = sheetOf(buildPlanSet(members, [], { walls }), 'Foundation plan')
+    const spots = glyphSpots(svg, 'hold-down')
+    expect(spots).toHaveLength(hdus.length) // census
+    expect(svg).toContain(esc2(`HDU hold-down — ${hdus.length} pcs`)) // keyed row
+    // de-collision: every HDU glyph clears every anchor-bolt dot and every
+    // other glyph (the seismic plate line packs bolts @4 ft + HDUs at both
+    // wall ends) — and no crowded fallback was needed
+    const dots = [
+      ...drawingOf(svg).matchAll(/<circle cx="(-?[\d.]+)" cy="(-?[\d.]+)" r="2\.2" fill="#444"\/>/g),
+    ].map((m) => ({ x: Number(m[1]), y: Number(m[2]) }))
+    expect(dots.length).toBeGreaterThan(4) // the bolt field is really there
+    for (const s of spots) {
+      for (const q of [...dots, ...spots]) {
+        const d = Math.hypot(s.x - q.x, s.y - q.y)
+        if (d > 0) expect(d).toBeGreaterThanOrEqual(6.8) // 7 px clear − 0.1 px rounding
+      }
+    }
+    expect(drawingOf(svg)).not.toContain('hardware-glyph crowded')
+    // …and each glyph stays within the deterministic dodge ring of its
+    // true member position (symbols never wander)
+    const t = fitTransform(svg, members.filter((m) => m.role === 'anchor-bolt'))
+    anchoredToTruth(spots, hdus, t)
+  })
+
+  test('LA-windy compose: all three uplift roles census 1:1, de-collide at plan-coincident spots, and key with WFCM cites', () => {
+    const walls = [
+      wall('w_s', [0, 0], [8, 0], [
+        {
+          id: 'd1',
+          kind: 'door',
+          u: 2,
+          width: 0.9,
+          height: 2.1,
+          sillHeight: 0,
+          roughWidth: 0.938,
+          roughHeight: 2.138,
+        },
+        {
+          id: 'w1',
+          kind: 'window',
+          u: 5.5,
+          width: 1.2,
+          height: 1.2,
+          sillHeight: 0.9,
+          roughWidth: 1.238,
+          roughHeight: 1.238,
+        },
+      ]),
+      wall('w_e', [8, 0], [8, 6]),
+    ]
+    const members = [
+      ...frameWalls(walls, laSpec(), undefined, { slabBearing: true }),
+      // foundation members join the compose so the bolt dots pin the
+      // shared transform (P1) for the truth-anchoring check below
+      ...buildFoundation(walls, [], laSpec()),
+    ]
+    const byRole = (role: string) => members.filter((m) => m.role === role)
+    expect(byRole('uplift-strap').length).toBeGreaterThan(0)
+    expect(byRole('uplift-connector').length).toBeGreaterThan(20)
+    expect(byRole('foundation-strap').length).toBeGreaterThan(5)
+    const sheets = buildPlanSet(members, [], { walls })
+    const svg = sheetOf(sheets, 'Wall framing plan')
+    const spotsByKind = {
+      'uplift-strap': glyphSpots(svg, 'uplift-strap'),
+      'uplift-connector': glyphSpots(svg, 'uplift-connector'),
+      'foundation-strap': glyphSpots(svg, 'foundation-strap'),
+    }
+    // census per role
+    expect(spotsByKind['uplift-strap']).toHaveLength(byRole('uplift-strap').length)
+    expect(spotsByKind['uplift-connector']).toHaveLength(byRole('uplift-connector').length)
+    expect(spotsByKind['foundation-strap']).toHaveLength(byRole('foundation-strap').length)
+    // the coincidence exhibit is REAL: plan projection collapses height, so
+    // a stud-top connector and a plate-line foundation strap share a u —
+    // at least one pair of members is plan-coincident within a glyph body
+    const planCoincident = byRole('uplift-connector').some((c) =>
+      byRole('foundation-strap').some(
+        (f) => Math.hypot(c.position[0] - f.position[0], c.position[2] - f.position[2]) < 0.02,
+      ),
+    )
+    expect(planCoincident).toBe(true)
+    // …and every DRAWN glyph still clears every other by the 7 px budget
+    const all = Object.values(spotsByKind).flat()
+    for (let i = 0; i < all.length; i++) {
+      for (let j = i + 1; j < all.length; j++) {
+        const a = all[i] as { x: number; y: number }
+        const b = all[j] as { x: number; y: number }
+        expect(Math.hypot(a.x - b.x, a.y - b.y)).toBeGreaterThanOrEqual(6.8)
+      }
+    }
+    expect(drawingOf(svg)).not.toContain('hardware-glyph crowded')
+    // every drawn glyph anchors to its true member spot (dodges ≤ ring)
+    const t = fitTransform(
+      sheetOf(sheets, 'Foundation plan'),
+      members.filter((m) => m.role === 'anchor-bolt'),
+    )
+    for (const [kind, role] of [
+      ['uplift-strap', 'uplift-strap'],
+      ['uplift-connector', 'uplift-connector'],
+      ['foundation-strap', 'foundation-strap'],
+    ] as const) {
+      anchoredToTruth(spotsByKind[kind], byRole(role), t)
+    }
+    // legend rows: per-opening strap variants book separately (the
+    // pad-footing per-size precedent), cites pulled from labels
+    expect(svg).toContain(esc2('Header uplift strap over door (WFCM)'))
+    expect(svg).toContain(esc2('Header uplift strap over window (WFCM)'))
+    expect(svg).toContain(esc2('Stud-to-plate connector (R802.11 path / WFCM)'))
+    expect(svg).toContain(
+      esc2(`Plate-to-foundation uplift strap (WFCM) — ${byRole('foundation-strap').length} pcs`),
+    )
+  })
+
+  test('hardware-free paper carries ZERO new ink (INTL-class scenes stay byte-equal)', () => {
+    // an INTL compose has no straps / HDUs / uplift steel — none of the
+    // glyph markup nor any hardware legend row may appear on ANY sheet
+    const walls = [garage(), wall('w_side', [0, 0], [0, 5])]
+    const spec = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' as const }, profileFor('INTL'))
+    const members = [
+      ...frameWalls(walls, spec, undefined, { slabBearing: true }),
+      ...buildFoundation(walls, [], spec),
+    ]
+    expect(
+      members.some((m) =>
+        ['strap', 'uplift-strap', 'uplift-connector', 'foundation-strap', 'hold-down'].includes(
+          m.role,
+        ),
+      ),
+    ).toBe(false)
+    for (const sheet of buildPlanSet(members, [], { walls })) {
+      for (const markup of Object.values(GLYPH)) {
+        expect(sheet.svg).not.toContain(markup)
+      }
+      expect(sheet.svg).not.toContain('hardware-glyph crowded')
+    }
+  })
+})
+
+describe('NIGHT-10 — LOD-200 paper books the areas-fallback takeoff rows (C5, B21e)', () => {
+  const scene = (): Record<string, Record<string, unknown>> => ({
+    level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+    w_a: {
+      id: 'w_a',
+      type: 'wall',
+      parentId: 'level_1',
+      start: [0, 0],
+      end: [6, 0],
+      thickness: 0.15,
+      height: 2.5,
+      frontSide: 'exterior',
+      children: [],
+    },
+    w_b: {
+      id: 'w_b',
+      type: 'wall',
+      parentId: 'level_1',
+      start: [0, 0],
+      end: [0, 4],
+      thickness: 0.15,
+      height: 2.5,
+      frontSide: 'exterior',
+      children: [],
+    },
+  })
+  const compute200 = () => {
+    const { computeLevel } = require('../framing/compute') as typeof import('../framing/compute')
+    const { FramingNode } = require('../framing/schema') as typeof import('../framing/schema')
+    const config = {
+      ...FramingNode.parse({ jurisdiction: 'INTL', detail: '200' }),
+      parentId: 'level_1',
+    } as Parameters<typeof computeLevel>[1]
+    const r = computeLevel(scene(), config)
+    if (!r) throw new Error('computeLevel returned null')
+    return r
+  }
+  const allSchedText = (sheets: { title: string; svg: string }[]): string =>
+    sheets
+      .filter((s) => s.title.startsWith('Schedules'))
+      .flatMap((s) => [...s.svg.matchAll(/>([^<>]+)<\/text>/g)].map((m) => unesc2(m[1] as string)))
+      .join(' ')
+
+  test('the sheet books the SAME rows as the panel call — one source of truth', () => {
+    const { computeTakeoff } = require('../engines/takeoff') as typeof import('../engines/takeoff')
+    const r = compute200()
+    // the fallback is live: LOD-200 frames no wall layers, areas are real
+    expect((r.areas.wallSheathingM2 ?? 0)).toBeGreaterThan(0)
+    expect(r.members.some((m) => m.role === 'sheathing' && m.system === 'wall-framing')).toBe(false)
+    const panelRows = computeTakeoff(r.members, r.fixtures, r.areas)
+    const fallback = panelRows.filter((row) => row.section === 'Sheathing')
+    expect(fallback.map((row) => row.item)).toContain('Wall sheathing 7/16" WSP')
+    expect(fallback.map((row) => row.item)).toContain('Drywall 1/2"')
+    const sheets = buildPlanSet(r.members, r.fixtures, { areas: r.areas })
+    const text = allSchedText(sheets)
+    // EVERY panel row prints — the exact composed row string, wrap-safe
+    for (const row of panelRows.filter((row) => row.section !== 'Flags')) {
+      const detail = row.detail && row.detail !== 'linear feet' ? ` (${row.detail})` : ''
+      expect(text).toContain(`${row.section} · ${row.item} — ${row.quantity} ${row.unit}${detail}`)
+    }
+  })
+
+  test('without areas the fallback rows stay off paper (pre-NIGHT-10 behavior, callers unchanged)', () => {
+    const r = compute200()
+    const text = allSchedText(buildPlanSet(r.members, r.fixtures, {}))
+    expect(text).not.toContain('Wall sheathing 7/16" WSP')
+    expect(text).not.toContain('Drywall 1/2"')
+    // …and an EMPTY areas object is byte-equal to the omitted argument
+    const a = buildPlanSet(r.members, r.fixtures, { areas: {} })
+    const b = buildPlanSet(r.members, r.fixtures, {})
+    expect(a.map((s) => s.svg).join()).toBe(b.map((s) => s.svg).join())
+  })
+})
+
+/** Local escape twins of plan-set's own (tests pin the ESCAPED strings the
+ * sheets actually carry). */
+function esc2(s: string): string {
+  return s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+}
+function unesc2(s: string): string {
+  return s
+    .replaceAll('&quot;', '"')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&')
+}
