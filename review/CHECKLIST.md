@@ -1407,8 +1407,7 @@ AND a gate — a checklist line without a test is a wish.
   'Winter garden'/'Garden room' conservatory class stays outdoor by
   design. An outdoor zone needs NO floor slab — the room-coverage warning
   ('has no floor slab under it') is indoor-only, while an indoor room
-  without flooring still warns. HVAC serves indoor rooms only (no supply register, no tonnage,
-  design. ELECTRICAL honesty (night-10, closing the day-9 residual
+  without flooring still warns. ELECTRICAL honesty (night-10, closing the day-9 residual
   family): NO ceiling light composes in an outdoor zone ('Light —
   Garden' floated at y=2.7 over the grass) — the zone's honest lighting
   is NEC 210.70(A)(2)(2)'s own requirement, a wall-mounted 'Exterior
@@ -1451,9 +1450,6 @@ AND a gate — a checklist line without a test is a wish.
   matrix, R314 warning pair + smoke-alarm compose pin + 'Master terrace'
   speaks / 'Garden bedroom' silent pair, outdoor slab-warning exclusion
   both directions, characteristics corners + paper n/a strings,
-  outdoor-only honesty).
-  classifier witnesses incl. 'Terrazzo entry', R314 warning pair +
-  smoke-alarm compose pin, characteristics corners + paper n/a strings,
   outdoor-only honesty) + `src/engines/electrical.outdoor.test.ts`
   (the night-10 electrical slice: entrance-light pins + E2 wiring
   reach, garden-only warning pair, open-air face sweeps).
