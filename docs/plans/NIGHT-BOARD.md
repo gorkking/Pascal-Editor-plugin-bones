@@ -95,14 +95,48 @@ to tieAt's sloped consumers.
 
 # DAY-9 LIVE QUEUE (evening)
 - Z-FIGHT at duct×air-handler junction (Julien screenshots, day-9):
-  the supply trunk's end face is COPLANAR with the AH/plenum cabinet
-  face → per-frame color oscillation at the contact patch. FIX
-  (queued behind feat/manual-j-sizing merge — same hvac.ts owner):
-  bury the duct end ~5mm INSIDE the plenum (ducts connect INTO
-  cabinets — physical truth), junction stays a legal S1 connection;
-  gate = no coplanar face pairs at equipment junctions (sweep all
-  duct/plenum/AH contacts, not just the one exhibit). Check the
-  RETURN drop + plenum top too (same emission pattern).
+  SHIPPED ON BRANCH fix/duct-zfight (2026-08-23, pilot). Discovery
+  sweep: duct ends already terminated at receiving-body CENTERS, not
+  faces — the real coplanar family is MATCHED SECTIONS + SHARED CAP
+  PLANES on the junction verticals (plenum riser, boots, return
+  riser/drop, whip drop). Fix: DUCT_JUNCTION_BURY (5mm) — verticals
+  grow 2×BURY across the section (runs bury ≥5mm inside their
+  sides), caps leave the run center plane (plenum +BURY past, boots
+  2×BURY short; signs flip in soffit mode). Junctions stay legal S1
+  terminating-INTO (whip/line-set precedent; MEP outside the
+  structural gate — hvac.junctions.test.ts owns the class: sweep ×
+  11 scenarios + pins + 5 mutations). E5 recaptured (7 members/juris;
+  labels + plan positions + fixtures byte-stable); takeoff: 2 rows
+  move one 0.1-lf rounding step (enumerated). Suite 1703→1715. Full
+  family + byte movement: docs/plans/ZFIGHT-EXPECTED-DIFF.md.
+  ROUND-1 REVISE addressed (geometry verified sound; claims fixed):
+  (F1) the 'separated' claim on exhaust terminations was FALSE on
+  the M3 doorwayPlan — the dryer exhaust and the line-set coil stub
+  run the SAME equipAt→wall-anchor segment: the liquid line bores 2m
+  coaxially INSIDE the exhaust and their end caps coincide (same
+  normal, liquid cap inside the exhaust cap) — the ONLY cross-color
+  coplanar pair anywhere (duct gray × warm red = the visibly-
+  striping class). That is the day-8 queued lineset×dryer-duct BORE:
+  reclassified as a named pre-existing residual; the doorway compose
+  joined the sweep matrix with the pair allow-listed + PINNED
+  present, so the allowance dies with the bore fix. (F2) CAUSATION
+  CAVEAT stated in-suite + expected-diff: every burial-fixed pair
+  was same-color-bucket (identical fragments cannot two-color
+  stripe) — the burial closes the coplanar-geometry class as
+  hygiene; Julien's striping most likely rides a CROSS-COLOR
+  mechanism (bore caps / register×fan fixtures / host hover tint).
+  DAWN VISUAL ROUND owns confirmation: reproduce the screenshots'
+  camera on the merged tip, verify the striping is gone, else bisect
+  the three candidates (block in ZFIGHT-EXPECTED-DIFF.md). (F3)
+  keep-out prose corrected: ≥40mm both-grown worst case (boot 0.0812
+  + return-vertical 0.1828 vs 0.3040 enforced).
+  NEW FINDINGS for the queue: (a) bath supply REGISTER × exhaust-FAN
+  fixtures render near-coincident placeholder boxes at one ceiling
+  point (different colors — its own flicker class; fixture-placement
+  ownership, not duct geometry); (b) same-run elbow-corner seams
+  (return legA×legB, exhaust elbows, line-set penetration corners)
+  share planes but live in ONE color bucket — invisible, left as
+  legal seams; removing them means miter geometry.
 - Manual-J-lite (feat/manual-j-sizing) in verify round 1 — lead
   attack: humid-zone latent omission (TX 2.5→1.5t smell).
 - Heat-pump fast-follow (election 486957c + AC-block eb27037 merged)

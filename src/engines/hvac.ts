@@ -272,6 +272,38 @@ const RETURN_DROP_OFFSET = 0.5
 /** Clear gap between any return duct face and a supply duct face. */
 const DUCT_CLEAR_GAP = 0.05
 /**
+ * DUCT×EQUIPMENT JUNCTION BURIAL (day-9 z-fight — Julien screenshots: striped
+ * color oscillation where the supply trunk meets the AH/plenum stack). Two
+ * parallel faces on ONE plane render at identical depth and the GPU picks a
+ * winner per frame — the same class the heat-pump A/B round documented on the
+ * condenser placeholder ("W×H identical → coplanar faces"). The emission had
+ * two makers of coplanar pairs at equipment junctions:
+ *  (a) MATCHED SECTIONS — the junction VERTICALS (trunk riser = the supply
+ *      plenum stack, register boots, return riser/drop, the whip conduit
+ *      drop) carried exactly the section of the run connecting into them, so
+ *      wherever the run entered, both side planes coincided (a full-width
+ *      trunk leaving the plenum, a 6" branch entering its boot);
+ *  (b) SHARED CAP PLANES — every vertical capped exactly AT its run's center
+ *      plane (trunkY / returnY), so two verticals meeting one run capped on
+ *      the SAME plane (the equipment-room register: boot and plenum riser at
+ *      one plan point, caps coplanar at trunkY — the visible patch ON TOP of
+ *      the stack).
+ * Physical truth: ducts connect INTO plenums/cabinets — the receiving body
+ * is a hair larger than the duct it swallows. Every junction vertical grows
+ * 2×BURY across its section (connecting runs bury ≥ BURY inside its sides)
+ * and its junction cap leaves the run's center plane: plenum-class verticals
+ * (riser/return riser/return drop) extend BURY PAST it, boot collars stop
+ * 2×BURY SHORT of it — distinct planes in attic AND soffit routing, so no
+ * two caps can coincide. The junction stays a legal S1 connection: the run
+ * still terminates INSIDE the vertical (the whip/line-set terminating-INTO
+ * precedent — MEP engines are out of the structural interpenetration gate's
+ * scope by design, and the hvac suites own these junctions). Labels and
+ * takeoff section names round to whole inches (14.4" → 14), so the grow
+ * never renames a row; lf moves by mm and the junction sweep gate
+ * (hvac.junctions.test.ts) holds the family closed.
+ */
+export const DUCT_JUNCTION_BURY = 0.005
+/**
  * The RETURN plane rides one trunk-section height + gap off the SUPPLY
  * plane, so horizontal return legs can cross the supply corridor in plan
  * without sharing tin (skeptic round 1 BLOCKER: both trunks were emitted at
@@ -780,7 +812,15 @@ function legCrossesRo(
   return false
 }
 
-/** Half the RETURN section's widest plan face (verticals present 14" × 8"). */
+/** Half the RETURN section's widest plan face (verticals present 14" × 8").
+ * The emitted junction verticals ride 2×BURY fatter (junction-burial grow)
+ * — the extra 5 mm per side spends from the 50 mm DUCT_CLEAR_GAP margin:
+ * worst case BOTH bodies of a keep-out pair are grown (a supply boot booked
+ * at 0.0762 emits 0.0812; a return vertical booked here at 0.1778 emits
+ * 0.1828) against the 0.0762 + 0.1778 + 0.05 = 0.3040 enforced center
+ * distance ⇒ 0.3040 − 0.2640 = ≥ 40 mm of true clearance remains. The half
+ * itself stays UNGROWN so grille/drop elections (and their baselines)
+ * don't move. */
 const RETURN_VERT_HALF = Math.max(TRUNK_W, TRUNK_H) / 2
 
 /**
@@ -1512,12 +1552,16 @@ export function layoutHvac(
   // perpendicular leg reaches the trunk axis — every trunk/branch run lives
   // at attic elevation (trunkY), never in the plate band.
   const uEq = u(equipAt)
+  // The riser is the supply PLENUM STACK — the receiving body for the feed +
+  // trunk (day-9 z-fight): its section swallows the 14×8 runs with BURY of
+  // side clearance, and its cap extends BURY past the trunk's center plane
+  // (off every boot cap and off the run's own faces — 5 mm inside tin).
   const riser = ductDrop(
     equipAt,
     1.0,
-    trunkY,
-    TRUNK_W,
-    TRUNK_H,
+    trunkY + DUCT_JUNCTION_BURY,
+    TRUNK_W + 2 * DUCT_JUNCTION_BURY,
+    TRUNK_H + 2 * DUCT_JUNCTION_BURY,
     equipRoom.id,
     `Trunk riser ${Math.round(toFeet(TRUNK_W) * 12)}"×${Math.round(toFeet(TRUNK_H) * 12)}" — ${interiorStorey ? 'to soffit (M1601)' : 'to attic (M1601)'}`,
   )
@@ -1587,12 +1631,19 @@ export function layoutHvac(
       'supply',
     )
     if (branch) members.push(branch)
+    // The boot is the register COLLAR the branch buries into (day-9
+    // z-fight): 2×BURY fatter than the 6" branch (its sides clear the
+    // branch's by BURY), capped 2×BURY short of the branch's center plane —
+    // still deep inside the branch, and never on the plenum riser's cap
+    // plane even when the equipment room's own register drops at the same
+    // plan point (attic: riser +BURY vs boot −2×BURY; soffit the boot
+    // enters from above, so the retreat flips sign).
     const boot = ductDrop(
       at,
       room.ceilingHeight - BOOT_BELOW_CEILING,
-      trunkY,
-      BRANCH_SIDE,
-      BRANCH_SIDE,
+      interiorStorey ? trunkY + 2 * DUCT_JUNCTION_BURY : trunkY - 2 * DUCT_JUNCTION_BURY,
+      BRANCH_SIDE + 2 * DUCT_JUNCTION_BURY,
+      BRANCH_SIDE + 2 * DUCT_JUNCTION_BURY,
       room.id,
       'Supply boot 6" — ceiling drop (M1601)',
     )
@@ -1671,12 +1722,16 @@ export function layoutHvac(
     // ~0.35 m long — with the 14" side in dims[0] it reads as a horizontal
     // run to every dims[1]>dims[0] verticality check (plates harness, plan
     // projection). The section is the same 14×8 either way.
+    // Return verticals are the return-side PLENUM class (day-9 z-fight):
+    // 2×BURY fatter than the legs entering them, caps BURY past the leg's
+    // center plane on the far side from the grille/AH (attic legs sit above
+    // the grille, soffit legs below — the extension direction follows).
     const rise = ductDrop(
       grilleAt,
       grilleRoom.ceilingHeight - BOOT_BELOW_CEILING,
-      returnY,
-      TRUNK_H,
-      TRUNK_W,
+      interiorStorey ? returnY - DUCT_JUNCTION_BURY : returnY + DUCT_JUNCTION_BURY,
+      TRUNK_H + 2 * DUCT_JUNCTION_BURY,
+      TRUNK_W + 2 * DUCT_JUNCTION_BURY,
       'return-trunk',
       `Return riser ${sizeTag} — grille to ${interiorStorey ? 'soffit' : 'attic'} (M1602)`,
     )
@@ -1752,12 +1807,17 @@ export function layoutHvac(
       'return',
     )
     if (legB) members.push(legB)
+    // The drop rises from the AH below the return plane in BOTH modes, so
+    // its cap always extends upward past the leg's center plane. Its cap
+    // shares the attic riser's plane (both returnY + BURY) but the two
+    // stand RETURN_DROP_OFFSET apart in plan — coplanar without overlap is
+    // not a z-fight pair.
     const drop = ductDrop(
       ahReturnAt,
       1.0,
-      returnY,
-      TRUNK_H,
-      TRUNK_W,
+      returnY + DUCT_JUNCTION_BURY,
+      TRUNK_H + 2 * DUCT_JUNCTION_BURY,
+      TRUNK_W + 2 * DUCT_JUNCTION_BURY,
       'return-trunk',
       `Return drop ${sizeTag} — to air handler (M1602)`,
     )
@@ -2455,8 +2515,15 @@ export function layoutHvac(
           })
           const whipY = unitTopY - 0.1
           const whipLabel = 'Condenser whip — liquid-tight conduit (NEC 440.14)'
+          // The vertical is the whip's connector body at the disconnect
+          // (day-9 z-fight family): 2×BURY fatter than the run entering it,
+          // so the matched 16 mm sections never share side planes. Caps stay:
+          // the top is buried in the disconnect box, the bottom sits on the
+          // run's center plane — 8 mm from either run face, never coplanar.
           const drop = ductDrop(
-            face, whipY, discY, 0.016, 0.016, `ac-whip-${n}`, whipLabel, 'steel', 'wire-run',
+            face, whipY, discY,
+            0.016 + 2 * DUCT_JUNCTION_BURY, 0.016 + 2 * DUCT_JUNCTION_BURY,
+            `ac-whip-${n}`, whipLabel, 'steel', 'wire-run',
           )
           if (drop) members.push(drop)
           const run = duct(

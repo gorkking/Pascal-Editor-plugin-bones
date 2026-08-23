@@ -3,7 +3,7 @@ import { DEFAULT_SPEC } from '../core/spec'
 import type { Fixture, Member, OpeningSlice, RoomSlice, WallSlice } from '../core/types'
 import { toFeet } from '../core/units'
 import { pointInPolygon } from './electrical'
-import { equipmentRoomOf, layoutHvac, placeReturnGrilleSpot } from './hvac'
+import { DUCT_JUNCTION_BURY, equipmentRoomOf, layoutHvac, placeReturnGrilleSpot } from './hvac'
 import { computeTakeoff } from './takeoff'
 
 /**
@@ -503,9 +503,12 @@ describe('B19c — a RETURN trunk connects the central grille to the air handler
         expect(m.dims[2]).toBeCloseTo(14 * 0.0254, 6)
       } else {
         // vertical riser/drop: dims = [w, len, h] with the NARROW 8" side
-        // first so dims[1] > dims[0] verticality holds on short risers
-        expect(m.dims[0]).toBeCloseTo(8 * 0.0254, 6)
-        expect(m.dims[2]).toBeCloseTo(14 * 0.0254, 6)
+        // first so dims[1] > dims[0] verticality holds on short risers.
+        // Verticals are the return-side PLENUM class (day-9 z-fight): they
+        // ride 2×BURY fatter than the legs entering them so the matched
+        // 14×8 side planes never coincide (hvac.junctions.test.ts sweep).
+        expect(m.dims[0]).toBeCloseTo(8 * 0.0254 + 2 * DUCT_JUNCTION_BURY, 6)
+        expect(m.dims[2]).toBeCloseTo(14 * 0.0254 + 2 * DUCT_JUNCTION_BURY, 6)
       }
     }
     // the trunk leg carries the WHOLE system cfm — label honesty
