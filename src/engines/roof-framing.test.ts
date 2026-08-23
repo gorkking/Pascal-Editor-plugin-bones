@@ -1589,6 +1589,96 @@ describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', ()
     const ok = frameRoofs([seg({ roofType: 'gambrel' })], [], { ...DEFAULT_SPEC, detail: '400' })
     for (const m of ok) expect(m.flag ?? '').not.toContain('R802.4.3')
   })
+
+  // NIGHT-10 (B8a's stated residual): hip ridges + mansard/dutch crown
+  // ridges join the flag route. The slope that answers is the one CARRYING
+  // the ridge: the hip's long-plane commons' pitch (= schema pitch), the
+  // mansard crown's COMPUTED pitch (sub-3:12 even at the default 40° schema
+  // — tan ≈ 0.154 from the host ratios), the dutch gablet's computed pitch
+  // (= schema pitch at default ratios, served by the gable route already).
+  test('NIGHT-10: a 10° hip ridge carries the flag at 300 and 400 — on the RIDGE only', () => {
+    for (const detail of ['300', '400'] as const) {
+      const members = frameRoofs([seg({ roofType: 'hip', pitch: (10 * Math.PI) / 180 })], [], {
+        ...DEFAULT_SPEC,
+        detail,
+      })
+      const ridge = byRole(members, 'ridge')
+      expect(ridge).toHaveLength(1)
+      expect((ridge[0] as Member).flag).toBe(FLAG)
+      for (const m of members) {
+        if (m.role !== 'ridge') expect(m.flag ?? '').not.toContain('R802.4.3')
+      }
+    }
+  })
+
+  test('NIGHT-10: hip boundary — exactly 3:12 and the default 40° stay clean; LOD 200 silent', () => {
+    for (const pitch of [Math.atan(3 / 12), (40 * Math.PI) / 180]) {
+      const members = frameRoofs([seg({ roofType: 'hip', pitch })], [], {
+        ...DEFAULT_SPEC,
+        detail: '400',
+      })
+      for (const m of members) expect(m.flag ?? '').not.toContain('R802.4.3')
+    }
+    const lod200 = frameRoofs([seg({ roofType: 'hip', pitch: (10 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '200',
+    })
+    for (const m of lod200) expect(m.flag ?? '').not.toContain('R802.4.3')
+    // a SQUARE sub-3:12 hip converges to a point — no ridge board exists,
+    // so there is nothing for R802.4.3 to govern (the flag rides ridge
+    // members only; the apex trim story is the NIGHT-10 sibling gate)
+    const square = frameRoofs(
+      [seg({ roofType: 'hip', width: 8, depth: 8, pitch: (10 * Math.PI) / 180 })],
+      [],
+      { ...DEFAULT_SPEC, detail: '400' },
+    )
+    expect(byRole(square, 'ridge')).toHaveLength(0)
+    for (const m of square) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('NIGHT-10: the default mansard CROWN flags (computed ~8.8°); a 55° mansard crown (~14.7°) is clean', () => {
+    const members = frameRoofs([seg({ roofType: 'mansard' })], [], { ...DEFAULT_SPEC, detail: '400' })
+    const crown = byRole(members, 'ridge')
+    expect(crown).toHaveLength(1)
+    expect((crown[0] as Member).flag).toBe(FLAG)
+    for (const m of members) {
+      if (m.role !== 'ridge') expect(m.flag ?? '').not.toContain('R802.4.3')
+    }
+    const steep = frameRoofs([seg({ roofType: 'mansard', pitch: (55 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    for (const m of steep) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('NIGHT-10: the dutch gablet rides the GABLE route — sub-3:12 dutch pins the flag (pre-existing coverage)', () => {
+    // At default ratios the gablet's computed pitch equals the schema pitch:
+    // a 10° dutch composes a sub-3:12 crown ridge — the gable machinery
+    // already flags it (verified byte-identical before/after NIGHT-10).
+    const members = frameRoofs([seg({ roofType: 'dutch', pitch: (10 * Math.PI) / 180 })], [], {
+      ...DEFAULT_SPEC,
+      detail: '400',
+    })
+    const crown = byRole(members, 'ridge')
+    expect(crown).toHaveLength(1)
+    expect((crown[0] as Member).flag).toBe(FLAG)
+    const steep = frameRoofs([seg({ roofType: 'dutch' })], [], { ...DEFAULT_SPEC, detail: '400' })
+    for (const m of steep) expect(m.flag ?? '').not.toContain('R802.4.3')
+  })
+
+  test('NIGHT-10: the hip/crown flag reaches a takeoff Flags row (P4 prints it)', () => {
+    for (const over of [
+      { roofType: 'hip' as const, pitch: (10 * Math.PI) / 180 },
+      { roofType: 'mansard' as const },
+    ]) {
+      const rows = computeTakeoff(frameRoofs([seg(over)], [], { ...DEFAULT_SPEC, detail: '400' }), [])
+      const row = rows.find(
+        (r) => r.section === 'Flags' && r.detail.includes('ridge beam required, R802.4.3'),
+      )
+      expect(row).toBeDefined()
+      expect(row?.quantity).toBe(1) // one ridge, one statement
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

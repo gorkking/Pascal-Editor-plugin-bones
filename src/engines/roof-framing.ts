@@ -160,10 +160,14 @@ export function extractRoofs(nodes: NodesRecord, levelId: string): RoofSegmentSl
  * assumption stops at the ceiling joists), so the gap PRINTS instead of
  * upgrading silently: the flag rides the ridge member to the takeoff Flags
  * row and the P4 schedules block (the B6 stated-gap convention). Applies to
- * the GABLE ridge (slope = the schema pitch) and the GAMBREL main ridge
- * (slope = the shallow UPPER planes' φ — a 15° gambrel's upper faces fall
- * under 3:12 while its steep lowers don't; fix-round advisory). Hip/crown
- * ridges remain a queued residual. 200 stays schematic.
+ * the GABLE ridge (slope = the schema pitch — the dutch GABLET rides this
+ * route with its computed crown pitch), the GAMBREL main ridge (slope =
+ * the shallow UPPER planes' φ — a 15° gambrel's upper faces fall under
+ * 3:12 while its steep lowers don't; fix-round advisory), and the HIP
+ * ridge (slope = the long-plane commons' pitch — the MANSARD CROWN rides
+ * this route via the inner frameHip with its computed crown pitch, which
+ * sits sub-3:12 even on the default 40° mansard; NIGHT-10 residual
+ * closed). 200 stays schematic.
  */
 function ridgeBeamFlagFor(spec: FramingSpec, slopeTan: number): string | undefined {
   return spec.detail !== '200' && slopeTan < 3 / 12 - EPS
@@ -1128,6 +1132,12 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           ? ` — rafter plumb cuts ${Math.round((theta * 180) / Math.PI)}°`
           : ''
       }${splicedNote(spec, ridgeHalf * 2, 'rafter pairs (ridge board)')}`,
+      undefined,
+      // B8a extension (NIGHT-10): the slope CARRYING the hip ridge is the
+      // long-plane commons' pitch — sub-3:12 prints the R802.4.3 flag; the
+      // mansard crown inherits this via the inner frameHip (its computed
+      // crown pitch answers, not the schema pitch).
+      ridgeBeamFlagFor(spec, tan),
     )
   }
 
@@ -1457,9 +1467,8 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // The joists CROSS the ridge line at plan center — on a near-flat hip
   // (an inner mansard crown can compute a ~5° pitch) the ridge board's
   // underside descends INTO the joist band; no room = no fake wood (the
-  // collar-tie low-pitch skip convention; B8a flags sub-3:12 gable ridges
-  // and gambrel-main ridges via their upper-plane slope — the hip/crown
-  // ridge's own R802.4.3 flag is a queued residual).
+  // collar-tie low-pitch skip convention; the hip/crown ridge's own
+  // R802.4.3 flag rides the ridge member itself — B8a extension, NIGHT-10).
   const [, cjRidgeD] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const cjClearsRidge = ridgeHalf <= 0.05 || eaveY + cjD + 0.002 <= ridgeY - cjRidgeD
   if (cjLen >= 0.3 && cjBandHalf > cjT && cjClearsRidge) {

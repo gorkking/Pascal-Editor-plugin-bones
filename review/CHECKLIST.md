@@ -953,12 +953,22 @@ AND a gate — a checklist line without a test is a wish.
   beam required, R802.4.3 (…not modeled — verify design)' at 300+, reaching
   the takeoff Flags row and the P4 schedules block (flag route, v1 — the
   beam+post member set is the follow-up). The slope that answers the
-  question is the one CARRYING the ridge: the gable's schema pitch, and
-  the GAMBREL main ridge's shallow UPPER planes' φ (fix-round advisory —
+  question is the one CARRYING the ridge: the gable's schema pitch, the
+  GAMBREL main ridge's shallow UPPER planes' φ (fix-round advisory —
   a 15° gambrel composes sub-3:12 uppers while its steep lowers sit above
-  3:12; flagged + pinned, break purlins excluded). Hip/crown ridges are
-  the remaining queued residual. Slopes ≥ 3:12 and LOD 200 are byte-equal
-  to pre-B8.
+  3:12; flagged + pinned, break purlins excluded), and — NIGHT-10, B8a's
+  stated residual closed — the HIP ridge's long-plane commons' pitch (=
+  schema pitch) with the MANSARD CROWN riding the same route via the inner
+  frameHip at its COMPUTED crown pitch (sub-3:12 even on the default 40°
+  mansard, tan ≈ 0.154 from the host ratios — the default mansard now
+  states it; the compact-mansard spans gate carves the statement out as
+  shape honesty, table-independent) and the DUTCH GABLET served by the
+  gable route at its computed pitch (pre-existing coverage, now pinned).
+  A SQUARE sub-3:12 hip converges to a point — no ridge board exists, so
+  nothing for R802.4.3 to govern (pinned). Slopes ≥ 3:12 and LOD 200 are
+  byte-equal to pre-B8 (hip 3:12 boundary + default 40° hip + 55° mansard
+  crown pinned clean; moved shapes = sub-3:12 hip 300/400 + default
+  mansard crown only).
   (b) `spec.hurricaneTies` reaches FLAT roofs (R802.11 — shed tied both
   ends, frameFlat never called tieAt): every flat joist ties at BOTH
   bearing ends, at the plate line (footprint edge, never the overhung rim
@@ -1021,6 +1031,11 @@ AND a gate — a checklist line without a test is a wish.
   Gates: `src/engines/roof-framing.test.ts` (B8a describe: 2.5:12 flag pin
   at 300/400 + ridge-only placement, 3:12 boundary + 40° clean, LOD-200
   silence, takeoff Flags row, 15°-gambrel upper-plane flag + 40° clean;
+  NIGHT-10 hip/crown tests: 10° hip ridge-only flag at 300/400, hip 3:12
+  boundary + 40° clean + 200 silent + square-no-ridge pin, default-mansard
+  crown flag + 55° clean, sub-3:12 dutch gablet pin, hip+mansard takeoff
+  Flags rows; `roof-framing.spans.test.ts` compact-mansard INTENDED
+  carve-out with the crown-flag non-vacuous pin;
   B8b describe: windy 2-per-joist census at the
   plate line + beside-a-joist placement, spansX orientation, free takeoff
   tie row, non-windy byte-equality, fix-round window matrix — 6.9×5
