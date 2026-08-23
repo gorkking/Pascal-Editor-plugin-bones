@@ -832,7 +832,20 @@ AND a gate — a checklist line without a test is a wish.
   joists (an inner mansard crown computes ~5° from the host ratios); a
   degenerate skirt whose planes never rise clear emits no ceiling frame;
   near-square hips (no real ridge portion) carry no collar ties — all
-  pinned. BLAST RADIUS: gable/shed/flat/gambrel/valley outputs are pinned
+  pinned. SQUARE-HIP APEX (NIGHT-10 residual closed): with NO ridge board
+  (width == depth, incl. the square mansard crown) the hips' top cuts bear
+  on the apex COMMON pair — layout()'s guaranteed end station parks that
+  pair OFF-CENTER (u = ridgeHalf − t/2, box overhanging one thickness past
+  the negative ridge end), so the two hips facing the overhung side trim
+  past the pair's FAR face (√2·overhang/cos(tilt) extra slope inset, the
+  exact mirror of the opposite hips' clearance); the extra derives from
+  the ACTUAL commons-box overhang, which is zero whenever a ridge board
+  exists — rectangular hips byte-identical by construction. The square-hip
+  compose joins the interpenetration matrix. SCOPE NOTE: windy SLOPED
+  roofs carry a distinct pre-existing class (tieAt centers the steel ON
+  the rafter station at every gable/shed/hip bearing — only FLAT got
+  B8b's beside-the-joist fix); board-queued, not this residual's class.
+  BLAST RADIUS: gable/shed/flat/gambrel/valley outputs are pinned
   byte-equal to master 779d70e by sha256 hash across 200/300/400 + windy;
   the E5 baseline scene has no roof segments (recapture byte-identical) —
   the hip-roofed computeLevel compose carries the end-to-end truth. The
@@ -858,10 +871,14 @@ AND a gate — a checklist line without a test is a wish.
   end-plane statement + ' | ' composition pins, near-square subsumption,
   skirt-face statement both shapes, Flags-row quantity == joist census,
   300-quiet + whole-flag pins, crown assumed-bearing label + main-joist
-  exclusion) +
+  exclusion; NIGHT-10 square-hip apex describe: no-ridge + pair-station
+  pin, per-side inset/length/top pins with far-face clearance + exact
+  corners, rect-hip equal-inset byte guard) +
   `src/engines/interpenetration.test.ts` (B7 matrix: hip audit repro /
   25–75° sweep / wide + z-span variants / mansard 25–55 / dutch 25–70 —
-  compose SAT-clean at 400, non-vacuous joist presence) +
+  compose SAT-clean at 400, non-vacuous joist presence; NIGHT-10 square
+  matrix: 8/6/10-steep/10-shallow squares + near-square sliver + square
+  mansard crown, non-vacuous hips + commons) +
   `src/framing/compute.multistorey.test.ts` (B7 describe: hip-roofed
   storey composes joists + ties end-to-end incl. the Roof lumber rows) +
   `src/engines/roof-framing.spans.test.ts` (compact hip-family cases

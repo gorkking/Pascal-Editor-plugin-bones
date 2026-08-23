@@ -205,6 +205,78 @@ describe('frameRoofs — hip', () => {
   })
 })
 
+describe('frameRoofs — SQUARE hip: degenerate pyramid apex trim (NIGHT-10 residual)', () => {
+  // width == depth → ridgeHalf 0: NO ridge board, the four hips converge at
+  // the apex where layout()'s guaranteed end station parks the single common
+  // pair OFF-CENTER (station u = −t/2, box spanning [−t, 0] on the long
+  // axis). The two hips pointing at the overhung side bear on the pair's
+  // FAR face — trimmed one common thickness per plan axis (√2·t/cos(tilt)
+  // along the slope) past the standard ridge-end inset; the two opposite
+  // hips keep the standard inset (the pair's near face sits ON the apex
+  // line, the exact mirror). Pre-existing class this closes: 2 hip×common
+  // SAT overlaps at the ridge point, byte-identical across 3 branches,
+  // never gated (the interpenetration matrix now composes the class).
+  const roof = seg({ roofType: 'hip', width: 8, depth: 8 })
+  const members = frameRoofs([roof], [], DEFAULT_SPEC)
+  const run = 4
+  const theta = roof.pitch
+  const rise = run * Math.tan(theta)
+  const hipTilt = Math.atan2(rise, run * Math.SQRT2)
+  const t = 1.5 * 0.0254
+  const rd = 5.5 * 0.0254
+  const baseY = roof.position[1] + roof.wallHeight
+  const baseInset = Math.SQRT2 * ((1.5 * 0.0254) / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
+  const extra = (Math.SQRT2 * t) / Math.cos(hipTilt)
+  const fullDiag = Math.hypot(run * Math.SQRT2, rise)
+  const endpoints = (m: Member): [Vector3, Vector3] => {
+    const a = longAxis(m).multiplyScalar(m.length / 2)
+    const p = new Vector3(...m.position)
+    return [p.clone().add(a), p.clone().sub(a)]
+  }
+
+  test('no ridge board; ONE common pair parked at u = −t/2 (the trim reference)', () => {
+    expect(byRole(members, 'ridge')).toHaveLength(0)
+    const commons = members.filter((m) => m.label?.includes('(hip common)'))
+    expect(commons).toHaveLength(2)
+    for (const c of commons) expect(c.position[0]).toBeCloseTo(-t / 2, 6)
+  })
+
+  test('the two hips facing the pair trim √2·t/cos(tilt) further; the others keep the ridge-end inset', () => {
+    const hips = byRole(members, 'hip')
+    expect(hips).toHaveLength(4)
+    const cornersSeen = new Set<string>()
+    for (const h of hips) {
+      const [e1, e2] = endpoints(h)
+      const top = e1.y > e2.y ? e1 : e2
+      const bot = e1.y > e2.y ? e2 : e1
+      // corners stay EXACT — the trim moves only the apex end
+      expect(bot.y).toBeCloseTo(baseY, 6)
+      expect(Math.abs(bot.x)).toBeCloseTo(run, 6)
+      expect(Math.abs(bot.z)).toBeCloseTo(run, 6)
+      cornersSeen.add(`${Math.sign(bot.x)},${Math.sign(bot.z)}`)
+      const inset = bot.x < 0 ? baseInset + extra : baseInset
+      expect(h.length).toBeCloseTo(fullDiag - inset, 6)
+      expect(top.y).toBeCloseTo(baseY + rise - inset * Math.sin(hipTilt), 6)
+      // the far-face bearing: the trimmed hips' tops start PAST the common
+      // pair's far face plane (x = −t), never inside the pair
+      if (bot.x < 0) expect(top.x).toBeLessThanOrEqual(-t + 1e-9)
+      else expect(top.x).toBeGreaterThanOrEqual(0)
+    }
+    expect(cornersSeen.size).toBe(4)
+  })
+
+  test('rectangular hips keep extra = 0 — all four share the ridge-end inset (byte guard)', () => {
+    const rect = frameRoofs([seg({ roofType: 'hip' })], [], DEFAULT_SPEC) // 8×6
+    const runR = 3
+    const riseR = runR * Math.tan(theta)
+    const tiltR = Math.atan2(riseR, runR * Math.SQRT2)
+    const insetR = Math.SQRT2 * ((1.5 * 0.0254) / 2 + t / 2) + (rd / 2) * Math.tan(tiltR)
+    for (const h of byRole(rect, 'hip')) {
+      expect(h.length).toBeCloseTo(Math.hypot(runR * Math.SQRT2, riseR) - insetR, 6)
+    }
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Round-1 fabrication features (jacks, new roof types, valleys, rake, fascia)
 // ---------------------------------------------------------------------------

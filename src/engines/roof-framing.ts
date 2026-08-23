@@ -1141,11 +1141,34 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // of the square-ended box (round-10 gate).
   const [hipRidgeT] = LUMBER_CROSS_SECTIONS[ridgeSizeFor(spec.rafterSize)]
   const hipInset = Math.SQRT2 * (hipRidgeT / 2 + t / 2) + (rd / 2) * Math.tan(hipTilt)
-  const hipLen = Math.hypot(run * Math.SQRT2, rise) - hipInset
-  // Hips carry jacks — table spans are a rafter concept, but a field-spliced
-  // hip is no more a structural member than a spliced common (one-piece check).
-  const hipFlag = spec.detail === '200' ? undefined : onePieceFlag('Hip', hipLen)
+  // Long-plane common stations (also consumed by the apex trim below and the
+  // collar-tie band): layout() guarantees an end station at ridgeHalf − halfT.
+  const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
+  // NIGHT-10 square-hip apex trim: with NO ridge board (ridgeHalf ≤ 0.05 —
+  // the degenerate pyramid apex, width ≈ depth and the square mansard crown)
+  // the hips' top cuts bear on the apex COMMON pair instead of a ridge end.
+  // layout()'s guaranteed end station snaps that pair OFF-CENTER (u =
+  // ridgeHalf − halfT, box overhanging one thickness past the negative ridge
+  // end), so the hips pointing at the overhung side must trim past the
+  // pair's FAR face — the exact mirror of the clearance the opposite hips
+  // already have (which SAT-pass). Plan per-axis overhang beyond each ridge
+  // end, converted to slope inset along the 45° diagonal. Rectangular hips
+  // (ridge board present) keep extra = 0 — byte-identical (the pre-existing
+  // class was 2 hip×common SAT pairs at the ridge point, never gated).
+  const apexExtra = (se: 1 | -1): number => {
+    if (ridgeHalf > 0.05) return 0
+    const overhang =
+      se === 1
+        ? Math.max(...commons) + halfT - ridgeHalf
+        : -ridgeHalf - (Math.min(...commons) - halfT)
+    return overhang > EPS ? (Math.SQRT2 * overhang) / Math.cos(hipTilt) : 0
+  }
   for (const se of [1, -1] as const) {
+    const insetSe = hipInset + apexExtra(se)
+    const hipLenSe = Math.hypot(run * Math.SQRT2, rise) - insetSe
+    // Hips carry jacks — table spans are a rafter concept, but a field-spliced
+    // hip is no more a structural member than a spliced common (one-piece check).
+    const hipFlagSe = spec.detail === '200' ? undefined : onePieceFlag('Hip', hipLenSe)
     for (const sc of [1, -1] as const) {
       // Ridge end (segment frame) and its corner.
       const end: [number, number] = alongX ? [se * ridgeHalf, 0] : [0, se * ridgeHalf]
@@ -1157,18 +1180,18 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
       const dz = corner[1] - end[1]
       const planLen = Math.hypot(dx, dz)
       // Slide the START point down the diagonal by the inset's plan component.
-      const slide = (hipInset * Math.cos(hipTilt)) / planLen
+      const slide = (insetSe * Math.cos(hipTilt)) / planLen
       const start: [number, number] = [end[0] + dx * slide, end[1] + dz * slide]
-      const startY = ridgeY - hipInset * Math.sin(hipTilt)
+      const startY = ridgeY - insetSe * Math.sin(hipTilt)
       const yawTo = Math.atan2(-dz, dx) // +X box onto the plan diagonal
       emit(
         'hip',
         spec.rafterSize,
-        [hipLen, rd, t],
+        [hipLenSe, rd, t],
         [(start[0] + corner[0]) / 2, (startY + eaveY) / 2, (start[1] + corner[1]) / 2],
         yawTo + Math.PI, // point downhill (from ridge end toward the corner)
         hipTilt,
-        hipLen,
+        hipLenSe,
         'lumber',
         `Hip ${spec.rafterSize}${
           spec.detail === '400'
@@ -1176,7 +1199,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
             : ''
         }`,
         undefined,
-        hipFlag,
+        hipFlagSe,
       )
     }
   }
@@ -1193,7 +1216,6 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
   // stays a follow-up (the gable machinery assumes full-width joist lines;
   // the hip band stops short of the end planes) — flag only (S1).
   const commonFlag = slopeRafterFlag(spec, run, commonSlopeLen)
-  const commons = layout(-ridgeHalf, ridgeHalf, spec.rafterSpacing, halfT)
   for (const u of commons) {
     for (const side of [1, -1] as const) {
       const tipPlan = run + roof.overhang * cosT

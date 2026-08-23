@@ -646,6 +646,38 @@ describe('interpenetration gate — structural members never share volume', () =
     expect(violations(frameRoofs([roofSeg({ roofType: 'hip' })], [], spec400))).toEqual([])
   })
 
+  test('roof framing: SQUARE hips — the degenerate pyramid apex composes SAT-clean (NIGHT-10)', () => {
+    // Pre-existing residual, never gated: width == depth drops the ridge
+    // board (ridgeHalf 0) and layout() parks the apex common pair OFF-CENTER
+    // — the two hips pointing at the pair's overhung side drove through it
+    // (2 hip×common SAT pairs at the ridge point, byte-identical across 3
+    // branches). The apex trim now bears those hips on the pair's FAR face.
+    // The square mansard CROWN is the same code path (inner frameHip).
+    // Non-vacuous: hips and commons must exist in every case. SCOPE: cases
+    // run NON-windy — windy SLOPED roofs carry a distinct pre-existing
+    // class (tieAt centers the steel ON the rafter station at every gable/
+    // shed/hip bearing, 28-44 SAT pairs each on the rect defaults; only the
+    // FLAT windy shape got the B8b beside-the-joist fix and joined the
+    // matrix) — board-queued, not this residual's class.
+    const cases: [string, Partial<RoofSegmentSlice>][] = [
+      ['square8', { roofType: 'hip', width: 8, depth: 8 }],
+      ['square6', { roofType: 'hip', width: 6, depth: 6 }],
+      ['square10steep', { roofType: 'hip', width: 10, depth: 10, pitch: (60 * Math.PI) / 180 }],
+      ['square10shallow', { roofType: 'hip', width: 10, depth: 10, pitch: (25 * Math.PI) / 180 }],
+      ['nearSquareSliver', { roofType: 'hip', width: 8, depth: 7.95 }],
+      ['mansardSquareCrown', { roofType: 'mansard', width: 8, depth: 8 }],
+    ]
+    for (const [name, over] of cases) {
+      const members = frameRoofs([roofSeg(over)], [], spec400)
+      expect({
+        name,
+        hips: members.filter((m) => m.role === 'hip').length >= 4,
+        commons: members.some((m) => m.label?.includes('(hip common)')),
+        v: violations(members),
+      }).toEqual({ name, hips: true, commons: true, v: [] })
+    }
+  })
+
   // Two intersecting segments still interpenetrate where the wing meets the
   // main roof: proper overframing (California valley) stops the wing's
   // near-slope rafters and ceiling joists AT the valley boards instead of
