@@ -1425,6 +1425,47 @@ AND a gate — a checklist line without a test is a wish.
   Gate: `src/activation.test.ts` ("INVARIANT W1" describe — the A+B
   remove repro, the viewMode-off variant, parked-in-Normal holds nothing)
   plus the one-shot / manual-survival rows in the activation describe
+- **A6 The condenser-cabinet asset swap is visual-only, X-ray-only, and
+  never a hole.** In the 3D X-ray, the hvac cabinet member renders as the
+  host's real heat-pump model — the item-catalog "AC block" GLB (id
+  `ac-block`, URL pinned in `src/framing/condenser-asset.ts` with a
+  graceful missing-asset path) — under four invariants:
+  (1) X-RAY-ONLY SUBSTITUTION: 'off' draws no members, 'basement' keeps
+  its faint shell box; only 'xray' with a LOADED asset swaps.
+  (2) EXACT MATRIX PARITY: the wrapper takes the box's instance matrix
+  verbatim (shared `composeEntryMatrix`; the asset is normalized to a unit
+  cube, so the model fills precisely the member's dims volume — the engine
+  footprint governs, ≈ 0.9 × 0.8 × 0.35 m); live drags patch wrapper
+  matrices in place, and asset arrival/departure/count change is a
+  STRUCTURAL change (full rebuild, never a torn patch).
+  (3) NEVER-A-HOLE FALLBACK: headless, missing asset, network failure, a
+  spec-valid GLB with NO default scene, a mesh-less scene, or a payload
+  that crashes normalize — every arm resolves `null` (the loader NEVER
+  rejects into the renderer), the steel box renders bit-identical to
+  master, and the failure clears the in-flight slot so the next activation
+  retries (a wedged-forever cache was the round-1 skeptic exhibit).
+  (4) TRIPLE UNIQUENESS: the swap keys on `hvac`/`equipment`/`steel` —
+  no label regex, no engine-side meta (the Member type carries none and
+  adding one breaks the byte-identical baseline). The triple matches the
+  cabinet and NOTHING else: gated live over the pinned baseline corpus
+  plus 52 jurisdictions × {baseline, garage-variant} full computeLevel
+  sweeps (triple ⇔ 'AC condenser #' label, zero mismatches, non-vacuous);
+  the round-1 skeptic swept 52 jurisdictions × 3 scene shapes — zero
+  collisions in the class. Renderer conventions hold: clone meshes are
+  raycast-no-op (F2) with bucket shadow flags, geometry/materials are
+  SHARED with the module-cached asset (never re-minted, never disposed by
+  group teardown), and the bucket material cache stays flat. The MEMBER
+  itself is untouched everywhere — SAT, plans, takeoff, panel: the
+  'AC condenser #N — X tons outdoor unit' label keeps printing, and the
+  master baseline stays byte-identical. Pad, disconnect, whip and line-set
+  render exactly as before (M2 owns their honesty).
+  Origin: user ask 2026-08-22 ("that's actually a heatpump… called 'AC
+  block' — you could use that for placeholder. keep the label on it") +
+  round-1 skeptic (resolve-then-throw wedge, mesh-less hole).
+  Gate: `src/framing/condenser-asset.test.ts` (census both ways with the
+  loader mocked, matrix parity, patch structure, raycast/material
+  conventions, all loader arms, the uniqueness sweeps) — every clause
+  mutation-probed (10 probes, each red).
 
 ## Process
 
