@@ -1,3 +1,15 @@
+# HP PACKAGE SHIPPED TO PROD 2026-08-23 (night-10, ~05:20 UTC)
+
+## SHIP RECORD: private-editor #397 → 1231a771
+Chain: plugin 4a527ec (heat-pump package: scene-aware outdoor
+election + AC-block asset visual + service-body suppression; visual
+re-check SHIP 5/5 incl. the sign-as-handle bathroom-recovery flow)
+→ editor #710 (df4089fd, carries the #709 flake fix) →
+private-editor #397, all CI green, Vercel prod SUCCESS. GitHub
+tarball 504s stalled the lockfile once (retried clean). Board cards
+from the re-check: hydration flash of placeholder bodies before
+suppression settles; WH floating-sign state on wet-room-less scenes.
+
 # NIGHT-10 (2026-08-22 → 23) — "you have a lot to do. Put in an all-nighter."
 
 ## NIGHT-10 PLAN — drain the residual ledger + land the sizing batch
