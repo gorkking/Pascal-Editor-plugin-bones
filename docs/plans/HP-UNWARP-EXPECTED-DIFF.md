@@ -92,3 +92,12 @@ compute.devices byte-equality green over the new pin. Starter-template
 pins updated as INTENDED: wall-clearance gate 0.5 → 1.0 (stand-off class),
 disconnect proximity pin 1 m → 1.2 m plan (NEC 440.14 is a visibility
 rule; the pin guards sanity across the wider standoff).
+
+## Oblique-shell ULP residual (round-1 skeptic advisory)
+The post-seed == auto BYTE property holds on axis-aligned walls
+(incl. the non-dyadic slid anchors the foot fix closed). On OBLIQUE
+(rotated) shells a last-ULP drift (≤9e-16, pre-existing — base
+drifted 2.7e-15; this round improves it 3×) survives in pad
+rotation / line-set dims / whip lengths; semantics (warnings, census,
+labels, flags, elected wall) are byte-equal. Canonicalizing `out`
+from the wall normal is the queued follow-up.
