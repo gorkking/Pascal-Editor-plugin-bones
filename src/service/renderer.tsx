@@ -184,19 +184,29 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
           rotation={[0, proxy.rotationY - placement.rotationY, 0]}
         >
           <boxGeometry args={[proxy.dims[0], proxy.dims[1], proxy.dims[2]]} />
-          {/* Near-invisible but still rendered (the bones:device proxy
-              convention): some raycast paths skip invisible meshes, so
-              opacity ~0 with no depth write is the reliable hoverable
-              ghost — the host outline pass re-renders the silhouette with
-              its OWN mask material regardless of this one. DELIBERATE
-              exception to the X-ray raycast-no-op convention (A6/F2):
-              this is a SERVICE mesh under the node's registered group —
-              picking it IS picking the node, exactly like the sign plates
-              and the visible bodies; the engine-drawn asset meshes stay
-              raycast-disabled. Rotation: the engine yaw is world-frame,
-              the group already carries the node's own rotation — apply
-              the delta. */}
-          <meshBasicMaterial depthWrite={false} opacity={0.03} transparent />
+          {/* Rendered-but-writes-NOTHING (browser QA 2026-08-23: the old
+              opacity-0.03 recipe read as a faint 'glass case' against dark
+              X-ray drywall — killed at the property level, both proxies):
+              `visible` stays true so the mesh keeps its render-list
+              membership — the raycast reliability the original ghost was
+              built for AND the outline mask pass, which only reaches
+              render-list members before swapping in its OWN material
+              (projectObject culls on object/material `visible` alone,
+              never colorWrite — three Renderer.js). colorWrite:false
+              writes zero pixels; depthWrite:false stays LOAD-BEARING
+              (colorWrite kills color, not depth — a phantom depth box
+              would punch AO/ink-edge artifacts around the unit).
+              transparent/opacity dropped: dead knobs with no color
+              writes, and the proxy leaves the back-to-front sort.
+              DELIBERATE exception to the X-ray raycast-no-op convention
+              (A6/F2): this is a SERVICE mesh under the node's registered
+              group — picking it IS picking the node, exactly like the
+              sign plates and the visible bodies; the engine-drawn asset
+              meshes stay raycast-disabled (Mesh.raycast consults only
+              material presence + side, never write masks). Rotation: the
+              engine yaw is world-frame, the group already carries the
+              node's own rotation — apply the delta. */}
+          <meshBasicMaterial colorWrite={false} depthWrite={false} />
         </mesh>
       )}
       {presentation.sign &&

@@ -124,11 +124,16 @@ export const DeviceRenderer = ({ node: rawNode }: { node: DeviceNode }) => {
     <group position={[x, 0, z]} ref={ref} rotation={[0, placement.rotationY, 0]} {...handlers}>
       <mesh position={[0, y, 0]}>
         <boxGeometry args={PROXY_DIMS} />
-        {/* Near-invisible but still rendered: some raycast paths skip
-            invisible meshes, so opacity ~0 with no depth write is the
-            reliable "hoverable ghost" (the host outline pass re-renders
-            the silhouette regardless of material). */}
-        <meshBasicMaterial depthWrite={false} opacity={0.03} transparent />
+        {/* Rendered-but-writes-NOTHING: `visible` stays true (render-list
+            membership = raycast reliability + the outline mask pass, which
+            swaps in its OWN material), colorWrite:false writes zero pixels,
+            depthWrite:false keeps the phantom box out of depth (AO/edge
+            passes). Same-property fix as the heat-pump proxy (browser QA
+            2026-08-23: 0.03 alpha read as a faint 'glass case' at unit
+            size; at outlet size it sat below perception through every
+            visual round since #665, but the veil CLASS is identical —
+            one proxy convention, not two). */}
+        <meshBasicMaterial colorWrite={false} depthWrite={false} />
       </mesh>
     </group>
   )

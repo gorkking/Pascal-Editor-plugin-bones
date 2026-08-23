@@ -1685,7 +1685,10 @@ AND a gate — a checklist line without a test is a wish.
   the unit itself.** (Julien 2026-08-23, overruling the day-10 trade that
   left the sign plate as the suppressed body's only handle.) In 'xray'
   with hvac ON, the heat-pump service node mounts a NEAR-INVISIBLE pick
-  proxy (opacity ≈ 0, no depth write — the bones:device convention;
+  proxy (colorWrite:false + depthWrite:false, visible — renders in the
+  list but writes NO pixels and no depth; QA round 2026-08-23 retired the
+  opacity-0.03 recipe, whose stacked panes read as a faint 'glass case'
+  against dark drywall — the bones:device proxy took the same property;
   editor #665 trio: useNodeEvents + useRegistry + host SelectionManager /
   merged-outline, whose mask pass re-renders silhouettes with its own
   material, so the ghost outlines) sized to the ENGINE cabinet footprint
