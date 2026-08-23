@@ -707,7 +707,7 @@ describe('interpenetration gate — structural members never share volume', () =
       const members = frameRoofs([roofSeg(over)], [], windy400)
       expect({
         name,
-        ties: members.filter((m) => m.label === 'hurricane tie').length > 0,
+        ties: members.filter((m) => m.label?.startsWith('hurricane tie')).length > 0,
         v: violations(members),
       }).toEqual({ name, ties: true, v: [] })
     }

@@ -890,7 +890,16 @@ AND a gate — a checklist line without a test is a wish.
   (`spec.highWindUplift`, set by `applyJurisdiction` from the data's own
   highWind overlay trigger `ultimateWindMph >= 130 && flags.hurricaneTies`
   — DELIBERATELY narrower than `hurricaneTies`, whose sub-130 coastal
-  belt TX/AL/GA/NY… keeps roof ties with byte-equal walls) every framed
+  belt keeps roof ties with byte-equal walls — and since NIGHT-10 those
+  ties STATE the scope themselves: every belt tie is labeled 'hurricane
+  tie (roof-to-wall ties only — wall/foundation uplift path not modeled
+  below 130 mph design wind)', ≥130 ties keep the plain label because the
+  wall hardware IS the continuation; the belt is derived from the
+  profiles data and PINNED as exactly 12 states (AL CT DE GA MA MS NC NJ
+  NY RI SC TX vs FL HI LA full-path), geometry proven label-only by
+  strip-equality per tying shape, takeoff row-count/detail unchanged
+  (role-counted), label-not-flag (no Flags row), INTL tie-less byte-equal
+  — docs/plans/B10-EXPECTED-DIFF.md NIGHT-10 addendum) every framed
   EXTERIOR wall books the continuation as S13 surface hardware (1.2 mm
   symbolic steel on the framing face under the SAT skin, honest 'install
   per strapping schedule' labels, WFCM capacity/nailing stated as not
@@ -944,7 +953,12 @@ AND a gate — a checklist line without a test is a wish.
   B10 describe (LA walls+layers BOTH faces strictly clean with NO uplift
   allow-list pair; +foundation post-dedupe inherits only the documented
   bolt-shank class; HI portal+uplift coexistence). All mutation-checked
-  (17 probes across B10a-e).
+  (17 probes across B10a-e). NIGHT-10 belt-label gates:
+  `src/engines/roof-framing.test.ts` belt describe (exact clause on every
+  tie × 7 tying shapes, ≥130 plain, strip-equality label-only proof,
+  12-state derived enumeration pin + per-state labels + INTL byte pin,
+  takeoff row parity + no-Flags-row pin; gable-400-windy sha REPINNED —
+  the pin's spec is the belt).
 
 - **S17 Roof shape closures (B8): low-slope ridges, flat-roof uplift,
   unframed intersections and the gambrel break are never silent.**

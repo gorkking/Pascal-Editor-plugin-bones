@@ -646,8 +646,17 @@ function deckPlane(
   )
 }
 
-/** Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path). */
-function tieAt(emit: Emit, x: number, z: number, y: number) {
+/**
+ * Steel hurricane tie block at a rafter bearing (IRC R802.11 uplift path).
+ * NIGHT-10 (the B10 skeptic's residual): the sub-130 mph coastal belt
+ * (`hurricaneTies` without `highWindUplift` — TX/AL/CT/DE/GA/MA/MS/NJ/NY/
+ * NC/RI/SC) books roof ties while the WALL engine deliberately models no
+ * continuation (S16 keeps those walls byte-equal to INTL), so the tie
+ * itself states its scope instead of implying a full path. ≥ 130 mph
+ * (`highWindUplift` — LA/HI/FL) keeps the plain label: B10's wall
+ * connectors/straps ARE the continuation there.
+ */
+function tieAt(emit: Emit, spec: FramingSpec, x: number, z: number, y: number) {
   emit(
     'blocking',
     undefined,
@@ -657,7 +666,9 @@ function tieAt(emit: Emit, x: number, z: number, y: number) {
     0,
     inches(3),
     'steel',
-    'hurricane tie',
+    spec.highWindUplift
+      ? 'hurricane tie'
+      : 'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)',
   )
 }
 
@@ -760,7 +771,7 @@ function frameGable(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]
         undefined,
         rafterFlag,
       )
-      if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
+      if (spec.hurricaneTies) tieAt(emit, spec, x, side * run, eaveY)
     }
   }
 
@@ -1070,8 +1081,8 @@ function frameShed(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
       shedFlag,
     )
     if (spec.hurricaneTies) {
-      tieAt(emit, x, roof.depth / 2, lowY)
-      tieAt(emit, x, -roof.depth / 2, lowY + roof.depth * Math.tan(theta))
+      tieAt(emit, spec, x, roof.depth / 2, lowY)
+      tieAt(emit, spec, x, -roof.depth / 2, lowY + roof.depth * Math.tan(theta))
     }
   }
 
@@ -1248,7 +1259,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         commonFlag,
       )
       if (spec.hurricaneTies) {
-        tieAt(emit, alongX ? u : side * run, alongX ? side * run : u, eaveY)
+        tieAt(emit, spec, alongX ? u : side * run, alongX ? side * run : u, eaveY)
       }
     }
   }
@@ -1320,7 +1331,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           // Uplift path applies to every bearing rafter — jacks included
           // (round-2 advisory: hip jacks had no ties in high-wind specs).
           if (spec.hurricaneTies) {
-            tieAt(emit, alongX ? long : sc * run, alongX ? sc * run : long, eaveY)
+            tieAt(emit, spec, alongX ? long : sc * run, alongX ? sc * run : long, eaveY)
           }
         }
       }
@@ -1359,6 +1370,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
         if (spec.hurricaneTies) {
           tieAt(
             emit,
+            spec,
             alongX ? se * (ridgeHalf + run) : 0,
             alongX ? 0 : se * (ridgeHalf + run),
             eaveY,
@@ -1397,6 +1409,7 @@ function frameHip(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[]) 
           if (spec.hurricaneTies) {
             tieAt(
               emit,
+              spec,
               alongX ? se * (ridgeHalf + run) : sv * v,
               alongX ? sv * v : se * (ridgeHalf + run),
               eaveY,
@@ -1690,8 +1703,8 @@ function frameFlat(roof: RoofSegmentSlice, spec: FramingSpec, members: Member[])
     )
     if (typeof tieSpot === 'number') {
       for (const side of [1, -1] as const) {
-        if (spansX) tieAt(emit, side * tieBear, tieSpot, roof.wallHeight)
-        else tieAt(emit, tieSpot, side * tieBear, roof.wallHeight)
+        if (spansX) tieAt(emit, spec, side * tieBear, tieSpot, roof.wallHeight)
+        else tieAt(emit, spec, tieSpot, side * tieBear, roof.wallHeight)
       }
     }
   }
@@ -1841,7 +1854,7 @@ function frameGambrel(roof: RoofSegmentSlice, spec: FramingSpec, members: Member
         undefined,
         upperFlag,
       )
-      if (spec.hurricaneTies) tieAt(emit, x, side * run, eaveY)
+      if (spec.hurricaneTies) tieAt(emit, spec, x, side * run, eaveY)
     }
   }
 
@@ -2158,7 +2171,7 @@ function frameSkirt(
           undefined,
           faceFlag,
         )
-        if (spec.hurricaneTies) tieAt(emit, stationIsX ? u : side * half, stationIsX ? side * half : u, eaveY)
+        if (spec.hurricaneTies) tieAt(emit, spec, stationIsX ? u : side * half, stationIsX ? side * half : u, eaveY)
       }
     }
   }

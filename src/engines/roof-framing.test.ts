@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { Euler, Vector3 } from 'three'
 import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { Member } from '../core/types'
+import { applyJurisdiction, jurisdictionOptions, profileFor } from '../jurisdiction/profiles'
 import {
   birdsmouthSeat,
   detectUnframedRoofIntersections,
@@ -145,9 +146,11 @@ describe('frameRoofs — gable', () => {
   })
 
   test('no hurricane ties by default; present under a high-wind spec', () => {
-    expect(members.some((m) => m.label === 'hurricane tie')).toBe(false)
+    expect(members.some((m) => m.label?.startsWith('hurricane tie'))).toBe(false)
+    // hurricaneTies without highWindUplift = the sub-130 BELT — its ties
+    // carry the NIGHT-10 wall-path scope clause (dedicated describe below)
     const windy = frameRoofs([roof], [], { ...DEFAULT_SPEC, hurricaneTies: true })
-    const ties = windy.filter((m) => m.label === 'hurricane tie')
+    const ties = windy.filter((m) => m.label?.startsWith('hurricane tie'))
     // one tie per bearing rafter — barge rafters ride the rake, no plate below
     const bearing = byRole(windy, 'rafter').filter((r) => !r.label?.includes('Barge'))
     expect(ties.length).toBe(bearing.length)
@@ -684,7 +687,7 @@ describe('frameRoofs — hip jacks carry hurricane ties in high-wind specs', () 
       ...DEFAULT_SPEC,
       hurricaneTies: true,
     })
-    const ties = windy.filter((m) => m.label === 'hurricane tie')
+    const ties = windy.filter((m) => m.label?.startsWith('hurricane tie'))
     const bearing =
       byRole(windy, 'rafter').length + byRole(windy, 'jack-rafter').length
     expect(ties.length).toBe(bearing)
@@ -1490,13 +1493,23 @@ describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (
   //    gable ridges (the pinned scenes sit at 40°), B8b gates flat ties on
   //    hurricaneTies (flat-400 is non-windy; gable-400-windy has no flat),
   //    B8c emits WARNINGS, never members (the valley pin proves it).
+  // NIGHT-10 INTENDED-CHANGE (per-shape enumeration, master db7ada2):
+  //  - gable-400-windy REPINNED (tie-label residual ONLY): the pin's spec
+  //    is hurricaneTies WITHOUT highWindUplift = the sub-130 mph BELT —
+  //    every 'hurricane tie' label gained the wall-path scope clause. The
+  //    geometry is untouched (the belt describe pins strip-label equality
+  //    against the highWindUplift spec). Recaptured at the tieAt change.
+  //  - EVERY other pin holds: the 10 non-windy pins book no ties at all;
+  //    the square-hip apex trim (residual 1) moves only width==depth
+  //    shapes (none pinned); the hip/crown R802.4.3 flag (residual 2)
+  //    moves only sub-3:12 hip ridges + the mansard crown (none pinned).
   const hashOf = (members: Member[]): string =>
     createHash('sha256').update(JSON.stringify(members)).digest('hex').slice(0, 16)
   const PINS: [string, Partial<RoofSegmentSlice>, Partial<FramingSpec>, string][] = [
     ['gable-300', {}, {}, '0630b9f861ee5f6c'],
     ['gable-400', {}, { detail: '400' }, '956ef4b91c7d838c'],
     ['gable-200', {}, { detail: '200' }, '34f8a921c61c82e3'],
-    ['gable-400-windy', {}, { detail: '400', hurricaneTies: true }, 'cf188b8d03379ed1'],
+    ['gable-400-windy', {}, { detail: '400', hurricaneTies: true }, 'a408ae61e9011a01'],
     ['gable-big-400', { width: 10, depth: 12 }, { detail: '400' }, '9488d2b7f7a2c3c9'],
     ['shed-300', { roofType: 'shed' }, {}, '76e8a43f3f95a947'],
     ['shed-400', { roofType: 'shed' }, { detail: '400' }, '56128ff5e8d68001'],
@@ -1520,6 +1533,116 @@ describe('B7 blast radius: gable/shed/flat/gambrel/valley byte-equal to master (
       { ...DEFAULT_SPEC, detail: '400' },
     )
     expect(hashOf(members)).toBe('2ef111d64bcdd8d9')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// NIGHT-10: the sub-130 mph roof-tie belt states its wall-path scope
+// ---------------------------------------------------------------------------
+
+describe('NIGHT-10: sub-130 mph roof ties state their wall-path scope (B10 skeptic residual)', () => {
+  // The 115-129 mph coastal belt (hurricaneTies WITHOUT highWindUplift)
+  // books roof-to-wall ties while S16 deliberately keeps its walls
+  // byte-equal to INTL — no connectors, no straps, no foundation path. The
+  // tie member itself now says so; ≥ 130 mph keeps the plain label because
+  // B10's wall hardware IS the continuation there.
+  const PLAIN = 'hurricane tie'
+  const BELT =
+    'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)'
+  const beltSpec: FramingSpec = { ...DEFAULT_SPEC, detail: '400', hurricaneTies: true }
+  const fullSpec: FramingSpec = { ...beltSpec, highWindUplift: true }
+  const tiesOf = (ms: Member[]) => ms.filter((m) => m.label?.startsWith(PLAIN))
+  const SHAPES: [string, Partial<RoofSegmentSlice>][] = [
+    ['gable', {}],
+    ['shed', { roofType: 'shed' }],
+    ['hip', { roofType: 'hip' }],
+    ['flat', { roofType: 'flat' }],
+    ['gambrel', { roofType: 'gambrel' }],
+    ['mansard', { roofType: 'mansard' }], // skirt ties
+    ['dutch', { roofType: 'dutch' }],
+  ]
+
+  test('belt spec: EVERY tie on every tying shape carries the exact scope clause', () => {
+    for (const [name, over] of SHAPES) {
+      const ties = tiesOf(frameRoofs([seg(over)], [], beltSpec))
+      expect({ name, some: ties.length > 0 }).toEqual({ name, some: true })
+      for (const tie of ties) expect(tie.label).toBe(BELT)
+    }
+  })
+
+  test('≥130 spec (highWindUplift): ties keep the plain label — B10 walls continue the path', () => {
+    for (const [name, over] of SHAPES) {
+      const ties = tiesOf(frameRoofs([seg(over)], [], fullSpec))
+      expect({ name, some: ties.length > 0 }).toEqual({ name, some: true })
+      for (const tie of ties) expect(tie.label).toBe(PLAIN)
+    }
+  })
+
+  test('the label is the ONLY delta: normalizing belt tie labels reproduces the ≥130 bytes', () => {
+    for (const [name, over] of SHAPES) {
+      const belt = frameRoofs([seg(over)], [], beltSpec).map((m) =>
+        m.label === BELT ? { ...m, label: PLAIN } : m,
+      )
+      const full = frameRoofs([seg(over)], [], fullSpec)
+      expect({ name, eq: JSON.stringify(belt) === JSON.stringify(full) }).toEqual({
+        name,
+        eq: true,
+      })
+    }
+  })
+
+  test('jurisdiction truth: exactly 12 belt states — enumerated, derived, and labeled', () => {
+    // Derive the belt from the data itself (the B10 sweep discipline) and
+    // pin the enumeration: a jurisdiction drifting across the 130 boundary
+    // must show up HERE, not silently swap tie labels.
+    const belt: string[] = []
+    const full: string[] = []
+    for (const { code } of jurisdictionOptions()) {
+      const p = profileFor(code)
+      if (!p.hurricaneTies) continue
+      if (p.ultimateWindMph >= 130) full.push(code)
+      else belt.push(code)
+    }
+    expect(belt.sort()).toEqual(['AL', 'CT', 'DE', 'GA', 'MA', 'MS', 'NC', 'NJ', 'NY', 'RI', 'SC', 'TX'])
+    expect(full.sort()).toEqual(['FL', 'HI', 'LA'])
+    for (const code of belt) {
+      const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
+      expect({ code, ties: sp.hurricaneTies, uplift: sp.highWindUplift }).toEqual({
+        code,
+        ties: true,
+        uplift: false,
+      })
+      const ties = tiesOf(frameRoofs([seg()], [], sp))
+      expect(ties.length).toBeGreaterThan(0)
+      for (const tie of ties) expect(tie.label).toBe(BELT)
+    }
+    for (const code of full) {
+      const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
+      const ties = tiesOf(frameRoofs([seg()], [], sp))
+      expect(ties.length).toBeGreaterThan(0)
+      for (const tie of ties) expect(tie.label).toBe(PLAIN)
+    }
+    // INTL books no ties and stays byte-equal to the default spec
+    const intl = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor('INTL'))
+    const intlMembers = frameRoofs([seg()], [], intl)
+    expect(tiesOf(intlMembers)).toHaveLength(0)
+    expect(JSON.stringify(intlMembers)).toBe(
+      JSON.stringify(frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '400' })),
+    )
+  })
+
+  test('takeoff: the tie row counts by role+material+system — the clause books nothing new', () => {
+    const beltRows = computeTakeoff(frameRoofs([seg()], [], beltSpec), [])
+    const fullRows = computeTakeoff(frameRoofs([seg()], [], fullSpec), [])
+    const beltRow = beltRows.find((r) => r.item === 'Hurricane ties')
+    const fullRow = fullRows.find((r) => r.item === 'Hurricane ties')
+    expect(beltRow).toBeDefined()
+    expect(beltRow?.quantity).toBe(fullRow?.quantity as never)
+    expect(beltRow?.detail).toBe(fullRow?.detail as never)
+    // the clause is a LABEL, never a flag — no Flags row appears for it
+    expect(
+      beltRows.some((r) => r.section === 'Flags' && r.detail.includes('wall/foundation uplift path')),
+    ).toBe(false)
   })
 })
 
@@ -1687,7 +1810,10 @@ describe('LOD-400 B8a: sub-3:12 gable ridge flags R802.4.3 (flag route, v1)', ()
 
 describe('LOD-400 B8b: flat-roof joists tie BOTH bearing ends under high wind (R802.11)', () => {
   const windy = { ...DEFAULT_SPEC, hurricaneTies: true }
-  const tiesOf = (members: Member[]) => members.filter((m) => m.label === 'hurricane tie')
+  // the B8b windy spec is the sub-130 BELT (hurricaneTies, no highWindUplift)
+  // — NIGHT-10 gave its ties the wall-path scope clause; prefix match here,
+  // the exact-label pins live in the NIGHT-10 belt describe
+  const tiesOf = (members: Member[]) => members.filter((m) => m.label?.startsWith('hurricane tie'))
 
   test('windy census: exactly two ties per joist, at the plate line on the joist underside plane', () => {
     const roof = seg({ roofType: 'flat' }) // 8 × 6 → joists run along Z, bearing at z = ±3

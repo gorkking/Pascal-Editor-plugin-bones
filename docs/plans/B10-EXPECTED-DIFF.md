@@ -121,6 +121,8 @@ Result: **PASS — nothing moved beyond the enumerated classes.**
 - **Sub-130 hurricaneTies states** (TX et al.) get roof ties with no wall
   path and no statement — deliberate blast-radius containment per the
   backlog; the seam is documented on the spec field and here.
+  → CLOSED (NIGHT-10, feat/roof-residuals): see the addendum below — the
+  tie members now state the scope themselves.
 - **Mixed CMU/framed walls** route their framed zone through `frameWall`
   without `slabBearing`: connectors + opening straps book in the zone
   (path continues to the seam sill, which is already bolted to the bond
@@ -130,3 +132,40 @@ Result: **PASS — nothing moved beyond the enumerated classes.**
   outer FACE, so a grid stud whose center lands within halfT past it
   overlaps the king by up to 18 mm. Board-note queued; the B10 connectors
   dodge it rather than stack.
+
+
+## NIGHT-10 ADDENDUM — the belt states its scope (tie-label expected diff)
+
+Residual 3 of the ROOF RESIDUALS batch (base `db7ada2`): the B10 skeptic's
+nice-to-have. Every hurricane-tie member emitted under a BELT spec
+(`hurricaneTies` && !`highWindUplift`) now carries the label
+
+```
+hurricane tie (roof-to-wall ties only — wall/foundation uplift path not
+modeled below 130 mph design wind)
+```
+
+`highWindUplift` specs (LA HI, FL-framed-override) keep the plain
+`hurricane tie` — B10's wall connectors/straps ARE the continuation there.
+
+### The ONLY allowed diff class
+
+- **Tie member LABELS in the 12 belt states** — derived from the profiles
+  data (`hurricaneTies && ultimateWindMph < 130`), enumerated and PINNED
+  by the jurisdiction-truth gate (a state drifting across the 130 boundary
+  fails the enumeration, never silently swaps labels):
+
+  **AL CT DE GA MA MS NC NJ NY RI SC TX** (12)
+
+- Applies to every tying shape (gable, shed, hip commons/kings/jacks,
+  flat both-end ties, gambrel, mansard/dutch skirts).
+- GEOMETRY is untouched: normalizing belt tie labels reproduces the ≥130
+  spec bytes exactly (strip-equality gate per shape).
+- Labels never print on paper (plan-set prints flags, not labels) and the
+  takeoff counts ties by role+material+system → paper + takeoff byte-equal
+  everywhere; the clause is a label, NOT a flag (no Flags row — gated).
+- ≥130 states (FL HI LA), INTL and the 36 tie-less states: REQUIRED
+  byte-equal — held by the ≥130 plain-label gate, the INTL byte pin, the
+  11 untouched sha pins and the E5 baseline (no roof segments).
+- `gable-400-windy` sha pin REPINNED for this class alone
+  (cf188b8d03379ed1 → a408ae61e9011a01) — its spec is the belt.
