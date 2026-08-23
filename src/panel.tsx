@@ -693,6 +693,9 @@ function ExportPlansButton({
           // openings feed the door/window schedule sheet (B21d) — live
           // memo references, never mutated
           walls: result.walls,
+          // gross-fallback areas so LOD-200 paper books the SAME takeoff
+          // rows as the panel (C5 — one source of truth)
+          areas: result.areas,
           // storey lifts RELATIVE to the owner level — owner members draw
           // level-local, so absolute elevations put an upper-storey owner's
           // roof a full storey too high on elevations/section (round-6)

@@ -55,6 +55,11 @@ describe('sidebar panel composition (source gates)', () => {
   })
 })
 
+test('C5: the plan-set export passes the gross-fallback areas (one source of truth)', () => {
+  const src = readFileSync(new URL('./panel.tsx', import.meta.url), 'utf8')
+  expect(src).toContain('areas: result.areas')
+})
+
 describe('day-9 declutter: warnings + flags fold away, the summary stays', () => {
   const panel = read('./panel.tsx')
 
