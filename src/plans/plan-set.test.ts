@@ -470,25 +470,52 @@ describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
     expect(sched?.svg).not.toContain('BUILDING CHARACTERISTICS')
   })
 
-  test('Manual-J-lite basis prints ON PAPER: the cooling figure names its load + the M1401.3 line', () => {
+  test('Manual-J-lite basis prints ON PAPER: composition (sensible × latent → total) + the M1401.3 line', () => {
     const mj: BuildingCharacteristics = {
       ...characteristics,
-      coolingTonsEstimate: 0.28,
+      coolingTonsEstimate: 0.35,
       coolingBasis: 'manual-j-lite',
+      coolingSensibleTons: 0.28,
+      coolingLatentFactor: 1.25,
+      coolingMoistureRegime: 'A',
     }
     const sched = buildPlanSet([member({})], [], { characteristics: mj }).find((s) =>
       s.title.startsWith('Schedules'),
     )
     const svg = sched?.svg ?? ''
-    expect(svg).toContain('Cooling ~0.3 ton (MANUAL J-LITE load)')
+    // the F1 reach: sensible + allowance + total ALL on the sheet
+    // (wrap-safe pieces — the composition may break across wrapped lines;
+    // 0.35 prints '0.3' via toFixed(1) float round-down)
+    expect(svg).toContain('Cooling ~0.3 ton (MANUAL J-LITE: 0.28 t')
+    expect(svg).toContain('sensible × 1.25 latent A)')
     // (wrapRow may break the line — assert the wrap-safe pieces)
     expect(svg).toContain('cooling per Manual J-LITE')
     expect(svg).toContain('M1401.3')
-    expect(svg).toContain('verify local design conditions')
+    expect(svg).toContain('coarse latent allowance by moisture regime')
+    expect(svg).toContain('full Manual J latent governs')
+    // 'verify local design conditions' wraps mid-phrase at this column
+    expect(svg).toContain('verify local')
+    expect(svg).toContain('design conditions')
     expect(svg).toContain('not a full Manual J')
     expect(svg).not.toContain('RULE OF THUMB')
+    // a regime-less zone (no latent fields / ×1.0) states sensible-only
+    const bare: BuildingCharacteristics = {
+      ...characteristics,
+      coolingTonsEstimate: 0.28,
+      coolingBasis: 'manual-j-lite',
+      coolingSensibleTons: 0.28,
+      coolingLatentFactor: 1,
+      coolingMoistureRegime: null,
+    }
+    const svg2 =
+      buildPlanSet([member({})], [], { characteristics: bare })
+        .find((s) => s.title.startsWith('Schedules'))?.svg ?? ''
+    // wrap-safe fragments (the ~100-char column breaks these phrases)
+    expect(svg2).toContain('MANUAL J-LITE load,')
+    expect(svg2).toContain('sensible-only — no latent')
+    expect(svg2).toContain('sensible-only — verify local')
     // legacy/fallback objects (no basis) keep the rule-of-thumb wording —
-    // the sibling test above pins it; the two strings never coexist
+    // the sibling test above pins it; the strings never coexist
   })
 
   test('coexists with flags: block stacks ABOVE the red flag list', () => {

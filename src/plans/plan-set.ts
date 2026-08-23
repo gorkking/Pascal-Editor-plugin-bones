@@ -2333,7 +2333,13 @@ function schedulesSheets(
       ...wrapRow(
         noSlab
           ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
-          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (${c.coolingBasis === 'manual-j-lite' ? 'MANUAL J-LITE load' : 'RULE OF THUMB'})`,
+          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (${
+              c.coolingBasis === 'manual-j-lite'
+                ? c.coolingSensibleTons !== undefined && (c.coolingLatentFactor ?? 1) > 1
+                  ? `MANUAL J-LITE: ${c.coolingSensibleTons.toFixed(2)} t sensible × ${c.coolingLatentFactor} latent ${c.coolingMoistureRegime}`
+                  : 'MANUAL J-LITE load, sensible-only — no latent allowance'
+                : 'RULE OF THUMB'
+            })`,
         100,
       ),
       // ~100 chars ≈ the column width at 9.5px — WRAPPED, never clipped.
@@ -2343,7 +2349,9 @@ function schedulesSheets(
       ...wrapRow(
         `${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · ${
           c.coolingBasis === 'manual-j-lite'
-            ? 'cooling per Manual J-LITE (M1401.3) — verify local design conditions; not a full Manual J'
+            ? (c.coolingLatentFactor ?? 1) > 1
+              ? 'cooling per Manual J-LITE (M1401.3) — coarse latent allowance by moisture regime, full Manual J latent governs; verify local design conditions; not a full Manual J'
+              : 'cooling per Manual J-LITE (M1401.3), sensible-only — verify local design conditions; not a full Manual J'
             : 'schematic — not a Manual J'
         }`,
         100,

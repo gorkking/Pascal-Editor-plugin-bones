@@ -291,6 +291,8 @@
       "infiltrationAch": 0.35,
       "airSensibleWhPerM3K": 0.33,
       "infiltrationNote": "Sensible infiltration = 0.33 Wh/(m³·K) × ACH × conditioned volume × ΔT; ACH 0.35 assumed (typical code-era construction) — blower-door data governs.",
+      "latentAllowanceByMoistureRegime": { "A": 1.25, "B": 1.05, "C": 1.1 },
+      "latentAllowanceNote": "COARSE latent allowance applied to the four-term sensible sum BEFORE Manual S selection, keyed on the IECC moisture-regime letter of the state's climate zone (A moist/humid, B dry, C marine — the letter in wall-assemblies.json exterior.stateClimateZone, 2021 IECC Figure R301.1): humid ×1.25, dry ×1.05, marine ×1.10 — class factors only, a full ACCA Manual J latent calculation governs. Zones whose label carries NO regime letter (bare digits like AK '7') take ×1.0 and say so on the label/notes.",
       "manualSBandPctOfLoad": { "min": 95, "max": 115 },
       "manualSNote": "Equipment total = smallest half-ton multiple ≥ the sensible load (floored at 1.5 tons); ACCA Manual S common practice keeps selection within 95-115% of load — a selection outside the band (stock-size steps at small loads) is flagged, never silent.",
       "fallbackNote": "When the climate zone cannot resolve (INTL/unknown state), the level has no straight exterior envelope, or no conditioned volume, sizing falls back to the labeled sqft-per-ton rule (condenser.sqftPerTonByZoneBand) with the reason stated on the label — never silently. LOD does not gate the load: walls/rooms exist at every LOD."

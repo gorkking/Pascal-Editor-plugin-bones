@@ -85,6 +85,13 @@ export type BuildingCharacteristics = {
   /** Basis of `coolingTonsEstimate` — absent reads 'rule-of-thumb'
    * (hand-built fixtures predating the Manual-J-lite batch). */
   coolingBasis?: 'manual-j-lite' | 'rule-of-thumb'
+  /** Manual-J-lite composition (skeptic F1 — sensible + allowance + total
+   * must all reach the reader): the four-term SENSIBLE tons and the
+   * moisture-regime latent factor whose product is `coolingTonsEstimate`.
+   * Absent on the fallback / hand-built fixtures. */
+  coolingSensibleTons?: number
+  coolingLatentFactor?: number
+  coolingMoistureRegime?: 'A' | 'B' | 'C' | null
   /** Citations + assumptions for every derived number above. */
   notes: string[]
   /** Set when floorAreaM2 is 0 BECAUSE every drawn zone is outdoor (round-4
@@ -261,9 +268,19 @@ export function computeCharacteristics(
   const mj = manualJLite(walls, rooms, stateCode)
   let coolingTonsEstimate: number
   let coolingBasis: 'manual-j-lite' | 'rule-of-thumb'
+  let coolingComposition: {
+    coolingSensibleTons: number
+    coolingLatentFactor: number
+    coolingMoistureRegime: 'A' | 'B' | 'C' | null
+  } | null = null
   if (mj.ok) {
     coolingBasis = 'manual-j-lite'
     coolingTonsEstimate = mj.loadTons
+    coolingComposition = {
+      coolingSensibleTons: mj.sensibleTons,
+      coolingLatentFactor: mj.latentFactor,
+      coolingMoistureRegime: mj.moistureRegime,
+    }
     notes.push(...mj.notes)
   } else {
     coolingBasis = 'rule-of-thumb'
@@ -289,6 +306,7 @@ export function computeCharacteristics(
     designHeatLossW,
     coolingTonsEstimate,
     coolingBasis,
+    ...(coolingComposition ?? {}),
     notes,
     ...(allZonesOutdoor ? { allZonesOutdoor: true } : {}),
   }
@@ -346,7 +364,15 @@ export function characteristicsRows(
       ? { metric: coolingMetric, value: na, unit: '' }
       : {
           metric: coolingMetric,
-          value: c.coolingTonsEstimate.toFixed(1),
+          // sensible + allowance + total all show (skeptic F1): a humid-
+          // zone figure is NOT the four-term sum, and the reader must see
+          // the composition, not just the product.
+          value:
+            c.coolingBasis === 'manual-j-lite' &&
+            c.coolingSensibleTons !== undefined &&
+            (c.coolingLatentFactor ?? 1) > 1
+              ? `${c.coolingTonsEstimate.toFixed(2)} (${c.coolingSensibleTons.toFixed(2)} sensible × ${c.coolingLatentFactor} latent ${c.coolingMoistureRegime})`
+              : c.coolingTonsEstimate.toFixed(1),
           unit: 'tons',
         },
   ]

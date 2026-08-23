@@ -461,12 +461,21 @@ export function sizeCoolingPlan(
     const totalTons = sel.tons
     const count = Math.max(1, Math.ceil(totalTons / MAX_TONS_PER_CONDENSER))
     const unitTons = Math.max(COND_MIN_TONS, Math.round((totalTons / count) * 2) / 2)
+    // The LATENT COMPOSITION goes on the label (skeptic F1): the four-term
+    // load is sensible-only, and in a humid zone the allowance moves the
+    // selection — a reader of any consumer label must see all three
+    // figures (sensible × factor → selected), not discover the omission
+    // in a module docstring.
+    const sens = Math.round(load.sensibleTons * 100) / 100
+    const latentNote = load.moistureRegime
+      ? `${sens} t sensible × ${load.latentFactor} latent (regime ${load.moistureRegime})`
+      : `${sens} t sensible, no latent allowance (no regime letter)`
     return {
       totalTons,
       count,
       unitTons,
       basis: 'manual-j-lite',
-      sizingNote: `Manual J-lite, zone ${load.zone} design ${load.outdoorDesignC}°C`,
+      sizingNote: `Manual J-lite, zone ${load.zone} design ${load.outdoorDesignC}°C, ${latentNote}`,
       zone: load.zone,
       load,
       withinManualSBand: sel.withinBand,
@@ -1333,7 +1342,16 @@ export function layoutHvac(
       conditionedSqft: Math.round(areaM2 * 10.7639),
       cfm: totalCfm,
       sizingBasis: plan.basis,
-      ...(plan.load ? { loadBtuH: Math.round(plan.load.totalBtuH) } : {}),
+      ...(plan.load
+        ? {
+            // design load = what Manual S selected from (sensible × latent)
+            loadBtuH: Math.round(plan.load.loadTons * 12000),
+            sensibleBtuH: Math.round(plan.load.totalBtuH),
+            latentFactor: plan.load.latentFactor,
+            // fixture meta forbids null — a regime-less zone just omits it
+            ...(plan.load.moistureRegime ? { moistureRegime: plan.load.moistureRegime } : {}),
+          }
+        : {}),
     },
   })
 
@@ -1971,6 +1989,15 @@ export function layoutHvac(
             units: plan.count,
             totalTons: plan.totalTons,
             sizingBasis: plan.basis,
+            ...(plan.load
+              ? {
+                  sensibleTons: Math.round(plan.load.sensibleTons * 100) / 100,
+                  latentFactor: plan.load.latentFactor,
+                  ...(plan.load.moistureRegime
+                    ? { moistureRegime: plan.load.moistureRegime }
+                    : {}),
+                }
+              : {}),
           },
         })
         // Refrigerant LINE-SET (suction ¾" insulated + liquid ⅜", M1411):

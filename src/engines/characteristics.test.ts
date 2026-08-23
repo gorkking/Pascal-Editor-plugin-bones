@@ -274,7 +274,10 @@ describe('characteristics CSV — pinned shape', () => {
     expect(lines).toContain('Design heat loss (dT 22K),662,W')
     const mj = manualJLite(WALLS, [ROOM], 'FL')
     if (!mj.ok) throw new Error('expected load')
-    expect(lines).toContain(`Cooling load (Manual J-lite),${mj.loadTons.toFixed(1)},tons`)
+    // the row VALUE shows sensible + allowance + total (skeptic F1)
+    expect(lines).toContain(
+      `Cooling load (Manual J-lite),${mj.loadTons.toFixed(2)} (${mj.sensibleTons.toFixed(2)} sensible × 1.25 latent A),tons`,
+    )
     // notes ride along as Note rows (csv-escaped)
     expect(csv).toContain('Note,')
     // 11 metric rows exactly, in this order

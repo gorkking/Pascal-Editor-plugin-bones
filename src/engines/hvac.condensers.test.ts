@@ -1272,13 +1272,13 @@ function glazedShell(W: number, D: number, eastWindows: number, winW = 2.4, winH
 }
 
 describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, climate divergence', () => {
-  test('HAND-COMPUTED: the engine tonnage equals the four-term load selected per Manual S (FL, zone 2A)', () => {
-    // 70×30 m shell, 10 east windows 2.4×2.4 — every term derived here with
+  test('HAND-COMPUTED: the engine tonnage equals the four-term load × latent allowance, selected per Manual S (FL, zone 2A)', () => {
+    // 70×30 m shell, 2 east windows 2.4×2.4 — every term derived here with
     // independent arithmetic; the engine must land the same equipment tons.
-    const { walls, rooms } = glazedShell(70, 30, 10)
+    const { walls, rooms } = glazedShell(70, 30, 2)
     const out = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
     // hand: zone 2A → ΔT = 35−24 = 11 K; wall R-13, ceiling R-49
-    const winArea = 10 * 2.4 * 2.4 // 57.6 m²
+    const winArea = 2 * 2.4 * 2.4 // 11.52 m²
     const wallNet = 2 * (70 + 30) * 2.7 - winArea
     const uaWalls = wallNet / (13 * 0.1761)
     const uaWindows = winArea * 0.32 * 5.678263
@@ -1287,28 +1287,37 @@ describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, cli
     const solarW = winArea * 220 * 0.3 // east facade
     const internalW = 2 * 67.4 + 351.7 // 1 bedroom → 2 occupants
     const infiltrationW = 0.33 * 0.35 * (70 * 30 * 2.5) * 11
-    const loadTons = ((envelopeW + solarW + internalW + infiltrationW) * 3.412142) / 12000
-    const handTons = Math.max(1.5, Math.ceil(loadTons * 2) / 2)
+    const sensTons = ((envelopeW + solarW + internalW + infiltrationW) * 3.412142) / 12000
+    // 2A → moisture regime A (humid) → ×1.25 latent allowance (F1)
+    const designTons = sensTons * 1.25
+    const handTons = Math.max(1.5, Math.ceil(designTons * 2) / 2)
     const ah = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
     expect(ah.meta?.tons).toBe(handTons)
     expect(ah.meta?.sizingBasis).toBe('manual-j-lite')
-    expect(Number(ah.meta?.loadBtuH)).toBe(Math.round(loadTons * 12000))
-    // sanity on the pinned scene itself: the load really is in the 4.5–5
-    // band this gate was built around (a fabric change should trip this)
-    expect(loadTons).toBeGreaterThan(4.5)
-    expect(loadTons).toBeLessThanOrEqual(5)
+    expect(Number(ah.meta?.loadBtuH)).toBe(Math.round(designTons * 12000))
+    expect(Number(ah.meta?.sensibleBtuH)).toBe(Math.round(sensTons * 12000))
+    expect(ah.meta?.latentFactor).toBe(1.25)
+    expect(ah.meta?.moistureRegime).toBe('A')
+    // sanity on the pinned scene itself: the DESIGN load really is in the
+    // 4.5–5 band this gate was built around (a fabric change trips this)
+    expect(designTons).toBeGreaterThan(4.5)
+    expect(designTons).toBeLessThanOrEqual(5)
     expect(handTons).toBe(5)
-    // ≤ 5 tons → ONE unit carrying the whole tonnage
+    // ≤ 5 tons → ONE unit carrying the whole tonnage, composition on it
     const units = condensersOf(out.fixtures)
     expect(units.length).toBe(1)
     expect(units[0]?.meta?.tons).toBe(5)
-    expect(units[0]?.label).toContain('5 tons (Manual J-lite, zone 2A design 35°C)')
+    const sens2 = Math.round(sensTons * 100) / 100
+    expect(units[0]?.label).toContain(
+      `5 tons (Manual J-lite, zone 2A design 35°C, ${sens2} t sensible × 1.25 latent (regime A))`,
+    )
   })
 
   test('5-TON SPLIT: the same fabric with two more windows crosses 5 tons → 2 units, per-unit labels', () => {
-    const { walls, rooms } = glazedShell(70, 30, 12)
+    const { walls, rooms } = glazedShell(70, 30, 4)
     const out = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
-    // oracle: the module load crosses 5 tons (hand gate above pins the math)
+    // oracle: the module DESIGN load (sensible × 1.25) crosses 5 tons
+    // (the hand gate above pins the arithmetic)
     const load = manualJLite(walls, rooms, 'FL')
     expect(load.ok).toBe(true)
     if (!load.ok) return
@@ -1319,10 +1328,13 @@ describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, cli
     expect(units.length).toBe(2)
     // per-unit tonnage on EVERY cabinet + fixture label (#k — X tons)
     const unitTons = Math.round((total / 2) * 2) / 2 // 3
+    const sensRounded = Math.round(load.sensibleTons * 100) / 100
     for (let k = 0; k < units.length; k++) {
       const u = units[k] as Fixture
       expect(u.label).toContain(`AC Condenser #${k + 1} — ${unitTons} tons`)
-      expect(u.label).toContain('Manual J-lite, zone 2A design 35°C')
+      expect(u.label).toContain(
+        `Manual J-lite, zone 2A design 35°C, ${sensRounded} t sensible × 1.25 latent (regime A)`,
+      )
       expect(u.meta?.tons).toBe(unitTons)
       expect(u.meta?.totalTons).toBe(total)
     }
@@ -1363,7 +1375,9 @@ describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, cli
     // equipment) — per-unit rounding to stock half tons runs above the
     // 5.5-ton plan total, which is what you actually purchase
     expect(rowT?.detail).toContain('2 × 3 tons (6 tons total)')
-    expect(rowT?.detail).toContain('Manual J-lite sizing')
+    expect(rowT?.detail).toContain(
+      `Manual J-lite ${sensRounded} t sensible × 1.25 latent (A)`,
+    )
   })
 
   test('CLIMATE DIVERGENCE: the same house buys more tonnage in FL (zone 2) than MN (zone 6)', () => {
@@ -1376,11 +1390,47 @@ describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, cli
     const mnTons = Number(
       (mn.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture).meta?.tons,
     )
-    expect(flTons).toBe(5)
+    expect(flTons).toBe(6.5) // 4.87 t sensible × 1.25 → 6.09 → 6.5 selected
     expect(mnTons).toBeLessThan(flTons) // ΔT 7 vs 11 + R-30 walls, R-60 ceiling
     expect(condensersOf(mn.fixtures)[0]?.label).toContain(
       'Manual J-lite, zone 6A design 31°C',
     )
+  })
+
+  test('LATENT EXHIBIT (skeptic F1): the humid-zone allowance moves the selection — 2.6 t sensible → 3.5 t, never a silent 3.0', () => {
+    // 44×20 m FL shell (880 m²), 8 east windows 2.2×2.2: the four-term
+    // sensible sum lands ~2.62 t — sensible-only Manual S would pick 3.0
+    // IN BAND and say nothing; the ×1.25 humid allowance makes the design
+    // load 3.27 t and the honest selection 3.5 t.
+    const { walls, rooms } = glazedShell(44, 20, 8, 2.2, 2.2)
+    const load = manualJLite(walls, rooms, 'FL')
+    expect(load.ok).toBe(true)
+    if (!load.ok) return
+    expect(load.sensibleTons).toBeGreaterThan(2.5)
+    expect(load.sensibleTons).toBeLessThan(2.7)
+    // the OLD silent behavior, documented: sensible-only selection = 3.0
+    expect(manualSTons(load.sensibleTons).tons).toBe(3)
+    // the engine now selects from the latent-adjusted design load
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBe(1)
+    expect(units[0]?.meta?.tons).toBe(3.5)
+    // the label carries the WHOLE composition — sensible × factor visible
+    const sens = Math.round(load.sensibleTons * 100) / 100
+    expect(units[0]?.label).toContain(
+      `3.5 tons (Manual J-lite, zone 2A design 35°C, ${sens} t sensible × 1.25 latent (regime A))`,
+    )
+    // dry zone 2B (AZ): same digit → identical sensible; ×1.05 barely moves
+    // the selection — back to the 3.0 the sensible sum wanted
+    const az = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'AZ' })
+    const azUnits = condensersOf(az.fixtures)
+    expect(azUnits[0]?.meta?.tons).toBe(3)
+    expect(azUnits[0]?.label).toContain('× 1.05 latent (regime B)')
+    // takeoff buy line carries the composition too (F1 reach)
+    const rowT = computeTakeoff(out.members, out.fixtures).find(
+      (r) => r.item === 'AC condensers',
+    )
+    expect(rowT?.detail).toContain(`Manual J-lite ${sens} t sensible × 1.25 latent (A)`)
   })
 
   test('MANUAL S BAND: a tiny FL home floors at 1.5 tons and says the selection left the band', () => {

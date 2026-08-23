@@ -162,11 +162,15 @@ describe('Manual-J-lite — hand-computed load (the bite gate)', () => {
     expect(load.conditionedVolumeM3).toBeCloseTo(volume, 9)
     expect(load.infiltrationW).toBeCloseTo(infiltrationW, 9)
 
-    // total → Btu/h → tons
+    // total → Btu/h → sensible tons → ×1.25 humid latent allowance (2A → A)
     const totalW = envelopeW + solarW + internalW + infiltrationW
     expect(load.totalW).toBeCloseTo(totalW, 9)
     expect(load.totalBtuH).toBeCloseTo(totalW * BTUH_PER_W, 6)
-    expect(load.loadTons).toBeCloseTo((totalW * BTUH_PER_W) / 12000, 9)
+    const sensTons = (totalW * BTUH_PER_W) / 12000
+    expect(load.sensibleTons).toBeCloseTo(sensTons, 9)
+    expect(load.moistureRegime).toBe('A')
+    expect(load.latentFactor).toBe(1.25)
+    expect(load.loadTons).toBeCloseTo(sensTons * 1.25, 9)
 
     // the basis is STATED — every assumption in the notes
     const joined = load.notes.join('\n')
@@ -181,6 +185,8 @@ describe('Manual-J-lite — hand-computed load (the bite gate)', () => {
       `ACH ${INFILTRATION_ACH}`,
       'bedrooms 1 + 1',
       '−z = north assumed',
+      'Latent allowance ×1.25 (moisture regime A — humid',
+      'full Manual J latent calculation governs',
     ]) {
       expect(joined).toContain(needle)
     }
@@ -208,6 +214,32 @@ describe('Manual-J-lite — hand-computed load (the bite gate)', () => {
     expect(wa.zoneKey).toBe('4M')
     expect(wa.outdoorDesignC).toBe(33)
     expect(wa.wallR).toBe(30)
+    // marine regime → ×1.10 latent allowance
+    expect(wa.moistureRegime).toBe('C')
+    expect(wa.latentFactor).toBe(1.1)
+    expect(wa.loadTons).toBeCloseTo(wa.sensibleTons * 1.1, 12)
+  })
+
+  test('latent allowance by moisture regime: A ×1.25, B ×1.05, none ×1.0 — stated either way', () => {
+    const { walls, rooms } = pinnedScene()
+    const humid = manualJLite(walls, rooms, 'FL') // 2A
+    const dry = manualJLite(walls, rooms, 'AZ') // 2B — same digit, same ΔT/R
+    const bare = manualJLite(walls, rooms, 'AK') // '7 (8 interior)' — no letter
+    expect(humid.ok && dry.ok && bare.ok).toBe(true)
+    if (!humid.ok || !dry.ok || !bare.ok) return
+    // 2A and 2B share the whole sensible calculation — only the regime moves
+    expect(dry.totalW).toBeCloseTo(humid.totalW, 9)
+    expect(humid.latentFactor).toBe(1.25)
+    expect(dry.moistureRegime).toBe('B')
+    expect(dry.latentFactor).toBe(1.05)
+    expect(dry.loadTons).toBeCloseTo(dry.sensibleTons * 1.05, 12)
+    // a bare-digit zone takes NO allowance and says so — never silent
+    expect(bare.moistureRegime).toBeNull()
+    expect(bare.latentFactor).toBe(1)
+    expect(bare.loadTons).toBeCloseTo(bare.sensibleTons, 12)
+    expect(
+      bare.notes.some((n) => n.includes('No moisture-regime letter') && n.includes('×1.0')),
+    ).toBe(true)
   })
 })
 

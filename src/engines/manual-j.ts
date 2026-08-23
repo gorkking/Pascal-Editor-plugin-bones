@@ -31,8 +31,12 @@
  *      VOLUME (Σ room area × ceiling height — the same volume the building
  *      characteristics block sums) × ΔT.
  *
- * Latent load, duct gains, floors, doors and shading are NOT modeled —
- * every consumer label says "Manual J-lite" and ACCA Manual J/S govern.
+ * The four terms are SENSIBLE; a COARSE LATENT ALLOWANCE then scales the
+ * sum by the zone's IECC moisture-regime letter (A humid ×1.25 / B dry
+ * ×1.05 / C marine ×1.10; no letter → ×1.0, stated) before Manual S —
+ * class factors only, a full Manual J latent calculation governs. Duct
+ * gains, floors, doors and shading are NOT modeled — every consumer label
+ * says "Manual J-lite" and ACCA Manual J/S govern.
  *
  * FALLBACK CONTRACT (never silent): the load computes only when the
  * climate zone resolves AND a straight exterior envelope exists AND the
@@ -76,6 +80,7 @@ const RULES = (mepRules as Record<string, unknown>).hvac as {
     appliancesSensibleW?: number
     infiltrationAch?: number
     airSensibleWhPerM3K?: number
+    latentAllowanceByMoistureRegime?: Record<string, number>
     manualSBandPctOfLoad?: { min?: number; max?: number }
   }
 }
@@ -116,6 +121,17 @@ export const APPLIANCES_SENSIBLE_W = MJ?.appliancesSensibleW ?? 351.7
 export const INFILTRATION_ACH = MJ?.infiltrationAch ?? 0.35
 /** Sensible heat capacity of air, Wh/(m³·K) — ρ·cp/3600. */
 export const AIR_SENSIBLE_WH_PER_M3K = MJ?.airSensibleWhPerM3K ?? 0.33
+/** COARSE latent allowance by IECC moisture-regime letter (A moist/humid,
+ * B dry, C marine — 2021 IECC Figure R301.1), applied to the sensible sum
+ * BEFORE Manual S selection. Class factors only — a full ACCA Manual J
+ * latent calculation governs (skeptic F1: the sensible-only figure sized a
+ * humid-zone system a half ton short with no words anywhere a selection
+ * reader looks). Zones with no regime letter take ×1.0, stated. */
+export const LATENT_BY_REGIME: Record<'A' | 'B' | 'C', number> = {
+  A: MJ?.latentAllowanceByMoistureRegime?.A ?? 1.25,
+  B: MJ?.latentAllowanceByMoistureRegime?.B ?? 1.05,
+  C: MJ?.latentAllowanceByMoistureRegime?.C ?? 1.1,
+}
 /** Manual S selection band, fraction of load. */
 export const MANUAL_S_MIN = (MJ?.manualSBandPctOfLoad?.min ?? 95) / 100
 export const MANUAL_S_MAX = (MJ?.manualSBandPctOfLoad?.max ?? 115) / 100
@@ -165,7 +181,14 @@ export type ManualJLiteLoad = {
   infiltrationW: number
   totalW: number
   totalBtuH: number
-  /** totalBtuH / 12,000. */
+  /** The four-term SENSIBLE sum in tons (totalBtuH / 12,000). */
+  sensibleTons: number
+  /** IECC moisture-regime letter of the zone (A humid / B dry / C marine),
+   * null when the zone label carries none (bare digits like AK '7'). */
+  moistureRegime: 'A' | 'B' | 'C' | null
+  /** Latent allowance applied (LATENT_BY_REGIME; 1.0 when no regime). */
+  latentFactor: number
+  /** The DESIGN load Manual S selects from: sensibleTons × latentFactor. */
   loadTons: number
   /** Per-orientation glazing breakdown (exterior windows only). */
   windowGains: WindowGain[]
@@ -327,10 +350,23 @@ export function manualJLite(
 
   const totalW = envelopeW + solarW + internalW + infiltrationW
   const totalBtuH = totalW * BTUH_PER_W
-  const loadTons = totalBtuH / BTUH_PER_TON
+  const sensibleTons = totalBtuH / BTUH_PER_TON
+
+  // ---- latent allowance (skeptic F1): the four terms are SENSIBLE only —
+  // in a humid zone the missing latent share sized real systems a half ton
+  // short while every label read as a finished load. Coarse class factor by
+  // the zone's moisture-regime letter, applied BEFORE Manual S; stated on
+  // every consumer label. Full Manual J latent governs.
+  const letter = /([ABC])$/.exec(zone.label)?.[1] as 'A' | 'B' | 'C' | undefined
+  const moistureRegime = letter ?? null
+  const latentFactor = letter ? LATENT_BY_REGIME[letter] : 1
+  const loadTons = sensibleTons * latentFactor
 
   const notes = [
-    `Manual J-lite SENSIBLE load (IRC M1401.3 — ACCA Manual J/S govern): UA·ΔT ${Math.round(envelopeW)} W + solar ${Math.round(solarW)} W + internal ${Math.round(internalW)} W + infiltration ${Math.round(infiltrationW)} W = ${Math.round(totalW)} W (${Math.round(totalBtuH)} Btu/h ≈ ${loadTons.toFixed(2)} tons)`,
+    `Manual J-lite SENSIBLE load (IRC M1401.3 — ACCA Manual J/S govern): UA·ΔT ${Math.round(envelopeW)} W + solar ${Math.round(solarW)} W + internal ${Math.round(internalW)} W + infiltration ${Math.round(infiltrationW)} W = ${Math.round(totalW)} W (${Math.round(totalBtuH)} Btu/h ≈ ${sensibleTons.toFixed(2)} tons sensible)`,
+    moistureRegime
+      ? `Latent allowance ×${latentFactor} (moisture regime ${moistureRegime} — ${moistureRegime === 'A' ? 'humid' : moistureRegime === 'B' ? 'dry' : 'marine'}, 2021 IECC Figure R301.1 zone letter): ${sensibleTons.toFixed(2)} tons sensible → ${loadTons.toFixed(2)} tons design load — coarse class factor, full Manual J latent calculation governs`
+      : `No moisture-regime letter on zone ${zone.label} — no latent allowance applied (×1.0); full Manual J latent calculation governs`,
     `Cooling design ΔT ${deltaTK} K: zone ${zone.label} outdoor design ${outdoorDesignC}°C (ASHRAE/ACCA-style default — verify local design conditions, Table R301.2(1)) − indoor ${INDOOR_DESIGN_C}°C`,
     `Load UA ${uaWPerK.toFixed(1)} W/K = walls ${wallNetM2.toFixed(1)} m² @ R-${wallR} + exterior glazing ${windowAreaM2.toFixed(1)} m² @ U-${WINDOW_U_IMPERIAL} + ceiling ${conditionedAreaM2.toFixed(1)} m² @ R-${ceilingR} (2021 IECC R402.1.3, top-storey attic assumption); floors/doors/latent/ducts excluded — schematic`,
     `Solar: glazing × SHGC ${SHGC_ASSUMED} × N ${SOLAR_W_PER_M2.N}/E ${SOLAR_W_PER_M2.E}/S ${SOLAR_W_PER_M2.S}/W ${SOLAR_W_PER_M2.W} W/m² by facade (+x = east, −z = north assumed)`,
@@ -359,6 +395,9 @@ export function manualJLite(
     infiltrationW,
     totalW,
     totalBtuH,
+    sensibleTons,
+    moistureRegime,
+    latentFactor,
     loadTons,
     windowGains,
     wallR,

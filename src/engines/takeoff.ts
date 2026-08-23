@@ -1199,8 +1199,14 @@ export function computeTakeoff(
     // each cabinet IS, not only the sum. Mixed per-unit tonnage (no engine
     // emits it today) keeps the total-only wording.
     const perUnit = [...new Set(condensers.map((f) => round1(Number(f.meta?.tons) || 0)))]
+    // The buy line carries the LOAD COMPOSITION (skeptic F1): sensible ×
+    // latent allowance — a purchaser must see the sensible-only basis and
+    // the coarse regime factor, not just 'Manual J-lite sizing'.
+    const f0 = condensers[0]
     const basis = condensers.every((f) => f.meta?.sizingBasis === 'manual-j-lite')
-      ? 'Manual J-lite sizing'
+      ? f0?.meta?.moistureRegime
+        ? `Manual J-lite ${f0.meta?.sensibleTons} t sensible × ${f0.meta?.latentFactor} latent (${f0.meta?.moistureRegime})`
+        : 'Manual J-lite sizing (sensible-only, no latent allowance)'
       : 'assumed sizing'
     push(
       'HVAC',
