@@ -93,10 +93,31 @@ to tieAt's sloped consumers.
   2×BURY short; signs flip in soffit mode). Junctions stay legal S1
   terminating-INTO (whip/line-set precedent; MEP outside the
   structural gate — hvac.junctions.test.ts owns the class: sweep ×
-  9 scenarios + pins + 5 mutations). E5 recaptured (7 members/juris;
+  11 scenarios + pins + 5 mutations). E5 recaptured (7 members/juris;
   labels + plan positions + fixtures byte-stable); takeoff: 2 rows
-  move one 0.1-lf rounding step (enumerated). Suite 1703→1714. Full
+  move one 0.1-lf rounding step (enumerated). Suite 1703→1715. Full
   family + byte movement: docs/plans/ZFIGHT-EXPECTED-DIFF.md.
+  ROUND-1 REVISE addressed (geometry verified sound; claims fixed):
+  (F1) the 'separated' claim on exhaust terminations was FALSE on
+  the M3 doorwayPlan — the dryer exhaust and the line-set coil stub
+  run the SAME equipAt→wall-anchor segment: the liquid line bores 2m
+  coaxially INSIDE the exhaust and their end caps coincide (same
+  normal, liquid cap inside the exhaust cap) — the ONLY cross-color
+  coplanar pair anywhere (duct gray × warm red = the visibly-
+  striping class). That is the day-8 queued lineset×dryer-duct BORE:
+  reclassified as a named pre-existing residual; the doorway compose
+  joined the sweep matrix with the pair allow-listed + PINNED
+  present, so the allowance dies with the bore fix. (F2) CAUSATION
+  CAVEAT stated in-suite + expected-diff: every burial-fixed pair
+  was same-color-bucket (identical fragments cannot two-color
+  stripe) — the burial closes the coplanar-geometry class as
+  hygiene; Julien's striping most likely rides a CROSS-COLOR
+  mechanism (bore caps / register×fan fixtures / host hover tint).
+  DAWN VISUAL ROUND owns confirmation: reproduce the screenshots'
+  camera on the merged tip, verify the striping is gone, else bisect
+  the three candidates (block in ZFIGHT-EXPECTED-DIFF.md). (F3)
+  keep-out prose corrected: ≥40mm both-grown worst case (boot 0.0812
+  + return-vertical 0.1828 vs 0.3040 enforced).
   NEW FINDINGS for the queue: (a) bath supply REGISTER × exhaust-FAN
   fixtures render near-coincident placeholder boxes at one ceiling
   point (different colors — its own flicker class; fixture-placement

@@ -26,12 +26,24 @@ import { DUCT_JUNCTION_BURY, layoutHvac } from './hvac'
  *
  * GATE: sweep every composed scenario for SAME-normal coplanar overlapping
  * face pairs involving a junction body (any VERTICAL duct/pipe/conduit
- * member, or an `equipment` member) — expect ZERO. Out of scope by
- * construction: ANTI abutments (trunk step-down seams, opposed branch tees
- * — backface culling, legal S1 seams) and same-run horizontal elbow corners
- * (one sourceId, one color bucket — identical fragments cannot oscillate).
- * Mutations at the bottom revert one junction class each and demand the
- * sweep FIRES — the gate can never go vacuous.
+ * member, an `equipment` member, or two members of DIFFERENT runs — cross-
+ * sourceId horizontals can sit in different color buckets) — expect ZERO
+ * outside the one allow-listed pre-existing residual (the day-8 queued
+ * lineset×dryer-duct BORE, pinned present so the allowance cannot go
+ * stale). Out of scope by construction: ANTI abutments (trunk step-down
+ * seams, opposed branch tees — backface culling, legal S1 seams) and
+ * same-run horizontal elbow corners (one sourceId, one color bucket —
+ * identical fragments cannot oscillate). Mutations at the bottom revert
+ * one junction class each and demand the sweep FIRES — the gate can never
+ * go vacuous.
+ *
+ * CAUSATION CAVEAT (round-1 verdict): every pair the burial FIXED was
+ * same-color-bucket — identical fragments, so the fix closes the coplanar
+ * GEOMETRY class as hygiene, but Julien's TWO-COLOR striping most likely
+ * comes from a cross-color mechanism: the dryer×line-set caps (the
+ * allow-listed bore), the bath register×exhaust-fan fixture coincidence,
+ * or a host hover/selection tint. The dawn visual round owns the
+ * confirmation (docs/plans/ZFIGHT-EXPECTED-DIFF.md, verification block).
  */
 
 // ---------------------------------------------------------------------------
@@ -125,6 +137,36 @@ function oneSidedPlan() {
   return { walls, rooms }
 }
 
+/** The M3 doorwayPlan (hvac.return.test round-3 verbatim): 8×6 hall/laundry
+ * split. The laundry equipment room puts the dryer exhaust and the line-set
+ * coil stub on the SAME equipAt → wall-anchor segment — the day-8 queued
+ * lineset×dryer-duct BORE, whose coincident end caps are the sweep's one
+ * allow-listed (cross-color) residual. */
+function doorwayPlan() {
+  const d: OpeningSlice = {
+    id: 'd_m',
+    kind: 'door',
+    u: 2.5,
+    width: 0.9,
+    height: 2.1,
+    sillHeight: 0,
+    roughWidth: 0.95,
+    roughHeight: 2.17,
+  }
+  const walls = [
+    wall('w_s', [0, 0], [8, 0]),
+    wall('w_e', [8, 0], [8, 6]),
+    wall('w_n', [8, 6], [0, 6]),
+    wall('w_w', [0, 6], [0, 0]),
+    wall('w_m', [4, 0], [4, 6], false, [d]),
+  ]
+  const rooms = [
+    room('r_hall', 'Hallway', 'hallway', [[0, 0], [4, 0], [4, 6], [0, 6]]),
+    room('r_laundry', 'Laundry', 'laundry', [[4, 0], [8, 0], [8, 6], [4, 6]]),
+  ]
+  return { walls, rooms }
+}
+
 // ---------------------------------------------------------------------------
 // the sweep: SAME-normal coplanar overlapping face pairs at junction bodies
 // ---------------------------------------------------------------------------
@@ -132,11 +174,14 @@ function oneSidedPlan() {
 type Vec3 = [number, number, number]
 type Box = {
   label: string
+  sourceId: string
   center: Vec3
   half: Vec3
   yaw: number
   vertical: boolean
   equipment: boolean
+  dryer: boolean
+  lineset: boolean
 }
 type Face = { n: Vec3; d: number; u: Vec3; v: Vec3; hu: number; hv: number; c: Vec3 }
 
@@ -148,11 +193,14 @@ function boxOf(m: Member): Box | null {
   if (m.rotation[0] !== 0 || m.rotation[2] !== 0) return null
   return {
     label: `${m.label ?? m.role} @ [${m.position.map((x) => x.toFixed(2)).join(',')}]`,
+    sourceId: m.sourceId,
     center: [m.position[0], m.position[1], m.position[2]],
     half: [m.dims[0] / 2, m.dims[1] / 2, m.dims[2] / 2],
     yaw: m.rotation[1],
     vertical: m.dims[1] > m.dims[0],
     equipment: m.role === 'equipment',
+    dryer: m.label?.startsWith('Dryer exhaust') === true,
+    lineset: m.sourceId.startsWith('lineset-'),
   }
 }
 
@@ -206,34 +254,64 @@ function rectsOverlap(f: Face, g: Face): boolean {
 }
 
 /**
- * Every SAME-normal coplanar overlapping face pair whose pair involves a
- * junction body (vertical member or equipment) — empty array = gate holds.
+ * ALLOW-LISTED pre-existing residual (day-8 queue: lineset×dryer-duct
+ * BORE): in a laundry equipment room the dryer exhaust and the line-set
+ * coil stub both run equipAt → the same nearest-wall anchor, so the liquid
+ * line rides COAXIALLY INSIDE the 4" exhaust body and their end caps land
+ * on ONE plane with ONE normal (M3 doorwayPlan: both caps at x=6 and x=8,
+ * the ⅜" cap inside the 4" cap). This is the sweep's only CROSS-COLOR
+ * coincidence (duct gray × liquid warm-red — the class that can visibly
+ * stripe in two colors); the fix is the queued BORE relocation, not a
+ * junction burial — the pair is pinned below (symptomPresent) so the
+ * allow-list dies with the bore fix instead of going stale.
  */
-function zFightPairs(members: Member[]): string[] {
+const allowedPair = (a: Box, b: Box): boolean =>
+  (a.dryer && b.lineset) || (b.dryer && a.lineset)
+
+/**
+ * Every SAME-normal coplanar overlapping face pair whose pair involves a
+ * junction body — a VERTICAL member, an `equipment` member, or two members
+ * of DIFFERENT runs (different sourceId ⇒ potentially different color
+ * buckets: sourceId drives every color route — circuit/pipe/duct-tone).
+ * Same-sourceId horizontal pairs stay out of scope: one run's own elbow
+ * corners live in ONE color bucket, and identical fragments cannot stripe.
+ * `violations` empty = gate holds; `allowed` carries the day-8 bore
+ * symptom pairs (pinned present in the doorway compose below).
+ */
+function sweep(members: Member[]): { violations: string[]; allowed: string[] } {
   const boxes: Box[] = []
   for (const m of members) {
     if (m.system !== 'hvac') continue
     const b = boxOf(m)
     if (b) boxes.push(b)
   }
-  const out: string[] = []
+  const violations: string[] = []
+  const allowed: string[] = []
   for (let i = 0; i < boxes.length; i++) {
     const bi = boxes[i] as Box
     for (let j = i + 1; j < boxes.length; j++) {
       const bj = boxes[j] as Box
-      if (!(bi.vertical || bj.vertical || bi.equipment || bj.equipment)) continue
+      const inScope =
+        bi.vertical || bj.vertical || bi.equipment || bj.equipment || bi.sourceId !== bj.sourceId
+      if (!inScope) continue
       for (const f of facesOf(bi)) {
         for (const g of facesOf(bj)) {
           const align = dot(f.n, g.n)
           if (align < 1 - PLANE_EPS) continue // SAME-normal only (ANTI = abutment)
           if (Math.abs(f.d - g.d) > PLANE_EPS) continue
           if (!rectsOverlap(f, g)) continue
-          out.push(`${bi.label} × ${bj.label} (n=[${f.n.map((x) => x.toFixed(1)).join(',')}] d=${f.d.toFixed(4)})`)
+          const desc = `${bi.label} × ${bj.label} (n=[${f.n.map((x) => x.toFixed(1)).join(',')}] d=${f.d.toFixed(4)})`
+          ;(allowedPair(bi, bj) ? allowed : violations).push(desc)
         }
       }
     }
   }
-  return out
+  return { violations, allowed }
+}
+
+/** The gate view: violations only (allow-listed residuals excluded). */
+function zFightPairs(members: Member[]): string[] {
+  return sweep(members).violations
 }
 
 const BURY = DUCT_JUNCTION_BURY
@@ -273,9 +351,33 @@ describe('day-9 z-fight — no coplanar face pairs at any duct/equipment junctio
           .members,
       })
     }
+    {
+      const { walls, rooms } = doorwayPlan()
+      for (const ctx of [undefined, { hasLevelAbove: true }]) {
+        scenarios.push({
+          tag: `doorway/${ctx ? 'soffit' : 'attic'}`,
+          members: layoutHvac(walls, rooms, DEFAULT_SPEC, undefined, ctx).members,
+        })
+      }
+    }
     for (const s of scenarios) {
       expect({ tag: s.tag, pairs: zFightPairs(s.members) }).toEqual({ tag: s.tag, pairs: [] })
     }
+  })
+
+  test('the day-8 bore symptom is PRESENT and allow-listed — the allow-list dies with the bore fix', () => {
+    // The doorway/laundry compose: dryer exhaust and line-set coil stub run
+    // the same equipAt → wall-anchor segment, end caps coincident on one
+    // plane with one normal (the ⅜" liquid cap INSIDE the 4" exhaust cap at
+    // both ends) — the only CROSS-COLOR coplanar pair the sweep knows (duct
+    // gray × warm red: the two-color striping class). When the queued bore
+    // fix relocates the line-set, this pin fails ⇒ delete the allow-list
+    // (allowedPair) together with this test.
+    const { walls, rooms } = doorwayPlan()
+    const { allowed, violations } = sweep(layoutHvac(walls, rooms).members)
+    expect(violations).toEqual([])
+    expect(allowed.length).toBeGreaterThan(0)
+    expect(allowed.every((p) => p.includes('Dryer exhaust') && p.includes('Line-set'))).toBe(true)
   })
 
   test('the exhibit scene really exercises the exhibit: a FULL-width trunk leaves the plenum', () => {

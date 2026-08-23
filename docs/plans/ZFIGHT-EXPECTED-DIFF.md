@@ -36,13 +36,26 @@ Separated / buried — no change needed (enumerated for completeness):
   CENTER (buried ≥ half a section — the terminating-INTO convention);
 - line-set stubs + whip run end at the condenser cabinet's plan center
   (buried ≥ 175 mm from every cabinet face — the precedent class);
-- exhaust/dryer terminations end on the exterior wall CENTERLINE (buried
-  57 mm inside the wall body); the bath-fan fixture sits 13 mm off the
-  exhaust duct (separated);
+- exhaust/dryer WALL terminations end on the exterior wall CENTERLINE
+  (buried 57 mm inside the wall body); the bath-fan fixture sits 13 mm off
+  the exhaust duct (separated);
 - cabinet-on-pad: ANTI-normal coincident seating faces (legal stacking
   contact, backface-culled — physical truth);
 - trunk step-down seams + opposed branch tees: ANTI-normal abutments
   (legal S1 connections, backface-culled).
+
+PRE-EXISTING CROSS-COLOR RESIDUAL — allow-listed, NOT fixed here (round-1
+verdict F1; the day-8 queued "lineset×dryer-duct BORE" owns the fix): in a
+laundry equipment room the dryer exhaust and the line-set coil stub both
+run equipAt → the SAME nearest-wall anchor, so the ⅜" liquid line rides
+COAXIALLY INSIDE the 4" exhaust body (2 m on the M3 doorwayPlan compose)
+and their END CAPS land on one plane with ONE normal at both ends (gap
+0.0, the liquid cap inside the exhaust cap). This is the sweep's ONLY
+cross-color coplanar pair — duct gray × liquid warm-red, the class that
+visibly stripes in two colors. The junction sweep composes the doorway/
+laundry scene (attic + soffit), allow-lists exactly this pair, and PINS it
+present (hvac.junctions.test.ts `allowedPair` + the symptom test) so the
+allowance dies with the bore fix instead of going stale.
 
 Out of scope (same-run seams — one sourceId, one color bucket: identical
 fragments cannot oscillate; board-noted):
@@ -55,6 +68,31 @@ exhaust-FAN fixtures render as two near-coincident placeholder boxes at the
 same ceiling point (register 2.46 vs fan 2.45 center height, identical
 renderer dims, different colors) — a fixture×fixture near-coincidence
 class, separate emission ownership (fixture placement, not duct geometry).
+
+## CAUSATION CAVEAT (round-1 verdict F2)
+
+Every pair the burial FIXED was same-color-bucket: two coincident faces of
+one instanced color produce IDENTICAL fragments, which cannot stripe in
+two colors — the same rationale that scopes the elbow-corner seams out.
+The burial therefore closes the coplanar-geometry class as HYGIENE (and it
+is the right physical model: ducts connect INTO plenums), but Julien's
+TWO-COLOR striping most likely comes from a CROSS-COLOR mechanism.
+Candidates, in likelihood order:
+1. the dryer×line-set coincident caps / coaxial bore (the allow-listed
+   residual above — duct gray × warm red, laundry equipment rooms);
+2. the bath register×exhaust-fan fixture near-coincidence (yellow × gray);
+3. a host hover/selection tint compositing over the duct at the junction.
+
+DAWN VISUAL ROUND — verification block (run on the MERGED tip):
+- open Julien's day-9 scene, reproduce the screenshots' camera (the supply
+  trunk at the AH/plenum stack, X-ray mode);
+- confirm the striped oscillation at the junction is GONE;
+- if striping persists, identify WHICH cross-color pair it is: hide the
+  line-set (candidate 1), hide the fixtures (candidate 2), then toggle
+  hover/selection off (candidate 3) — and queue the owning fix (the bore
+  relocation for 1, fixture placement for 2, host tint for 3). Do not
+  re-open the burial: the junction sweep proves the duct-geometry class
+  is closed.
 
 ## EXPECTED BYTE MOVEMENT (every hvac scene)
 
@@ -80,10 +118,13 @@ Takeoff: section names byte-stable (inch rounding). Two lf rows move by one
 `Duct 14×8"` absorbs the supply riser's +5 mm (rounds).
 
 Keep-out model deliberately UNGROWN (RETURN_VERT_HALF, supply-spine
-obstacle halves): the 5 mm grow spends from the 50 mm DUCT_CLEAR_GAP margin
-(≥45 mm remains), so grille/drop elections — and every position byte —
-stay put. Stated in-file.
+obstacle halves): the 5 mm grow spends from the 50 mm DUCT_CLEAR_GAP
+margin — worst case BOTH bodies of a keep-out pair are grown (boot emits
+0.0812 half, return vertical 0.1828) against the 0.0762 + 0.1778 + 0.05 =
+0.3040 enforced center distance ⇒ ≥ 40 mm of true clearance remains — so
+grille/drop elections, and every position byte, stay put. Stated in-file.
 
-Suite 1703 → 1714 (junction gate +11). Manual-J sizing gates untouched;
-starter-template untouched; hvac.return section pin updated to state the
-new vertical convention (+2×BURY).
+Suite 1703 → 1715 (junction gate +12: sweep matrix incl. the doorway/
+laundry compose, burial pins, 5 mutation probes, the bore-symptom pin).
+Manual-J sizing gates untouched; starter-template untouched; hvac.return
+section pin updated to state the new vertical convention (+2×BURY).

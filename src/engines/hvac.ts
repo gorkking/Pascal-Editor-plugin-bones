@@ -813,10 +813,14 @@ function legCrossesRo(
 }
 
 /** Half the RETURN section's widest plan face (verticals present 14" × 8").
- * The emitted return verticals ride 2×BURY fatter (junction-burial grow) —
- * the extra 5 mm per side spends from the 50 mm DUCT_CLEAR_GAP margin, so
- * every keep-out this half feeds stays ≥ 45 mm clear; the half itself stays
- * UNGROWN so grille/drop elections (and their baselines) don't move. */
+ * The emitted junction verticals ride 2×BURY fatter (junction-burial grow)
+ * — the extra 5 mm per side spends from the 50 mm DUCT_CLEAR_GAP margin:
+ * worst case BOTH bodies of a keep-out pair are grown (a supply boot booked
+ * at 0.0762 emits 0.0812; a return vertical booked here at 0.1778 emits
+ * 0.1828) against the 0.0762 + 0.1778 + 0.05 = 0.3040 enforced center
+ * distance ⇒ 0.3040 − 0.2640 = ≥ 40 mm of true clearance remains. The half
+ * itself stays UNGROWN so grille/drop elections (and their baselines)
+ * don't move. */
 const RETURN_VERT_HALF = Math.max(TRUNK_W, TRUNK_H) / 2
 
 /**
