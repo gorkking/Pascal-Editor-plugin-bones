@@ -1,3 +1,18 @@
+# HP FIRST-CLASS SHIPPED TO PROD 2026-08-23 (evening)
+
+## SHIP RECORD: private-editor #399 → (see deploy state above this run)
+Chain: plugin 5c2650e (heat pump as a first-class object: pick proxy
+hover/select/⌘-drag with live wiring recompute; true-proportion AC
+block, native aspect uniform ≈0.896 scale; thickness-honest 24"
+face-clearance standoff; 1.0m pad; overhang honesty flag; both pick
+proxies colorWrite:false — the glass-case veil retired) → editor
+#712 (cfe13068) → private-editor #399, full-stack CI green, Vercel
+prod SUCCESS. 2 loop rounds + 2 browser QA rounds (SHIP 7/7 + 5/5).
+QUEUE from the rounds: plain-drag vs ⌘-drag gesture parity (Julien's
+kitchen-island exact-feel — host gesture, awaiting his call);
+oblique-shell ULP canonicalization; WH/meter pick proxies;
+wall-tool-armed-on-load host default.
+
 # DAWN-10 SHIPPED TO PROD 2026-08-23 (~08:35 UTC) — NIGHT-10 CLOSED
 
 ## SHIP RECORD: private-editor #398 → 0617ef51
