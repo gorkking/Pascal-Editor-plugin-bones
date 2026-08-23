@@ -288,6 +288,27 @@ export type FramingSpec = {
    * knob to key on.
    */
   wallBracingMethod: 'CS-WSP'
+  // ---- framing system (LGS Phase 0 — data model only) ----
+  /**
+   * Structural framing system: dimensional lumber (IRC Chapters 5/6/8 wood
+   * prescriptive path — everything the engines build today) or light-gauge
+   * steel (cold-formed steel per IRC R603 walls / R505 floors / R804 roofs,
+   * AISI S230/S240 member designations). ABSENT means 'lumber' — the field
+   * is optional and NOT in DEFAULT_SPEC, so every existing spec object (and
+   * the E5 master-baseline bytes, which pin the spec) is untouched. Phase 0
+   * ships the TYPE and the profile catalog (data/lgs-profiles.json +
+   * src/engines/lgs-profiles.ts); no engine consumes it yet — Phase 1 does
+   * (docs/plans/LGS-PLAN.md).
+   */
+  framingSystem?: 'lumber' | 'lgs'
+  /**
+   * Roll-forming machine key ('vendor/machine', e.g. 'framecad/f325it' —
+   * keys of data/lgs-profiles.json vendors[].machines) constraining LGS
+   * member selection to what that machine can roll. Only meaningful with
+   * framingSystem 'lgs'; resolution + the honest fallback chain live in
+   * src/engines/lgs-profiles.ts (`profileFor`).
+   */
+  lgsMachine?: string
 }
 
 export const DEFAULT_SPEC: FramingSpec = {

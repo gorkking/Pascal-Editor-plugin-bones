@@ -8,7 +8,16 @@ import { z } from 'zod'
  * never stored, so the skeleton can't drift out of sync with the model.
  */
 
-export const WallConstruction = z.enum(['framed', 'cmu', 'skip'])
+/**
+ * Per-wall construction system. 'lgs' (light-gauge / cold-formed steel, IRC
+ * R603) is Phase 0 of the LGS track (docs/plans/LGS-PLAN.md): the value is
+ * accepted and persists, but NO engine consumes it yet — an 'lgs' wall
+ * routes down the framed-lumber path exactly as before until the Phase-1
+ * LGS wall engine lands. Nothing writes it today (the inspector's segmented
+ * control still offers framed/CMU/skip only), so stored scenes are
+ * byte-untouched.
+ */
+export const WallConstruction = z.enum(['framed', 'cmu', 'lgs', 'skip'])
 export type WallConstruction = z.infer<typeof WallConstruction>
 
 /** Per-wall stud size override (framed walls) — 2x4 or 2x6 only. */
@@ -153,6 +162,22 @@ export const FramingNode = BaseNode.extend({
   servicesSeeded: z.boolean().default(false),
   /** Per-wall construction overrides, keyed by wall id. */
   wallOverrides: z.record(z.string(), WallOverride).default({}),
+  /**
+   * Framing system for the level (LGS Phase 0): 'lumber' (default) or 'lgs'
+   * (cold-formed steel, IRC R603/R505/R804). OPTIONAL with NO zod default —
+   * absent means 'lumber' and, critically, an absent field round-trips
+   * ABSENT (byte-parity for every stored scene; a `.default('lumber')`
+   * would inject the key on parse). No engine consumes it yet — Phase 1
+   * (docs/plans/LGS-PLAN.md).
+   */
+  framingSystem: z.enum(['lumber', 'lgs']).optional(),
+  /**
+   * Roll-forming machine key ('vendor/machine', keys of
+   * data/lgs-profiles.json) constraining LGS profiles to the machine's
+   * rollable set. Meaningful only with framingSystem 'lgs'; optional, no
+   * default (same byte-parity rule).
+   */
+  lgsMachine: z.string().optional(),
 }).describe(
   `Bones framing config (engineering X-ray) — one per level.
   - jurisdiction: US state code ('CA'), 'INTL', or 'AUTO' (guessed from the browser locale/timezone)
@@ -160,7 +185,8 @@ export const FramingNode = BaseNode.extend({
   - studSpacingIn: stud spacing on-center in inches (16 or 24)
   - show*: per-system visibility (walls, floor, roof, foundation, electrical, plumbing, hvac — all default on)
   - viewMode: 'off' (finished house — walls closed, only surface fixtures show) | 'xray' (engineering X-ray, default) | 'basement' (under-the-house view: foundation/buried pipes read through a faint house shell)
-  - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'skip', or the object form { construction, cmuHeightM?, studSize?, spacingIn?, insulation?, insulationR?, cladding? }: cmuHeightM makes a mixed wall (CMU up to a course-snapped height, framed above); studSize ('2x4'|'2x6') + spacingIn (16|24) re-size the framing; insulation ('none'|'batt'|'blown'|'spray-foam') + insulationR fill the stud bays with labeled batts; cladding picks the exterior finish (vinyl|fiberCement|stucco|brickVeneer|wood|eifs)
+  - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'lgs' (light-gauge steel — accepted but not yet built: renders as framed lumber until the LGS engine lands), 'skip', or the object form { construction, cmuHeightM?, studSize?, spacingIn?, insulation?, insulationR?, cladding? }: cmuHeightM makes a mixed wall (CMU up to a course-snapped height, framed above); studSize ('2x4'|'2x6') + spacingIn (16|24) re-size the framing; insulation ('none'|'batt'|'blown'|'spray-foam') + insulationR fill the stud bays with labeled batts; cladding picks the exterior finish (vinyl|fiberCement|stucco|brickVeneer|wood|eifs)
+  - framingSystem: 'lumber' (default when absent) | 'lgs' (cold-formed steel, IRC R603 — data model only today, no members change yet); lgsMachine: roll-forming machine key from data/lgs-profiles.json (e.g. 'framecad/f325it')
   All framing members are derived live from the level's walls/openings/slabs/roofs; deleting this node removes the X-ray without touching the model.`,
 )
 
