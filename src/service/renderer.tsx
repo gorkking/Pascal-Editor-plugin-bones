@@ -5,6 +5,7 @@ import { useNodeEvents } from '@pascal-app/viewer'
 import { useEffect, useMemo, useRef } from 'react'
 import { CanvasTexture, DoubleSide, type Group } from 'three'
 import { resolveServicePlacement, SERVICE_BODY, servicePresentation } from './placement'
+import { resolveHeatPumpProxy } from './proxy'
 import type { ServiceNode } from './schema'
 
 /**
@@ -91,6 +92,18 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
     () => servicePresentation(nodes as Record<string, Record<string, unknown>>, node),
     [nodes, node],
   )
+  // X-ray heat pump: the engine renders the unit and the body yields — an
+  // INVISIBLE pick proxy at the unit's own footprint keeps the equipment
+  // hoverable/clickable (proxy.ts owns the doctrine + geometry; resolution
+  // is the memoized computeLevel the framing renderer already ran, so a
+  // suppressed-body frame costs no extra derivation).
+  const proxy = useMemo(
+    () =>
+      presentation.pickProxy
+        ? resolveHeatPumpProxy(nodes as Record<string, Record<string, unknown>>, node)
+        : null,
+    [presentation.pickProxy, nodes, node],
+  )
 
   const body = SERVICE_BODY[node.serviceType]
   const texture = useMemo(
@@ -112,7 +125,9 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
   // sign hidden) → the whole node steps aside (switch to X-ray/Basement to
   // see or manage it — nothing here is pickable). An X-ray-suppressed body
   // with its sign still up stays IN the tree: the sign plates keep the node
-  // pickable where the engine draws the physical equipment.
+  // pickable where the engine draws the physical equipment — and the
+  // heat pump ADDITIONALLY mounts the invisible unit-footprint pick proxy
+  // (Julien 2026-08-23: click the equipment itself, kitchen-island style).
   if (!presentation.body && !presentation.sign) return null
 
   // Unresolvable anchor (missing/curved/foreign wall + never-moved position):
@@ -161,6 +176,27 @@ export const ServiceRenderer = ({ node: rawNode }: { node: ServiceNode }) => {
         <mesh castShadow position={[0, position[1], 0]} receiveShadow>
           <boxGeometry args={[body.dims[0], body.dims[1], body.dims[2]]} />
           <meshStandardMaterial color={body.color} roughness={0.7} />
+        </mesh>
+      )}
+      {proxy && (
+        <mesh
+          position={[0, proxy.centerY, 0]}
+          rotation={[0, proxy.rotationY - placement.rotationY, 0]}
+        >
+          <boxGeometry args={[proxy.dims[0], proxy.dims[1], proxy.dims[2]]} />
+          {/* Near-invisible but still rendered (the bones:device proxy
+              convention): some raycast paths skip invisible meshes, so
+              opacity ~0 with no depth write is the reliable hoverable
+              ghost — the host outline pass re-renders the silhouette with
+              its OWN mask material regardless of this one. DELIBERATE
+              exception to the X-ray raycast-no-op convention (A6/F2):
+              this is a SERVICE mesh under the node's registered group —
+              picking it IS picking the node, exactly like the sign plates
+              and the visible bodies; the engine-drawn asset meshes stay
+              raycast-disabled. Rotation: the engine yaw is world-frame,
+              the group already carries the node's own rotation — apply
+              the delta. */}
+          <meshBasicMaterial depthWrite={false} opacity={0.03} transparent />
         </mesh>
       )}
       {presentation.sign &&
