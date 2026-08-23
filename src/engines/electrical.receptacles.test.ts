@@ -11,6 +11,8 @@ import {
   pointInPolygon,
   streetEdgePoint,
 } from './electrical'
+import { deriveWallDevices } from '../device/derive'
+import { reconcileDeviceNodes } from '../device/place'
 import { unreachableDevices } from './electrical.test-helpers'
 import { routeWiring } from './electrical'
 import { computeTakeoff } from './takeoff'
@@ -1045,5 +1047,159 @@ describe('B14 round-3 — the WR glazing ⚠ follows user moves (recomputed, nev
     const moved = applied.fixtures.find((f) => f.meta?.outdoor === 'back')
     expect(moved?.meta?.obstructed).toBe(true)
     expect(moved?.label).toContain('⚠')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// B14 night-10 — WALK-REMOVAL ORDINAL STABILITY (E5): deleting a sink must
+// never re-base the surviving walk's deviceIds (ctr-4..7 → ctr-0..3 orphaned
+// the user's bones:device overrides — the r3 skeptic's advisory). The
+// per-face offset now keys on the kitchen ZONE (rank × 100 id block,
+// sink-independent), not on how many boxes sibling walks placed first.
+// ---------------------------------------------------------------------------
+
+describe('B14 night-10 — counter walk ids survive sibling-sink removal (E5 ordinal stability)', () => {
+  /** 16 m shell, kitchens A (x in [0,4]) and B (x in [8,12]) on one face —
+   * the round-3 scenario A shape, id-sorted room_kA < room_kB. */
+  function twoKitchenScene(): { walls: WallSlice[]; rooms: RoomSlice[] } {
+    const walls = [
+      wall('w_s', [0, 0], [16, 0]),
+      wall('w_e', [16, 0], [16, 6]),
+      wall('w_n', [16, 6], [0, 6]),
+      wall('w_w', [0, 6], [0, 0]),
+    ]
+    const kA = room(
+      'kitchen',
+      [
+        [0, 0],
+        [4, 0],
+        [4, 3],
+        [0, 3],
+      ],
+      { id: 'room_kA', name: 'Kitchen A' },
+    )
+    const kB = room(
+      'kitchen',
+      [
+        [8, 0],
+        [12, 0],
+        [12, 3],
+        [8, 3],
+      ],
+      { id: 'room_kB', name: 'Kitchen B' },
+    )
+    return { walls, rooms: [kA, kB] }
+  }
+  const sinkA = placedItem('sink_a', 'kitchen-sink', [2, 0.5])
+  const sinkB = placedItem('sink_b', 'kitchen-sink', [10, 0.5])
+  const idsOf = (fx: Fixture[]): string[] =>
+    counterBoxes(fx)
+      .map((f) => String(f.meta?.deviceId))
+      .sort()
+
+  test('zone blocks: kitchen A walks plain ctr-0.., kitchen B its own 100-block — both stable, unique', () => {
+    const { walls, rooms } = twoKitchenScene()
+    const ctr = counterBoxes(layoutElectrical(walls, rooms, undefined, undefined, [sinkA, sinkB]))
+    const inA = ctr.filter((f) => f.position[0] < 4.1)
+    const inB = ctr.filter((f) => f.position[0] > 7.9)
+    expect(inA.length).toBeGreaterThanOrEqual(2)
+    expect(inB.length).toBeGreaterThanOrEqual(2)
+    for (const f of inA) expect(String(f.meta?.deviceId)).toMatch(/^recep-w_s-ctr-[0-9]-(p|m)$/)
+    for (const f of inB) expect(String(f.meta?.deviceId)).toMatch(/^recep-w_s-ctr-1\d\d-(p|m)$/)
+    const ids = ctr.map((f) => String(f.meta?.deviceId))
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  test('delete sink B → walk A ids unchanged; delete sink A → walk B ids unchanged (the shuffling case); re-add round-trips', () => {
+    const { walls, rooms } = twoKitchenScene()
+    const both = layoutElectrical(walls, rooms, undefined, undefined, [sinkA, sinkB])
+    const bothIds = idsOf(both)
+    const idsA = idsOf(both).filter((id) => {
+      const f = counterBoxes(both).find((x) => String(x.meta?.deviceId) === id) as Fixture
+      return f.position[0] < 4.1
+    })
+    const idsB = bothIds.filter((id) => !idsA.includes(id))
+
+    // delete sink B: kitchen A's walk keeps every id
+    expect(idsOf(layoutElectrical(walls, rooms, undefined, undefined, [sinkA]))).toEqual(idsA)
+    // delete sink A: kitchen B's walk keeps every id — the OLD running
+    // offset re-based these to ctr-0..3 and orphaned user overrides
+    expect(idsOf(layoutElectrical(walls, rooms, undefined, undefined, [sinkB]))).toEqual(idsB)
+    // re-add: byte round-trip (ids AND positions)
+    const again = layoutElectrical(walls, rooms, undefined, undefined, [sinkA, sinkB])
+    const tuple = (fx: Fixture[]) =>
+      counterBoxes(fx)
+        .map((f) => `${String(f.meta?.deviceId)}@${f.position.join(',')}`)
+        .sort()
+    expect(tuple(again)).toEqual(tuple(both))
+  })
+
+  test('single-kitchen faces stay byte-identical: plain consecutive ctr-0..n-1 (master parity — the migration guard)', () => {
+    const { walls, rooms } = kitchenScene()
+    const ctr = counterBoxes(
+      layoutElectrical(walls, rooms, undefined, undefined, [
+        placedItem('sink_1', 'kitchen-sink', [2, 0.5]),
+      ]),
+    )
+    const ords = ctr
+      .map((f) => Number(String(f.meta?.deviceId).match(/-ctr-(\d+)-/)?.[1]))
+      .sort((a, b) => a - b)
+    expect(ords).toEqual([...ctr.keys()]) // 0..n-1, no block offset
+  })
+
+  test('same-zone sibling walks (two sinks split by a door RO) keep the legacy running ordinal inside ONE block', () => {
+    // the round-3 scenario B shape — DOCUMENTED residual: deleting the
+    // first same-zone sink still re-bases the second walk (solo-scene id
+    // parity makes sibling-independent ids impossible in a pure engine);
+    // the block scheme must NOT split one zone's walks across blocks.
+    const { walls, rooms } = kitchenScene(8)
+    ;(walls[0] as WallSlice).openings.push(door(4, 0.9, 'door_split'))
+    const ctr = counterBoxes(
+      layoutElectrical(walls, rooms, undefined, undefined, [
+        placedItem('sink_1', 'kitchen-sink', [2, 0.5]),
+        placedItem('sink_2', 'kitchen-sink', [6, 0.5]),
+      ]),
+    )
+    const ords = ctr
+      .map((f) => Number(String(f.meta?.deviceId).match(/-ctr-(\d+)-/)?.[1]))
+      .sort((a, b) => a - b)
+    expect(ords.length).toBeGreaterThanOrEqual(4)
+    expect(Math.max(...ords)).toBeLessThan(100) // one zone = one block
+    expect(ords).toEqual([...ctr.keys()]) // continuing 0..n-1, master parity
+  })
+
+  test('the reconciler never re-mints: a MOVED kitchen-B node survives sink-A deletion untouched (compute.devices machinery)', () => {
+    const { walls, rooms } = twoKitchenScene()
+    const both = layoutElectrical(walls, rooms, undefined, undefined, [sinkA, sinkB])
+    const derived1 = deriveWallDevices(both, walls)
+
+    // seed the level's bones:device nodes exactly as the reconcile effect would
+    const nodes: Record<string, Record<string, unknown>> = {}
+    for (const n of reconcileDeviceNodes({}, 'level_1', derived1).create) {
+      nodes[n.id] = { ...n, parentId: 'level_1' }
+    }
+    // the user drags one of kitchen B's counter boxes (anchor ≠ seed)
+    const movedNode = Object.values(nodes).find((n) => {
+      const id = String(n.deviceId)
+      return /-ctr-1\d\d-/.test(id)
+    }) as Record<string, unknown>
+    expect(movedNode).toBeDefined()
+    movedNode.wallT = Math.min(1, Number(movedNode.wallT) + 0.05)
+
+    // sink A deleted → kitchen B's ids still derive → the moved node is
+    // neither removed nor re-created, and its anchor is never touched
+    const after = layoutElectrical(walls, rooms, undefined, undefined, [sinkB])
+    const derived2 = deriveWallDevices(after, walls)
+    const plan = reconcileDeviceNodes(nodes, 'level_1', derived2)
+    expect(plan.create).toEqual([]) // nothing re-mints
+    expect(plan.remove.includes(String(movedNode.id))).toBe(false)
+    const touch = plan.update.find((u) => u.id === movedNode.id)
+    expect(touch?.data.wallT).toBeUndefined()
+    expect(touch?.data.wallId).toBeUndefined()
+    // only kitchen A's orphans leave — every removed node was an A-walk id
+    for (const rid of plan.remove) {
+      const gone = nodes[rid] as Record<string, unknown>
+      expect(String(gone.deviceId)).toMatch(/-ctr-[0-9]-(p|m)$/)
+    }
   })
 })

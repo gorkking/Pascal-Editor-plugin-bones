@@ -39,7 +39,23 @@ AND a gate — a checklist line without a test is a wish.
   Every wall device fixture (receptacle / GFCI / switch) carries a
   DETERMINISTIC `meta.deviceId` (per-wall ordinal / opening key / hallway
   room key): an unchanged scene reproduces identical ids and editing one
-  wall never shuffles another wall's. Each derived device is mirrored by a
+  wall never shuffles another wall's. COUNTER-WALK ORDINAL STABILITY
+  (night-10, the r3 skeptic's re-base advisory): a face's B14c counter
+  ids key on the KITCHEN ZONE (rank × 100 id block among the zones
+  facing that face, sink-independent), so deleting a sink never
+  re-bases a surviving sibling walk's ids (ctr-4..7 used to become
+  ctr-0..3 and orphan the user's bones:device overrides) — delete
+  either of two sibling sinks and the other walk's ids are unchanged,
+  re-adding round-trips byte-equal, and the reconciler removes only
+  the true orphans (a MOVED surviving node is never re-minted or
+  re-anchored). Rank 0 keeps plain 0-based ids: single-kitchen faces —
+  the baseline/master-parity class — are byte-identical. DOCUMENTED
+  residuals: same-ZONE sibling walks (two sinks split by a door RO)
+  keep the legacy running ordinal within their block, so deleting the
+  FIRST same-zone sink still re-bases the second walk (solo-scene id
+  parity makes sibling-independent ids impossible in a pure engine);
+  deleting/adding a kitchen ZONE re-ranks the blocks (structural edit,
+  note 3's same-wall class). Each derived device is mirrored by a
   `bones:device` node (reconciler: create at the derived anchor with
   seed == anchor, re-seat UNMOVED nodes when the derivation drifts, NEVER
   touch a moved node's anchor, drop orphans/duplicates) so any outlet is
@@ -75,6 +91,10 @@ AND a gate — a checklist line without a test is a wish.
   an extra piece of wood, per code"), built night-4; live drag closed
   night-5 (movableOutlets defaults ON since).
   Gates: `src/engines/electrical.devices.test.ts` (ids + snapping matrix) +
+  the night-10 ordinal-stability describe in
+  `src/engines/electrical.receptacles.test.ts` (zone-block pins, the
+  delete-A/delete-B/re-add trio, single-kitchen master parity,
+  same-zone one-block pin, reconciler never-re-mints — mutation-checked) +
   `src/framing/compute.devices.test.ts` (byte-equality pin, wiring
   re-route, warning parity) + `src/device/schema.test.ts` +
   `src/device/place.test.ts` (reconciler + position→anchor normalization
@@ -91,9 +111,15 @@ AND a gate — a checklist line without a test is a wish.
   interconnect is pullable cable.** Placement (IRC R314.3/R315.3): every
   bedroom alarms; the outside-sleeping-area alarm NEVER silently drops —
   a missing hallway falls back to a bedroom-ADJACENT room (polygon
-  adjacency, garage/bathroom last) and an impossible proxy is a LEVEL
-  WARNING; every story with rooms carries at least one alarm
-  (R314.3(3)); a level with an attached garage + bedrooms places a
+  adjacency, garage/bathroom last — OUTDOOR zones NEVER host: R314
+  covers the dwelling interior, so a garden sharing the bedroom's wall
+  is open air, not "outside the sleeping area"; night-10) and an
+  impossible proxy is a LEVEL WARNING; every story with rooms carries
+  at least one alarm (R314.3(3)) hosted by the largest INDOOR room —
+  a bigger garden never outranks the living room, and an outdoor-only
+  level warns ('all zones on this level are outdoor — … R314.3(3) not
+  placed…') instead of hanging the alarm in the yard (night-10 close
+  of the day-9 residual family); a level with an attached garage + bedrooms places a
   `co-alarm` outside the sleeping area (R315.3 — the fuel-appliance
   condition rides the same garage trigger as the plumbing tank-WH
   assumption); centroid nudges clamp INTO the host polygon (narrow-
@@ -125,7 +151,10 @@ AND a gate — a checklist line without a test is a wish.
   one-circuit pin, 14/3 interconnect walk, traveler continuity, takeoff
   row split, 3-storey cross-storey warning matrix + scoped labels,
   corridor nudge-clamp repro, duplicate-zone/face-twin traveler
-  exhibits + legitimate-pair keep, ceiling-box census).
+  exhibits + legitimate-pair keep, ceiling-box census) +
+  `src/engines/electrical.outdoor.test.ts` (garden-only warning pair,
+  indoor-only per-story election, garden-vs-den proxy exhibit,
+  proxy-fail bedroom+garden scene — all mutation-checked night-10).
 - **E7 Every service chain carries its grounding electrode system.**
   A meter + panel imply the GES (NEC 250.50 — every build orders it):
   TWO driven 5/8" × 8 ft rods below grade AT the meter, exactly 6 ft
@@ -255,14 +284,39 @@ AND a gate — a checklist line without a test is a wish.
   (pre-existing, documented not fixed): the census's
   `us.length===0 && wall.exterior` skip makes the exclusion reachable
   only on INTERIOR counter walls — an exterior counter wall's faces
-  skip the 210.52(A) census entirely. On paper the B14 boxes print as
+  skip the 210.52(A) census entirely. OUTDOOR ZONES ARE OPEN AIR
+  (night-10, the day-9 M4 residual): a wall face opening onto an
+  'outdoor' zone with no indoor room at the same point is NEVER a
+  210.52(A) mounting face — interior-style 15" receptacles used to
+  mint on the yard side of shell walls (winning the face election
+  from the indoor side on some orientations) and on garden fences; an
+  exterior wall resolves its interior side against INDOOR rooms only,
+  a wall whose only resolved side is outdoor (fences, freestanding
+  garden walls — EITHER wall typing: real fences classify
+  interior-typed since both-sides-uncovered leaves exposedSides=2 and
+  the host fallback marks exactly-1, and an interior-typed wall
+  touching open air keeps a face only by resolving a REAL indoor room;
+  round-1 F2) gets NO faces at all, the exterior-entrance-light zone
+  lookup is INDOOR-FIRST like the face predicate (an outdoor polygon
+  double-claiming an indoor slice mints no phantom entrance light and
+  never swallows the zone's honesty warning; round-1 F1), and the
+  moved-device spacing census skips open-air faces exactly like
+  exterior faces (a courtyard partition's outdoor side is a by-design
+  zero, not a >12ft gap). `exteriorFaceOf` reads an outdoor zone as the OUTSIDE when no
+  indoor room resolves a side, so the meter/WR boxes stop flipping
+  indoors on garden-backed walls. Outdoor coverage stays the B14a WR
+  machinery's job — the two required WR boxes are UNAFFECTED by the
+  open-air skip. On paper the B14 boxes print as
   their OWN tags — GC (44" AFF) / GB (40" AFF) / WR — with legend
   rows naming the heights and a tag-keyed bubble dedupe (a counter box
   plan-stacks exactly over the wall-line box below it); EXT-1 carries
   its own circuit-color family (round-2 E3 blocker: it printed
   byte-identical to the SE copper fallback). All B14 boxes carry
-  deterministic deviceIds (`-out-front/back`, `-ctr-<i>`,
-  `-basin-<lavId>`) and are movable `bones:device` nodes (E5 contract).
+  deterministic deviceIds (`-out-front/back`, `-ctr-<i>` — `i` numbers
+  inside the kitchen ZONE's 100-wide block so sibling-sink deletion
+  never re-bases a surviving walk, E5 night-10; single-kitchen faces
+  keep plain 0-based ids — `-basin-<lavId>`) and are movable
+  `bones:device` nodes (E5 contract).
   Origin: LOD-400 audit BATCH 14 (2026-08-21) — zero outdoor
   receptacles ever, all kitchen/bath boxes at 15", the sink-GFCI test
   skipped behind a stale 'once sink positions are extracted' comment;
@@ -272,7 +326,11 @@ AND a gate — a checklist line without a test is a wish.
   sub-invariants mutation-checked) + the GC/GB/WR/EXT-1 paper pins in
   `src/plans/plan-set.test.ts` + the EXT family floor (incl. the
   explicit `service-entrance` id) in
-  `src/plans/circuit-colors.test.ts`.
+  `src/plans/circuit-colors.test.ts` + the open-air face gates in
+  `src/engines/electrical.outdoor.test.ts` (garden/fence/courtyard
+  sweeps, indoor-first face election, meter-side pins incl. the
+  un-zoned-interior fallback, census skip, indoor-overlap
+  conservatism — all mutation-checked night-10).
 
 ## S — Structure
 
@@ -1350,6 +1408,19 @@ AND a gate — a checklist line without a test is a wish.
   design. An outdoor zone needs NO floor slab — the room-coverage warning
   ('has no floor slab under it') is indoor-only, while an indoor room
   without flooring still warns. HVAC serves indoor rooms only (no supply register, no tonnage,
+  design. ELECTRICAL honesty (night-10, closing the day-9 residual
+  family): NO ceiling light composes in an outdoor zone ('Light —
+  Garden' floated at y=2.7 over the grass) — the zone's honest lighting
+  is NEC 210.70(A)(2)(2)'s own requirement, a wall-mounted 'Exterior
+  light — <zone> entrance' on the OUTDOOR face above each dwelling
+  door into the zone (riding the served indoor room's LTG circuit;
+  the door's interior latch-side switch is the control), and a zone no
+  dwelling door opens into carries the level warning 'outdoor zone
+  "<name>": open air — ceiling lighting not modeled; exterior fixtures
+  by site plan' — garden gates in fences are not dwelling entrances;
+  outdoor zones pack no phantom 220.12 lighting VA and never form
+  3-way groups; smoke-alarm + receptacle-face honesty per E6/E8.
+  HVAC serves indoor rooms only (no supply register, no tonnage,
   never the equipment room / thermostat / heat-pump anchor — filtered at
   every exported rooms-boundary, A4 parity with seeding and the panel); an
   outdoor-only level composes NO air handler, hence honestly no condenser
@@ -1381,6 +1452,11 @@ AND a gate — a checklist line without a test is a wish.
   speaks / 'Garden bedroom' silent pair, outdoor slab-warning exclusion
   both directions, characteristics corners + paper n/a strings,
   outdoor-only honesty).
+  classifier witnesses incl. 'Terrazzo entry', R314 warning pair +
+  smoke-alarm compose pin, characteristics corners + paper n/a strings,
+  outdoor-only honesty) + `src/engines/electrical.outdoor.test.ts`
+  (the night-10 electrical slice: entrance-light pins + E2 wiring
+  reach, garden-only warning pair, open-air face sweeps).
 
 ## P — Plans (the exported document)
 

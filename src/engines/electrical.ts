@@ -210,8 +210,10 @@ export function sharedBoundaryLength(a: Polygon, b: Polygon): number {
  * The room that stands in for a missing hallway: the non-bedroom room
  * sharing the most boundary (≥ 0.5 m — at least a doorway of shared wall)
  * with any bedroom. Garages/bathrooms rank last (R314.3.3 humidity /
- * nuisance sources — hosts of last resort only). Deterministic: shared
- * length desc, ties by id.
+ * nuisance sources — hosts of last resort only). OUTDOOR zones never host:
+ * R314's "outside the sleeping area" is a spot in the dwelling INTERIOR —
+ * a garden sharing the bedroom's exterior wall is open air, not a proxy
+ * (M4). Deterministic: shared length desc, ties by id.
  */
 function bedroomAdjacentProxy(
   bedrooms: RoomSlice[],
@@ -220,7 +222,7 @@ function bedroomAdjacentProxy(
   const AVOID = new Set<RoomSlice['category']>(['garage', 'bathroom'])
   let best: { room: RoomSlice; shared: number; avoided: boolean } | undefined
   for (const room of rooms) {
-    if (room.category === 'bedroom') continue
+    if (room.category === 'bedroom' || room.category === 'outdoor') continue
     let shared = 0
     for (const bed of bedrooms) shared += sharedBoundaryLength(room.polygon, bed.polygon)
     if (shared < 0.5) continue
@@ -264,21 +266,64 @@ function faceOf(wall: WallSlice, side: 1 | -1): WallFace {
 }
 
 /**
+ * A wall face that opens onto an OUTDOOR zone (garden/patio/yard… — M4's
+ * open-air category) with no indoor room claiming the same point. Such a
+ * face is open air: it never counts as a habitable side for the 210.52(A)
+ * walk, switch mounting or the spacing census. Overlapping polygons resolve
+ * indoor-first (conservative — keep the receptacle when a zone seam is
+ * ambiguous).
+ */
+function isOpenAirFace(wall: WallSlice, side: 1 | -1, rooms: RoomSlice[]): boolean {
+  const p = faceOf(wall, side).plan(wall.length / 2)
+  let indoor = false
+  let outdoor = false
+  for (const r of rooms) {
+    if (!pointInPolygon(p, r.polygon)) continue
+    if (r.category === 'outdoor') outdoor = true
+    else indoor = true
+  }
+  return outdoor && !indoor
+}
+
+/**
  * Faces that get devices. Interior walls serve rooms on BOTH sides. Exterior
  * walls get devices on the interior face only — resolved by testing which
- * face's midpoint falls inside a room polygon.
+ * face's midpoint falls inside an INDOOR room polygon. Outdoor zones are
+ * open air (M4): a face opening onto one is never an interior mounting face
+ * (day-9 residual: gardens minted interior-style 15" receptacles), and a
+ * wall whose only resolved side is an outdoor zone (garden fences,
+ * freestanding garden walls — EITHER wall typing: fences classify
+ * interior-typed too, both faces uncovered leaves exposedSides=2 and the
+ * host's fallback marks exactly-1; round-1 F2) bounds NO habitable space —
+ * the 210.52(A) walk skips it entirely; outdoor coverage is the B14a WR
+ * machinery's job.
  * ASSUMPTION: face choice is made once at the wall midpoint; walls whose
  * interior side flips mid-run (rare) would need per-segment resolution.
  */
 function interiorFaces(wall: WallSlice, rooms: RoomSlice[]): WallFace[] {
   const plus = faceOf(wall, 1)
   const minus = faceOf(wall, -1)
-  if (!wall.exterior) return [plus, minus]
   const mid = wall.length / 2
-  const inRoom = (f: WallFace) => rooms.some((r) => pointInPolygon(f.plan(mid), r.polygon))
-  if (inRoom(plus)) return [plus]
-  if (inRoom(minus)) return [minus]
-  // No room data covers this wall — fall back to the +normal side.
+  const indoor = rooms.filter((r) => r.category !== 'outdoor')
+  const inIndoor = (f: WallFace) => indoor.some((r) => pointInPolygon(f.plan(mid), r.polygon))
+  if (!wall.exterior) {
+    const openPlus = isOpenAirFace(wall, 1, rooms)
+    const openMinus = isOpenAirFace(wall, -1, rooms)
+    // no outdoor contact: legacy both-sides service (zone-less scenes stay
+    // byte-identical)
+    if (!openPlus && !openMinus) return [plus, minus]
+    // The wall touches open air: only a face resolving a REAL indoor room
+    // survives. One open-air side + one UNCOVERED side is a freestanding
+    // garden wall (interior-TYPED fences, round-1 F2 — they minted 15"
+    // receptacles + a gate switch on the outer face), not a partition.
+    return [plus, minus].filter((f) => !isOpenAirFace(wall, f.side, rooms) && inIndoor(f))
+  }
+  if (inIndoor(plus)) return [plus]
+  if (inIndoor(minus)) return [minus]
+  // No indoor room resolves a side. An outdoor zone on either face means the
+  // wall visibly bounds open air with no habitable side — no interior faces.
+  if (isOpenAirFace(wall, 1, rooms) || isOpenAirFace(wall, -1, rooms)) return []
+  // No zone data at all — fall back to the +normal side (legacy).
   return [plus]
 }
 
@@ -497,7 +542,13 @@ export function layoutElectrical(
   fixtures.push(...placeBasinReceptacles(walls, placed, warnings))
 
   // ---- lights: one switched lighting outlet per habitable room (210.70(A)(1)) ----
-  for (const room of rooms) {
+  // OUTDOOR zones (M4) are open air: a ceiling light at `ceilingHeight`
+  // would float in the yard (day-9 residual: 'Light — Garden' at y=2.7 over
+  // the grass). They get exterior ENTRANCE lights below instead — with a
+  // level warning when no entrance adjoins them.
+  const indoorRooms = rooms.filter((r) => r.category !== 'outdoor')
+  const outdoorZones = rooms.filter((r) => r.category === 'outdoor')
+  for (const room of indoorRooms) {
     const [cx, cz] = polygonCentroid(room.polygon)
     fixtures.push({
       system: 'electrical',
@@ -526,6 +577,70 @@ export function layoutElectrical(
         sourceId: room.id,
         label: `Smoke alarm — ${room.name || 'bedroom'}`,
       })
+    }
+  }
+
+  // ---- outdoor-zone lighting honesty (M4 + NEC 210.70(A)(2)(2)) ----
+  // Real outdoor lighting exists, but the only spot the scene can carry
+  // honestly is the code's own requirement: a wall-mounted fixture on the
+  // EXTERIOR side of each entrance between the dwelling and the outdoor
+  // zone (210.70(A)(2)(2) — outdoor entrances with grade-level access; the
+  // door's interior latch-side switch above already controls it). Zones no
+  // dwelling door opens into get a LEVEL WARNING instead of a fixture —
+  // landscape/site lighting is a site-plan matter, never a floating light.
+  if (outdoorZones.length > 0) {
+    const litZones = new Set<string>()
+    const litOpenings = new Set<string>()
+    for (const wall of walls) {
+      if (wall.curved) continue
+      for (const opening of wall.openings) {
+        if (opening.kind !== 'door' || litOpenings.has(opening.id)) continue
+        for (const side of [1, -1] as const) {
+          const outFace = faceOf(wall, side)
+          const op = outFace.plan(opening.u)
+          const zone = outdoorZones.find((z) => pointInPolygon(op, z.polygon))
+          if (!zone) continue
+          // INDOOR-FIRST, like isOpenAirFace (round-1 F1): the outdoor-face
+          // point must be genuinely OPEN AIR — a courtyard polygon
+          // double-claiming an indoor slice used to compose a phantom
+          // 'Exterior light — Courtyard entrance' INSIDE the living room
+          // AND swallow the courtyard's honesty warning via litZones.
+          if (indoorRooms.some((r) => pointInPolygon(op, r.polygon))) continue
+          // the entrance must come FROM the dwelling: the opposite face
+          // stands in an indoor room (garden gates in fences don't count)
+          const ip = faceOf(wall, side === 1 ? -1 : 1).plan(opening.u)
+          const home = indoorRooms.find((r) => pointInPolygon(ip, r.polygon))
+          if (!home) continue
+          // Fixture centered above the door head; a full-height opening
+          // (no headroom) mounts beside the RO at the latch band instead.
+          let y = opening.sillHeight + opening.roughHeight + 0.15
+          let u = opening.u
+          if (y > wall.height - 0.1) {
+            y = Math.min(2.0, wall.height - 0.15)
+            u = clearOfOpenings(wall, u, y - 0.1, y + 0.1)
+          }
+          const [lx, lz] = outFace.plan(u)
+          fixtures.push({
+            system: 'electrical',
+            kind: 'light',
+            position: [lx, y, lz],
+            rotationY: outFace.rotationY,
+            // keyed to the INDOOR room the door serves: the fixture rides
+            // that room's lighting circuit (assignCircuits home lookup)
+            sourceId: home.id,
+            label: `Exterior light — ${zone.name || 'outdoor'} entrance (NEC 210.70(A)(2))`,
+          })
+          litZones.add(zone.id)
+          litOpenings.add(opening.id)
+          break
+        }
+      }
+    }
+    for (const zone of outdoorZones) {
+      if (litZones.has(zone.id)) continue
+      warnings?.push(
+        `outdoor zone “${zone.name || zone.id}”: open air — ceiling lighting not modeled; exterior fixtures by site plan (no dwelling entrance adjoins it)`,
+      )
     }
   }
 
@@ -569,22 +684,32 @@ export function layoutElectrical(
 
   // ---- one smoke alarm per story (IRC R314.3(3)) ----
   // A storey with rooms but neither bedrooms nor a hallway used to compute
-  // ZERO alarms (B13a: the upper den floor of a two-storey). Largest room
-  // hosts it, deterministically (area, ties by id).
+  // ZERO alarms (B13a: the upper den floor of a two-storey). Largest INDOOR
+  // room hosts it, deterministically (area, ties by id) — R314 covers the
+  // dwelling interior, so the alarm never elects an outdoor zone (day-9
+  // residual: a garden-only level hung 'Smoke alarm — one per story' in the
+  // yard, and a big garden outranked the living room on mixed levels). An
+  // outdoor-only level warns instead — the E6 never-silent contract.
   if (rooms.length > 0 && !fixtures.some((f) => f.kind === 'smoke-alarm')) {
-    const host = [...rooms].sort(
-      (a, b) => polygonArea(b.polygon) - polygonArea(a.polygon) || a.id.localeCompare(b.id),
-    )[0] as RoomSlice
-    const [sx, sz] = polygonCentroid(host.polygon)
-    const [ax, az] = nudgeInside(host.polygon, sx, sz, inches(12))
-    fixtures.push({
-      system: 'electrical',
-      kind: 'smoke-alarm',
-      position: [ax, host.ceilingHeight, az],
-      rotationY: 0,
-      sourceId: host.id,
-      label: 'Smoke alarm — one per story (IRC R314.3(3))',
-    })
+    if (indoorRooms.length === 0) {
+      warnings?.push(
+        'all zones on this level are outdoor — smoke alarm one per story (IRC R314.3(3)) not placed; alarms serve the dwelling interior (R314), verify layout',
+      )
+    } else {
+      const host = [...indoorRooms].sort(
+        (a, b) => polygonArea(b.polygon) - polygonArea(a.polygon) || a.id.localeCompare(b.id),
+      )[0] as RoomSlice
+      const [sx, sz] = polygonCentroid(host.polygon)
+      const [ax, az] = nudgeInside(host.polygon, sx, sz, inches(12))
+      fixtures.push({
+        system: 'electrical',
+        kind: 'smoke-alarm',
+        position: [ax, host.ceilingHeight, az],
+        rotationY: 0,
+        sourceId: host.id,
+        label: 'Smoke alarm — one per story (IRC R314.3(3))',
+      })
+    }
   }
 
   // ---- CO alarm outside the sleeping area (IRC R315.3) ----
@@ -911,10 +1036,9 @@ function placeElectricMeter(
     ? { wall: forced.wall, u: forced.u, heightAff: override?.heightAff ?? METER_AFF }
     : placeElectricMeterSpot(walls, rooms)
   if (!spot) return null
-  // Exterior face = the opposite of the resolved interior face; when no
-  // room data resolves a side, +normal is the interior guess → use −.
-  const inFace = interiorFaces(spot.wall, rooms)[0] ?? faceOf(spot.wall, 1)
-  const face = faceOf(spot.wall, inFace.side === 1 ? -1 : 1)
+  // Exterior face = the opposite of the resolved interior face; an outdoor
+  // zone names the outside directly when no indoor room resolves a side.
+  const face = exteriorFaceOf(spot.wall, rooms)
   const [x, z] = face.plan(spot.u)
   return {
     system: 'electrical',
@@ -933,11 +1057,21 @@ function placeElectricMeter(
 /** 210.52(E)(1): outdoor receptacles mount no more than 6'6" above grade. */
 const OUTDOOR_MAX_AFF = feet(rules.receptacles.outdoorMaxAboveGradeFt)
 
-/** The exterior FACE of a wall — the opposite of its resolved interior face
- * (no room data resolves a side → interior guess is +normal → use −). */
+/** The exterior FACE of a wall — the opposite of its resolved interior face.
+ * When NO indoor room resolves a side, a face standing in an OUTDOOR zone
+ * (M4 open air) IS the outside — a garden behind the house used to read as
+ * the interior side and flipped the meter/WR mounting INDOORS. With no zone
+ * data at all: interior guess is +normal → use − (legacy). */
 function exteriorFaceOf(wall: WallSlice, rooms: RoomSlice[]): WallFace {
-  const inFace = interiorFaces(wall, rooms)[0] ?? faceOf(wall, 1)
-  return faceOf(wall, inFace.side === 1 ? -1 : 1)
+  const inFace = interiorFaces(wall, rooms)[0]
+  if (inFace) return faceOf(wall, inFace.side === 1 ? -1 : 1)
+  const mid = wall.length / 2
+  const outdoor = rooms.filter((r) => r.category === 'outdoor')
+  for (const side of [1, -1] as const) {
+    const f = faceOf(wall, side)
+    if (outdoor.some((r) => pointInPolygon(f.plan(mid), r.polygon))) return f
+  }
+  return faceOf(wall, -1)
 }
 
 /**
@@ -1125,15 +1259,53 @@ function placeCounterReceptacles(
   const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
   const out: Fixture[] = []
   // Per counter FACE (`${wall.id}|${side}`): the u-spans already walked,
-  // the box u-positions placed there, and the running deviceId ordinal —
+  // the box u-positions placed there, and the per-ZONE deviceId counts —
   // a second walk on the same face (another kitchen zone down the wall, or
   // a same-kitchen sink across a door RO) covers ITS OWN span with unique
   // ids instead of silently bailing (round-3 finding: the old global
   // `walked.has(key) → continue` was a FOURTH wordless zero-box exit).
   const walked = new Map<
     string,
-    { spans: { a: number; b: number }[]; us: number[]; ordinal: number }
+    { spans: { a: number; b: number }[]; us: number[]; blocks: Map<string, number> }
   >()
+  // STABLE WALK IDENTITY (night-10, E5 — the r3 skeptic's ordinal-re-base
+  // advisory): the per-face ordinal offset used to be the RUNNING count of
+  // boxes sibling walks placed first — deleting sink A re-based the
+  // surviving walk's ids (ctr-4..7 → ctr-0..3) and orphaned the user's
+  // bones:device overrides. The offset now keys on the KITCHEN ZONE:
+  // each face ranks the kitchens FACING it (zone polygon contains a
+  // sampled face point — SINK-independent, so removing a sink never moves
+  // a sibling zone's block) in zone-id order, and a zone's walks number
+  // inside their own 100-wide id block (rank × 100; a 100-box counter
+  // face is >120 m of casework — unreachable). DECISION (stated): zone-id
+  // keying over the suggested walk-content hash — simpler, stable under
+  // sink edits, and rank 0 keeps plain 0-based ids so every
+  // single-kitchen face (the baseline + master-parity class) stays
+  // byte-identical; same-zone sibling walks (two sinks split by a door
+  // RO) keep the legacy running ordinal WITHIN their block — that
+  // residual re-base is confined to the same-zone multi-sink class, where
+  // solo-scene id parity makes sibling-independent ids impossible (a pure
+  // engine cannot tell "sink B after A was deleted" from "sink B alone").
+  // Deleting/adding a KITCHEN ZONE re-ranks (structural edit, E5 note 3).
+  const faceRank = new Map<string, number>()
+  const rankOf = (w: WallSlice, face: WallFace, kitchen: RoomSlice): number => {
+    const key = `${w.id}|${face.side}|${kitchen.id}`
+    const hit = faceRank.get(key)
+    if (hit !== undefined) return hit
+    const step = 0.05
+    const facesZone = (k: RoomSlice): boolean => {
+      for (let u = 0; u <= w.length + 1e-9; u += step) {
+        if (pointInPolygon(face.plan(Math.min(u, w.length)), k.polygon)) return true
+      }
+      return false
+    }
+    const facing = kitchens
+      .filter(facesZone)
+      .map((k) => k.id)
+      .sort((a, b) => a.localeCompare(b))
+    for (const [i, id] of facing.entries()) faceRank.set(`${w.id}|${face.side}|${id}`, i)
+    return faceRank.get(key) ?? 0
+  }
   for (const kitchen of kitchens) {
     const name = kitchen.name || kitchen.id
     const sinks = placed
@@ -1206,7 +1378,7 @@ function placeCounterReceptacles(
         continue
       }
       const key = `${wall.id}|${face.side}`
-      const rec = walked.get(key) ?? { spans: [], us: [], ordinal: 0 }
+      const rec = walked.get(key) ?? { spans: [], us: [], blocks: new Map<string, number>() }
       // Skip ONLY when this sink's own span already lies inside a prior
       // walk (its boxes exist there — honest silence). An uncovered span
       // gets its own walk + F1 coverage audit (round 3, scenarios A/B:
@@ -1220,6 +1392,9 @@ function placeCounterReceptacles(
         Math.ceil((b - a) / (2 * COUNTER_FIRST_MAX)),
       )
       const pitch = (b - a) / count
+      // this walk's id base: the zone's 100-wide block + the count its own
+      // zone already placed on this face (sibling zones never shift it)
+      const idBase = rankOf(wall, face, kitchen) * 100 + (rec.blocks.get(kitchen.id) ?? 0)
       const used: number[] = []
       for (let i = 0; i < count; i++) {
         let u = a + pitch * (i + 0.5)
@@ -1244,9 +1419,10 @@ function placeCounterReceptacles(
           label: 'Counter receptacle \u2014 44" AFF (NEC 210.52(C)(1))',
           meta: {
             // slot-based WITHIN a walk (single-walk scenes keep their ids
-            // byte-identical); the per-face running offset keeps a second
-            // walk's ids unique (round 3)
-            deviceId: `recep-${wall.id}-ctr-${rec.ordinal + i}-${face.side === 1 ? 'p' : 'm'}`,
+            // byte-identical); the zone-block base keeps a second walk's
+            // ids unique AND stable when a sibling sink disappears
+            // (round 3 uniqueness; night-10 E5 ordinal stability)
+            deviceId: `recep-${wall.id}-ctr-${idBase + i}-${face.side === 1 ? 'p' : 'm'}`,
             counter: true,
           },
         })
@@ -1284,7 +1460,7 @@ function placeCounterReceptacles(
       }
       rec.spans.push({ a, b })
       rec.us.push(...used)
-      rec.ordinal += count
+      rec.blocks.set(kitchen.id, (rec.blocks.get(kitchen.id) ?? 0) + count)
       walked.set(key, rec)
     }
   }
@@ -1788,8 +1964,9 @@ export function applyDeviceOverrides(
         .map((f) => wallU(wall, f.position))
         .sort((a, b) => a - b)
       // Only faces that had receptacles derive receptacles — an exterior
-      // wall's outside face never counts.
-      if (us.length === 0 && wall.exterior) continue
+      // wall's outside face never counts, and neither does a face opening
+      // onto an OUTDOOR zone (M4 open air — the walk skips it by design).
+      if (us.length === 0 && (wall.exterior || isOpenAirFace(wall, side, rooms))) continue
       for (const seg of usableSegments(wall)) {
         const inSeg = us.filter((v) => v >= seg.a - 1e-6 && v <= seg.b + 1e-6)
         let maxDist: number
@@ -1886,10 +2063,15 @@ export function assignCircuits(fixtures: Fixture[], rooms: RoomSlice[]): void {
     rooms.find((r) => pointInPolygon(p, r.polygon))
 
   // Lighting circuits: pack rooms in order until ~1200 VA of 220.12 load.
+  // OUTDOOR zones pack no lighting load: they carry no ceiling light (M4 —
+  // open air) and 220.12's 3 VA/ft² covers the dwelling's floor area, not
+  // the yard (a 72 m² garden used to burn a whole LTG circuit of phantom
+  // VA). Their entrance lights ride the served indoor room's circuit.
   const lightingOf = new Map<string, { circuit: string; va: number }>()
   let ltgIndex = 1
   let ltgVa = 0
   for (const room of rooms) {
+    if (room.category === 'outdoor') continue
     const va = Math.max(60, Math.round(polygonArea(room.polygon) * SQFT_PER_M2 * LIGHTING_VA_PER_SQFT))
     if (ltgVa > 0 && ltgVa + va > MAX_LIGHTING_VA) {
       ltgIndex += 1
@@ -1953,8 +2135,11 @@ export function assignCircuits(fixtures: Fixture[], rooms: RoomSlice[]): void {
   }
 
   // 3-way groups: a room whose interior holds 2+ switches (2+ doors, or a
-  // hallway) needs each entry to control the light.
+  // hallway) needs each entry to control the light. Outdoor zones group
+  // nothing — no switch mounts in open air, and a zone polygon drawn past
+  // the wall centerline must not weld indoor switches into a garden group.
   for (const room of rooms) {
+    if (room.category === 'outdoor') continue
     const entries = fixtures.filter(
       (f) => f.kind === 'switch' && pointInPolygon([f.position[0], f.position[2]], room.polygon),
     )
