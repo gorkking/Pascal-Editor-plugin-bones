@@ -17,6 +17,7 @@ import {
   InstancedMesh,
   Matrix4,
   MeshStandardMaterial,
+  type Object3D,
   Quaternion,
   Vector3,
 } from 'three'
@@ -27,6 +28,12 @@ import { circuitColor, hvacDuctColor, plumbingPipeColor } from '../plans/circuit
 import { normalizeServiceAnchors } from '../service/normalize'
 import { planServiceSeeding } from '../service/place'
 import { computeLevel } from './compute'
+import {
+  condenserAssetSnapshot,
+  isCondenserCabinet,
+  loadCondenserAsset,
+  prepareCondenserClone,
+} from './condenser-asset'
 import { effectiveNodesFor, throttleTrailing } from './live'
 import { effectiveViewMode, type FramingNode, type ViewMode } from './schema'
 
@@ -336,28 +343,98 @@ const scratchScale = new Vector3()
 const scratchTranslation = new Vector3()
 const scratchEuler = new Euler()
 
+/** Compose one entry's instance matrix (position, rotation, scale = dims,
+ * with the same degenerate-dim clamp the buckets always used). Shared by
+ * the box buckets AND the condenser-asset wrappers, so the asset sits at
+ * the EXACT matrix its box would — parity by construction. */
+export function composeEntryMatrix(
+  dims: readonly [number, number, number],
+  position: readonly [number, number, number],
+  rotation: readonly [number, number, number],
+  out: Matrix4,
+): Matrix4 {
+  scratchEuler.set(rotation[0], rotation[1], rotation[2])
+  scratchQuaternion.setFromEuler(scratchEuler)
+  scratchTranslation.set(position[0], position[1], position[2])
+  scratchScale.set(
+    Math.max(dims[0], 0.001),
+    Math.max(dims[1], 0.001),
+    Math.max(dims[2], 0.001),
+  )
+  return out.compose(scratchTranslation, scratchQuaternion, scratchScale)
+}
+
 /** Write a bucket's instance matrices into its mesh set (solid + ghost copy
  * share indices) and flag the GPU upload. */
 function writeMatrices(bucket: Bucket, meshes: InstancedMesh[]) {
   bucket.entries.forEach((entry, i) => {
-    scratchEuler.set(entry.rotation[0], entry.rotation[1], entry.rotation[2])
-    scratchQuaternion.setFromEuler(scratchEuler)
-    scratchTranslation.set(entry.position[0], entry.position[1], entry.position[2])
-    scratchScale.set(
-      Math.max(entry.dims[0], 0.001),
-      Math.max(entry.dims[1], 0.001),
-      Math.max(entry.dims[2], 0.001),
-    )
-    scratchMatrix.compose(scratchTranslation, scratchQuaternion, scratchScale)
+    composeEntryMatrix(entry.dims, entry.position, entry.rotation, scratchMatrix)
     for (const mesh of meshes) mesh.setMatrixAt(i, scratchMatrix)
   })
   for (const mesh of meshes) mesh.instanceMatrix.needsUpdate = true
+}
+
+/**
+ * AC-BLOCK VISUAL SWAP (user ask 2026-08-22: the outdoor condenser "is
+ * actually a heatpump" — render the host's 'AC block' asset, keep the
+ * label). X-ray-only member partition: with a LOADED asset, condenser
+ * cabinet members (isCondenserCabinet) leave the box buckets and render as
+ * per-member asset wrappers below; without one (headless tests, missing
+ * asset, load failure) or in any other mode ('off' draws no members at
+ * all; 'basement' keeps its faint shell abstract) every member stays a box
+ * exactly as before — the swap is a progressive enhancement, never a hole.
+ * The MEMBER itself is untouched everywhere (SAT, plans, takeoff, panel —
+ * its 'AC condenser #N …' label keeps surfacing there unchanged); only
+ * this renderer trades the cabinet's box for the model. Pad, disconnect,
+ * whip and line-set render as before.
+ */
+function splitAssetMembers(
+  members: Member[],
+  mode: ViewMode,
+  condenserAsset: Object3D | null | undefined,
+): { boxed: Member[]; condensers: Member[] } {
+  if (!condenserAsset || mode !== 'xray') return { boxed: members, condensers: [] }
+  const condensers = members.filter(isCondenserCabinet)
+  if (condensers.length === 0) return { boxed: members, condensers }
+  return { boxed: members.filter((m) => !isCondenserCabinet(m)), condensers }
+}
+
+/** Condenser-asset wrapper groups per built group, in cabinet-member order —
+ * the patch path rewrites their matrices exactly like bucket instances.
+ * WeakMap like bucketIndex: dies with the group, no teardown needed (the
+ * wrappers' geometry/materials are SHARED with the module-cached asset and
+ * must never be disposed — disposeGroup only frees InstancedMesh state). */
+const assetWrapperIndex = new WeakMap<Group, Group[]>()
+
+/** Mount one asset wrapper per cabinet member onto the group. The wrapper
+ * takes the box's exact instance matrix (matrixAutoUpdate off — the matrix
+ * IS the source of truth, patch rewrites it in place); the clone inside is
+ * normalized to a unit cube, so the model fills precisely the volume the
+ * box occupied. Clones share geometry/materials with the cached asset and
+ * follow the X-ray mesh conventions (no-op raycast, shadow flags). */
+function attachCondenserAssets(
+  group: Group,
+  condensers: Member[],
+  condenserAsset: Object3D,
+): void {
+  if (condensers.length === 0) return
+  const wrappers = condensers.map((member) => {
+    const wrapper = new Group()
+    wrapper.add(prepareCondenserClone(condenserAsset))
+    wrapper.matrixAutoUpdate = false
+    composeEntryMatrix(member.dims, member.position, member.rotation, wrapper.matrix)
+    wrapper.matrixWorldNeedsUpdate = true
+    group.add(wrapper)
+    return wrapper
+  })
+  assetWrapperIndex.set(group, wrappers)
 }
 
 export function buildGroups(
   members: Member[],
   fixtures: Fixture[],
   mode: ViewMode,
+  condenserAsset?: Object3D | null,
 ): BuiltGroups {
   const foreign = new Map<string, Group>()
   const own: Member[] = []
@@ -372,9 +449,9 @@ export function buildGroups(
       byLevel.set(mount, list)
     } else own.push(m)
   }
-  const group = buildGroup(own, fixtures, mode)
+  const group = buildGroup(own, fixtures, mode, condenserAsset)
   for (const [levelId, list] of byLevel) {
-    const g = buildGroup(list, [], mode)
+    const g = buildGroup(list, [], mode, condenserAsset)
     g.name = `bones-foreign-${levelId}`
     // Source level strictly ABOVE the owner (compute tags the members) —
     // only these groups take the exploded roof stratum drop below.
@@ -412,8 +489,16 @@ export function buildGroups(
  *    fixtures get 'ghosted-through' (drawn after the field), structure
  *    keeps the strong 'ghosted' copy.
  */
-export function buildGroup(members: Member[], fixtures: Fixture[], mode: ViewMode): Group {
-  return groupFromBuckets(collectBuckets(members, fixtures, mode))
+export function buildGroup(
+  members: Member[],
+  fixtures: Fixture[],
+  mode: ViewMode,
+  condenserAsset?: Object3D | null,
+): Group {
+  const { boxed, condensers } = splitAssetMembers(members, mode, condenserAsset)
+  const group = groupFromBuckets(collectBuckets(boxed, fixtures, mode))
+  if (condenserAsset) attachCondenserAssets(group, condensers, condenserAsset)
+  return group
 }
 
 /** Pure bucketing pass — cheap JS grouping, shared by the full build and the
@@ -609,10 +694,18 @@ export function patchGroup(
   members: Member[],
   fixtures: Fixture[],
   mode: ViewMode,
+  condenserAsset?: Object3D | null,
 ): boolean {
   const index = bucketIndex.get(group)
   if (!index) return false
-  const buckets = collectBuckets(members, fixtures, mode)
+  // Condenser-asset wrappers patch like bucket instances: same member
+  // count → rewrite the wrapper matrices in place; any structural change
+  // (asset just resolved, cabinet added/removed, mode moved) mismatches
+  // and forces the full rebuild — exactly the bucket contract.
+  const { boxed, condensers } = splitAssetMembers(members, mode, condenserAsset)
+  const wrappers = assetWrapperIndex.get(group) ?? []
+  if (wrappers.length !== condensers.length) return false
+  const buckets = collectBuckets(boxed, fixtures, mode)
   if (buckets.size !== index.size) return false
   for (const [key, bucket] of buckets) {
     const meshes = index.get(key)
@@ -622,6 +715,12 @@ export function patchGroup(
     const meshes = index.get(key)
     if (meshes) writeMatrices(bucket, meshes)
   }
+  condensers.forEach((member, i) => {
+    const wrapper = wrappers[i]
+    if (!wrapper) return
+    composeEntryMatrix(member.dims, member.position, member.rotation, wrapper.matrix)
+    wrapper.matrixWorldNeedsUpdate = true
+  })
   return true
 }
 
@@ -637,6 +736,7 @@ export function patchGroups(
   members: Member[],
   fixtures: Fixture[],
   mode: ViewMode,
+  condenserAsset?: Object3D | null,
 ): boolean {
   const own: Member[] = []
   const byLevel = new Map<string, Member[]>()
@@ -650,12 +750,12 @@ export function patchGroups(
   }
   if (byLevel.size !== built.foreign.size) return false
   for (const levelId of byLevel.keys()) if (!built.foreign.has(levelId)) return false
-  if (!patchGroup(built.group, own, fixtures, mode)) return false
+  if (!patchGroup(built.group, own, fixtures, mode, condenserAsset)) return false
   for (const [levelId, list] of byLevel) {
     const g = built.foreign.get(levelId)
     if (!g) return false
     if (g.userData.strataAbove !== list.some((m) => m.strataAbove === true)) return false
-    if (!patchGroup(g, list, [], mode)) return false
+    if (!patchGroup(g, list, [], mode, condenserAsset)) return false
   }
   return true
 }
@@ -979,6 +1079,30 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   // OFF / X-RAY / BASEMENT — one field drives every treatment below
   // (legacy seeThrough nodes resolve through effectiveViewMode).
   const mode = effectiveViewMode(node)
+
+  // AC-block visual swap (user ask 2026-08-22): once the host's 'AC block'
+  // heat-pump asset resolves, X-ray condenser cabinets render as the real
+  // model in place of the steel box (same matrix — splitAssetMembers /
+  // attachCondenserAssets above). Lazy: only an X-ray that actually SHOWS a
+  // cabinet kicks the once-per-session GLB fetch, and a failed load simply
+  // leaves the boxes (loadCondenserAsset never rejects) — progressive
+  // enhancement, never a hole. Headless (bun test) nothing here runs: the
+  // component is never mounted, so the dynamic loader import never fires.
+  const [condenserAsset, setCondenserAsset] = useState<Object3D | null>(() =>
+    condenserAssetSnapshot(),
+  )
+  const wantsCondenserAsset = mode === 'xray' && active.members.some(isCondenserCabinet)
+  useEffect(() => {
+    if (condenserAsset || !wantsCondenserAsset) return
+    let disposed = false
+    loadCondenserAsset().then((asset) => {
+      if (!disposed && asset) setCondenserAsset(asset)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [condenserAsset, wantsCondenserAsset])
+
   // In-place fast path (night-8 perf, F2): when the fresh compute keeps the
   // bucket structure (the common case for every live-drag preview tick and
   // most single-member commits), patch the existing groups' instance
@@ -988,14 +1112,16 @@ export const FramingRenderer = ({ node }: { node: FramingNode }) => {
   const builtRef = useRef<BuiltGroups | null>(null)
   const built = useMemo(() => {
     const prev = builtRef.current
-    if (prev && patchGroups(prev, active.members, active.fixtures, mode)) return prev
-    const next = buildGroups(active.members, active.fixtures, mode)
+    if (prev && patchGroups(prev, active.members, active.fixtures, mode, condenserAsset)) {
+      return prev
+    }
+    const next = buildGroups(active.members, active.fixtures, mode, condenserAsset)
     builtRef.current = next
     return next
     // `active` (NOT `result`): during a drag only the override store moves,
     // so a committed-only dep froze the scene graph — the whole feature was
     // visually inert (verify night-6 blocker).
-  }, [active, mode])
+  }, [active, mode, condenserAsset])
   const group = built.group
   useEffect(() => {
     return () => {

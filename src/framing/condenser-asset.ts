@@ -1,0 +1,181 @@
+/**
+ * AC-CONDENSER VISUAL SWAP (user ask 2026-08-22: "we have an object. That's
+ * actually a heatpump. called 'AC block' — you could use that for
+ * placeholder. keep the label on it.")
+ *
+ * The hvac engine's outdoor condenser CABINET member keeps rendering as a
+ * steel box everywhere it matters (SAT, plans, takeoff, baseline — the
+ * member itself is untouched, so its 'AC condenser #N — X tons outdoor
+ * unit' label keeps surfacing on the panel and the paper exactly as
+ * before). In the 3D X-ray ONLY, the renderer substitutes the host
+ * editor's real heat-pump model for the box — a PROGRESSIVE ENHANCEMENT:
+ * headless tests, a missing asset or a failed network load all fall back
+ * to the box exactly as today, never a hole.
+ *
+ * ASSET SOURCE — the host item-catalog entry (private-editor
+ * packages/editor/src/components/ui/item-catalog/catalog-items.tsx):
+ *   id 'ac-block', name "AC block", native bbox ≈ 1.06 × 0.95 × 1.06 m.
+ * The catalog is not exported to plugins and the host exposes no
+ * imperative asset loader (only the suspense hook `useGLTFKTX2`, which
+ * cannot run headless), so the GLB URL is pinned here and loaded directly
+ * with three's GLTFLoader. The GLB requires KHR_draco_mesh_compression
+ * (no textures), hence the DRACOLoader with the SAME decoder path the
+ * host item renderer pins (packages/nodes/src/item/renderer.tsx).
+ *
+ * SCALE CHOICE: the loaded scene is normalized so its bounding box is a
+ * UNIT cube centered at the origin; each rendered instance then takes the
+ * EXACT matrix its box instance would (position, rotation, scale = member
+ * dims). The asset therefore occupies precisely the volume the box did —
+ * the engine's cabinet footprint (≈ 0.9 × 0.8 × 0.35 m) governs, with the
+ * squarish native model gently compressed to the slim heat-pump form.
+ * Pad, disconnect, whip and line-set are untouched.
+ */
+
+import { Box3, Group, type Mesh, type Object3D, Vector3 } from 'three'
+import type { Member } from '../core/types'
+
+/** Host item-catalog id of the substituted asset — "AC block". */
+export const AC_BLOCK_ASSET_ID = 'ac-block'
+
+/** The "AC block" model GLB, verbatim from the host catalog entry's `src`.
+ * If the host ever moves the file, the load fails and every cabinet simply
+ * renders as the steel box again (graceful missing-asset path). */
+export const AC_BLOCK_GLB_URL =
+  'https://byrpxoiotywskoojsrzd.supabase.co/storage/v1/object/public/items/system/ac-block/model.glb'
+
+/** Same Draco decoder the host item renderer uses for catalog GLBs. */
+const DRACO_DECODER_PATH = 'https://www.gstatic.com/draco/versioned/decoders/1.5.5/'
+
+/**
+ * The one member the swap applies to: the hvac engine emits exactly two
+ * `role: 'equipment'` members — the concrete pad and the STEEL cabinet
+ * (the air handler is a fixture, not a member) — so the structural triple
+ * identifies the cabinet without touching the engine. No label regex (the
+ * takeoff doctrine) and no engine-side meta: the Member type carries none,
+ * and adding one would break the byte-identical master baseline.
+ */
+export function isCondenserCabinet(
+  member: Pick<Member, 'system' | 'role' | 'material'>,
+): boolean {
+  return (
+    member.system === 'hvac' && member.role === 'equipment' && member.material === 'steel'
+  )
+}
+
+/**
+ * Normalize a loaded asset scene so its bounding box becomes a unit cube
+ * centered at the origin. A renderer wrapper composed with the box
+ * instance matrix (position, rotation, scale = dims) then bounds the asset
+ * to EXACTLY the volume the box occupied — position/rotation/scale parity
+ * by construction.
+ */
+export function normalizeToUnitBox(scene: Object3D): Group {
+  const box = new Box3().setFromObject(scene)
+  const size = new Vector3()
+  const center = new Vector3()
+  box.getSize(size)
+  box.getCenter(center)
+  const inner = new Group()
+  inner.scale.set(
+    1 / Math.max(size.x, 1e-6),
+    1 / Math.max(size.y, 1e-6),
+    1 / Math.max(size.z, 1e-6),
+  )
+  inner.position.set(
+    -center.x * inner.scale.x,
+    -center.y * inner.scale.y,
+    -center.z * inner.scale.z,
+  )
+  inner.add(scene)
+  const root = new Group()
+  root.add(inner)
+  return root
+}
+
+/**
+ * Per-instance clone of the normalized asset (geometry/materials shared,
+ * hierarchy cloned), conformed to the X-ray mesh conventions: every mesh
+ * raycast-disabled (`clone` does NOT carry an own raycast override, so
+ * this must run per clone — the X-ray never intercepts the host's event
+ * raycast, F2) and shadow-casting like the solid buckets.
+ */
+export function prepareCondenserClone(asset: Object3D): Object3D {
+  const clone = asset.clone(true)
+  clone.traverse((obj) => {
+    obj.raycast = () => {}
+    if ((obj as Mesh).isMesh) {
+      obj.castShadow = true
+      obj.receiveShadow = true
+    }
+  })
+  return clone
+}
+
+type CondenserAssetLoader = () => Promise<Object3D>
+
+/** Production loader — dynamic DEEP-path imports (never the Addons.js
+ * aggregate; its LottieLoader/TTFLoader CDN imports crash bun — same rule
+ * as the host's ktx2-loader), evaluated only in the browser: bun tests
+ * never call it (they inject a mock via the seam below). */
+const defaultLoader: CondenserAssetLoader = async () => {
+  const [{ GLTFLoader }, { DRACOLoader }] = await Promise.all([
+    import('three/examples/jsm/loaders/GLTFLoader.js'),
+    import('three/examples/jsm/loaders/DRACOLoader.js'),
+  ])
+  const draco = new DRACOLoader()
+  draco.setDecoderPath(DRACO_DECODER_PATH)
+  const loader = new GLTFLoader()
+  loader.setDRACOLoader(draco)
+  try {
+    const gltf = await loader.loadAsync(AC_BLOCK_GLB_URL)
+    return gltf.scene
+  } finally {
+    draco.dispose()
+  }
+}
+
+let loadImpl: CondenserAssetLoader = defaultLoader
+/** Deduped in-flight load; cleared on failure so a LATER call may retry. */
+let inflight: Promise<Object3D | null> | null = null
+/** The normalized, module-cached asset — loaded at most once per session. */
+let resolvedAsset: Object3D | null = null
+
+/**
+ * Load (once) and normalize the AC block asset. NEVER rejects: any failure
+ * resolves `null` and the caller keeps rendering the box — the swap is a
+ * progressive enhancement. A failed attempt clears the in-flight slot so
+ * the next activation retries (transient network); callers only re-invoke
+ * on mode/member changes, so there is no retry storm.
+ */
+export function loadCondenserAsset(): Promise<Object3D | null> {
+  if (resolvedAsset) return Promise.resolve(resolvedAsset)
+  if (!inflight) {
+    inflight = loadImpl().then(
+      (scene) => {
+        resolvedAsset = normalizeToUnitBox(scene)
+        return resolvedAsset
+      },
+      () => {
+        inflight = null
+        return null
+      },
+    )
+  }
+  return inflight
+}
+
+/** Synchronous snapshot for render paths — null until a load resolved. */
+export function condenserAssetSnapshot(): Object3D | null {
+  return resolvedAsset
+}
+
+/** Test seam: swap the loader (or `null` to restore the real one) and
+ * reset the cache, so headless tests drive BOTH the resolve and the
+ * reject path without any network or GL context. */
+export function __setCondenserAssetLoaderForTests(
+  loader: CondenserAssetLoader | null,
+): void {
+  loadImpl = loader ?? defaultLoader
+  inflight = null
+  resolvedAsset = null
+}
