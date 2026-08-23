@@ -470,6 +470,27 @@ describe('BUILDING CHARACTERISTICS block on the schedules sheet', () => {
     expect(sched?.svg).not.toContain('BUILDING CHARACTERISTICS')
   })
 
+  test('Manual-J-lite basis prints ON PAPER: the cooling figure names its load + the M1401.3 line', () => {
+    const mj: BuildingCharacteristics = {
+      ...characteristics,
+      coolingTonsEstimate: 0.28,
+      coolingBasis: 'manual-j-lite',
+    }
+    const sched = buildPlanSet([member({})], [], { characteristics: mj }).find((s) =>
+      s.title.startsWith('Schedules'),
+    )
+    const svg = sched?.svg ?? ''
+    expect(svg).toContain('Cooling ~0.3 ton (MANUAL J-LITE load)')
+    // (wrapRow may break the line — assert the wrap-safe pieces)
+    expect(svg).toContain('cooling per Manual J-LITE')
+    expect(svg).toContain('M1401.3')
+    expect(svg).toContain('verify local design conditions')
+    expect(svg).toContain('not a full Manual J')
+    expect(svg).not.toContain('RULE OF THUMB')
+    // legacy/fallback objects (no basis) keep the rule-of-thumb wording —
+    // the sibling test above pins it; the two strings never coexist
+  })
+
   test('coexists with flags: block stacks ABOVE the red flag list', () => {
     const flagged = member({ flag: 'ENGINEERED BEAM REQUIRED — exceeds prescriptive header span' })
     const sched = buildPlanSet([flagged], [], { characteristics }).find((s) =>

@@ -2333,12 +2333,19 @@ function schedulesSheets(
       ...wrapRow(
         noSlab
           ? `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ${na}`
-          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (RULE OF THUMB)`,
+          : `Envelope UA ${c.uaWPerK.toFixed(1)} W/K · Design heat loss ${c.designHeatLossW.toFixed(0)} W @ ΔT 22 K · Cooling ~${c.coolingTonsEstimate.toFixed(1)} ton (${c.coolingBasis === 'manual-j-lite' ? 'MANUAL J-LITE load' : 'RULE OF THUMB'})`,
         100,
       ),
-      // ~100 chars ≈ the column width at 9.5px — WRAPPED, never clipped
+      // ~100 chars ≈ the column width at 9.5px — WRAPPED, never clipped.
+      // The cooling basis prints truthfully: the Manual-J-lite figure says
+      // so (and that it is still not a FULL Manual J — M1401.3), the rule
+      // of thumb keeps its legacy wording.
       ...wrapRow(
-        `${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · schematic — not a Manual J`,
+        `${c.insulation.citation} · window U-0.32 assumed (2021 IECC R402.1.2) · ${
+          c.coolingBasis === 'manual-j-lite'
+            ? 'cooling per Manual J-LITE (M1401.3) — verify local design conditions; not a full Manual J'
+            : 'schematic — not a Manual J'
+        }`,
         100,
       ),
     )

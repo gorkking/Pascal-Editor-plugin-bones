@@ -1071,12 +1071,18 @@ AND a gate — a checklist line without a test is a wish.
   single-indoor-coil/exchanger assumption stated on its label PLUS a level
   warning (the duct machinery models one trunk network; inventing zoning
   dampers would be a lie). Tiny homes floor at 1 unit/1.5 tons.
+  The BUILDING CHARACTERISTICS cooling row prints the SAME load —
+  'Cooling load (Manual J-lite)' with the term-by-term basis notes (panel
+  rows, CSV and the schedules sheet's 'MANUAL J-LITE load' + M1401.3
+  basis line all switch together; the rule-of-thumb wording survives only
+  on the stated fallback and on pre-batch hand-built fixtures).
   Manual-J-lite gates: `src/engines/manual-j.test.ts` (hand-computed
   four-term load, zone divergence, fallback triggers, Manual S band) +
   the 'Manual-J-lite engine sizing' describe in
   `src/engines/hvac.condensers.test.ts` (hand-derived engine tonnage,
   5-ton split with A6 triple + row compose, climate divergence, band
-  warning, takeoff mirror).
+  warning, takeoff mirror) + the characteristics/paper coherence gates in
+  `src/engines/characteristics.test.ts` and `src/plans/plan-set.test.ts`.
   Every pad + cabinet sits OUTSIDE an exterior wall, ≥ 0.6 m clear between
   units, cabinet ≥ 0.3 m off the wall face (per mfr clearance + IRC M1403),
   the pad slab's inner edge clears the worst-case exterior assembly
