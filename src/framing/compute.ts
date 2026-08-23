@@ -684,6 +684,11 @@ function computeLevelUncached(
       return inside
     }
     for (const room of activeRooms) {
+      // OUTDOOR zones need no floor slab — a garden/terrace/yard over bare
+      // ground is not a defect, and the warning read as one (M4, day-9
+      // advisory: 'Room "Back garden" has no floor slab under it' beside a
+      // house whose garden is grass). Indoor rooms keep the call-out.
+      if (room.category === 'outdoor') continue
       const c = room.polygon.reduce<[number, number]>(
         (acc, p) => [acc[0] + p[0] / room.polygon.length, acc[1] + p[1] / room.polygon.length],
         [0, 0],

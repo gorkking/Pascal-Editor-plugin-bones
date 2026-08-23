@@ -1271,10 +1271,9 @@ AND a gate — a checklist line without a test is a wish.
   indoor-only tonnage, A4 seeding parity, B14 WR-GFCI + meter seam guard,
   classifier witnesses incl. 'Terrazzo entry' + head-noun/anchoring
   matrix, R314 warning pair + smoke-alarm compose pin + 'Master terrace'
-  speaks / 'Garden bedroom' silent pair, characteristics corners + paper
-  n/a strings, outdoor-only honesty),
-  `src/framing/compute.multistorey.test.ts` (outdoor slab-warning
-  exclusion, both directions).
+  speaks / 'Garden bedroom' silent pair, outdoor slab-warning exclusion
+  both directions, characteristics corners + paper n/a strings,
+  outdoor-only honesty).
 
 ## P — Plans (the exported document)
 

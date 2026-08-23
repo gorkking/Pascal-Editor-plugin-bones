@@ -857,6 +857,48 @@ describe('R314 open-air warning (round-2 advisory — E6 spirit)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// 4b. Room-coverage warning is INDOOR-only — a garden needs no slab (M4)
+// ---------------------------------------------------------------------------
+
+describe('room-coverage slab warning — outdoor zones excluded (day-9 advisory)', () => {
+  /** Garden house WITH a slab under the living zone only: the coverage
+   * walk runs (slabs.length > 0) and finds the garden uncovered. */
+  function slabbedGardenScene(): Record<string, Record<string, unknown>> {
+    const nodes = starterTemplateScene()
+    nodes.slab_living = {
+      id: 'slab_living',
+      type: 'slab',
+      parentId: 'level_0',
+      polygon: [
+        [-HOUSE_W, -HOUSE_D],
+        [HOUSE_W, -HOUSE_D],
+        [HOUSE_W, HOUSE_D],
+        [-HOUSE_W, HOUSE_D],
+      ],
+      elevation: 0,
+      thickness: 0.1,
+    }
+    return nodes
+  }
+
+  test('an OUTDOOR zone without a slab stays warning-free — bare ground is not a defect', () => {
+    const result = computeLevel(slabbedGardenScene(), config())
+    expect(
+      result.warnings.some((w) => w.includes('Back garden') && w.includes('no floor slab')),
+    ).toBe(false)
+  })
+
+  test('the SAME uncovered polygon under an indoor name still warns — the exclusion is category-scoped', () => {
+    const nodes = slabbedGardenScene()
+    ;(nodes.zone_garden as Record<string, unknown>).name = 'Storage annex'
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some((w) => w.includes('Storage annex') && w.includes('no floor slab')),
+    ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // 5. Zone-twin dedupe — the false countertop-warning exhibit (S8 class)
 // ---------------------------------------------------------------------------
 
