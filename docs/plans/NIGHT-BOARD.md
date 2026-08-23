@@ -1,3 +1,35 @@
+# NIGHT-10 (2026-08-22 → 23) — "you have a lot to do. Put in an all-nighter."
+
+## NIGHT-10 PLAN — drain the residual ledger + land the sizing batch
+IN FLIGHT AT KICKOFF: Manual-J-lite verify r1 (latent-load lead
+attack); heat-pump fast-follow visual check (election 486957c +
+AC-block eb27037 — ships TONIGHT on SHIP); z-fight duct×AH fix
+queued behind Manual-J's merge (same hvac.ts owner).
+WAVE A (launched, disjoint files):
+  1. feat/legend-grammar (plan-set.ts) — keyed symbols + legend rows
+     for straps/HDUs/portal posts/uplift roles (anchor-bolt-dot
+     class, 4 batches flagged) + C5 LOD-200 areas-fallback rows on
+     paper.
+  2. feat/zone-classifier-honesty (wall-model/compute/
+     characteristics) — zone-twin dedupe (S8), head-noun tie-break
+     + terrazza + substring traps (Kindergarden/Vineyard), outdoor
+     room-coverage warning exclusion, concrete sub-1yd³ note.
+  3. feat/electrical-outdoor-honesty (electrical.ts) — garden
+     ceiling-light fiction + R314 alarm never-outdoors + 210.52(A)
+     walk skip verification + B14 walk-removal ordinal stability.
+  4. feat/roof-residuals (roof-framing.ts + one wall-framing
+     string) — square-hip SAT, hip/crown sub-3:12 flags, sub-130mph
+     tie-scope label, B10 stale parenthetical.
+  5. fix/pointer-support-registry-leak (HOST editor repo) — the
+     night-8 CI flake (order-dependent registry mock leak) fixed at
+     both sides + gated; PR opened, not merged.
+WAVE B (behind merges): z-fight duct fix (post Manual-J); Manual-J
+fix rounds; yawed-section euler bands (post legend merge — same
+plan-set owner). SHIPS: heat-pump fast-follow tonight; dawn ship for
+the night's accumulation; morning review file.
+DEFERRED TO JULIEN: auto-assume room from slab (product call, asked
+day-9, unanswered); GPU eyeball items; hover-glow verdict (carried).
+
 # DAY-9 LIVE QUEUE (evening)
 - Z-FIGHT at duct×air-handler junction (Julien screenshots, day-9):
   the supply trunk's end face is COPLANAR with the AH/plenum cabinet
