@@ -487,12 +487,25 @@ function computeLevelUncached(
       `${duplicateOf.size} duplicate overlapping wall${duplicateOf.size > 1 ? 's' : ''} skipped (framed once, not twice)`,
     )
   }
-  const rooms = extractRooms(nodes, levelId)
-  // R314 never drops silently (round-2 advisory): a LEADING outdoor
-  // qualifier can reclassify a sleeping-word name outdoors ('Outdoor
-  // bedroom' → open air), which strips its smoke alarm — the only path to
-  // category 'outdoor' with a sleeping word in the name, since the
-  // compound-name precedence keeps 'Garden bedroom' indoors. Say so.
+  // Zone twins (S8 class): duplicated zones sharing a polygon collapse to
+  // ONE room at extraction — a twin used to make the honesty warnings
+  // contradict the sheets ('countertop not modeled' for the sink-less twin
+  // while the other twin's counter run was drawn) and welded B13's false
+  // traveler. Say so, like the wall dedupe above.
+  const zoneTwins: { kept: string; dropped: string }[] = []
+  const rooms = extractRooms(nodes, levelId, zoneTwins)
+  for (const twin of zoneTwins) {
+    warnings.push(
+      `duplicate zone “${twin.dropped}” shares “${twin.kept}”'s polygon — merged (classified once, not twice)`,
+    )
+  }
+  // R314 never drops silently (round-2 advisory + day-9 head-noun): a
+  // LEADING outdoor qualifier ('Outdoor bedroom') OR an outdoor HEAD NOUN
+  // ('Master terrace', 'Bedroom terrace') can classify a sleeping-word
+  // name outdoors, which strips its smoke alarm — the check keys on the
+  // RESULT (category + name), so every path that lands a sleeping-word
+  // name in 'outdoor' speaks; 'Garden bedroom' stays indoors (head noun)
+  // and stays silent. Say so.
   for (const room of rooms) {
     if (room.category === 'outdoor' && SLEEPING_NAME_RE.test(room.name)) {
       warnings.push(
@@ -671,6 +684,11 @@ function computeLevelUncached(
       return inside
     }
     for (const room of activeRooms) {
+      // OUTDOOR zones need no floor slab — a garden/terrace/yard over bare
+      // ground is not a defect, and the warning read as one (M4, day-9
+      // advisory: 'Room "Back garden" has no floor slab under it' beside a
+      // house whose garden is grass). Indoor rooms keep the call-out.
+      if (room.category === 'outdoor') continue
       const c = room.polygon.reduce<[number, number]>(
         (acc, p) => [acc[0] + p[0] / room.polygon.length, acc[1] + p[1] / room.polygon.length],
         [0, 0],

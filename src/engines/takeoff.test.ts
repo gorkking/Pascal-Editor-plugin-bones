@@ -315,7 +315,12 @@ describe('concrete', () => {
       [],
     )
     expect(find(rows, 'Concrete', 'footings — +5% waste ≈ 1.4 yd³')?.section).toBe('Foundation')
-    const lintelRow = find(rows, 'Concrete', 'lintels/beams — +5% waste ≈ 0.1 yd³')
+    // sub-batch pour (net 0.1 == order 0.1): the display-collapse note
+    // rides the detail — match on the stable prefix here, wording gated
+    // in full in the collapse test below
+    const lintelRow = rows.find(
+      (r) => r.item === 'Concrete' && r.detail.startsWith('lintels/beams — +5% waste ≈ 0.1 yd³'),
+    )
     expect(lintelRow?.section).toBe('Wall framing')
     expect(lintelRow?.quantity).toBe(0.1) // 0.0433 m³ floors at the 0.1 yd³ batch
   })
@@ -323,6 +328,27 @@ describe('concrete', () => {
   test('a real but tiny pour never rounds to 0.0 yd³', () => {
     const rows = computeTakeoff([concrete([0.3, 0.19, 0.19], { role: 'lintel' })], [])
     expect(find(rows, 'Concrete')?.quantity).toBe(0.1)
+  })
+
+  test('sub-batch display collapse SAYS WHY the figures meet (B21e r2 advisory)', () => {
+    // The '0.6 == buy 0.6' exhibit: 5% of a small pour is smaller than one
+    // 0.1 yd³ display step, so net and ceiled order figure PRINT identically
+    // and the stated factor read as adding zero. 0.4358 m³ = 0.5700 yd³ →
+    // net 0.6; × 1.05 = 0.5985 → ceil 0.6 — a REAL collapse case.
+    const m3 = 2 * 0.5 * 0.4358
+    const net = Math.max(0.1, Math.round(m3 * 1.30795 * 10) / 10)
+    const buy = Math.ceil(m3 * 1.30795 * 1.05 * 10) / 10
+    expect(buy).toBe(net) // scenario reality check: both display as 0.6
+    const rows = computeTakeoff([concrete([2, 0.5, 0.4358])], [])
+    const row = rows.find((r) => r.item === 'Concrete')
+    expect(row?.quantity).toBe(net) // zero quantity drift — wording only
+    expect(row?.detail).toBe(
+      'footings — +5% waste ≈ 0.6 yd³ (waste smaller than the 0.1 yd³ display step — net and order figures meet at display rounding)',
+    )
+    // …and a pour whose order figure clears the display step stays
+    // note-free, byte-for-byte (the non-collapse direction)
+    const big = computeTakeoff([concrete([2, 0.5, 1]), concrete([2, 0.5, 1])], [])
+    expect(find(big, 'Concrete')?.detail).toBe('footings — +5% waste ≈ 2.8 yd³')
   })
 })
 

@@ -539,11 +539,22 @@ export function computeTakeoff(
     // The BUY figure CEILS to the 0.1 yd³ batch (skeptic r1 F1): round1
     // could round the +5% back DOWN onto the net figure — a stated factor
     // that adds zero — while every other class already ceils its buy.
+    const netYd = Math.max(0.1, round1(pour.m3 * M3_TO_YD3))
+    const buyYd = Math.ceil(pour.m3 * M3_TO_YD3 * (1 + CONCRETE_WASTE) * 10) / 10
+    // Sub-batch display collapse (B21e r2 advisory): on small pours 5% is
+    // smaller than one 0.1 yd³ display step, so the net quantity and the
+    // ceiled order figure PRINT as the same number ('0.6 … ≈ 0.6 yd³') and
+    // the stated factor reads as adding zero. Say why the figures meet —
+    // wording only, the quantity stays the net pour volume.
+    const collapseNote =
+      buyYd === netYd
+        ? ' (waste smaller than the 0.1 yd³ display step — net and order figures meet at display rounding)'
+        : ''
     push(
       pour.section,
       'Concrete',
-      `${pour.detail} — +${pctOf(CONCRETE_WASTE)} waste ≈ ${Math.ceil(pour.m3 * M3_TO_YD3 * (1 + CONCRETE_WASTE) * 10) / 10} yd³`,
-      Math.max(0.1, round1(pour.m3 * M3_TO_YD3)),
+      `${pour.detail} — +${pctOf(CONCRETE_WASTE)} waste ≈ ${buyYd} yd³${collapseNote}`,
+      netYd,
       'yd³',
     )
   }

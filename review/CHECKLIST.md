@@ -388,7 +388,13 @@ AND a gate — a checklist line without a test is a wish.
   concrete BUY figure ceils to the 0.1 yd³ ready-mix batch (r1 F1: a
   round that collapses onto the net states a factor adding zero), and
   every printed '+X%' derives from the factor constant itself, so the
-  label can never drift from the arithmetic. The roof deck's under-tile
+  label can never drift from the arithmetic. SUB-BATCH pours (r2
+  advisory, night-10): when 5% is smaller than one 0.1 yd³ display step
+  the ceiled order figure and the net PRINT identically ('0.6 … ≈ 0.6')
+  — the detail then states the basis ('waste smaller than the 0.1 yd³
+  display step — net and order figures meet at display rounding'),
+  wording only, zero quantity drift; pours that clear the step stay
+  note-free byte-for-byte. The roof deck's under-tile
   caveat states that the exact scene-dependent shortfall sits ON TOP of
   the generic stated waste.
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
@@ -414,7 +420,8 @@ AND a gate — a checklist line without a test is a wish.
   describe (net-preservation per class, stated-factor buy figures
   re-derived from the same net arithmetic, gross-only-on-fallback
   header honesty, subfloor label both paths, demo-compose enumeration
-  in BOTH directions, lap-vs-waste distinction)
+  in BOTH directions, lap-vs-waste distinction, sub-batch display
+  collapse note both directions)
 - **S5 A mixed CMU/framed wall seams on a whole course and tops out at its
   architectural height.** The override `{ construction: 'cmu', cmuHeightM }`
   splits the wall at `snapCmuHeight` (8" module, R606 coursing): bond beam as
@@ -489,6 +496,23 @@ AND a gate — a checklist line without a test is a wish.
   twin carried; the card's opening count includes merged ones. Kept-only
   walls stay reference-equal. Gates: `src/framing/compute.test.ts`
   (dedupe describe block).
+  ZONE TWINS (same class, night-10): duplicate zones sharing a polygon
+  (vertex-for-vertex within 1 cm, any start vertex / winding, same level)
+  collapse to ONE room AT EXTRACTION (`extractRooms` — every consumer
+  sees the deduped census, A4 parity). Tiebreak, stated: a CATEGORIZED
+  name beats 'other' (engines key on category), then the LONGER trimmed
+  name, then the smaller id; the dropped twin's boundaryWallIds union
+  onto the kept room (the opening-merge mirror) and room ORDER stays
+  scene order (circuit numbering is byte-pinned to it). compute warns
+  'duplicate zone … merged (classified once, not twice)' — the twin used
+  to make honesty warnings contradict the sheets (the demo's
+  'Living / Kitchen' twin printed 'countertop receptacles … not modeled'
+  while the other twin's counter run was drawn; B13's false-traveler
+  root). Genuinely distinct zones (≥ 5 cm apart) never merge. Gates:
+  `src/core/wall-model.test.ts` (zone-twin dedupe describe: tiebreak
+  matrix, tolerance both directions, winding/rotation, wallId union,
+  order pin), `src/framing/starter-template.test.ts` (false
+  countertop-warning exhibit + real-two-kitchens keep).
 - **S9 The Engineering cladding choice reads in BOTH render modes.** Every
   CLADDING_OPTIONS family emits ≥ 1 member (ROLE_OF covers veneer/lamina/
   foam/drainage) with a per-family X-ray color (label-matched, pairwise
@@ -1208,16 +1232,24 @@ AND a gate — a checklist line without a test is a wish.
   sections), `src/plans/plan-set.test.ts` (return tone + legend rows).
 - **M4 Outdoor zones are OPEN AIR — classified, unserved by HVAC, and
   honestly reported.** A zone named for the outdoors (garden/yard/patio/
-  terrace|terrasse|terraza — anchored forms, material adjectives like
-  'Terrazzo'/'Terracotta' never match — deck/porch/balcon/lanai/pergola/
+  terrace|terrasse|terraza|terrazza — anchored forms, material adjectives
+  like 'Terrazzo'/'Terracotta' never match; garden/yard are WORD-anchored
+  (day-9 misfire list — 'Kindergarden'/'Vineyard cellar' never classify)
+  with courtyard/backyard/frontyard + plurals as their own anchored
+  compounds — deck/porch/balcon/lanai/pergola/
   jardin/outdoor/outside/exterior) classifies category 'outdoor'; compound
-  names resolve INDOOR-first ('Garden bedroom' is a bedroom and keeps its
-  R314 alarm) unless the outdoor word LEADS as a qualifier
-  (outdoor|outside|exterior|roof — 'Outdoor kitchen', 'Roof terrace'), and
-  a leading-qualifier reclassification of a sleeping-word name WARNS
-  ('reads as open-air — no smoke alarm placed (R314)'), never silent; the
+  names resolve by HEAD NOUN — the LAST matching word is the thing the
+  room IS (day-9 refinement: 'Garden bedroom' is a bedroom and keeps its
+  R314 alarm; 'Master terrace'/'Bedroom terrace' are terraces, open air) —
+  and an outdoor word LEADING as a qualifier flips outdoors regardless
+  (outdoor|outside|exterior|roof — 'Outdoor kitchen', 'Roof terrace');
+  EVERY path that lands a sleeping-word name in 'outdoor' WARNS
+  ('reads as open-air — no smoke alarm placed (R314)') — the check keys on
+  the RESULT (category + SLEEPING_NAME_RE), never on one branch; the
   'Winter garden'/'Garden room' conservatory class stays outdoor by
-  design. HVAC serves indoor rooms only (no supply register, no tonnage,
+  design. An outdoor zone needs NO floor slab — the room-coverage warning
+  ('has no floor slab under it') is indoor-only, while an indoor room
+  without flooring still warns. HVAC serves indoor rooms only (no supply register, no tonnage,
   never the equipment room / thermostat / heat-pump anchor — filtered at
   every exported rooms-boundary, A4 parity with seeding and the panel); an
   outdoor-only level composes NO air handler, hence honestly no condenser
@@ -1237,13 +1269,17 @@ AND a gate — a checklist line without a test is a wish.
   Origin: prod starter-template report 2026-08-22 ("I don't see the heat
   pump standing outside the house") + skeptic/examiner rounds 1-4
   (terrazzo harm class, R314 drop, yard-inflated sheet figure, terrace
-  slab-outdoor corner, stale n/a reason).
+  slab-outdoor corner, stale n/a reason) + day-9 skeptic misfire list
+  (head-noun tie-break both directions, terrazza, Kindergarden/Vineyard
+  substring traps, outdoor slab-warning exclusion — night-10).
   Gates: `src/framing/starter-template.test.ts` (starter-template compose
   pin: whole-shell election, unflagged condenser outside the footprint +
   NEC 440.14 disconnect + E2 line-set, no HVAC in the outdoor zone,
   indoor-only tonnage, A4 seeding parity, B14 WR-GFCI + meter seam guard,
-  classifier witnesses incl. 'Terrazzo entry', R314 warning pair +
-  smoke-alarm compose pin, characteristics corners + paper n/a strings,
+  classifier witnesses incl. 'Terrazzo entry' + head-noun/anchoring
+  matrix, R314 warning pair + smoke-alarm compose pin + 'Master terrace'
+  speaks / 'Garden bedroom' silent pair, outdoor slab-warning exclusion
+  both directions, characteristics corners + paper n/a strings,
   outdoor-only honesty).
 
 ## P — Plans (the exported document)

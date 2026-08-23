@@ -377,9 +377,10 @@ export function extractLevels(nodes: NodesRecord): LevelSlice[] {
 }
 
 /** Sleeping-area name words — the bedroom row below, and exported so the
- * compose can WARN when the leading-qualifier branch reclassifies a
- * sleeping-word name outdoors ('Outdoor bedroom' → open air → NO smoke
- * alarm placed; R314 must never drop silently — round-2 advisory). */
+ * compose can WARN when a name carrying a sleeping word classifies
+ * outdoors ('Outdoor bedroom' via the leading qualifier, 'Master terrace'
+ * via the head noun → open air → NO smoke alarm placed; R314 must never
+ * drop silently — round-2 + day-9 advisories). */
 export const SLEEPING_NAME_RE = /bed|chambre|master|primary/i
 
 const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
@@ -393,47 +394,145 @@ const ROOM_PATTERNS: [RegExp, RoomSlice['category']][] = [
 
 /** Outdoor names (open air — never conditioned/habitable; starter-template
  * 'Back garden' zone, 2026-08-22). The terrace forms are spelled OUT
- * (terrace|terrasse|terraza) so material adjectives never match: a
+ * (terrace|terrasse|terraza|terrazza) so material adjectives never match: a
  * 'Terrazzo bathroom' is a bathroom (plumbing stubs, exhaust fan, wet
  * GFCI), a 'Terracotta kitchen' a kitchen (skeptic round-1 harm class).
+ * garden/yard are WORD-ANCHORED (day-9 skeptic misfire list): a
+ * 'Kindergarden' is a child's room and a 'Vineyard cellar' a cellar —
+ * substrings never classify — while the legitimate one-word compounds
+ * keep their own anchored forms (courtyard/backyard/frontyard, plurals).
  * 'balcon' covers balcony/balcon/balcón; 'lanai' is the FL porch. */
 const OUTDOOR_RE =
-  /garden|yard|patio|terrace|terrasse|terraza|deck|porch|balcon|lanai|pergola|jardin|outdoor|outside|exterior/i
+  /\bgardens?\b|\b(?:court|back|front)?yards?\b|patio|terrace|terrasse|terraza|terrazza|deck|porch|balcon|lanai|pergola|jardin|outdoor|outside|exterior/i
 
 /** A LEADING outdoor qualifier flips a compound name outdoors: an 'Outdoor
  * kitchen' or 'Roof terrace' is open air even where the trailing word alone
  * would classify indoor. */
 const OUTDOOR_QUALIFIER_RE = /^\s*(outdoor|outside|exterior|roof)\b/i
 
+/** Start index of the LAST match of `re` in `name`, −1 when none. The
+ * head-noun tie-break reads compound names right-to-left: room names put
+ * the head noun LAST ('Master terrace' is a terrace, 'Garden bedroom' a
+ * bedroom), so the later match is the thing the room IS. */
+function lastMatchIndex(re: RegExp, name: string): number {
+  const g = new RegExp(re.source, re.flags.includes('g') ? re.flags : `${re.flags}g`)
+  let idx = -1
+  for (let m = g.exec(name); m !== null; m = g.exec(name)) {
+    idx = m.index
+    if (g.lastIndex === m.index) g.lastIndex++ // zero-width safety
+  }
+  return idx
+}
+
 /**
  * Classify a zone name into the room categories the MEP engines key on.
  *
- * Compound-name precedence (skeptic round-1): when a name carries BOTH an
- * indoor category word and an outdoor keyword, the INDOOR category wins —
- * a 'Garden bedroom' is a bedroom (it keeps its R314 smoke alarm), a
- * 'Patio kitchen' a kitchen — UNLESS the outdoor word LEADS as a qualifier
- * (OUTDOOR_QUALIFIER_RE): an 'Outdoor kitchen' is open air. A name with an
- * outdoor keyword and NO indoor category word stays outdoor: 'Back garden',
- * 'Roof terrace' — and deliberately also 'Winter garden' / 'Garden room'
- * ('room' is not a category word; a conservatory is unconditioned glass
- * space until the user renames or re-zones it — the defensible reading).
+ * Compound-name precedence (skeptic round-1, head-noun refinement day-9):
+ * when a name carries BOTH an indoor category word and an outdoor keyword,
+ * the HEAD NOUN — the LAST matching word — wins: a 'Garden bedroom' is a
+ * bedroom (it keeps its R314 smoke alarm), a 'Patio kitchen' a kitchen,
+ * while a 'Master terrace' / 'Bedroom terrace' is a terrace (open air; the
+ * compose still speaks for the dropped alarm via SLEEPING_NAME_RE). A tie
+ * cannot arise from distinct words; equal indices keep the INDOOR reading
+ * (conservative — life-safety machinery stays). A LEADING outdoor
+ * qualifier (OUTDOOR_QUALIFIER_RE) still flips outdoors regardless: an
+ * 'Outdoor kitchen' is open air even though 'kitchen' is the head noun.
+ * A name with an outdoor keyword and NO indoor category word stays
+ * outdoor: 'Back garden', 'Roof terrace' — and deliberately also
+ * 'Winter garden' / 'Garden room' ('room' is not a category word; a
+ * conservatory is unconditioned glass space until the user renames or
+ * re-zones it — the defensible reading). The indoor CATEGORY itself keeps
+ * ROOM_PATTERNS order ('Master bath' is a bathroom, not a bedroom).
  */
 export function classifyRoom(name: string): RoomSlice['category'] {
   let indoor: RoomSlice['category'] | null = null
+  let indoorLast = -1
   for (const [pattern, category] of ROOM_PATTERNS) {
-    if (pattern.test(name)) {
-      indoor = category
-      break
-    }
+    const at = lastMatchIndex(pattern, name)
+    if (at < 0) continue
+    if (indoor === null) indoor = category
+    if (at > indoorLast) indoorLast = at
   }
-  if (OUTDOOR_RE.test(name) && (indoor === null || OUTDOOR_QUALIFIER_RE.test(name))) {
+  const outdoorLast = lastMatchIndex(OUTDOOR_RE, name)
+  if (
+    outdoorLast >= 0 &&
+    (indoor === null || OUTDOOR_QUALIFIER_RE.test(name) || outdoorLast > indoorLast)
+  ) {
     return 'outdoor'
   }
   return indoor ?? 'other'
 }
 
-/** Extract named rooms (zones) on `levelId`. */
-export function extractRooms(nodes: NodesRecord, levelId: string): RoomSlice[] {
+/** Zone-twin tolerance (m): two zones whose polygons match vertex-for-vertex
+ * within this distance are the SAME drawn space duplicated (host zone
+ * duplication / re-detection drift), not two rooms. 1 cm — float drift and
+ * re-snap jitter live well under it; genuinely distinct zones (even twins
+ * shifted a wall thickness apart) sit far above it. */
+const ZONE_TWIN_TOL = 0.01
+
+/** Vertex-for-vertex polygon identity within ZONE_TWIN_TOL, under any
+ * cyclic offset in either winding order (the host re-detects zones with
+ * arbitrary start vertex / orientation). */
+function sameZonePolygon(
+  a: readonly (readonly [number, number])[],
+  b: readonly (readonly [number, number])[],
+): boolean {
+  const n = a.length
+  if (n !== b.length) return false
+  const close = (p: readonly [number, number], q: readonly [number, number]): boolean =>
+    Math.hypot(p[0] - q[0], p[1] - q[1]) <= ZONE_TWIN_TOL
+  for (const dir of [1, -1]) {
+    for (let off = 0; off < n; off++) {
+      let ok = true
+      for (let i = 0; i < n; i++) {
+        const j = (((off + dir * i) % n) + n) % n
+        const bj = b[j]
+        const ai = a[i]
+        if (!ai || !bj || !close(ai, bj)) {
+          ok = false
+          break
+        }
+      }
+      if (ok) return true
+    }
+  }
+  return false
+}
+
+/** Zone-twin tiebreak — which twin is the room (S8 class, stated):
+ * (1) a CATEGORIZED name beats 'other' — the MEP engines key on category,
+ *     so a 'Kitchen' twin outranks its 'Living' twin (the counter walk,
+ *     GFCI zones, register land once, on the honest name);
+ * (2) then the LONGER trimmed name (more descriptive: 'Living / Kitchen'
+ *     beats 'Kitchen');
+ * (3) then the lexicographically smaller id (deterministic across hosts —
+ *     object insertion order is not a contract). */
+function betterZoneTwin(a: RoomSlice, b: RoomSlice): RoomSlice {
+  const rank = (r: RoomSlice): number => (r.category === 'other' ? 0 : 1)
+  if (rank(a) !== rank(b)) return rank(a) > rank(b) ? a : b
+  const an = a.name.trim().length
+  const bn = b.name.trim().length
+  if (an !== bn) return an > bn ? a : b
+  return a.id <= b.id ? a : b
+}
+
+/**
+ * Extract named rooms (zones) on `levelId`, DEDUPED: zone twins — same
+ * polygon within ZONE_TWIN_TOL on the same level — collapse to ONE room
+ * (kept per betterZoneTwin; the dropped twin's boundaryWallIds union onto
+ * the kept room, mirroring S8's opening merge). Duplicate zones made the
+ * honesty warnings contradict the sheets: the demo's 'Living / Kitchen'
+ * twin fired 'countertop receptacles not modeled' for the sink-less twin
+ * while the OTHER twin's counter run was drawn — and welded B13's false
+ * cross-circuit traveler. Every extractRooms consumer (compute, seeding,
+ * panel) sees the same deduped census (A4 parity). `twinLog`, when passed,
+ * collects the merges so computeLevel can say so.
+ */
+export function extractRooms(
+  nodes: NodesRecord,
+  levelId: string,
+  twinLog?: { kept: string; dropped: string }[],
+): RoomSlice[] {
   const rooms: RoomSlice[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'zone' || node.parentId !== levelId) continue
@@ -453,5 +552,29 @@ export function extractRooms(nodes: NodesRecord, levelId: string): RoomSlice[] {
       ceilingHeight: num(node.ceilingHeight, 2.7),
     })
   }
-  return rooms
+  // Room ORDER is a downstream contract (circuit numbering walks rooms in
+  // scene order — byte-equality): dedupe in place, never re-sort. The
+  // WINNER is still insertion-order-independent — betterZoneTwin is a
+  // strict total order (category rank, name length, then id).
+  const kept: RoomSlice[] = []
+  for (const room of rooms) {
+    const twinAt = kept.findIndex((k) => sameZonePolygon(k.polygon, room.polygon))
+    if (twinAt < 0) {
+      kept.push(room)
+      continue
+    }
+    const incumbent = kept[twinAt] as RoomSlice
+    const winner = betterZoneTwin(incumbent, room)
+    const loser = winner === incumbent ? room : incumbent
+    const mergedWallIds = [
+      ...winner.boundaryWallIds,
+      ...loser.boundaryWallIds.filter((id) => !winner.boundaryWallIds.includes(id)),
+    ]
+    kept[twinAt] =
+      mergedWallIds.length === winner.boundaryWallIds.length
+        ? winner
+        : { ...winner, boundaryWallIds: mergedWallIds }
+    twinLog?.push({ kept: winner.name || winner.id, dropped: loser.name || loser.id })
+  }
+  return kept
 }

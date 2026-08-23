@@ -136,6 +136,99 @@ describe('extractSlabs / extractLevels / extractRooms', () => {
   })
 })
 
+describe('extractRooms — zone-twin dedupe (S8 class)', () => {
+  const BASE: [number, number][] = [
+    [0, 0],
+    [6, 0],
+    [6, 4],
+    [0, 4],
+  ]
+  const zoneNode = (
+    id: string,
+    name: string,
+    polygon: [number, number][],
+    boundaryWallIds: string[] = [],
+  ): Record<string, unknown> => ({ id, type: 'zone', parentId: 'level_z', name, polygon, boundaryWallIds })
+  const scene = (
+    ...zones: Record<string, unknown>[]
+  ): Record<string, Record<string, unknown>> => ({
+    level_z: { id: 'level_z', type: 'level', level: 0, height: 2.7 },
+    ...Object.fromEntries(zones.map((z) => [String(z.id), z])),
+  })
+  const shift = (poly: [number, number][], dx: number, dz: number): [number, number][] =>
+    poly.map(([x, z]) => [x + dx, z + dz])
+
+  test('exact twins collapse to ONE room; the CATEGORIZED name beats "other"', () => {
+    const log: { kept: string; dropped: string }[] = []
+    const rooms = extractRooms(scene(zoneNode('z_a', 'Living', BASE), zoneNode('z_b', 'Kitchen', BASE)), 'level_z', log)
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]?.name).toBe('Kitchen')
+    expect(rooms[0]?.category).toBe('kitchen')
+    expect(log).toEqual([{ kept: 'Kitchen', dropped: 'Living' }])
+  })
+
+  test('5 mm re-detection drift still merges; the LONGER name wins among equals', () => {
+    const rooms = extractRooms(
+      scene(zoneNode('z_a', 'Kitchen', BASE), zoneNode('z_b', 'Living / Kitchen', shift(BASE, 0.005, 0.005))),
+      'level_z',
+    )
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]?.name).toBe('Living / Kitchen')
+  })
+
+  test('rotated start vertex and reversed winding are the SAME polygon', () => {
+    const rotated: [number, number][] = [
+      [6, 0],
+      [6, 4],
+      [0, 4],
+      [0, 0],
+    ]
+    const reversed = [...BASE].reverse() as [number, number][]
+    expect(extractRooms(scene(zoneNode('z_a', 'Kitchen', BASE), zoneNode('z_b', 'Living', rotated)), 'level_z')).toHaveLength(1)
+    expect(extractRooms(scene(zoneNode('z_a', 'Kitchen', BASE), zoneNode('z_b', 'Living', reversed)), 'level_z')).toHaveLength(1)
+  })
+
+  test('genuinely distinct zones NEVER merge — 5 cm offset is two rooms', () => {
+    const rooms = extractRooms(
+      scene(zoneNode('z_a', 'Kitchen', BASE), zoneNode('z_b', 'Kitchen 2', shift(BASE, 0.05, 0))),
+      'level_z',
+    )
+    expect(rooms).toHaveLength(2)
+  })
+
+  test("the dropped twin's boundaryWallIds union onto the kept room (S8 opening-merge mirror)", () => {
+    const rooms = extractRooms(
+      scene(zoneNode('z_a', 'Living', BASE, ['wall_1', 'wall_2']), zoneNode('z_b', 'Kitchen', BASE, ['wall_2', 'wall_3'])),
+      'level_z',
+    )
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]?.boundaryWallIds).toEqual(['wall_2', 'wall_3', 'wall_1'])
+  })
+
+  test('full ties break on the smaller id — deterministic across hosts', () => {
+    const rooms = extractRooms(
+      scene(zoneNode('z_b', 'Kitchen', BASE), zoneNode('z_a', 'Cuisine', BASE)),
+      'level_z',
+    )
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]?.id).toBe('z_a')
+  })
+
+  test('room order stays SCENE order — dedupe never re-sorts (byte-equality contract)', () => {
+    const other: [number, number][] = [
+      [10, 0],
+      [16, 0],
+      [16, 4],
+      [10, 4],
+    ]
+    const rooms = extractRooms(
+      scene(zoneNode('z_x', 'Bedroom', other), zoneNode('z_y', 'Living', BASE), zoneNode('z_z', 'Kitchen', BASE)),
+      'level_z',
+    )
+    expect(rooms.map((r) => r.name)).toEqual(['Bedroom', 'Kitchen'])
+  })
+})
+
 describe('classifyRoom', () => {
   test('multilingual room names', () => {
     expect(classifyRoom('Master Bedroom')).toBe('bedroom')

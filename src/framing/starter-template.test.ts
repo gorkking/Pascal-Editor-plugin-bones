@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { classifyRoom } from '../core/wall-model'
+import { classifyRoom, extractRooms } from '../core/wall-model'
 import type { Fixture, Member, RoomSlice, SlabSlice } from '../core/types'
 import {
   characteristicsRows,
@@ -342,11 +342,12 @@ describe('classifyRoom — outdoor zones', () => {
     expect(classifyRoom('Terracotta foyer')).toBe('other')
   })
 
-  test('compound names: the indoor category wins unless the outdoor word LEADS', () => {
+  test('compound names: the HEAD NOUN wins unless the outdoor word LEADS', () => {
     // 'Garden bedroom' is a bedroom — it keeps its R314 smoke alarm
     expect(classifyRoom('Garden bedroom')).toBe('bedroom')
     expect(classifyRoom('Patio kitchen')).toBe('kitchen')
     expect(classifyRoom('Garden bath')).toBe('bathroom')
+    expect(classifyRoom('Terrace bedroom')).toBe('bedroom')
     // leading qualifier flips outdoors
     expect(classifyRoom('Outdoor kitchen')).toBe('outdoor')
     expect(classifyRoom('Exterior hall')).toBe('outdoor')
@@ -355,6 +356,35 @@ describe('classifyRoom — outdoor zones', () => {
     // user renames or re-zones it
     expect(classifyRoom('Winter garden')).toBe('outdoor')
     expect(classifyRoom('Garden room')).toBe('outdoor')
+  })
+
+  test('head-noun tie-break (day-9 misfire list): a trailing outdoor word IS the room', () => {
+    // both directions of the compound class: the LAST matching word is the
+    // thing the room is — a 'Master terrace' is a terrace (open air; the
+    // R314 warning speaks for the dropped alarm, gated below), a
+    // 'Garden bedroom' a bedroom (pinned above)
+    expect(classifyRoom('Master terrace')).toBe('outdoor')
+    expect(classifyRoom('Bedroom terrace')).toBe('outdoor')
+    expect(classifyRoom('Bedroom balcony')).toBe('outdoor')
+    expect(classifyRoom('Kitchen garden')).toBe('outdoor') // the vegetable plot
+    // the indoor CATEGORY keeps ROOM_PATTERNS order, not name order
+    expect(classifyRoom('Master bath')).toBe('bathroom')
+  })
+
+  test('Italian terrazza is an anchored terrace form; Terrazzo still is not', () => {
+    expect(classifyRoom('Terrazza')).toBe('outdoor')
+    expect(classifyRoom('Terrazza coperta')).toBe('outdoor')
+    expect(classifyRoom('Terrazzo entry')).toBe('other') // material adjective
+  })
+
+  test('garden/yard are word-anchored — substrings never classify (day-9 traps)', () => {
+    expect(classifyRoom('Kindergarden')).toBe('other') // a child's room, not a garden
+    expect(classifyRoom('Vineyard cellar')).toBe('other') // a cellar, not a yard
+    expect(classifyRoom('Gardenia room')).toBe('other')
+    // …while the legitimate one-word compounds + plurals keep matching
+    expect(classifyRoom('Courtyard')).toBe('outdoor')
+    expect(classifyRoom('Backyard')).toBe('outdoor')
+    expect(classifyRoom('Gardens')).toBe('outdoor')
   })
 
   test('a Garden bedroom KEEPS its smoke alarms in the compose (R314 pin)', () => {
@@ -790,5 +820,158 @@ describe('R314 open-air warning (round-2 advisory — E6 spirit)', () => {
     ;(nodes.zone_bed as Record<string, unknown>).name = 'Outdoor kitchen'
     const result = computeLevel(nodes, config())
     expect(result.warnings.some((w) => w.includes('reads as open-air'))).toBe(false)
+  })
+
+  test('a "Master terrace" (head-noun outdoor) SPEAKS: warning fires, alarm honestly gone', () => {
+    // the day-9 head-noun tie-break opens a SECOND path to category
+    // 'outdoor' with a sleeping word in the name — the warning keys on the
+    // RESULT (category + SLEEPING_NAME_RE), so it must fire here too
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Master terrace'
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes('Master terrace') && w.includes('reads as open-air') && w.includes('R314'),
+      ),
+    ).toBe(true)
+    // the warning tells the truth: no alarm was placed for it
+    expect(
+      result.fixtures.some(
+        (f) => f.kind === 'smoke-alarm' && f.label?.includes('Master terrace'),
+      ),
+    ).toBe(false)
+  })
+
+  test('a "Garden bedroom" (head noun indoor) keeps its alarm and stays warning-free', () => {
+    const nodes = indoorNoSlabScene()
+    ;(nodes.zone_bed as Record<string, unknown>).name = 'Garden bedroom'
+    const result = computeLevel(nodes, config())
+    expect(result.warnings.some((w) => w.includes('reads as open-air'))).toBe(false)
+    expect(
+      result.fixtures.some(
+        (f) => f.kind === 'smoke-alarm' && f.label?.includes('Garden bedroom'),
+      ),
+    ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 4b. Room-coverage warning is INDOOR-only — a garden needs no slab (M4)
+// ---------------------------------------------------------------------------
+
+describe('room-coverage slab warning — outdoor zones excluded (day-9 advisory)', () => {
+  /** Garden house WITH a slab under the living zone only: the coverage
+   * walk runs (slabs.length > 0) and finds the garden uncovered. */
+  function slabbedGardenScene(): Record<string, Record<string, unknown>> {
+    const nodes = starterTemplateScene()
+    nodes.slab_living = {
+      id: 'slab_living',
+      type: 'slab',
+      parentId: 'level_0',
+      polygon: [
+        [-HOUSE_W, -HOUSE_D],
+        [HOUSE_W, -HOUSE_D],
+        [HOUSE_W, HOUSE_D],
+        [-HOUSE_W, HOUSE_D],
+      ],
+      elevation: 0,
+      thickness: 0.1,
+    }
+    return nodes
+  }
+
+  test('an OUTDOOR zone without a slab stays warning-free — bare ground is not a defect', () => {
+    const result = computeLevel(slabbedGardenScene(), config())
+    expect(
+      result.warnings.some((w) => w.includes('Back garden') && w.includes('no floor slab')),
+    ).toBe(false)
+  })
+
+  test('the SAME uncovered polygon under an indoor name still warns — the exclusion is category-scoped', () => {
+    const nodes = slabbedGardenScene()
+    ;(nodes.zone_garden as Record<string, unknown>).name = 'Storage annex'
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some((w) => w.includes('Storage annex') && w.includes('no floor slab')),
+    ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. Zone-twin dedupe — the false countertop-warning exhibit (S8 class)
+// ---------------------------------------------------------------------------
+
+describe('zone-twin dedupe — honesty warnings must not contradict the sheets', () => {
+  /** The demo's 'Living / Kitchen' twin: two zone nodes over ONE drawn
+   * space, polygons 5 mm apart (host zone re-detection drift). The placed
+   * kitchen sink sits 2 mm inside the LARGER twin's south edge — so before
+   * the dedupe the sink-less twin fired 'countertop receptacles … not
+   * modeled' while the OTHER twin's counter run was drawn on the same
+   * sheet (B13's false-traveler root, same duplicate-zone class). */
+  function kitchenTwinScene(): Record<string, Record<string, unknown>> {
+    return {
+      level_0: { id: 'level_0', type: 'level', level: 0, height: 2.7 },
+      wall_n: wall('wall_n', [-5, -4], [5, -4]),
+      wall_e: wall('wall_e', [5, -4], [5, 4]),
+      wall_s: wall('wall_s', [5, 4], [-5, 4]),
+      wall_w: wall('wall_w', [-5, 4], [-5, -4]),
+      zone_a: zone('zone_a', 'Living / Kitchen', [
+        [-5, -4],
+        [5, -4],
+        [5, 4],
+        [-5, 4],
+      ]),
+      zone_b: zone('zone_b', 'Kitchen', [
+        [-5, -4],
+        [5, -4],
+        [5, 3.995],
+        [-5, 3.995],
+      ]),
+      sink_1: {
+        id: 'sink_1',
+        type: 'item',
+        parentId: 'level_0',
+        asset: { id: 'kitchen' },
+        position: [1, 0, 3.998],
+        rotation: [0, 0, 0],
+      },
+    }
+  }
+
+  test('twins merge: ONE kitchen, counter run drawn, NO contradicting warning, merge stated', () => {
+    const nodes = kitchenTwinScene()
+    // extraction: one room, the better-named twin kept
+    const rooms = extractRooms(nodes, 'level_0')
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]?.name).toBe('Living / Kitchen')
+    const result = computeLevel(nodes, config())
+    // the counter walk ran — boxes at counter height exist
+    expect(result.fixtures.filter((f) => f.meta?.counter === true).length).toBeGreaterThan(0)
+    // …and NO honesty warning claims the counter is not modeled (pre-fix
+    // the sink-less twin printed exactly this beside the drawn run)
+    expect(result.warnings.some((w) => w.includes('not modeled'))).toBe(false)
+    // the merge itself speaks (P4: it prints in the flag block)
+    expect(
+      result.warnings.some(
+        (w) => w.includes('duplicate zone') && w.includes('Kitchen') && w.includes('merged'),
+      ),
+    ).toBe(true)
+  })
+
+  test('two REAL kitchens (distinct polygons) still warn independently — dedupe never eats them', () => {
+    const nodes = kitchenTwinScene()
+    // move zone_b to its own space (sink-less): the warning is TRUE there
+    ;(nodes.zone_b as Record<string, unknown>).polygon = [
+      [-5, -4],
+      [0, -4],
+      [0, 0],
+      [-5, 0],
+    ]
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some((w) => w.includes('Kitchen') && w.includes('not modeled')),
+    ).toBe(true)
+    expect(result.warnings.some((w) => w.includes('duplicate zone'))).toBe(false)
   })
 })
