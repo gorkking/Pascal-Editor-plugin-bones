@@ -1,3 +1,23 @@
+# DAWN-10 SHIPPED TO PROD 2026-08-23 (~08:35 UTC) — NIGHT-10 CLOSED
+
+## SHIP RECORD: private-editor #398 → 0617ef51
+Chain: plugin d1c3c8b (1,736 tests; 8 night-10 merges) → editor #711
+(45a8cce8) → private-editor #398, all CI green, Vercel prod SUCCESS.
+Dawn visual: SHIP 6/6 — Julien's duct striping VERIFIED GONE at his
+camera (0/1.6M differing pixels across provocation orbits); the
+cross-color bore residual pinned + quiet at working distance.
+NIGHT-10 TALLY: 2 prod ships (HP package 1231a771 + this), 10 merges
+(host flake, HP body, zone honesty, legend+C5, roof residuals,
+Manual-J, electrical outdoor, z-fight, +2 ship companions), tests
+1,646 → 1,736. Morning review: docs/morning-review-2026-08-24.txt.
+NEXT QUEUE (head first): lineset×dryer-duct bore (owns the pinned
+allow-list), sloped-roof tieAt steel-in-rafter (B8b class),
+register×fan fixture coincidence, elbow miters, hydration flash,
+WH floating sign, plate-washer legend, Manual-J says-so gates +
+115.0% wording, HP sign mirrored-text-from-behind (cosmetic).
+CARRIED FOR JULIEN: hover-glow verdict, Q13, auto-assume-room-from-
+slab, GPU toggle eyeball.
+
 # HP PACKAGE SHIPPED TO PROD 2026-08-23 (night-10, ~05:20 UTC)
 
 ## SHIP RECORD: private-editor #397 → 1231a771
