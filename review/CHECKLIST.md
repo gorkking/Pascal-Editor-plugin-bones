@@ -39,7 +39,23 @@ AND a gate — a checklist line without a test is a wish.
   Every wall device fixture (receptacle / GFCI / switch) carries a
   DETERMINISTIC `meta.deviceId` (per-wall ordinal / opening key / hallway
   room key): an unchanged scene reproduces identical ids and editing one
-  wall never shuffles another wall's. Each derived device is mirrored by a
+  wall never shuffles another wall's. COUNTER-WALK ORDINAL STABILITY
+  (night-10, the r3 skeptic's re-base advisory): a face's B14c counter
+  ids key on the KITCHEN ZONE (rank × 100 id block among the zones
+  facing that face, sink-independent), so deleting a sink never
+  re-bases a surviving sibling walk's ids (ctr-4..7 used to become
+  ctr-0..3 and orphan the user's bones:device overrides) — delete
+  either of two sibling sinks and the other walk's ids are unchanged,
+  re-adding round-trips byte-equal, and the reconciler removes only
+  the true orphans (a MOVED surviving node is never re-minted or
+  re-anchored). Rank 0 keeps plain 0-based ids: single-kitchen faces —
+  the baseline/master-parity class — are byte-identical. DOCUMENTED
+  residuals: same-ZONE sibling walks (two sinks split by a door RO)
+  keep the legacy running ordinal within their block, so deleting the
+  FIRST same-zone sink still re-bases the second walk (solo-scene id
+  parity makes sibling-independent ids impossible in a pure engine);
+  deleting/adding a kitchen ZONE re-ranks the blocks (structural edit,
+  note 3's same-wall class). Each derived device is mirrored by a
   `bones:device` node (reconciler: create at the derived anchor with
   seed == anchor, re-seat UNMOVED nodes when the derivation drifts, NEVER
   touch a moved node's anchor, drop orphans/duplicates) so any outlet is
@@ -75,6 +91,10 @@ AND a gate — a checklist line without a test is a wish.
   an extra piece of wood, per code"), built night-4; live drag closed
   night-5 (movableOutlets defaults ON since).
   Gates: `src/engines/electrical.devices.test.ts` (ids + snapping matrix) +
+  the night-10 ordinal-stability describe in
+  `src/engines/electrical.receptacles.test.ts` (zone-block pins, the
+  delete-A/delete-B/re-add trio, single-kitchen master parity,
+  same-zone one-block pin, reconciler never-re-mints — mutation-checked) +
   `src/framing/compute.devices.test.ts` (byte-equality pin, wiring
   re-route, warning parity) + `src/device/schema.test.ts` +
   `src/device/place.test.ts` (reconciler + position→anchor normalization
@@ -285,8 +305,11 @@ AND a gate — a checklist line without a test is a wish.
   plan-stacks exactly over the wall-line box below it); EXT-1 carries
   its own circuit-color family (round-2 E3 blocker: it printed
   byte-identical to the SE copper fallback). All B14 boxes carry
-  deterministic deviceIds (`-out-front/back`, `-ctr-<i>`,
-  `-basin-<lavId>`) and are movable `bones:device` nodes (E5 contract).
+  deterministic deviceIds (`-out-front/back`, `-ctr-<i>` — `i` numbers
+  inside the kitchen ZONE's 100-wide block so sibling-sink deletion
+  never re-bases a surviving walk, E5 night-10; single-kitchen faces
+  keep plain 0-based ids — `-basin-<lavId>`) and are movable
+  `bones:device` nodes (E5 contract).
   Origin: LOD-400 audit BATCH 14 (2026-08-21) — zero outdoor
   receptacles ever, all kitchen/bath boxes at 15", the sink-GFCI test
   skipped behind a stale 'once sink positions are extracted' comment;

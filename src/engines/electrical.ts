@@ -1241,15 +1241,53 @@ function placeCounterReceptacles(
   const straight = walls.filter((w) => !w.curved && w.length >= 0.1)
   const out: Fixture[] = []
   // Per counter FACE (`${wall.id}|${side}`): the u-spans already walked,
-  // the box u-positions placed there, and the running deviceId ordinal —
+  // the box u-positions placed there, and the per-ZONE deviceId counts —
   // a second walk on the same face (another kitchen zone down the wall, or
   // a same-kitchen sink across a door RO) covers ITS OWN span with unique
   // ids instead of silently bailing (round-3 finding: the old global
   // `walked.has(key) → continue` was a FOURTH wordless zero-box exit).
   const walked = new Map<
     string,
-    { spans: { a: number; b: number }[]; us: number[]; ordinal: number }
+    { spans: { a: number; b: number }[]; us: number[]; blocks: Map<string, number> }
   >()
+  // STABLE WALK IDENTITY (night-10, E5 — the r3 skeptic's ordinal-re-base
+  // advisory): the per-face ordinal offset used to be the RUNNING count of
+  // boxes sibling walks placed first — deleting sink A re-based the
+  // surviving walk's ids (ctr-4..7 → ctr-0..3) and orphaned the user's
+  // bones:device overrides. The offset now keys on the KITCHEN ZONE:
+  // each face ranks the kitchens FACING it (zone polygon contains a
+  // sampled face point — SINK-independent, so removing a sink never moves
+  // a sibling zone's block) in zone-id order, and a zone's walks number
+  // inside their own 100-wide id block (rank × 100; a 100-box counter
+  // face is >120 m of casework — unreachable). DECISION (stated): zone-id
+  // keying over the suggested walk-content hash — simpler, stable under
+  // sink edits, and rank 0 keeps plain 0-based ids so every
+  // single-kitchen face (the baseline + master-parity class) stays
+  // byte-identical; same-zone sibling walks (two sinks split by a door
+  // RO) keep the legacy running ordinal WITHIN their block — that
+  // residual re-base is confined to the same-zone multi-sink class, where
+  // solo-scene id parity makes sibling-independent ids impossible (a pure
+  // engine cannot tell "sink B after A was deleted" from "sink B alone").
+  // Deleting/adding a KITCHEN ZONE re-ranks (structural edit, E5 note 3).
+  const faceRank = new Map<string, number>()
+  const rankOf = (w: WallSlice, face: WallFace, kitchen: RoomSlice): number => {
+    const key = `${w.id}|${face.side}|${kitchen.id}`
+    const hit = faceRank.get(key)
+    if (hit !== undefined) return hit
+    const step = 0.05
+    const facesZone = (k: RoomSlice): boolean => {
+      for (let u = 0; u <= w.length + 1e-9; u += step) {
+        if (pointInPolygon(face.plan(Math.min(u, w.length)), k.polygon)) return true
+      }
+      return false
+    }
+    const facing = kitchens
+      .filter(facesZone)
+      .map((k) => k.id)
+      .sort((a, b) => a.localeCompare(b))
+    for (const [i, id] of facing.entries()) faceRank.set(`${w.id}|${face.side}|${id}`, i)
+    return faceRank.get(key) ?? 0
+  }
   for (const kitchen of kitchens) {
     const name = kitchen.name || kitchen.id
     const sinks = placed
@@ -1322,7 +1360,7 @@ function placeCounterReceptacles(
         continue
       }
       const key = `${wall.id}|${face.side}`
-      const rec = walked.get(key) ?? { spans: [], us: [], ordinal: 0 }
+      const rec = walked.get(key) ?? { spans: [], us: [], blocks: new Map<string, number>() }
       // Skip ONLY when this sink's own span already lies inside a prior
       // walk (its boxes exist there — honest silence). An uncovered span
       // gets its own walk + F1 coverage audit (round 3, scenarios A/B:
@@ -1336,6 +1374,9 @@ function placeCounterReceptacles(
         Math.ceil((b - a) / (2 * COUNTER_FIRST_MAX)),
       )
       const pitch = (b - a) / count
+      // this walk's id base: the zone's 100-wide block + the count its own
+      // zone already placed on this face (sibling zones never shift it)
+      const idBase = rankOf(wall, face, kitchen) * 100 + (rec.blocks.get(kitchen.id) ?? 0)
       const used: number[] = []
       for (let i = 0; i < count; i++) {
         let u = a + pitch * (i + 0.5)
@@ -1360,9 +1401,10 @@ function placeCounterReceptacles(
           label: 'Counter receptacle \u2014 44" AFF (NEC 210.52(C)(1))',
           meta: {
             // slot-based WITHIN a walk (single-walk scenes keep their ids
-            // byte-identical); the per-face running offset keeps a second
-            // walk's ids unique (round 3)
-            deviceId: `recep-${wall.id}-ctr-${rec.ordinal + i}-${face.side === 1 ? 'p' : 'm'}`,
+            // byte-identical); the zone-block base keeps a second walk's
+            // ids unique AND stable when a sibling sink disappears
+            // (round 3 uniqueness; night-10 E5 ordinal stability)
+            deviceId: `recep-${wall.id}-ctr-${idBase + i}-${face.side === 1 ? 'p' : 'm'}`,
             counter: true,
           },
         })
@@ -1400,7 +1442,7 @@ function placeCounterReceptacles(
       }
       rec.spans.push({ a, b })
       rec.us.push(...used)
-      rec.ordinal += count
+      rec.blocks.set(kitchen.id, (rec.blocks.get(kitchen.id) ?? 0) + count)
       walked.set(key, rec)
     }
   }
