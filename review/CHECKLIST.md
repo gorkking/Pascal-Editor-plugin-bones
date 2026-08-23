@@ -1640,12 +1640,17 @@ AND a gate — a checklist line without a test is a wish.
   graceful missing-asset path) — under four invariants:
   (1) X-RAY-ONLY SUBSTITUTION: 'off' draws no members, 'basement' keeps
   its faint shell box; only 'xray' with a LOADED asset swaps.
-  (2) EXACT MATRIX PARITY: the wrapper takes the box's instance matrix
-  verbatim (shared `composeEntryMatrix`; the asset is normalized to a unit
-  cube, so the model fills precisely the member's dims volume — the engine
-  footprint governs, ≈ 0.9 × 0.8 × 0.35 m); live drags patch wrapper
-  matrices in place, and asset arrival/departure/count change is a
-  STRUCTURAL change (full rebuild, never a torn patch).
+  (2) EXACT MATRIX PARITY, UNWARPED: the wrapper takes the box's instance
+  matrix verbatim (shared `composeEntryMatrix`; the asset is normalized to
+  a unit cube, so the model fills precisely the member's dims volume — the
+  engine footprint governs, 0.95 × 0.85 × 0.95 m since the unwarp round
+  2026-08-23: real top-discharge proportions equal to the asset's native
+  bbox aspect within 0.2%, so the per-axis scale is a UNIFORM ≈ 0.896
+  shrink — the scale-ratio pin (CONDENSER_UNIT_DIMS vs
+  AC_BLOCK_NATIVE_BBOX_M, 1% tolerance) keeps either side from drifting
+  back into single-axis compression); live drags patch wrapper matrices in
+  place, and asset arrival/departure/count change is a STRUCTURAL change
+  (full rebuild, never a torn patch).
   (3) NEVER-A-HOLE FALLBACK: headless, missing asset, network failure, a
   spec-valid GLB with NO default scene, a mesh-less scene, or a payload
   that crashes normalize — every arm resolves `null` (the loader NEVER
@@ -1672,8 +1677,37 @@ AND a gate — a checklist line without a test is a wish.
   round-1 skeptic (resolve-then-throw wedge, mesh-less hole).
   Gate: `src/framing/condenser-asset.test.ts` (census both ways with the
   loader mocked, matrix parity, patch structure, raycast/material
-  conventions, all loader arms, the uniqueness sweeps) — every clause
-  mutation-probed (10 probes, each red).
+  conventions, all loader arms, the uniqueness sweeps, the scale-ratio +
+  placeholder-parity pins) — every clause mutation-probed (10 probes, each
+  red).
+
+- **A7 The X-ray heat pump is directly selectable — hover, click, move on
+  the unit itself.** (Julien 2026-08-23, overruling the day-10 trade that
+  left the sign plate as the suppressed body's only handle.) In 'xray'
+  with hvac ON, the heat-pump service node mounts a NEAR-INVISIBLE pick
+  proxy (opacity ≈ 0, no depth write — the bones:device convention;
+  editor #665 trio: useNodeEvents + useRegistry + host SelectionManager /
+  merged-outline, whose mask pass re-renders silhouettes with its own
+  material, so the ghost outlines) sized to the ENGINE cabinet footprint
+  (× 1.04 hug inflate) at the unit's center height and unit-#1 yaw, read
+  from the memoized computeLevel the framing renderer draws from. Unit #1
+  sits at the node verbatim (A4), so the proxy rides the node's group —
+  live drags track for free and the engines re-route on commit (the
+  proven sign-drag flow). Invariants: the proxy is the ONE stated
+  exception to the X-ray raycast-no-op convention (it is a SERVICE mesh
+  in the node's registered group — picking it IS picking the node; the
+  engine-drawn asset meshes stay raycast-disabled, A6); the sign plates
+  keep picking; a visible body (off/basement/toggle-off/no-framing) means
+  NO proxy (the body is the handle); ENGINE SILENCE (no unit #1 composed)
+  means NO proxy (no phantom hover volume — the sign is the handle, the
+  stated trade); water-heater/electric-meter stay proxy-less (wall-mounted,
+  sign hugs the equipment — follow-up candidates, stated).
+  Origin: Julien 2026-08-23 ("select the heat pump… highlights when I
+  mouse over it… similar experience to the kitchen island").
+  Gates: `src/service/place.test.ts` (the suppression matrix's pickProxy
+  column — exactly the xray+engine-suppressed heat pump) +
+  `src/service/proxy.test.ts` (footprint/height/yaw parity vs the engine
+  compose, A4 position parity, engine-silence null, composition arms).
 
 ## Process
 

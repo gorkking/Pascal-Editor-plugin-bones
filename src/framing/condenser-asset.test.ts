@@ -10,6 +10,8 @@ import {
   type Object3D,
 } from 'three'
 import type { Member } from '../core/types'
+import { CONDENSER_PAD_THICKNESS, CONDENSER_UNIT_DIMS } from '../engines/hvac'
+import { SERVICE_BODY } from '../service/placement'
 import { jurisdictionOptions } from '../jurisdiction/profiles'
 import { baselineConfig, baselineScene } from './baseline-scene'
 import { computeLevel } from './compute'
@@ -23,6 +25,7 @@ import {
   loadCondenserAsset,
   normalizeToUnitBox,
   prepareCondenserClone,
+  AC_BLOCK_NATIVE_BBOX_M,
 } from './condenser-asset'
 import {
   buildGroup,
@@ -465,5 +468,39 @@ describe('prepareCondenserClone', () => {
     expect(found).toBe(1)
     // the source asset's meshes were NOT mutated by the clone pass
     expect(Object.hasOwn(mesh, 'raycast')).toBe(false)
+  })
+})
+
+describe('scale uniformity — the unwarp pin (Julien 2026-08-23)', () => {
+  test('engine cabinet dims match the native bbox aspect: wrapper scale ratios equal within 1%', () => {
+    // The wrapper's per-axis scale is memberDims[i] / native[i] (unit-box
+    // normalization × the box instance matrix). Julien: "it's warped —
+    // compressed in one dimension… shrink in all dimensions instead of 1".
+    // The truth-level fix set the ENGINE dims to the asset's native aspect
+    // at a real-unit size (mep-rules unitDimsNote), so the three ratios
+    // must stay equal — a drift on EITHER side (engine dims or a re-pinned
+    // native bbox) re-opens the warp and turns this red.
+    const ratios = CONDENSER_UNIT_DIMS.map((d, i) => d / AC_BLOCK_NATIVE_BBOX_M[i]!)
+    const [rx, ry, rz] = ratios as [number, number, number]
+    expect(Math.abs(rx / ry - 1)).toBeLessThan(0.01)
+    expect(Math.abs(rz / ry - 1)).toBeLessThan(0.01)
+    expect(Math.abs(rx / rz - 1)).toBeLessThan(0.01)
+    // …and it is a SHRINK (the model never renders larger than life)
+    for (const r of ratios) expect(r).toBeLessThan(1)
+    // non-vacuous: the pinned truths themselves
+    expect(CONDENSER_UNIT_DIMS).toEqual([0.95, 0.85, 0.95])
+    expect(AC_BLOCK_NATIVE_BBOX_M).toEqual([1.06, 0.95, 1.06])
+  })
+
+  test('the service placeholder body mirrors the engine cabinet truth', () => {
+    // Basement/toggle-off placeholder + the move-tool ghost read
+    // SERVICE_BODY dims; X-ray renders the engine member. One footprint,
+    // both readers — a drift re-opens the A/B z-fight class.
+    expect(SERVICE_BODY['heat-pump'].dims).toEqual(CONDENSER_UNIT_DIMS as never)
+    // placeholder center height = pad top + half the cabinet height
+    expect(SERVICE_BODY['heat-pump'].defaultAff).toBeCloseTo(
+      CONDENSER_PAD_THICKNESS + CONDENSER_UNIT_DIMS[1] / 2,
+      2,
+    )
   })
 })

@@ -1270,6 +1270,14 @@ function planSheet(
       { x: gx, y: gy + 42, anchor: 'middle' },
       { x: cx2, y: cy2 - 52, anchor: 'middle' },
       { x: cx2, y: cy2 + 54, anchor: 'middle' },
+      // beyond-equipment ring (unwarp round 2026-08-23: the true-size
+      // condenser pad + cabinet print as ~50 px squares — a unit parked on
+      // the exit wall blankets every ring above and the marker used to
+      // fall through to the center-only tier ACROSS the equipment rects)
+      { x: gx, y: gy - 54, anchor: 'middle' },
+      { x: gx, y: gy + 56, anchor: 'middle' },
+      { x: cx2, y: cy2 - 66, anchor: 'middle' },
+      { x: cx2, y: cy2 + 68, anchor: 'middle' },
     ]
     const leftOf = (s: TextSpot): number =>
       s.anchor === 'start' ? s.x : s.anchor === 'end' ? s.x - sewerW : s.x - sewerW / 2

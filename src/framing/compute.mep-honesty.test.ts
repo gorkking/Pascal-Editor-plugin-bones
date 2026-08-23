@@ -359,11 +359,12 @@ describe('F3: condenser election validated at the computeLevel boundary (coverag
     const result = computeLevel(nodes, bones('lvl0'))
     const unit = result.fixtures.find((f) => /AC Condenser #1/.test(f.label ?? ''))
     expect(unit).toBeDefined()
-    // pre-fix: (3.4, 3.5) — inside the Bathroom zone; coverage-blind
-    // mutation: (5, 1.9) — the covered mid-plan void. The honest spot is
-    // 0.6 m SOUTH of the south wall.
+    // pre-fix class: inside the Bathroom zone; coverage-blind mutation:
+    // the covered mid-plan void. The honest spot is condenserStandoff
+    // (0.075 + 0.6096 + 0.475 = 1.1596, walls t = 0.15) SOUTH of the
+    // south wall.
     expect(unit?.position[0]).toBeCloseTo(5, 6)
-    expect(unit?.position[2]).toBeCloseTo(-0.6, 6)
+    expect(unit?.position[2]).toBeCloseTo(-1.1596, 6)
     // unflagged + silent (the healthy validated path), disconnect present
     const boxes = result.members.filter(
       (m) => m.system === 'hvac' && m.role === 'equipment',

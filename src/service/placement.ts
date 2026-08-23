@@ -28,7 +28,12 @@ export const SERVICE_BODY: Record<ServiceType, BodySpec> = {
   'sewer-exit': { dims: [inches(4), 0.3, inches(4)], color: '#5b6670', defaultAff: 0.15, sign: 'SEWER' },
   'power-entry': { dims: [0.12, 0.28, 0.12], color: '#3a3a3e', defaultAff: 2.2, sign: 'POWER' },
   thermostat: { dims: [0.09, 0.12, 0.03], color: '#e9e9e6', defaultAff: inches(52), sign: 'TSTAT' },
-  'heat-pump': { dims: [0.9, 0.8, 0.4], color: '#b9bec4', defaultAff: 0.5, sign: 'HP' },
+  // Heat-pump placeholder mirrors the ENGINE's cabinet truth (hvac
+  // CONDENSER_UNIT_DIMS 0.95×0.85×0.95 — true top-discharge proportions,
+  // unwarp round 2026-08-23) so basement/toggle-off placeholders and the
+  // move-tool ghost read the same footprint the X-ray unit occupies;
+  // defaultAff = pad top (0.1016) + half the cabinet height.
+  'heat-pump': { dims: [0.95, 0.85, 0.95], color: '#b9bec4', defaultAff: 0.5266, sign: 'HP' },
   'electric-meter': { dims: [0.2, 0.3, 0.15], color: '#9aa1a9', defaultAff: inches(55), sign: 'METER' },
 }
 
@@ -255,7 +260,19 @@ export function resolveServicePlacement(
  *    placed deliberately and there is no view mode to respect
  *    (pre-automation behavior, unchanged).
  */
-export type ServicePresentation = { body: boolean; sign: boolean }
+export type ServicePresentation = {
+  body: boolean
+  sign: boolean
+  /** X-ray heat-pump only (Julien 2026-08-23, overruling the day-10
+   * sign-as-only-handle trade): when the ENGINE renders the physical unit
+   * at this node's anchor and the placeholder body yields, an INVISIBLE
+   * pick proxy takes the unit's own footprint so hovering/clicking the
+   * equipment selects the service node — the kitchen-island gesture. The
+   * proxy geometry resolves in proxy.ts; false for the other suppressed
+   * kinds (water-heater / electric-meter: wall-mounted, their sign plates
+   * hug the equipment — follow-up candidates, stated). */
+  pickProxy: boolean
+}
 
 export const PHYSICAL_SERVICE_TYPES: ReadonlySet<ServiceType> = new Set<ServiceType>([
   'panel',
@@ -280,7 +297,10 @@ export const PHYSICAL_SERVICE_TYPES: ReadonlySet<ServiceType> = new Set<ServiceT
  *  - electric-meter → electrical meter-socket fixture on the exterior face
  *                     (~90% embedded in the body).
  * In 'xray' with the engine toggle ON the body yields to the engine's
- * render and only the sign plate stays (Julien 2026-08-22: keep the label).
+ * render and the sign plate stays (Julien 2026-08-22: keep the label);
+ * the heat pump additionally mounts an invisible PICK PROXY at the unit
+ * footprint (Julien 2026-08-23 — see ServicePresentation.pickProxy and
+ * proxy.ts), so the equipment itself hovers/selects like a kitchen island.
  * Toggle OFF → the body RETURNS as the visual anchor (the toggle lives on
  * the same framing node the view mode does — reachable here). When the
  * toggle is ON but the engine emits nothing (the no-zones honesty case:
@@ -332,12 +352,19 @@ export function servicePresentation(
   const mode = framing
     ? effectiveViewMode(framing as { viewMode?: unknown; seeThrough?: unknown })
     : null
-  if (mode === 'off') return { body: PHYSICAL_SERVICE_TYPES.has(node.serviceType), sign: false }
+  if (mode === 'off') {
+    return { body: PHYSICAL_SERVICE_TYPES.has(node.serviceType), sign: false, pickProxy: false }
+  }
   if (mode === 'xray' && framing) {
     const toggle = ENGINE_RENDERED_SERVICE_TYPES[node.serviceType]
     // Absent toggle field = schema default true (legacy nodes never re-parse).
-    if (toggle && framing[toggle] !== false) return { body: false, sign: true }
+    if (toggle && framing[toggle] !== false) {
+      // Body yields to the engine's render; the heat pump ADDITIONALLY gets
+      // the invisible pick proxy at the unit footprint (see the type doc).
+      return { body: false, sign: true, pickProxy: node.serviceType === 'heat-pump' }
+    }
   }
-  // 'basement', 'xray' non-engine kinds, and no-framing levels: box + sign.
-  return { body: true, sign: true }
+  // 'basement', 'xray' non-engine kinds, and no-framing levels: box + sign —
+  // the visible body is the pick handle, no proxy needed.
+  return { body: true, sign: true, pickProxy: false }
 }
