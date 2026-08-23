@@ -1122,10 +1122,60 @@ AND a gate — a checklist line without a test is a wish.
   invisible grilles).
   Gates: `src/engines/hvac.plates.test.ts` +
   `src/framing/compute.multistorey.test.ts` (M1 soffit storey)
-- **M2 The AC condenser row is sized, placed and booked honestly.** Outdoor
-  units are a labeled ASSUMPTION (1 ton per 450/550/650 sqft by IECC zone
-  band 1-2/3-4/5+, cited in the fixture label — Manual J/S govern per
-  M1401.3), one condenser per ≤ 5 tons, tiny homes floor at 1 unit/1.5 tons.
+- **M2 The AC condenser row is sized, placed and booked honestly.** ONE
+  system tonnage (IRC M1401.3 — equipment per ACCA Manual S from Manual J
+  loads) sizes the air handler, the duct cfm, the return grille AND the
+  condenser row: the MANUAL-J-LITE v1 sensible load (src/engines/manual-j.ts
+  — envelope UA at prescriptive R including the ceiling × per-zone
+  ASHRAE/ACCA-style design ΔT + per-orientation glazing solar × assumed
+  SHGC 0.30 + Manual-J internal gains at bedrooms+1 occupancy + ACH-0.35
+  infiltration over the conditioned volume, then a COARSE LATENT
+  ALLOWANCE by the zone's IECC moisture-regime letter — A humid ×1.25 /
+  B dry ×1.05 / C marine ×1.10, bare-digit zones ×1.0 and say so (the
+  four terms are sensible-only; a humid-zone selection sat a half ton
+  short IN band with the confession buried in a docstring — skeptic F1);
+  every constant cited in data/mep-rules.json hvac.manualJLite, every
+  fixture label carries the basis AND the composition — 'Manual J-lite,
+  zone 2A design 35°C, 2.62 t sensible × 1.25 latent (regime A)' — and
+  'verify local design conditions' + 'full Manual J latent calculation
+  governs' ride the notes), selected in half-ton steps within the
+  Manual S 95–115% band (an out-of-band selection — stock steps, the
+  1.5-ton floor — warns, never silent). The band is checked on the
+  INSTALLED SUM too (skeptic F2): the ≤5-ton split rounds each unit to a
+  stock half ton, so count × unitTons can leave the band the plan total
+  passed — the overrun warns with a one-decimal percent ('installed
+  6 tons = 118.1% of the 5.08-ton load — exceeds the Manual S 115%
+  band…'), and the AIR HANDLER reconciles to the installed figure (its
+  drawn coil serves the cabinets that exist: label/cfm/grille read
+  6 ton beside 2 × 3-ton cabinets, never 5.5) with the plan-vs-installed
+  distinction stated on its label ('2 × 3 t installed vs 5.5 t
+  selected') and meta.selectedTons carrying the Manual S selection when
+  the two differ. FALLBACK, stated ON THE LABEL:
+  unknown climate zone (INTL/unset) / no straight exterior envelope / no
+  conditioned volume → the labeled sqft rule (1 ton per 450/550/650 sqft
+  by IECC zone band 1-2/3-4/5+, 'Manual J-lite fallback: <trigger>'); LOD
+  never gates the load (walls/rooms exist at every LOD). One condenser per
+  ≤ 5 tons — a >5-ton load splits into N units with per-unit tonnage on
+  every cabinet/fixture label and on the takeoff buy line ('N × X tons
+  (installed total)'); ONE air handler is drawn with the
+  single-indoor-coil/exchanger assumption stated on its label PLUS a level
+  warning (the duct machinery models one trunk network; inventing zoning
+  dampers would be a lie). Tiny homes floor at 1 unit/1.5 tons.
+  The BUILDING CHARACTERISTICS cooling row prints the SAME load —
+  'Cooling load (Manual J-lite)' with the term-by-term basis notes (panel
+  rows, CSV and the schedules sheet's 'MANUAL J-LITE load' + M1401.3
+  basis line all switch together; the rule-of-thumb wording survives only
+  on the stated fallback and on pre-batch hand-built fixtures).
+  Manual-J-lite gates: `src/engines/manual-j.test.ts` (hand-computed
+  four-term load, zone divergence, fallback triggers, Manual S band) +
+  the 'Manual-J-lite engine sizing' describe in
+  `src/engines/hvac.condensers.test.ts` (hand-derived engine tonnage,
+  5-ton split with A6 triple + row compose + the installed-band exhibit
+  in the (5.0, 5.22] window, climate divergence incl. the 115.1%
+  hair-over-band arm, latent exhibit — 2.6 t sensible → 3.5 t selected,
+  dry-zone 2B stays 3.0 —, band warning, takeoff mirror) + the
+  characteristics/paper coherence gates in
+  `src/engines/characteristics.test.ts` and `src/plans/plan-set.test.ts`.
   Every pad + cabinet sits OUTSIDE an exterior wall, ≥ 0.6 m clear between
   units, cabinet ≥ 0.3 m off the wall face (per mfr clearance + IRC M1403),
   the pad slab's inner edge clears the worst-case exterior assembly

@@ -272,6 +272,30 @@
       "linesetNote": "Refrigerant line-set per unit: suction 3/4 in (19 mm, insulated — the COLD line) + liquid 3/8 in (9.5 mm, warm) as a parallel pair, through ONE exterior-wall penetration at ~0.4 m (clear of ROs), then wall-following to the indoor air handler coil (M1411). Runs over ~15 m carry a 'verify manufacturer max line-set length / oil return' advisory — typical residential mfr charts top out 15-30 m; the manufacturer's line-set table governs.",
       "disconnectAboveUnitM": 0.3,
       "disconnectNote": "NEC 440.14: disconnecting means within sight of the unit — wall-mounted beside each condenser; the dedicated branch circuit is routed separately."
+    },
+    "manualJLite": {
+      "basis": "IRC M1401.3 — cooling equipment sized per ACCA Manual S from ACCA Manual J loads. MANUAL-J-LITE v1 (honestly labeled, NOT a Manual J): sensible-only schematic load = envelope UA (exterior walls + exterior glazing + ceiling, prescriptive R) × design cooling ΔT + glazing solar gain + internal gains + infiltration. Latent load, duct gains, floors, doors and shading are NOT modeled; full ACCA Manual J governs.",
+      "indoorDesignC": 24,
+      "indoorDesignNote": "24°C / 75°F indoor cooling design (ACCA MJ8 convention).",
+      "outdoorDesignCByZone": { "1": 33, "2": 35, "3": 34, "4": 33, "5": 33, "6": 31, "7": 29, "8": 26 },
+      "outdoorDesignNote": "ASHRAE/ACCA-style 1% cooling design dry-bulb DEFAULTS per IECC zone digit — verify local design conditions (IRC Table R301.2(1) / ACCA MJ8 Table 1A); dry same-zone sites (2B Phoenix) run far hotter than these humid-zone defaults.",
+      "ceilingRByZone": { "1": 30, "2": 49, "3": 49, "4": 60, "5": 60, "6": 60, "7": 60, "8": 60 },
+      "ceilingRNote": "2021 IECC Table R402.1.3 prescriptive ceiling R-value by zone; the load's ceiling term assumes the level is a TOP storey under an attic at outdoor ΔT (interior storeys overstate slightly — conservative, stated).",
+      "solarWPerM2ByOrientation": { "N": 75, "E": 220, "S": 150, "W": 220 },
+      "solarNote": "ASHRAE-style peak cooling-design solar heat gain proxies per m² of glass by facade orientation (northern hemisphere; E/W morning-evening peak, S high-sun, N diffuse). Plan axes assumed world-aligned: +x = east, −z = north; diagonal facades bucket to the dominant axis.",
+      "shgcAssumed": 0.3,
+      "shgcNote": "2021 IECC Table R402.1.2 maximum fenestration SHGC for zones 1-3, assumed for all zones — real glazing schedules govern.",
+      "occupantSensibleW": 67.4,
+      "appliancesSensibleW": 351.7,
+      "internalGainsNote": "ACCA Manual J defaults: 230 Btu/h (67.4 W) sensible per occupant, occupancy = bedrooms + 1; 1,200 Btu/h (351.7 W) appliance allowance per dwelling.",
+      "infiltrationAch": 0.35,
+      "airSensibleWhPerM3K": 0.33,
+      "infiltrationNote": "Sensible infiltration = 0.33 Wh/(m³·K) × ACH × conditioned volume × ΔT; ACH 0.35 assumed (typical code-era construction) — blower-door data governs.",
+      "latentAllowanceByMoistureRegime": { "A": 1.25, "B": 1.05, "C": 1.1 },
+      "latentAllowanceNote": "COARSE latent allowance applied to the four-term sensible sum BEFORE Manual S selection, keyed on the IECC moisture-regime letter of the state's climate zone (A moist/humid, B dry, C marine — the letter in wall-assemblies.json exterior.stateClimateZone, 2021 IECC Figure R301.1): humid ×1.25, dry ×1.05, marine ×1.10 — class factors only, a full ACCA Manual J latent calculation governs. Zones whose label carries NO regime letter (bare digits like AK '7') take ×1.0 and say so on the label/notes.",
+      "manualSBandPctOfLoad": { "min": 95, "max": 115 },
+      "manualSNote": "Equipment total = smallest half-ton multiple ≥ the sensible load (floored at 1.5 tons); ACCA Manual S common practice keeps selection within 95-115% of load — a selection outside the band (stock-size steps at small loads) is flagged, never silent.",
+      "fallbackNote": "When the climate zone cannot resolve (INTL/unknown state), the level has no straight exterior envelope, or no conditioned volume, sizing falls back to the labeled sqft-per-ton rule (condenser.sqftPerTonByZoneBand) with the reason stated on the label — never silently. LOD does not gate the load: walls/rooms exist at every LOD."
     }
   },
   "placementHeuristics": {

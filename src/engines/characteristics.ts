@@ -9,7 +9,10 @@
  *
  * Everything approximate is SAID so: each derived number carries its
  * citation or assumption in `notes`. This is a drafting aid, not a
- * Manual J — the UA counts wall + window conduction only.
+ * Manual J — the UA row counts wall + window conduction only. The COOLING
+ * row is the Manual-J-lite SENSIBLE load when it computes (src/engines/
+ * manual-j.ts — the same figure the HVAC engine sizes equipment from, IRC
+ * M1401.3), else the legacy rule of thumb with the trigger stated.
  */
 
 import assemblies from '../../data/wall-assemblies.json'
@@ -17,6 +20,13 @@ import { DEFAULT_SPEC, type FramingSpec } from '../core/spec'
 import type { RoomSlice, SlabSlice, WallSlice } from '../core/types'
 import { toInches } from '../core/units'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
+import {
+  R_IMPERIAL_TO_RSI,
+  U_IMPERIAL_TO_SI,
+  WINDOW_U_IMPERIAL,
+  manualJLite,
+  parseZone,
+} from './manual-j'
 
 type Pt = readonly [number, number]
 
@@ -36,12 +46,9 @@ type AssembliesData = {
 const DATA = assemblies as unknown as AssembliesData
 
 // ---- conversion + rule-of-thumb constants (all cited in `notes`) ----
-/** RSI (m²·K/W) per imperial R (ft²·°F·h/BTU). */
-export const R_IMPERIAL_TO_RSI = 0.1761
-/** W/m²K per BTU/h·ft²·°F. */
-export const U_IMPERIAL_TO_SI = 5.678263
-/** 2021 IECC Table R402.1.2 climate-typical fenestration U-factor. */
-export const WINDOW_U_IMPERIAL = 0.32
+// The UA conversion constants single-source in src/engines/manual-j.ts
+// (the load module) — re-exported here so this module's public API holds.
+export { R_IMPERIAL_TO_RSI, U_IMPERIAL_TO_SI, WINDOW_U_IMPERIAL }
 /** Winter design temperature difference (indoor 20°C − design −2°C ≈ 22 K). */
 export const DESIGN_DELTA_T_K = 22
 /** Cooling RULE OF THUMB: 1 ton per 55 m² of conditioned floor. */
@@ -70,8 +77,21 @@ export type BuildingCharacteristics = {
   uaWPerK: number
   /** uaWPerK × ΔT 22 K — schematic winter design heat loss, W. */
   designHeatLossW: number
-  /** RULE OF THUMB cooling estimate, tons (12,000 BTU/h each). */
+  /** Cooling load/estimate, tons (12,000 BTU/h each): the Manual-J-lite
+   * SENSIBLE load when it computes (`coolingBasis` 'manual-j-lite' — the
+   * same figure the HVAC engine sizes equipment from, IRC M1401.3), else
+   * the legacy rule of thumb with the trigger stated in the notes. */
   coolingTonsEstimate: number
+  /** Basis of `coolingTonsEstimate` — absent reads 'rule-of-thumb'
+   * (hand-built fixtures predating the Manual-J-lite batch). */
+  coolingBasis?: 'manual-j-lite' | 'rule-of-thumb'
+  /** Manual-J-lite composition (skeptic F1 — sensible + allowance + total
+   * must all reach the reader): the four-term SENSIBLE tons and the
+   * moisture-regime latent factor whose product is `coolingTonsEstimate`.
+   * Absent on the fallback / hand-built fixtures. */
+  coolingSensibleTons?: number
+  coolingLatentFactor?: number
+  coolingMoistureRegime?: 'A' | 'B' | 'C' | null
   /** Citations + assumptions for every derived number above. */
   notes: string[]
   /** Set when floorAreaM2 is 0 BECAUSE every drawn zone is outdoor (round-4
@@ -93,17 +113,8 @@ function ringArea(polygon: readonly Pt[]): number {
   return Math.abs(sum) / 2
 }
 
-/** "2A (1A Miami/Keys)" → { label: "2A", key: "2" }; 4C (marine) → "4M". */
-function parseZone(raw: string): { label: string; key: string } | null {
-  const m = /^(\d)([ABC])?/.exec(raw.trim())
-  if (!m) return null
-  const digit = m[1] as string
-  const letter = m[2] ?? ''
-  return {
-    label: `${digit}${letter}`,
-    key: digit === '4' && letter === 'C' ? '4M' : digit,
-  }
-}
+// parseZone ("2A (1A Miami/Keys)" → { label, key }) now single-sources in
+// manual-j.ts — one zone parse for the load AND the insulation lookup.
 
 export function computeCharacteristics(
   walls: WallSlice[],
@@ -248,13 +259,39 @@ export function computeCharacteristics(
   // ---- design loads ----
   const designHeatLossW = uaWPerK * DESIGN_DELTA_T_K
   notes.push(`Design heat loss at ΔT = ${DESIGN_DELTA_T_K} K (winter design assumption)`)
-  const baseTons = floorAreaM2 / COOLING_M2_PER_TON
-  const uaDensity = floorAreaM2 > 0 ? uaWPerK / floorAreaM2 : 0
-  const factor = Math.min(1.2, Math.max(0.8, uaDensity / REFERENCE_UA_DENSITY))
-  const coolingTonsEstimate = baseTons * factor
-  notes.push(
-    `Cooling RULE OF THUMB: 1 ton per ${COOLING_M2_PER_TON} m² floor, ±20% by envelope UA density — not a Manual J load calculation`,
-  )
+  // COOLING: the Manual-J-lite SENSIBLE load when it can compute — the SAME
+  // figure the HVAC engine sizes the air handler + condenser row from (IRC
+  // M1401.3, ACCA Manual J/S govern; src/engines/manual-j.ts states every
+  // term). When it cannot (unknown zone / no envelope / no conditioned
+  // volume) the legacy rule of thumb estimates, with the trigger stated —
+  // never a silent basis swap.
+  const mj = manualJLite(walls, rooms, stateCode)
+  let coolingTonsEstimate: number
+  let coolingBasis: 'manual-j-lite' | 'rule-of-thumb'
+  let coolingComposition: {
+    coolingSensibleTons: number
+    coolingLatentFactor: number
+    coolingMoistureRegime: 'A' | 'B' | 'C' | null
+  } | null = null
+  if (mj.ok) {
+    coolingBasis = 'manual-j-lite'
+    coolingTonsEstimate = mj.loadTons
+    coolingComposition = {
+      coolingSensibleTons: mj.sensibleTons,
+      coolingLatentFactor: mj.latentFactor,
+      coolingMoistureRegime: mj.moistureRegime,
+    }
+    notes.push(...mj.notes)
+  } else {
+    coolingBasis = 'rule-of-thumb'
+    const baseTons = floorAreaM2 / COOLING_M2_PER_TON
+    const uaDensity = floorAreaM2 > 0 ? uaWPerK / floorAreaM2 : 0
+    const factor = Math.min(1.2, Math.max(0.8, uaDensity / REFERENCE_UA_DENSITY))
+    coolingTonsEstimate = baseTons * factor
+    notes.push(
+      `Cooling RULE OF THUMB: 1 ton per ${COOLING_M2_PER_TON} m² floor, ±20% by envelope UA density — not a Manual J load calculation (Manual J-lite unavailable: ${mj.reason})`,
+    )
+  }
   notes.push('Metrics cover the X-rayed level only')
 
   return {
@@ -268,6 +305,8 @@ export function computeCharacteristics(
     uaWPerK,
     designHeatLossW,
     coolingTonsEstimate,
+    coolingBasis,
+    ...(coolingComposition ?? {}),
     notes,
     ...(allZonesOutdoor ? { allZonesOutdoor: true } : {}),
   }
@@ -295,6 +334,13 @@ export function characteristicsRows(
 ): { metric: string; value: string; unit: string }[] {
   const noSlab = c.floorAreaM2 <= 0
   const na = zeroAreaNa(c)
+  // The cooling row NAMES its basis (M4/B11 convention): the Manual-J-lite
+  // LOAD when that's what the figure is, the rule of thumb otherwise —
+  // absent basis (hand-built fixtures) reads rule-of-thumb.
+  const coolingMetric =
+    c.coolingBasis === 'manual-j-lite'
+      ? 'Cooling load (Manual J-lite)'
+      : 'Cooling estimate (rule of thumb)'
   return [
     noSlab
       ? { metric: 'Floor area', value: na, unit: '' }
@@ -315,10 +361,18 @@ export function characteristicsRows(
       unit: 'W',
     },
     noSlab
-      ? { metric: 'Cooling estimate (rule of thumb)', value: na, unit: '' }
+      ? { metric: coolingMetric, value: na, unit: '' }
       : {
-          metric: 'Cooling estimate (rule of thumb)',
-          value: c.coolingTonsEstimate.toFixed(1),
+          metric: coolingMetric,
+          // sensible + allowance + total all show (skeptic F1): a humid-
+          // zone figure is NOT the four-term sum, and the reader must see
+          // the composition, not just the product.
+          value:
+            c.coolingBasis === 'manual-j-lite' &&
+            c.coolingSensibleTons !== undefined &&
+            (c.coolingLatentFactor ?? 1) > 1
+              ? `${c.coolingTonsEstimate.toFixed(2)} (${c.coolingSensibleTons.toFixed(2)} sensible × ${c.coolingLatentFactor} latent ${c.coolingMoistureRegime})`
+              : c.coolingTonsEstimate.toFixed(1),
           unit: 'tons',
         },
   ]

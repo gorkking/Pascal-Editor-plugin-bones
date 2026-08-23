@@ -2,10 +2,18 @@
  * HVAC engine — ducted system layout. Pure function:
  * (WallSlice[], RoomSlice[], FramingSpec) → {members, fixtures}.
  *
- * Sizing and layout follow the rules of thumb in data/mep-rules.json /
- * docs/research/mep.md (Manual J/S/D are the real methods — labeled as such):
- *  - tonnage from conditioned area (sqft per ton, climate-typical 500),
- *    garages excluded;
+ * Sizing and layout follow data/mep-rules.json / docs/research/mep.md
+ * (Manual J/S/D are the real methods — every label says which rule sized it):
+ *  - SYSTEM TONNAGE (IRC M1401.3 — equipment per ACCA Manual S from Manual J
+ *    loads) from the MANUAL-J-LITE v1 sensible load (src/engines/manual-j.ts:
+ *    envelope UA × per-zone design ΔT + glazing solar gain + internal gains
+ *    + infiltration × conditioned volume — every assumption stated), selected
+ *    in half-ton steps within the Manual S 95–115% band (out-of-band
+ *    selections warn). ONE plan sizes the air handler, duct cfm, return
+ *    grille AND the condenser row. FALLBACK (never silent): unknown climate
+ *    zone / no exterior envelope / no conditioned volume → the labeled
+ *    sqft-per-ton rule with the trigger on the label. Garages excluded
+ *    either way;
  *  - the air handler lives in a CONDITIONED service space (laundry/utility >
  *    closet > hallway > largest conditioned room); the GARAGE is kept only
  *    when no conditioned service space exists — with a loud M1602.2(1)
@@ -41,10 +49,11 @@
  *    (condenser-always fix — user report 'sometimes the HVAC does not add
  *    the outside heat pump': the row was LOD-400-gated while the AH + full
  *    duct network emitted at 200/300 with zero words; LOD 400 alone still
- *    adds the condensate drain): N units sized from conditioned area at a
- *    climate-zone divisor
- *    (zones 1-2 ≈ 1 ton/450 sqft, 3-4 ≈ 550, 5+ ≈ 650 — an ASSUMPTION,
- *    Manual J/S govern), one condenser per ≤ 5 tons. Each unit gets a 4"
+ *    adds the condensate drain): N units from the SHARED system plan —
+ *    the Manual-J-lite load when it computes, else the labeled climate-zone
+ *    divisor fallback (zones 1-2 ≈ 1 ton/450 sqft, 3-4 ≈ 550, 5+ ≈ 650 —
+ *    an ASSUMPTION, Manual J/S govern) — one condenser per ≤ 5 tons,
+ *    per-unit tonnage on every label. Each unit gets a 4"
  *    concrete pad + cabinet outside an exterior wall (≥ 0.3 m off the face,
  *    ≥ 0.6 m between units, clear of door/window ROs — per mfr clearance +
  *    IRC M1403), a refrigerant LINE-SET — suction ¾" (insulated) + liquid
@@ -92,6 +101,7 @@ import {
   wallPath,
   wallPlan,
 } from './electrical'
+import { MANUAL_S_MAX, MANUAL_S_MIN, manualJLite, manualSTons, type ManualJLiteLoad } from './manual-j'
 import { routePipe, type PipeSpec } from './plumbing'
 
 type Pt = readonly [number, number]
@@ -343,7 +353,9 @@ export function roomInteriorPoint(polygon: readonly Pt[], walls: WallSlice[]): P
   return c
 }
 
-/** Cooling tons from conditioned area, rounded up to the half ton, min 1.5. */
+/** Cooling tons from conditioned area, rounded up to the half ton, min 1.5.
+ * LEGACY rule of thumb (1 ton/500 sqft) — `layoutHvac` sizes from
+ * `sizeCoolingPlan` now; kept exported for direct callers/gates. */
 export function tonsFor(conditionedAreaM2: number): number {
   const sqft = conditionedAreaM2 * 10.7639
   const raw = sqft / SQFT_PER_TON
@@ -382,10 +394,14 @@ export function condenserSqftPerTon(stateCode?: string): {
 }
 
 /**
- * Outdoor-unit plan for a conditioned area: total tons at the climate-band
- * divisor (rounded UP to the half ton, min 1.5), one condenser per ≤ 5 tons
- * (unit count = ceil(total/5)), per-unit tonnage = total/count rounded to
- * the NEAREST half ton. A tiny home floors at 1 unit / 1.5 tons.
+ * Outdoor-unit plan for a conditioned area — the labeled sqft-per-ton
+ * FALLBACK RULE (kept from the pre-Manual-J-lite engine): total tons at the
+ * climate-band divisor (rounded UP to the half ton, min 1.5), one condenser
+ * per ≤ 5 tons (unit count = ceil(total/5)), per-unit tonnage = total/count
+ * rounded to the NEAREST half ton. A tiny home floors at 1 unit / 1.5 tons.
+ * The PRIMARY sizing basis is `sizeCoolingPlan` (Manual-J-lite load per IRC
+ * M1401.3); this rule sizes only when that load cannot compute, with the
+ * reason stated on the label.
  */
 export function condenserPlan(
   conditionedAreaM2: number,
@@ -397,6 +413,111 @@ export function condenserPlan(
   const count = Math.max(1, Math.ceil(totalTons / MAX_TONS_PER_CONDENSER))
   const unitTons = Math.max(COND_MIN_TONS, Math.round((totalTons / count) * 2) / 2)
   return { totalTons, count, unitTons, divisor, zone }
+}
+
+/** ONE system tonnage for the level — air handler, ducts and the condenser
+ * row all size from it (the old engine ran TWO rules of thumb side by side:
+ * AH at 1 ton/500 sqft, condensers at 450/550/650 — incoherent). */
+export type CoolingPlan = {
+  totalTons: number
+  count: number
+  unitTons: number
+  basis: 'manual-j-lite' | 'sqft-rule'
+  /** Basis text for fixture labels, e.g. 'Manual J-lite, zone 2A design
+   * 35°C' or 'assumed 1 ton/550 sqft — Manual J-lite fallback: …'. */
+  sizingNote: string
+  zone: string | null
+  /** The computed load (manual-j-lite basis only). */
+  load?: ManualJLiteLoad
+  /** Stated fallback trigger (sqft-rule basis only). */
+  fallbackReason?: string
+  divisor?: number
+  /** False when stock half-ton steps / the 1.5-ton floor push the Manual S
+   * selection outside the 95–115% band — layoutHvac warns, never silent. */
+  withinManualSBand: boolean
+  /** count × unitTons — the capacity actually INSTALLED. Splitting rounds
+   * each unit to the nearest stock half ton, so a 5.5-ton selection ships
+   * as 2 × 3.0 = 6.0 tons of cabinets (skeptic F2: the plan total passed
+   * the band while the installed sum quietly exceeded it, and the AH said
+   * 5.5 while the cabinets said 6.0). */
+  installedTons: number
+  /** False when the INSTALLED sum leaves the Manual S 95–115% band
+   * (manual-j basis; the fallback rule makes no band claim). */
+  installedWithinBand: boolean
+}
+
+/**
+ * SYSTEM COOLING TONNAGE (IRC M1401.3 — equipment per ACCA Manual S from
+ * Manual J loads): the MANUAL-J-LITE v1 sensible load (envelope UA ×
+ * per-zone design ΔT + glazing solar + internal gains + infiltration ×
+ * conditioned volume — src/engines/manual-j.ts states every assumption)
+ * selected in half-ton steps within the Manual S 95–115% band, split into
+ * one condenser per ≤ 5 tons. FALLBACK (never silent): when the load
+ * cannot compute — unknown climate zone (INTL/unset), no straight exterior
+ * envelope, no conditioned volume — the labeled sqft-per-ton rule
+ * (`condenserPlan`) sizes instead and the trigger goes ON THE LABEL. LOD
+ * never gates the load (walls/rooms exist at every LOD).
+ */
+export function sizeCoolingPlan(
+  walls: WallSlice[],
+  rooms: RoomSlice[],
+  conditionedAreaM2: number,
+  stateCode?: string,
+): CoolingPlan {
+  const load = manualJLite(walls, rooms, stateCode)
+  if (load.ok) {
+    const sel = manualSTons(load.loadTons, COND_MIN_TONS)
+    const totalTons = sel.tons
+    const count = Math.max(1, Math.ceil(totalTons / MAX_TONS_PER_CONDENSER))
+    const unitTons = Math.max(COND_MIN_TONS, Math.round((totalTons / count) * 2) / 2)
+    // The LATENT COMPOSITION goes on the label (skeptic F1): the four-term
+    // load is sensible-only, and in a humid zone the allowance moves the
+    // selection — a reader of any consumer label must see all three
+    // figures (sensible × factor → selected), not discover the omission
+    // in a module docstring.
+    const sens = Math.round(load.sensibleTons * 100) / 100
+    const latentNote = load.moistureRegime
+      ? `${sens} t sensible × ${load.latentFactor} latent (regime ${load.moistureRegime})`
+      : `${sens} t sensible, no latent allowance (no regime letter)`
+    // INSTALLED capacity (skeptic F2): per-unit rounding to stock half
+    // tons makes count × unitTons ≥ the selection — band-check what is
+    // actually bought, not only the plan figure.
+    const installedTons = count * unitTons
+    const installedWithinBand =
+      installedTons >= MANUAL_S_MIN * load.loadTons &&
+      installedTons <= MANUAL_S_MAX * load.loadTons + 1e-9
+    return {
+      totalTons,
+      count,
+      unitTons,
+      basis: 'manual-j-lite',
+      sizingNote: `Manual J-lite, zone ${load.zone} design ${load.outdoorDesignC}°C, ${latentNote}`,
+      zone: load.zone,
+      load,
+      withinManualSBand: sel.withinBand,
+      installedTons,
+      installedWithinBand,
+    }
+  }
+  const fallback = condenserPlan(conditionedAreaM2, stateCode)
+  return {
+    totalTons: fallback.totalTons,
+    count: fallback.count,
+    unitTons: fallback.unitTons,
+    basis: 'sqft-rule',
+    sizingNote:
+      `assumed 1 ton/${fallback.divisor} sqft` +
+      `${fallback.zone ? `, zone ${fallback.zone}` : ''}` +
+      ` — Manual J-lite fallback: ${load.reason}`,
+    zone: fallback.zone,
+    fallbackReason: load.reason,
+    divisor: fallback.divisor,
+    // The fallback rule is its own labeled basis — it makes no Manual S
+    // band claim (the label already says which rule sized it).
+    withinManualSBand: true,
+    installedTons: fallback.count * fallback.unitTons,
+    installedWithinBand: true,
+  }
 }
 
 /** A straight horizontal duct run between two plan points. */
@@ -1172,8 +1293,51 @@ export function layoutHvac(
 
   const areaM2 = conditioned.reduce((sum, r) => sum + polygonArea(r.polygon), 0)
   const habitableArea = habitable.reduce((sum, r) => sum + polygonArea(r.polygon), 0)
-  const tons = tonsFor(areaM2)
+  // ONE system tonnage (IRC M1401.3): Manual-J-lite load → Manual S
+  // selection, or the labeled sqft fallback — air handler, duct cfm, return
+  // grille and the condenser row all size from this plan (the old engine
+  // ran the AH at 1 ton/500 sqft NEXT TO condensers at 450/550/650).
+  const plan = sizeCoolingPlan(walls, rooms, areaM2, context?.stateCode)
+  // The system figure is the INSTALLED capacity (count × unitTons — what
+  // the cabinets actually add up to; == the selection for single-unit
+  // plans). The drawn single indoor coil serves the installed units, so
+  // the AH label/cfm/grille must say 6.0 when the cabinets say 2 × 3.0 —
+  // an AH reading 5.5 beside 6.0 tons of cabinets was its own honesty gap
+  // (skeptic F2); the plan-vs-installed distinction is stated on the AH
+  // label when they differ.
+  const tons = plan.installedTons
   const totalCfm = tons * CFM_PER_TON
+  if (plan.basis === 'manual-j-lite' && !plan.withinManualSBand && plan.load) {
+    warnings.push(
+      `cooling selection ${plan.totalTons} tons sits outside the Manual S 95–115% band for the ${plan.load.loadTons.toFixed(2)}-ton Manual J-lite load (stock half-ton steps / 1.5-ton floor) — verify equipment selection (M1401.3)`,
+    )
+  }
+  // INSTALLED-SUM band (skeptic F2): the ≤5-ton split rounds each unit to
+  // a stock half ton, so the installed sum can leave the band the plan
+  // total passed — say so, never silently.
+  if (
+    plan.basis === 'manual-j-lite' &&
+    plan.load &&
+    plan.withinManualSBand &&
+    !plan.installedWithinBand
+  ) {
+    // one-decimal percent: a 115.1% overrun rounded to '115%' would read
+    // as '115% exceeds the 115% band' — a printed contradiction
+    warnings.push(
+      `installed ${plan.installedTons} tons = ${((plan.installedTons / plan.load.loadTons) * 100).toFixed(1)}% of the ${plan.load.loadTons.toFixed(2)}-ton Manual J-lite load — exceeds the Manual S 115% band (stock unit steps after the ≤5-ton split); verify selection`,
+    )
+  }
+  // MULTI-SYSTEM HONESTY: the load takes N>1 condensers, but this engine's
+  // duct machinery models ONE trunk network from ONE equipment point
+  // (supplySpineOf) — drawing N air handlers would invent zoning it cannot
+  // route (no zoning dampers, no per-system register split). One indoor
+  // coil/exchanger is DRAWN and the assumption is stated here + on the AH
+  // label, never silent.
+  if (plan.count > 1) {
+    warnings.push(
+      `cooling load takes ${plan.count} condensers — ONE air handler/duct system drawn (single indoor coil/exchanger assumption; multi-system zoning not modeled, Manual S/D govern) — verify`,
+    )
+  }
   const ceiling = Math.min(...conditioned.map((r) => r.ceilingHeight))
   // DUCTS NEVER CROSS TOP PLATES (prod report): the trunk plane sits above
   // the TALLEST wall's plate band — R602.6/R602.6.1 cap plate notching/
@@ -1210,8 +1374,34 @@ export function layoutHvac(
     position: [equipAt[0], 1.0, equipAt[1]],
     rotationY: 0,
     sourceId: equipRoom.id,
-    label: `Air handler — ${tons} ton (rule of thumb; Manual J/S govern)`,
-    meta: { tons, conditionedSqft: Math.round(areaM2 * 10.7639), cfm: totalCfm },
+    label:
+      `Air handler — ${tons} ton (${plan.sizingNote}; Manual J/S govern)` +
+      (plan.count > 1
+        ? ` — serves ${plan.count} condensers (${plan.count} × ${plan.unitTons} t installed${
+            plan.installedTons !== plan.totalTons
+              ? ` vs ${plan.totalTons} t selected`
+              : ''
+          }), single indoor coil assumption`
+        : ''),
+    meta: {
+      tons,
+      // the Manual S SELECTION, when the installed sum diverged from it
+      // (split rounding) — single-unit scenes carry no duplicate key
+      ...(plan.installedTons !== plan.totalTons ? { selectedTons: plan.totalTons } : {}),
+      conditionedSqft: Math.round(areaM2 * 10.7639),
+      cfm: totalCfm,
+      sizingBasis: plan.basis,
+      ...(plan.load
+        ? {
+            // design load = what Manual S selected from (sensible × latent)
+            loadBtuH: Math.round(plan.load.loadTons * 12000),
+            sensibleBtuH: Math.round(plan.load.totalBtuH),
+            latentFactor: plan.load.latentFactor,
+            // fixture meta forbids null — a regime-less zone just omits it
+            ...(plan.load.moistureRegime ? { moistureRegime: plan.load.moistureRegime } : {}),
+          }
+        : {}),
+    },
   })
 
   // The supply spine (axis + register drop points + keep-out footprints) —
@@ -1761,7 +1951,8 @@ export function layoutHvac(
       }
     }
     {
-      const plan = condenserPlan(areaM2, context?.stateCode)
+      // The hoisted system plan (ONE tonnage — Manual-J-lite or the labeled
+      // fallback) drives the row count and every per-unit label.
       const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt, rowWall)
       warnings.push(...row.warnings)
       if (electionUnvalidated) warnings.push(COND_UNVALIDATED_WARNING)
@@ -1778,7 +1969,7 @@ export function layoutHvac(
       // shared by every unit's run (the coil is one point).
       const linesetGraph = buildWallGraph(walls)
       const ahAnchor = nearestWallPoint(walls, equipAt)
-      const sizingNote = `assumed 1 ton/${plan.divisor} sqft${plan.zone ? `, zone ${plan.zone}` : ''}`
+      const sizingNote = plan.sizingNote
       for (let i = 0; i < row.slots.length; i++) {
         const slot = row.slots[i] as CondenserSlot
         const n = i + 1
@@ -1846,6 +2037,16 @@ export function layoutHvac(
             unit: n,
             units: plan.count,
             totalTons: plan.totalTons,
+            sizingBasis: plan.basis,
+            ...(plan.load
+              ? {
+                  sensibleTons: Math.round(plan.load.sensibleTons * 100) / 100,
+                  latentFactor: plan.load.latentFactor,
+                  ...(plan.load.moistureRegime
+                    ? { moistureRegime: plan.load.moistureRegime }
+                    : {}),
+                }
+              : {}),
           },
         })
         // Refrigerant LINE-SET (suction ¾" insulated + liquid ⅜", M1411):

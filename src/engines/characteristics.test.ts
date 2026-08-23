@@ -12,6 +12,7 @@ import {
   characteristicsRows,
   computeCharacteristics,
 } from './characteristics'
+import { manualJLite } from './manual-j'
 
 // ---- synthetic 8 × 5 m room, 2.5 m walls, one 1.5×1.2 window + one door ----
 
@@ -154,21 +155,47 @@ describe('computeCharacteristics — UA and design loads', () => {
     expect(c.designHeatLossW).toBeCloseTo(c.uaWPerK * DESIGN_DELTA_T_K, 6)
   })
 
-  test('cooling rule of thumb: floor/55 adjusted ±20% by UA density', () => {
+  test('cooling row = the Manual-J-lite SENSIBLE load when it computes (M1401.3)', () => {
+    // the SAME figure the HVAC engine sizes equipment from — one load, two
+    // consumers (cross-engine coherence; the load's own hand-computed gate
+    // lives in manual-j.test.ts)
+    const mj = manualJLite(WALLS, [ROOM], 'FL')
+    expect(mj.ok).toBe(true)
+    if (!mj.ok) return
+    expect(c.coolingBasis).toBe('manual-j-lite')
+    expect(c.coolingTonsEstimate).toBeCloseTo(mj.loadTons, 12)
+    // every load term's basis rides the notes verbatim
+    for (const note of mj.notes) expect(c.notes).toContain(note)
+  })
+
+  test('cooling FALLS BACK to the rule of thumb when the zone cannot resolve — trigger stated', () => {
+    const intl = computeCharacteristics(WALLS, [ROOM], [], DEFAULT_SPEC, 'INTL')
+    if (!intl) throw new Error('expected characteristics')
+    expect(intl.coolingBasis).toBe('rule-of-thumb')
     const base = 40 / COOLING_M2_PER_TON
-    const factor = Math.min(1.2, Math.max(0.8, c.uaWPerK / 40 / REFERENCE_UA_DENSITY))
-    expect(c.coolingTonsEstimate).toBeCloseTo(base * factor, 6)
-    // this leaky little box clamps at +20%
-    expect(factor).toBe(1.2)
+    const factor = Math.min(1.2, Math.max(0.8, intl.uaWPerK / 40 / REFERENCE_UA_DENSITY))
+    expect(intl.coolingTonsEstimate).toBeCloseTo(base * factor, 6)
+    // INTL assumes zone 4 → R-30 walls → this tight little box clamps at −20%
+    expect(factor).toBe(0.8)
+    expect(
+      intl.notes.some(
+        (n) => n.includes('RULE OF THUMB') && n.includes('Manual J-lite unavailable'),
+      ),
+    ).toBe(true)
+    // and the row NAMES the basis it kept
+    const rows = characteristicsRows(intl)
+    expect(rows.some((r) => r.metric === 'Cooling estimate (rule of thumb)')).toBe(true)
+    expect(rows.some((r) => r.metric.includes('Manual J-lite'))).toBe(false)
   })
 
   test('every assumption is cited in notes', () => {
     const all = c.notes.join('\n')
     expect(all).toContain('R402.1.3') // wall R
     expect(all).toContain('R402.1.2') // window U
-    expect(all).toContain('RULE OF THUMB') // cooling
+    expect(all).toContain('Manual J-lite SENSIBLE load') // cooling basis
+    expect(all).toContain('verify local design conditions') // design-temp caveat
     expect(all).toContain(`ΔT = ${DESIGN_DELTA_T_K} K`) // heat loss
-    expect(all).toContain('infiltration excluded') // UA scope
+    expect(all).toContain('infiltration excluded') // UA row scope
   })
 })
 
@@ -216,7 +243,8 @@ describe('characteristicsRows — slab-less n/a (round-3 scorecard C5)', () => {
     const NA = 'n/a — no floor slabs (see flags)'
     expect(val('Floor area')).toBe(NA)
     expect(val('Volume')).toBe(NA)
-    expect(val('Cooling estimate (rule of thumb)')).toBe(NA)
+    // the spread keeps c's Manual-J-lite basis — the n/a row names IT
+    expect(val('Cooling load (Manual J-lite)')).toBe(NA)
     // envelope metrics keep their numbers; the pinned 11-row order holds
     expect(val('Envelope area (net)')).toBe('61.4')
     expect(val('Envelope UA')).toBe('30.1')
@@ -244,7 +272,12 @@ describe('characteristics CSV — pinned shape', () => {
     expect(lines).toContain('Wall insulation,R-13,ft2·F·h/BTU')
     expect(lines).toContain('Envelope UA,30.1,W/K')
     expect(lines).toContain('Design heat loss (dT 22K),662,W')
-    expect(lines).toContain('Cooling estimate (rule of thumb),0.9,tons')
+    const mj = manualJLite(WALLS, [ROOM], 'FL')
+    if (!mj.ok) throw new Error('expected load')
+    // the row VALUE shows sensible + allowance + total (skeptic F1)
+    expect(lines).toContain(
+      `Cooling load (Manual J-lite),${mj.loadTons.toFixed(2)} (${mj.sensibleTons.toFixed(2)} sensible × 1.25 latent A),tons`,
+    )
     // notes ride along as Note rows (csv-escaped)
     expect(csv).toContain('Note,')
     // 11 metric rows exactly, in this order
@@ -259,7 +292,7 @@ describe('characteristics CSV — pinned shape', () => {
       'Wall insulation',
       'Envelope UA',
       'Design heat loss (dT 22K)',
-      'Cooling estimate (rule of thumb)',
+      'Cooling load (Manual J-lite)',
     ])
   })
 })
