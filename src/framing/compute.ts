@@ -487,7 +487,18 @@ function computeLevelUncached(
       `${duplicateOf.size} duplicate overlapping wall${duplicateOf.size > 1 ? 's' : ''} skipped (framed once, not twice)`,
     )
   }
-  const rooms = extractRooms(nodes, levelId)
+  // Zone twins (S8 class): duplicated zones sharing a polygon collapse to
+  // ONE room at extraction — a twin used to make the honesty warnings
+  // contradict the sheets ('countertop not modeled' for the sink-less twin
+  // while the other twin's counter run was drawn) and welded B13's false
+  // traveler. Say so, like the wall dedupe above.
+  const zoneTwins: { kept: string; dropped: string }[] = []
+  const rooms = extractRooms(nodes, levelId, zoneTwins)
+  for (const twin of zoneTwins) {
+    warnings.push(
+      `duplicate zone “${twin.dropped}” shares “${twin.kept}”'s polygon — merged (classified once, not twice)`,
+    )
+  }
   // R314 never drops silently (round-2 advisory + day-9 head-noun): a
   // LEADING outdoor qualifier ('Outdoor bedroom') OR an outdoor HEAD NOUN
   // ('Master terrace', 'Bedroom terrace') can classify a sleeping-word

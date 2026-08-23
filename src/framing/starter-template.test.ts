@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { classifyRoom } from '../core/wall-model'
+import { classifyRoom, extractRooms } from '../core/wall-model'
 import type { Fixture, Member, RoomSlice, SlabSlice } from '../core/types'
 import {
   characteristicsRows,
@@ -853,5 +853,83 @@ describe('R314 open-air warning (round-2 advisory — E6 spirit)', () => {
         (f) => f.kind === 'smoke-alarm' && f.label?.includes('Garden bedroom'),
       ),
     ).toBe(true)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// 5. Zone-twin dedupe — the false countertop-warning exhibit (S8 class)
+// ---------------------------------------------------------------------------
+
+describe('zone-twin dedupe — honesty warnings must not contradict the sheets', () => {
+  /** The demo's 'Living / Kitchen' twin: two zone nodes over ONE drawn
+   * space, polygons 5 mm apart (host zone re-detection drift). The placed
+   * kitchen sink sits 2 mm inside the LARGER twin's south edge — so before
+   * the dedupe the sink-less twin fired 'countertop receptacles … not
+   * modeled' while the OTHER twin's counter run was drawn on the same
+   * sheet (B13's false-traveler root, same duplicate-zone class). */
+  function kitchenTwinScene(): Record<string, Record<string, unknown>> {
+    return {
+      level_0: { id: 'level_0', type: 'level', level: 0, height: 2.7 },
+      wall_n: wall('wall_n', [-5, -4], [5, -4]),
+      wall_e: wall('wall_e', [5, -4], [5, 4]),
+      wall_s: wall('wall_s', [5, 4], [-5, 4]),
+      wall_w: wall('wall_w', [-5, 4], [-5, -4]),
+      zone_a: zone('zone_a', 'Living / Kitchen', [
+        [-5, -4],
+        [5, -4],
+        [5, 4],
+        [-5, 4],
+      ]),
+      zone_b: zone('zone_b', 'Kitchen', [
+        [-5, -4],
+        [5, -4],
+        [5, 3.995],
+        [-5, 3.995],
+      ]),
+      sink_1: {
+        id: 'sink_1',
+        type: 'item',
+        parentId: 'level_0',
+        asset: { id: 'kitchen' },
+        position: [1, 0, 3.998],
+        rotation: [0, 0, 0],
+      },
+    }
+  }
+
+  test('twins merge: ONE kitchen, counter run drawn, NO contradicting warning, merge stated', () => {
+    const nodes = kitchenTwinScene()
+    // extraction: one room, the better-named twin kept
+    const rooms = extractRooms(nodes, 'level_0')
+    expect(rooms).toHaveLength(1)
+    expect(rooms[0]?.name).toBe('Living / Kitchen')
+    const result = computeLevel(nodes, config())
+    // the counter walk ran — boxes at counter height exist
+    expect(result.fixtures.filter((f) => f.meta?.counter === true).length).toBeGreaterThan(0)
+    // …and NO honesty warning claims the counter is not modeled (pre-fix
+    // the sink-less twin printed exactly this beside the drawn run)
+    expect(result.warnings.some((w) => w.includes('not modeled'))).toBe(false)
+    // the merge itself speaks (P4: it prints in the flag block)
+    expect(
+      result.warnings.some(
+        (w) => w.includes('duplicate zone') && w.includes('Kitchen') && w.includes('merged'),
+      ),
+    ).toBe(true)
+  })
+
+  test('two REAL kitchens (distinct polygons) still warn independently — dedupe never eats them', () => {
+    const nodes = kitchenTwinScene()
+    // move zone_b to its own space (sink-less): the warning is TRUE there
+    ;(nodes.zone_b as Record<string, unknown>).polygon = [
+      [-5, -4],
+      [0, -4],
+      [0, 0],
+      [-5, 0],
+    ]
+    const result = computeLevel(nodes, config())
+    expect(
+      result.warnings.some((w) => w.includes('Kitchen') && w.includes('not modeled')),
+    ).toBe(true)
+    expect(result.warnings.some((w) => w.includes('duplicate zone'))).toBe(false)
   })
 })

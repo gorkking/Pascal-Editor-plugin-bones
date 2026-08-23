@@ -489,6 +489,23 @@ AND a gate — a checklist line without a test is a wish.
   twin carried; the card's opening count includes merged ones. Kept-only
   walls stay reference-equal. Gates: `src/framing/compute.test.ts`
   (dedupe describe block).
+  ZONE TWINS (same class, night-10): duplicate zones sharing a polygon
+  (vertex-for-vertex within 1 cm, any start vertex / winding, same level)
+  collapse to ONE room AT EXTRACTION (`extractRooms` — every consumer
+  sees the deduped census, A4 parity). Tiebreak, stated: a CATEGORIZED
+  name beats 'other' (engines key on category), then the LONGER trimmed
+  name, then the smaller id; the dropped twin's boundaryWallIds union
+  onto the kept room (the opening-merge mirror) and room ORDER stays
+  scene order (circuit numbering is byte-pinned to it). compute warns
+  'duplicate zone … merged (classified once, not twice)' — the twin used
+  to make honesty warnings contradict the sheets (the demo's
+  'Living / Kitchen' twin printed 'countertop receptacles … not modeled'
+  while the other twin's counter run was drawn; B13's false-traveler
+  root). Genuinely distinct zones (≥ 5 cm apart) never merge. Gates:
+  `src/core/wall-model.test.ts` (zone-twin dedupe describe: tiebreak
+  matrix, tolerance both directions, winding/rotation, wallId union,
+  order pin), `src/framing/starter-template.test.ts` (false
+  countertop-warning exhibit + real-two-kitchens keep).
 - **S9 The Engineering cladding choice reads in BOTH render modes.** Every
   CLADDING_OPTIONS family emits ≥ 1 member (ROLE_OF covers veneer/lamina/
   foam/drainage) with a per-family X-ray color (label-matched, pairwise

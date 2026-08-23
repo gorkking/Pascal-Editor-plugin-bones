@@ -463,8 +463,76 @@ export function classifyRoom(name: string): RoomSlice['category'] {
   return indoor ?? 'other'
 }
 
-/** Extract named rooms (zones) on `levelId`. */
-export function extractRooms(nodes: NodesRecord, levelId: string): RoomSlice[] {
+/** Zone-twin tolerance (m): two zones whose polygons match vertex-for-vertex
+ * within this distance are the SAME drawn space duplicated (host zone
+ * duplication / re-detection drift), not two rooms. 1 cm — float drift and
+ * re-snap jitter live well under it; genuinely distinct zones (even twins
+ * shifted a wall thickness apart) sit far above it. */
+const ZONE_TWIN_TOL = 0.01
+
+/** Vertex-for-vertex polygon identity within ZONE_TWIN_TOL, under any
+ * cyclic offset in either winding order (the host re-detects zones with
+ * arbitrary start vertex / orientation). */
+function sameZonePolygon(
+  a: readonly (readonly [number, number])[],
+  b: readonly (readonly [number, number])[],
+): boolean {
+  const n = a.length
+  if (n !== b.length) return false
+  const close = (p: readonly [number, number], q: readonly [number, number]): boolean =>
+    Math.hypot(p[0] - q[0], p[1] - q[1]) <= ZONE_TWIN_TOL
+  for (const dir of [1, -1]) {
+    for (let off = 0; off < n; off++) {
+      let ok = true
+      for (let i = 0; i < n; i++) {
+        const j = (((off + dir * i) % n) + n) % n
+        const bj = b[j]
+        const ai = a[i]
+        if (!ai || !bj || !close(ai, bj)) {
+          ok = false
+          break
+        }
+      }
+      if (ok) return true
+    }
+  }
+  return false
+}
+
+/** Zone-twin tiebreak — which twin is the room (S8 class, stated):
+ * (1) a CATEGORIZED name beats 'other' — the MEP engines key on category,
+ *     so a 'Kitchen' twin outranks its 'Living' twin (the counter walk,
+ *     GFCI zones, register land once, on the honest name);
+ * (2) then the LONGER trimmed name (more descriptive: 'Living / Kitchen'
+ *     beats 'Kitchen');
+ * (3) then the lexicographically smaller id (deterministic across hosts —
+ *     object insertion order is not a contract). */
+function betterZoneTwin(a: RoomSlice, b: RoomSlice): RoomSlice {
+  const rank = (r: RoomSlice): number => (r.category === 'other' ? 0 : 1)
+  if (rank(a) !== rank(b)) return rank(a) > rank(b) ? a : b
+  const an = a.name.trim().length
+  const bn = b.name.trim().length
+  if (an !== bn) return an > bn ? a : b
+  return a.id <= b.id ? a : b
+}
+
+/**
+ * Extract named rooms (zones) on `levelId`, DEDUPED: zone twins — same
+ * polygon within ZONE_TWIN_TOL on the same level — collapse to ONE room
+ * (kept per betterZoneTwin; the dropped twin's boundaryWallIds union onto
+ * the kept room, mirroring S8's opening merge). Duplicate zones made the
+ * honesty warnings contradict the sheets: the demo's 'Living / Kitchen'
+ * twin fired 'countertop receptacles not modeled' for the sink-less twin
+ * while the OTHER twin's counter run was drawn — and welded B13's false
+ * cross-circuit traveler. Every extractRooms consumer (compute, seeding,
+ * panel) sees the same deduped census (A4 parity). `twinLog`, when passed,
+ * collects the merges so computeLevel can say so.
+ */
+export function extractRooms(
+  nodes: NodesRecord,
+  levelId: string,
+  twinLog?: { kept: string; dropped: string }[],
+): RoomSlice[] {
   const rooms: RoomSlice[] = []
   for (const node of Object.values(nodes)) {
     if (node.type !== 'zone' || node.parentId !== levelId) continue
@@ -484,5 +552,29 @@ export function extractRooms(nodes: NodesRecord, levelId: string): RoomSlice[] {
       ceilingHeight: num(node.ceilingHeight, 2.7),
     })
   }
-  return rooms
+  // Room ORDER is a downstream contract (circuit numbering walks rooms in
+  // scene order — byte-equality): dedupe in place, never re-sort. The
+  // WINNER is still insertion-order-independent — betterZoneTwin is a
+  // strict total order (category rank, name length, then id).
+  const kept: RoomSlice[] = []
+  for (const room of rooms) {
+    const twinAt = kept.findIndex((k) => sameZonePolygon(k.polygon, room.polygon))
+    if (twinAt < 0) {
+      kept.push(room)
+      continue
+    }
+    const incumbent = kept[twinAt] as RoomSlice
+    const winner = betterZoneTwin(incumbent, room)
+    const loser = winner === incumbent ? room : incumbent
+    const mergedWallIds = [
+      ...winner.boundaryWallIds,
+      ...loser.boundaryWallIds.filter((id) => !winner.boundaryWallIds.includes(id)),
+    ]
+    kept[twinAt] =
+      mergedWallIds.length === winner.boundaryWallIds.length
+        ? winner
+        : { ...winner, boundaryWallIds: mergedWallIds }
+    twinLog?.push({ kept: winner.name || winner.id, dropped: loser.name || loser.id })
+  }
+  return kept
 }
