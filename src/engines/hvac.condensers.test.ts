@@ -225,20 +225,21 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
         const b = cabs[j] as Member
         const dist = Math.hypot(a.position[0] - b.position[0], a.position[2] - b.position[2])
         // center pitch − cabinet width = clear air between the boxes
-        expect(dist - 0.9).toBeGreaterThanOrEqual(0.6 - 1e-9)
+        expect(dist - 0.95).toBeGreaterThanOrEqual(0.6 - 1e-9)
       }
       // row is on the south wall (z = 0, thickness 0.2): face at z = −0.1;
       // cabinet near edge = center + depth/2
       const cab = cabs[i] as Member
-      expect(-(cab.position[2] + 0.35 / 2) - 0.1).toBeGreaterThanOrEqual(0.3 - 1e-9)
+      expect(-(cab.position[2] + 0.95 / 2) - 0.1).toBeGreaterThanOrEqual(0.3 - 1e-9)
     }
   })
 
-  test('the pad slab clears the worst-case exterior assembly; the cabinet stays on it', () => {
-    // Brick veneer reaches ~0.13 m past the wall face (R703.8 4.625"
-    // assembly + sheathing): a 0.95 m pad centered on the legacy 0.6 m
-    // anchor would run into the wythe (S1). The slab slides outward; the
-    // CABINET keeps the anchor (legacy position) and still rests on the pad.
+  test('AUTO anchors: 24" face clearance by construction — pad centered under the cabinet, no slide', () => {
+    // Unwarp round 2026-08-23: the auto stand-off is condenserStandoff =
+    // t/2 + 0.6096 + depth/2 = 0.1 + 0.6096 + 0.475 = 1.1846 from the
+    // centerline — the pad inner edge (−0.5) clears the worst-case
+    // R703.8 exterior assembly (face 0.1 + 0.13) with ~0.45 m to spare,
+    // so the S1 slide never fires and the slab stays centered.
     const { walls, rooms } = shell(26, 10)
     const { members } = layoutHvac(walls, rooms, LOD400)
     const pads = padsOf(members)
@@ -248,17 +249,55 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
       const pad = pads[i] as Member
       const cab = cabs[i] as Member
       // south row: wall centerline z = 0, thickness 0.2 → face −0.1
-      const padInnerEdge = -(pad.position[2] + 0.95 / 2)
+      const padInnerEdge = -(pad.position[2] + 1.0 / 2)
       expect(padInnerEdge).toBeGreaterThanOrEqual(0.1 + 0.13 - 1e-9)
-      // cabinet footprint stays within the pad footprint
+      // cabinet footprint stays within the pad footprint (2.5 cm reveal)
       expect(Math.abs(cab.position[2] - pad.position[2])).toBeLessThanOrEqual(
-        0.95 / 2 - 0.35 / 2 + 1e-9,
+        1.0 / 2 - 0.95 / 2 + 1e-9,
       )
       expect(Math.abs(cab.position[0] - pad.position[0])).toBeLessThanOrEqual(
-        0.95 / 2 - 0.9 / 2 + 1e-9,
+        1.0 / 2 - 0.95 / 2 + 1e-9,
       )
-      // cabinet anchor itself is unmoved (legacy 0.6 m stand-off)
-      expect(cab.position[2]).toBeCloseTo(-0.6, 6)
+      // cabinet anchor at the stated stand-off basis: t/2 + 24" + depth/2
+      expect(cab.position[2]).toBeCloseTo(-(0.1 + 0.6096 + 0.95 / 2), 6)
+      // face clearance restated: wall face (−0.1) → cabinet near face
+      expect(-(cab.position[2] + 0.95 / 2) - 0.1).toBeCloseTo(0.6096, 6)
+      // …and the honest-anchor row carries no overhang flag
+      expect(pad.flag ?? '').not.toContain('overhangs its pad')
+      expect(cab.flag ?? '').not.toContain('overhangs its pad')
+    }
+    // the pad label states the clearance basis (restated, unwarp round)
+    expect(pads[0]?.label).toContain('24" face clearance basis')
+  })
+
+  test('VERBATIM anchor tucked against the wall: the slab slides clear (S1) and the overhang is flagged', () => {
+    // A user drag at the legacy 0.6 m stand-off: the pad must still clear
+    // the R703.8 assembly (inner edge ≥ face + 0.13), the CABINET keeps
+    // the user's point verbatim (A4), and — with only a 2.5 cm pad reveal
+    // around the true 0.95 m cabinet — the slide leaves the cabinet
+    // overhanging the slab: pad + cabinet say so, never silent.
+    const { walls, rooms } = shell(26, 10)
+    const { members } = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { position: [13, 0, -0.6] },
+    })
+    const pads = padsOf(members)
+    const cabs = cabinetsOf(members)
+    const pad = pads[0] as Member
+    const cab = cabs[0] as Member
+    // cabinet anchor verbatim (A4 — never silently relocated)
+    expect(cab.position[0]).toBeCloseTo(13, 6)
+    expect(cab.position[2]).toBeCloseTo(-0.6, 6)
+    // slab slid clear of the assembly
+    expect(-(pad.position[2] + 1.0 / 2)).toBeGreaterThanOrEqual(0.1 + 0.13 - 1e-9)
+    // the slide exceeded the 2.5 cm reveal → overhang, flagged on BOTH
+    expect(Math.abs(cab.position[2] - pad.position[2])).toBeGreaterThan(1.0 / 2 - 0.95 / 2)
+    expect(pad.flag ?? '').toContain('overhangs its pad')
+    expect(cab.flag ?? '').toContain('overhangs its pad')
+    // row unit #2 keeps the mfr floor (rowOff = max(off, minOff)) and,
+    // standing at minOff = t/2 + 0.3 + depth/2 = 0.875 ≥ the 0.73 the pad
+    // needs, composes flag-free
+    if (pads.length > 1) {
+      expect(pads[1]?.flag ?? '').not.toContain('overhangs its pad')
     }
   })
 
@@ -272,7 +311,7 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
       // pads stay on the south row (outside, z<0) …
       expect(pad.position[2]).toBeLessThan(0)
       // … and clear of the RO span [1.15, 2.05] by half a pad
-      expect(Math.abs(pad.position[0] - 1.6)).toBeGreaterThanOrEqual(0.9 / 2 + 0.95 / 2 - 1e-9)
+      expect(Math.abs(pad.position[0] - 1.6)).toBeGreaterThanOrEqual(0.9 / 2 + 1.0 / 2 - 1e-9)
     }
   })
 
@@ -453,7 +492,11 @@ describe('line-set — one RO-clear wall penetration, wall-following pair to the
         disc.position[1] - unit.position[1],
         disc.position[2] - unit.position[2],
       )
-      expect(dist).toBeLessThanOrEqual(1.0)
+      // "Within sight" (NEC 440.14) is a visibility rule (≤ 50 ft), not a
+      // 1 m one — this pin guards proximity sanity: wall box ↔ unit center
+      // across the 24" face clearance + half the 0.95 m cabinet depth +
+      // the height difference ≈ 1.29 m (unwarp round 2026-08-23).
+      expect(dist).toBeLessThanOrEqual(1.35)
       expect(disc.label).toContain('2-pole') // AC-n circuit label (wired by compute)
     }
     // + a whip per unit (liquid-tight conduit, never NM-B)
@@ -477,9 +520,9 @@ describe('heat-pump override moves unit #1 and the row follows (A4)', () => {
     expect(units[0]?.position[0]).toBeCloseTo(28, 6)
     expect(units[0]?.position[2]).toBeCloseTo(3, 6)
     // row re-anchors to the EAST wall (x = 26): unit #2 keeps the anchor's
-    // stand-off and steps along z at pad + clearance pitch
+    // stand-off and steps along z at pad + clearance pitch (1.0 + 0.6)
     expect(units[1]?.position[0]).toBeCloseTo(28, 6)
-    expect(Math.abs((units[1]?.position[2] ?? 0) - 3)).toBeCloseTo(0.95 + 0.6, 6)
+    expect(Math.abs((units[1]?.position[2] ?? 0) - 3)).toBeCloseTo(1.0 + 0.6, 6)
     // line-set #1 re-anchors with it
     const legs = moved.members.filter((m) => m.sourceId === 'lineset-suction-1')
     expect(legs.length).toBeGreaterThan(0)
@@ -920,13 +963,15 @@ describe('heat-pump override honesty — verbatim still WINS, mis-drags WARN (hu
  * carries the ⚠ flag and the level warns — never silent.
  *
  * Geometry (10×8 shell, laundry mid-plan, mirrors the exhibit shape):
- *  - w_bathLaundry (4,2.5)→(4,4.5) FALSE-exterior: its outward spot
- *    (3.4, 3.5) is inside the Bathroom — the exhibit's exact class;
- *  - w_voidNorth (4,2.5)→(6,2.5) FALSE-exterior: its spot (5, 1.9) has NO
- *    zone but sits UNDER the slab — a covered mid-plan void, still inside
- *    the building (only the coverage probe can catch it);
+  *  - w_bathLaundry (4,2.5)→(4,4.5) FALSE-exterior: its outward spot
+ *    (2.8154, 3.5) is inside the Bathroom — the exhibit's exact class
+ *    (spots stand at condenserStandoff = 0.1 + 0.6096 + 0.475 = 1.1846
+ *    from the centerline since the unwarp round);
+ *  - w_voidNorth (4,2.5)→(6,2.5) FALSE-exterior: its spot (5, 1.3154) has
+ *    NO zone but sits UNDER the slab — a covered mid-plan void, still
+ *    inside the building (only the coverage probe can catch it);
  *  - the true south wall (d=3.5) is the nearest candidate whose spot
- *    (5, −0.6) really is outdoors.
+ *    (5, −1.1846) really is outdoors.
  */
 function misclassifiedScene(perimeterExterior = true) {
   const walls = [
@@ -979,9 +1024,10 @@ describe('condenser election validation — false-exterior walls never place the
     // the coverage probe it lands in the covered mid-plan void at (5,1.9))
     for (const r of rooms) expect(inPoly(plan, r.polygon)).toBe(false)
     for (const c of coverage) expect(inPoly(plan, c.polygon)).toBe(false)
-    // the nearest wall that validates is the true SOUTH wall — pad 0.6 m out
+    // the nearest wall that validates is the true SOUTH wall — pad at the
+    // 24" face-clearance stand-off (1.1846 from the centerline, t = 0.2)
     expect(plan[0]).toBeCloseTo(5, 6)
-    expect(plan[1]).toBeCloseTo(-0.6, 6)
+    expect(plan[1]).toBeCloseTo(-1.1846, 6)
     // clean election: no ⚠ flags, no election warning — this is the healthy path
     for (const m of [...padsOf(out.members), ...cabinetsOf(out.members)]) {
       expect(m.flag).toBeUndefined()
@@ -1012,10 +1058,10 @@ describe('condenser election validation — false-exterior walls never place the
     const { walls, rooms, coverage } = misclassifiedScene()
     const blind = placeHeatPumpSpot(walls, rooms)
     expect(blind?.[0]).toBeCloseTo(5, 6)
-    expect(blind?.[1]).toBeCloseTo(1.9, 6) // in-plan void — wrong
+    expect(blind?.[1]).toBeCloseTo(2.5 - 1.1846, 6) // in-plan void — wrong
     const sighted = placeHeatPumpSpot(walls, rooms, coverage)
     expect(sighted?.[0]).toBeCloseTo(5, 6)
-    expect(sighted?.[1]).toBeCloseTo(-0.6, 6) // truly outdoors
+    expect(sighted?.[1]).toBeCloseTo(-1.1846, 6) // truly outdoors
   })
 
   test('a verbatim override still WINS and warns (fast-follow machinery unchanged)', () => {
@@ -1028,10 +1074,13 @@ describe('condenser election validation — false-exterior walls never place the
     expect(unit.position[0]).toBeCloseTo(3.4, 6)
     expect(unit.position[2]).toBeCloseTo(3.5, 6)
     expect(out.warnings.some((w) => w.includes('heat-pump point is inside Bathroom'))).toBe(true)
-    // the election never ran — no unvalidated flag/warning class
+    // the election never ran — no unvalidated flag/warning class; the S1
+    // overhang class legitimately fires instead (the verbatim point stands
+    // 0.6 m off the nearest wall — closer than the exterior-assembly
+    // allowance now that the cabinet is 0.95 m deep, unwarp round)
     expect(out.warnings.some((w) => w.includes('could not be validated'))).toBe(false)
     for (const m of [...padsOf(out.members), ...cabinetsOf(out.members)]) {
-      expect(m.flag).toBeUndefined()
+      expect(m.flag ?? '').not.toContain('verify condenser placement')
     }
   })
 
@@ -1050,8 +1099,9 @@ describe('condenser election validation — false-exterior walls never place the
     const out = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const units = condensersOf(out.fixtures)
     expect(units.length).toBe(1)
-    // least-bad = the nearest election (the pre-fix spot), kept — not dropped
-    expect(units[0]?.position[0]).toBeCloseTo(3.4, 6)
+    // least-bad = the nearest election (the pre-fix spot class), kept —
+    // not dropped (bathLaundry wall x = 4 minus the 1.1846 stand-off)
+    expect(units[0]?.position[0]).toBeCloseTo(4 - 1.1846, 6)
     expect(units[0]?.position[2]).toBeCloseTo(3.5, 6)
     // NEVER silent: every pad + cabinet carries the unvalidated ⚠ class …
     const boxes = [...padsOf(out.members), ...cabinetsOf(out.members)]
@@ -1071,16 +1121,17 @@ describe('condenser election validation — false-exterior walls never place the
 
   test('the row anchors to the ELECTED wall — never re-derived from whatever is nearest the pad', () => {
     // A detached garden wall just outside the shell (exterior=true, z=-1):
-    // the validated spot (5, -0.6) is NEARER the fence (0.4 m) than the
-    // elected south wall (0.6 m). Re-deriving the row wall by nearest would
-    // hang the disconnect + line-set penetration on the FENCE with the out-
-    // normal pointing back at the house; the election's wall must win.
+    // the validated spot (5, -1.1846) is NEARER the fence (0.1846 m, just
+    // past its line) than the elected south wall (1.1846 m). Re-deriving
+    // the row wall by nearest would hang the disconnect + line-set
+    // penetration on the FENCE with the out-normal pointing back at the
+    // house; the election's wall must win.
     const { walls, rooms, coverage } = misclassifiedScene()
     walls.push(wall('w_fence', [2, -1], [8, -1], true))
     const out = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const unit = condensersOf(out.fixtures)[0] as Fixture
     expect(unit.position[0]).toBeCloseTo(5, 6)
-    expect(unit.position[2]).toBeCloseTo(-0.6, 6)
+    expect(unit.position[2]).toBeCloseTo(-1.1846, 6)
     const disc = out.fixtures.find((f) => f.kind === 'disconnect') as Fixture
     expect(disc.sourceId).toBe('w_south')
   })
@@ -1089,7 +1140,7 @@ describe('condenser election validation — false-exterior walls never place the
     // THE round-2 finding: window RO where the auto anchor lands + a garden
     // fence just outside the shell. The engine slides unit #1 clear of the
     // RO; the OLD seed guard asked nearestExteriorExit(slid) — the fence
-    // (0.4 m from the pad) always beat the elected wall (0.6 m by
+    // always beat the elected wall (a full condenserStandoff away by
     // construction) — so the seed bailed to the RAW anchor, which fed back
     // as a verbatim override and recomposed DEAD-CENTER on the window with
     // the disconnect re-hosted to the fence, silently. A4: creation alone
@@ -1100,8 +1151,8 @@ describe('condenser election validation — false-exterior walls never place the
     const auto = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const unit = condensersOf(auto.fixtures)[0] as Fixture
     // the engine slid clear of the RO span [4.4, 5.6] (+ half-pad + slack)
-    expect(unit.position[0]).toBeCloseTo(6.125, 6)
-    expect(unit.position[2]).toBeCloseTo(-0.6, 6)
+    expect(unit.position[0]).toBeCloseTo(6.15, 6)
+    expect(unit.position[2]).toBeCloseTo(-1.1846, 6)
     expect((auto.fixtures.find((f) => f.kind === 'disconnect') as Fixture).sourceId).toBe(
       'w_south',
     )
@@ -1132,7 +1183,7 @@ describe('condenser election validation — false-exterior walls never place the
     const auto = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const seed = placeCondenserSeedSpot(walls, rooms, coverage)
     expect(seed?.[0]).toBeCloseTo(5, 6)
-    expect(seed?.[1]).toBeCloseTo(-0.6, 6)
+    expect(seed?.[1]).toBeCloseTo(-1.1846, 6)
     const post = layoutHvac(
       walls,
       rooms,
@@ -1174,9 +1225,9 @@ describe('condenser election validation — false-exterior walls never place the
     ]
     const rooms = [room('r_laundry', 'Laundry', 'laundry', [[1, 1], [3, 1], [3, 3], [1, 3]])]
     const seed = placeCondenserSeedSpot(walls, rooms)
-    // raw election spot (2, -0.6), not the off-wall slid spot (4.425, -0.6)
+    // raw election spot (2, -1.1846), not the off-wall slid spot (4.45, …)
     expect(seed?.[0]).toBeCloseTo(2, 6)
-    expect(seed?.[1]).toBeCloseTo(-0.6, 6)
+    expect(seed?.[1]).toBeCloseTo(-1.1846, 6)
   })
 
   test('courtyard decision: an OUTDOOR zone legitimizes a pad even over a patio slab', () => {
@@ -1217,7 +1268,7 @@ describe('condenser election validation — false-exterior walls never place the
       coverage: withZone.coverage,
     })
     const unitA = condensersOf(a.fixtures)[0] as Fixture
-    expect(unitA.position[0]).toBeCloseTo(5.4, 6)
+    expect(unitA.position[0]).toBeCloseTo(6 - 1.1846, 6)
     expect(unitA.position[2]).toBeCloseTo(4, 6)
     expect(a.warnings.some((w) => w.includes('could not be validated'))).toBe(false)
     for (const m of [...padsOf(a.members), ...cabinetsOf(a.members)]) {
@@ -1230,7 +1281,7 @@ describe('condenser election validation — false-exterior walls never place the
       coverage: noZone.coverage,
     })
     const unitB = condensersOf(b.fixtures)[0] as Fixture
-    expect(unitB.position[0]).toBeCloseTo(10.6, 6)
+    expect(unitB.position[0]).toBeCloseTo(10 + 1.1846, 6)
     expect(unitB.position[2]).toBeCloseTo(4, 6)
     // (3) a slab HOLE under the court is a courtyard too — uncovered, valid
     const holed = courtScene(false, true)
@@ -1238,7 +1289,7 @@ describe('condenser election validation — false-exterior walls never place the
       coverage: holed.coverage,
     })
     const unitC = condensersOf(c.fixtures)[0] as Fixture
-    expect(unitC.position[0]).toBeCloseTo(5.4, 6)
+    expect(unitC.position[0]).toBeCloseTo(6 - 1.1846, 6)
     expect(unitC.position[2]).toBeCloseTo(4, 6)
   })
 })

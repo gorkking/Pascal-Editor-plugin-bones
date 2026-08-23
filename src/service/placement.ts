@@ -28,7 +28,12 @@ export const SERVICE_BODY: Record<ServiceType, BodySpec> = {
   'sewer-exit': { dims: [inches(4), 0.3, inches(4)], color: '#5b6670', defaultAff: 0.15, sign: 'SEWER' },
   'power-entry': { dims: [0.12, 0.28, 0.12], color: '#3a3a3e', defaultAff: 2.2, sign: 'POWER' },
   thermostat: { dims: [0.09, 0.12, 0.03], color: '#e9e9e6', defaultAff: inches(52), sign: 'TSTAT' },
-  'heat-pump': { dims: [0.9, 0.8, 0.4], color: '#b9bec4', defaultAff: 0.5, sign: 'HP' },
+  // Heat-pump placeholder mirrors the ENGINE's cabinet truth (hvac
+  // CONDENSER_UNIT_DIMS 0.95×0.85×0.95 — true top-discharge proportions,
+  // unwarp round 2026-08-23) so basement/toggle-off placeholders and the
+  // move-tool ghost read the same footprint the X-ray unit occupies;
+  // defaultAff = pad top (0.1016) + half the cabinet height.
+  'heat-pump': { dims: [0.95, 0.85, 0.95], color: '#b9bec4', defaultAff: 0.5266, sign: 'HP' },
   'electric-meter': { dims: [0.2, 0.3, 0.15], color: '#9aa1a9', defaultAff: inches(55), sign: 'METER' },
 }
 

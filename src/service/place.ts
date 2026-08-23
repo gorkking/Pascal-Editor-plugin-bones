@@ -94,9 +94,10 @@ export function buildServicePointNodes(
     }
   }
 
-  // Heat pump: floor-placed pad 0.6 m outside the wall nearest the air
-  // handler — `position` is the anchor (like the sewer exit), so the node
-  // stands free and the lineset re-anchors wherever it's dragged.
+  // Heat pump: floor-placed pad outside the wall nearest the air handler
+  // (condenserStandoff: t/2 + 24" face clearance + cabinet depth/2) —
+  // `position` is the anchor (like the sewer exit), so the node stands
+  // free and the lineset re-anchors wherever it's dragged.
   if (!existing.has('heat-pump')) {
     // Coverage rides along (A4 parity with the engine's own election): a
     // seed elected without it could validate a spot the engine rejects.

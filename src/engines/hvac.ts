@@ -54,8 +54,10 @@
  *    divisor fallback (zones 1-2 ≈ 1 ton/450 sqft, 3-4 ≈ 550, 5+ ≈ 650 —
  *    an ASSUMPTION, Manual J/S govern) — one condenser per ≤ 5 tons,
  *    per-unit tonnage on every label. Each unit gets a 4"
- *    concrete pad + cabinet outside an exterior wall (≥ 0.3 m off the face,
- *    ≥ 0.6 m between units, clear of door/window ROs — per mfr clearance +
+ *    concrete pad + cabinet outside an exterior wall (AUTO anchors at 24"
+ *    wall-face-to-cabinet-face clearance — condenserStandoff; ≥ 0.3 m off
+ *    the face as the hard mfr floor for rows/verbatim drags, ≥ 0.6 m
+ *    between units, clear of door/window ROs — per mfr clearance +
  *    IRC M1403), a refrigerant LINE-SET — suction ¾" (insulated) + liquid
  *    ⅜" running as a parallel pair — from the cabinet through ONE
  *    exterior-wall penetration at ~0.4 m (snapped clear of ROs), then
@@ -120,6 +122,7 @@ const rules = mepRules as {
       unitDimsM?: number[]
       unitClearM?: number
       wallClearM?: number
+      faceClearM?: number
       linesetSuctionDiaM?: number
       linesetLiquidDiaM?: number
       linesetHeightM?: number
@@ -156,8 +159,10 @@ const REGISTER_BELOW_CEILING = 0.04
 const BOOT_BELOW_CEILING = 0.05
 /** Thermostat mount height (device center) — 48–52" practice band. */
 const TSTAT_AFF = inches(52)
-/** Heat-pump pad stands this far outside its exterior wall. */
-const PAD_OFFSET = 0.6
+/** Wall-less fallback stand-off for the heat-pump pad (no wall ⇒ no face to
+ * measure from, no thickness to add): face clearance + half the cabinet
+ * depth. Anchors WITH a wall use {@link condenserStandoff} instead. */
+const PAD_OFFSET_NO_WALL = () => COND_FACE_CLEAR + COND_DIMS[2] / 2
 
 // ---- AC condenser row (data/mep-rules.json hvac.condenser) ------------------
 const COND = rules.hvac?.condenser
@@ -168,19 +173,47 @@ const COND_SQFT_COLD = COND?.sqftPerTonByZoneBand?.cold ?? 650
 /** Residential condensers top out ~5 tons — bigger loads take more units. */
 export const MAX_TONS_PER_CONDENSER = COND?.maxTonsPerUnit ?? 5
 const COND_MIN_TONS = COND?.minTons ?? 1.5
-/** 4" concrete equipment pad, ~0.95 × 0.95 m footprint (IRC M1403). */
-const COND_PAD_SIDE = COND?.padSideM ?? 0.95
+/** 4" concrete equipment pad, 1.0 × 1.0 m (40"-class stock; IRC M1403) —
+ * a ≥ 2.5 cm reveal per side around the 0.95 m cabinet footprint. */
+const COND_PAD_SIDE = COND?.padSideM ?? 1.0
 const COND_PAD_T = COND?.padThicknessM ?? 0.1016
-/** Condenser cabinet W × H × D on the pad. */
+/** Condenser cabinet W × H × D on the pad. Basis (unwarp round 2026-08-23,
+ * Julien: native proportions): conventional TOP-DISCHARGE ducted heat-pump
+ * outdoor units in the 2–4 ton class — Bosch IDS BOVA-36 37.4×37.4×33.4"
+ * (0.95×0.95×0.85 m), Goodman GSZ 35.5×35.5×36.25", Carrier 25VNA4
+ * 35.4×35.4×37" — a ~0.95 m SQUARE footprint, not the old slim 0.35 m
+ * side-discharge form the box used to mimic. 0.95×0.85×0.95 additionally
+ * equals the host 'AC block' asset's native bbox aspect (1.06×0.95×1.06 m)
+ * within 0.2%, so the X-ray swap renders the model at TRUE proportions
+ * (uniform ≈0.90 shrink — gate: condenser-asset.test.ts ratio pin). */
 const COND_DIMS: readonly [number, number, number] = [
-  COND?.unitDimsM?.[0] ?? 0.9,
-  COND?.unitDimsM?.[1] ?? 0.8,
-  COND?.unitDimsM?.[2] ?? 0.35,
+  COND?.unitDimsM?.[0] ?? 0.95,
+  COND?.unitDimsM?.[1] ?? 0.85,
+  COND?.unitDimsM?.[2] ?? 0.95,
 ]
+/** The engine's condenser-cabinet truth, shared with the renderer side
+ * (the A6 asset wrapper's uniformity gate + the service pick proxy). */
+export const CONDENSER_UNIT_DIMS: readonly [number, number, number] = COND_DIMS
+export const CONDENSER_PAD_THICKNESS: number = COND_PAD_T
 /** Clear space BETWEEN units in the row — per mfr clearance + IRC M1403. */
 const COND_UNIT_CLEAR = COND?.unitClearM ?? 0.6
-/** Clear space between the wall FACE and the cabinet. */
+/** HARD floor between the wall FACE and the cabinet face (12" mfr minimum)
+ * — rows and verbatim overrides never stand closer. */
 const COND_WALL_CLEAR = COND?.wallClearM ?? 0.3
+/** AUTO-anchor face clearance: wall FACE → cabinet face, 24" (the mfr
+ * service/airflow recommendation class for the house-side coil — e.g.
+ * Bosch IDS & Carrier install guides ask 12" min / 24" recommended behind
+ * the unit). The old constant 0.6 m CENTER stand-off left only ~0.42 m
+ * centerline-to-face; with the true 0.95 m cabinet depth it would have
+ * pinched the coil to ~7 cm off a typical wall face — the anchor now
+ * derives from the face outward, wall-thickness aware. */
+const COND_FACE_CLEAR = COND?.faceClearM ?? inches(24)
+/** AUTO pad-anchor stand-off from the wall CENTERLINE: half the wall, the
+ * 24" face clearance, half the cabinet depth — the stated-basis version of
+ * the old flat 0.6 m. Row units keep {@link COND_WALL_CLEAR} as the floor. */
+function condenserStandoff(wallThickness: number): number {
+  return wallThickness / 2 + COND_FACE_CLEAR + COND_DIMS[2] / 2
+}
 /** Refrigerant line-set: suction ¾" (insulated) + liquid ⅜" pair, through
  * ONE wall penetration at ~0.4 m, then wall-following to the air handler. */
 const LINESET_SUCTION_DIA = COND?.linesetSuctionDiaM ?? 0.019
@@ -229,6 +262,12 @@ const COND_UNVALIDATED_FLAG =
   '⚠ verify condenser placement — auto spot could not be validated outdoors'
 const COND_UNVALIDATED_WARNING =
   'condenser auto spot could not be validated outdoors — every exterior-wall candidate lands inside a room or under floor coverage (exterior wall classification suspect); verify placement'
+/** Pad + cabinet flag when the S1 cladding slide pushes the pad out past
+ * the cabinet's 2.5 cm pad reveal — only a verbatim anchor tucked closer
+ * than the exterior-assembly allowance can cause it (auto anchors clear it
+ * by construction); the cabinet then overhangs its own slab. */
+const COND_PAD_OVERHANG_FLAG =
+  '⚠ cabinet overhangs its pad — the unit stands too close to the wall for the exterior assembly (R703.8); move it out'
 /**
  * A verbatim heat-pump override farther (plan) than this from EVERY
  * exterior wall warns — almost certainly a mis-drag into the yard.
@@ -1095,27 +1134,37 @@ export function electHeatPumpExit(
   // Stable sort keeps wall order on ties — the same wall nearestExteriorExit
   // (strict <, iteration order) elected before validation existed.
   candidates.sort((a, b) => a.d - b.d)
-  const spotOf = (at: Pt): Pt => {
+  // Per-candidate stand-off: t/2 + 24" face clearance + cabinet depth/2
+  // (condenserStandoff) — the spot is the CABINET CENTER, so the face
+  // clearance is honest for THIS wall's thickness, not a flat guess.
+  const spotOf = (at: Pt, wall: WallSlice): Pt => {
     const ox = at[0] - equipAt[0]
     const oz = at[1] - equipAt[1]
     const n = Math.max(1e-6, Math.hypot(ox, oz))
-    return [at[0] + (ox / n) * PAD_OFFSET, at[1] + (oz / n) * PAD_OFFSET]
+    const off = condenserStandoff(wall.thickness)
+    return [at[0] + (ox / n) * off, at[1] + (oz / n) * off]
   }
   for (const cand of candidates) {
-    const spot = spotOf(cand.at)
+    const spot = spotOf(cand.at, cand.wall)
     if (spotIsOutdoors(spot, walls, rooms, coverage)) {
       return { wall: cand.wall, at: cand.at, spot, validated: true }
     }
   }
   const nearest = candidates[0] as { wall: WallSlice; at: Pt; d: number }
-  return { wall: nearest.wall, at: nearest.at, spot: spotOf(nearest.at), validated: false }
+  return {
+    wall: nearest.wall,
+    at: nearest.at,
+    spot: spotOf(nearest.at, nearest.wall),
+    validated: false,
+  }
 }
 
 /**
- * AUTO plan point of the heat-pump / condenser pad: 0.6 m outside the
- * nearest exterior wall whose spot VALIDATES as outdoors (shortest lineset
- * among walls that are really exterior — electHeatPumpExit; off the wall
- * so service clearance survives). Exported for the Bones panel action.
+ * AUTO plan point of the heat-pump / condenser pad: condenserStandoff
+ * (t/2 + 24" face clearance + cabinet depth/2) outside the nearest exterior
+ * wall whose spot VALIDATES as outdoors (shortest lineset among walls that
+ * are really exterior — electHeatPumpExit; off the wall so the mfr
+ * service/airflow clearance survives). Exported for the Bones panel action.
  */
 export function placeHeatPumpSpot(
   walls: WallSlice[],
@@ -1175,7 +1224,8 @@ export function placeCondenserSeedSpot(
   // stays within the wall's span; a slide that ran off the wall keeps the
   // raw anchor. The old oracle asked nearestExteriorExit(slid) — the exact
   // wrong-wall race the row fix retired: a garden fence 0.4 m from the pad
-  // ALWAYS beats the elected wall (0.6 m by construction), so the guard
+  // ALWAYS beats the elected wall (≥ 1 m by construction — condenserStandoff:
+  // t/2 + 24" face clearance + cabinet depth/2), so the guard
   // bailed to the raw anchor and the seeded node recomposed dead-center on
   // the very RO the engine had slid past (round-2 finding). Compose-time
   // coherence for the seeded node is layoutHvac's ε-anchor.
@@ -1221,8 +1271,16 @@ function condenserRow(
     return { wall: null, slots, warnings }
   }
   const wall = exit.wall
-  const foot = exit.at
   const u0 = Math.max(0, Math.min(wall.length, (anchor[0] - wall.start[0]) * wall.dir[0] + (anchor[1] - wall.start[1]) * wall.dir[1]))
+  // Out-normal foot from the SAME clamped-u lerp the slide/penetration math
+  // uses — NOT exit.at: projectOnto's dot·axis/len² form drifts one ULP on
+  // non-dyadic coordinates (e.g. a slid anchor at u = 6.15…95 footed back
+  // at 6.15), handing the verbatim seed round-trip a ~1e-16 out-normal x
+  // and breaking the ε-anchor's post-seed == auto BYTE equality (the old
+  // keepout arithmetic only ever produced dyadic u values, which masked
+  // the class — unwarp round 2026-08-23). Same clamp, same point, stable
+  // bits.
+  const foot = wallPointAt(wall, u0)
   // Outward normal: anchor relative to its wall foot; a degenerate on-wall
   // anchor falls back to "away from the equipment room".
   const ox = anchor[0] - foot[0]
@@ -1968,8 +2026,9 @@ export function layoutHvac(
     // automatically — so the default lifecycle turns the auto anchor into
     // a verbatim override on the very next compose. Re-deriving that row's
     // wall by nearest flipped the disconnect onto a garden fence 0.4 m
-    // from the pad (the elected wall stands 0.6 m away BY CONSTRUCTION, so
-    // any exterior segment beyond the shell wins the race). DECISION: an
+    // from the pad (the elected wall stands ≥ 1 m away BY CONSTRUCTION —
+    // condenserStandoff — so any exterior segment beyond the shell wins
+    // the race). DECISION: an
     // override standing within ε of the election spot or of the engine's
     // own slid unit-#1 spot IS the machine's point — its row keeps the
     // ELECTED wall (post-seed compose == auto compose, byte). Any other
@@ -2002,12 +2061,11 @@ export function layoutHvac(
         const dx = p[0] - equipAt[0]
         const dz = p[1] - equipAt[1]
         const d = Math.hypot(dx, dz)
+        const off = condenserStandoff(near.wall.thickness)
         anchor =
-          d > 1e-6
-            ? [p[0] + (dx / d) * PAD_OFFSET, p[1] + (dz / d) * PAD_OFFSET]
-            : [p[0] + PAD_OFFSET, p[1]]
+          d > 1e-6 ? [p[0] + (dx / d) * off, p[1] + (dz / d) * off] : [p[0] + off, p[1]]
       } else {
-        anchor = [equipAt[0] + PAD_OFFSET, equipAt[1]]
+        anchor = [equipAt[0] + PAD_OFFSET_NO_WALL(), equipAt[1]]
       }
     }
     {
@@ -2041,10 +2099,19 @@ export function layoutHvac(
             ? Math.atan2(at[0] - equipAt[0], at[1] - equipAt[1])
             : Math.atan2(slot.out[0], slot.out[1])
         // The pad's inner edge must clear the wall's exterior assembly —
-        // brick veneer reaches ~0.13 m past the face (R703.8) and a 0.95 m
-        // square pad centered on the legacy 0.6 m anchor would run INTO it
-        // (S1). Slide the SLAB outward just enough; the cabinet stays put.
+        // brick veneer reaches ~0.13 m past the face (R703.8). AUTO anchors
+        // now stand off far enough by construction (24" face clearance >
+        // the 0.13 m allowance + pad reveal), but a VERBATIM user drag can
+        // still tuck the pad against the wall (S1). Slide the SLAB outward
+        // just enough; the cabinet stays put (A4 — the user's point is
+        // never moved). With the true square cabinet (0.95 deep on a 1.0
+        // pad) the reveal is only 2.5 cm per side, so a slide beyond it
+        // leaves the cabinet OVERHANGING its pad — physically wrong and
+        // caused by the too-close anchor itself: flag pad + cabinet, never
+        // silent (unwarp round 2026-08-23; the slim 0.35 m cabinet had
+        // 0.3 m of slack and could never overhang).
         let padCenter: Pt = at
+        let overhangFlag: string | null = null
         if (row.wall) {
           const foot = wallPointAt(row.wall, slot.u)
           const standOff = (at[0] - foot[0]) * slot.out[0] + (at[1] - foot[1]) * slot.out[1]
@@ -2052,8 +2119,17 @@ export function layoutHvac(
           const push = Math.max(0, needed - standOff)
           if (push > 0) {
             padCenter = [at[0] + slot.out[0] * push, at[1] + slot.out[1] * push]
+            if (push > (COND_PAD_SIDE - COND_DIMS[2]) / 2 + 1e-9) {
+              overhangFlag = COND_PAD_OVERHANG_FLAG
+            }
           }
         }
+        const slotFlag = (base: string | null): string | undefined => {
+          let out: string | undefined = base ?? undefined
+          if (overhangFlag) out = composeFlag(out, overhangFlag)
+          return out
+        }
+        const padCabinetFlag = slotFlag(rowFlag)
         // The PAD is always poured parallel to the row wall — only the
         // CABINET keeps unit #1's legacy facing. An oblique square pad
         // reaches (|sin|+|cos|)·half toward the wall and punched through
@@ -2069,8 +2145,8 @@ export function layoutHvac(
           rotation: [0, padRotY, 0],
           material: 'concrete',
           sourceId: equipRoom.id,
-          label: 'Condenser pad 4" — concrete (per mfr clearance + IRC M1403)',
-          ...(rowFlag ? { flag: rowFlag } : {}),
+          label: 'Condenser pad 4" — concrete (24" face clearance basis; per mfr clearance + IRC M1403)',
+          ...(padCabinetFlag ? { flag: padCabinetFlag } : {}),
         })
         members.push({
           system: 'hvac',
@@ -2082,7 +2158,7 @@ export function layoutHvac(
           material: 'steel',
           sourceId: equipRoom.id,
           label: `AC condenser #${n} — ${plan.unitTons} tons outdoor unit`,
-          ...(rowFlag ? { flag: rowFlag } : {}),
+          ...(padCabinetFlag ? { flag: padCabinetFlag } : {}),
         })
         fixtures.push({
           system: 'hvac',

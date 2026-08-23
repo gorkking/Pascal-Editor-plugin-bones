@@ -436,21 +436,26 @@ describe('starter template (garden-house shape) — the heat pump stands outside
     expect(inRect(plan, -HOUSE_W, HOUSE_W, -HOUSE_D, HOUSE_D)).toBe(false)
     // …but standing BY the house (a few meters at most), not lost on the site
     expect(inRect(plan, -HOUSE_W - 3, HOUSE_W + 3, -HOUSE_D - 3, HOUSE_D + 3)).toBe(true)
-    // clear of every wall centerline per the mfr-clearance convention
-    // (wall t/2 + 0.3 m + cabinet depth/2 ≈ 0.55 — gate at 0.5)
+    // clear of every wall centerline per the stand-off convention
+    // (condenserStandoff: t/2 + 24" face clearance + cabinet depth/2
+    // ≈ 1.16 on 0.15 m walls — gate at 1.0)
     for (const w of result.walls) {
-      expect(segDist(plan, w.start, w.end)).toBeGreaterThan(0.5)
+      expect(segDist(plan, w.start, w.end)).toBeGreaterThan(1.0)
     }
   })
 
-  test('NEC 440.14: disconnect within sight (≤ 1 m plan) + whip present', () => {
+  test('NEC 440.14: disconnect within sight (≤ 1.2 m plan) + whip present', () => {
+    // Plan reach = condenserStandoff (t/2 + 24" face clearance + 0.95/2)
+    // minus the box's wall-face offset ≈ 1.06 m on the 0.15 m template
+    // walls ("within sight" is a visibility rule, ≤ 50 ft — the pin guards
+    // proximity sanity; unwarp round 2026-08-23).
     const unit = condensersOf(result.fixtures)[0] as Fixture
     const disconnects = result.fixtures.filter((f) => f.kind === 'disconnect')
     expect(disconnects.length).toBe(1)
     const d = disconnects[0] as Fixture
     expect(
       Math.hypot(d.position[0] - unit.position[0], d.position[2] - unit.position[2]),
-    ).toBeLessThanOrEqual(1)
+    ).toBeLessThanOrEqual(1.2)
     expect(result.members.some((m) => m.sourceId.startsWith('ac-whip-'))).toBe(true)
   })
 

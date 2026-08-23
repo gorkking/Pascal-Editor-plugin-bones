@@ -26,9 +26,16 @@
  * UNIT cube centered at the origin; each rendered instance then takes the
  * EXACT matrix its box instance would (position, rotation, scale = member
  * dims). The asset therefore occupies precisely the volume the box did —
- * the engine's cabinet footprint (≈ 0.9 × 0.8 × 0.35 m) governs, with the
- * squarish native model gently compressed to the slim heat-pump form.
- * Pad, disconnect, whip and line-set are untouched.
+ * the engine's cabinet footprint governs. UNWARP (Julien 2026-08-23: "it's
+ * warped — compressed in one dimension… shrink in all dimensions instead
+ * of 1"): the fix lives at the TRUTH level — the ENGINE cabinet dims are
+ * now 0.95 × 0.85 × 0.95 m (real top-discharge ducted heat-pump class,
+ * basis in data/mep-rules.json unitDimsNote), which equals this asset's
+ * native bbox aspect within 0.2%, so the per-axis wrapper scale is a
+ * UNIFORM ≈ 0.896 shrink — no single-axis compression. Gated below
+ * (scale-ratio pin vs AC_BLOCK_NATIVE_BBOX_M, 1% tolerance) so neither
+ * side can drift back into a warp silently. Pad, disconnect, whip and
+ * line-set are untouched.
  */
 
 import { Box3, Group, type Mesh, type Object3D, Vector3 } from 'three'
@@ -36,6 +43,12 @@ import type { Member } from '../core/types'
 
 /** Host item-catalog id of the substituted asset — "AC block". */
 export const AC_BLOCK_ASSET_ID = 'ac-block'
+
+/** The asset's NATIVE bounding box (m), from the host catalog entry — the
+ * aspect truth the engine cabinet dims must match for a warp-free render.
+ * The wrapper's per-axis scale is memberDims[i] / native[i]; the
+ * uniformity gate pins those three ratios equal within 1%. */
+export const AC_BLOCK_NATIVE_BBOX_M: readonly [number, number, number] = [1.06, 0.95, 1.06]
 
 /** The "AC block" model GLB, verbatim from the host catalog entry's `src`.
  * If the host ever moves the file, the load fails and every cabinet simply

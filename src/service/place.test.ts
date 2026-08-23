@@ -529,10 +529,11 @@ describe('heat-pump seed election validation (Julien scene, 2026-08-22)', () => 
     const created = buildServicePointNodes(nodes, 'level_1')
     const hp = created.find((n) => n.serviceType === 'heat-pump')
     expect(hp).toBeDefined()
-    // the honest spot: 0.6 m SOUTH of the true south wall — outside the
-    // Bathroom (pre-fix: 3.4, 3.5) and outside the covered void (coverage-
-    // blind: 5, 1.9)
+    // the honest spot: condenserStandoff (t/2 + 24" face clearance +
+    // cabinet depth/2 = 1.1846) SOUTH of the true south wall — outside the
+    // Bathroom (pre-fix class: inside it) and outside the covered void
+    // (coverage-blind: 5, 1.3154)
     expect(hp?.position?.[0]).toBeCloseTo(5, 6)
-    expect(hp?.position?.[2]).toBeCloseTo(-0.6, 6)
+    expect(hp?.position?.[2]).toBeCloseTo(-1.1846, 6)
   })
 })
