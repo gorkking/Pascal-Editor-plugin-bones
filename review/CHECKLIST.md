@@ -388,7 +388,13 @@ AND a gate — a checklist line without a test is a wish.
   concrete BUY figure ceils to the 0.1 yd³ ready-mix batch (r1 F1: a
   round that collapses onto the net states a factor adding zero), and
   every printed '+X%' derives from the factor constant itself, so the
-  label can never drift from the arithmetic. The roof deck's under-tile
+  label can never drift from the arithmetic. SUB-BATCH pours (r2
+  advisory, night-10): when 5% is smaller than one 0.1 yd³ display step
+  the ceiled order figure and the net PRINT identically ('0.6 … ≈ 0.6')
+  — the detail then states the basis ('waste smaller than the 0.1 yd³
+  display step — net and order figures meet at display rounding'),
+  wording only, zero quantity drift; pours that clear the step stay
+  note-free byte-for-byte. The roof deck's under-tile
   caveat states that the exact scene-dependent shortfall sits ON TOP of
   the generic stated waste.
   Origin: verify round 2026-08-16 — the attic blanket-exterior rule fired on
@@ -414,7 +420,8 @@ AND a gate — a checklist line without a test is a wish.
   describe (net-preservation per class, stated-factor buy figures
   re-derived from the same net arithmetic, gross-only-on-fallback
   header honesty, subfloor label both paths, demo-compose enumeration
-  in BOTH directions, lap-vs-waste distinction)
+  in BOTH directions, lap-vs-waste distinction, sub-batch display
+  collapse note both directions)
 - **S5 A mixed CMU/framed wall seams on a whole course and tops out at its
   architectural height.** The override `{ construction: 'cmu', cmuHeightM }`
   splits the wall at `snapCmuHeight` (8" module, R606 coursing): bond beam as
