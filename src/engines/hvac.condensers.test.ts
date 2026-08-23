@@ -10,6 +10,7 @@ import {
   placeHeatPumpSpot,
 } from './hvac'
 import { circuitSchedule } from './electrical'
+import { manualJLite, manualSTons } from './manual-j'
 import { computeTakeoff } from './takeoff'
 
 /**
@@ -172,14 +173,25 @@ describe('condenser sizing — area + climate zone (assumption, Manual J/S gover
     expect(condenserPlan(260, 'MN').count).toBe(1)
   })
 
-  test('fixture label CITES the divisor + zone the sizing used', () => {
+  test('fixture label CITES the sizing basis: Manual J-lite when the zone resolves, the sqft rule + trigger when it cannot', () => {
     const { walls, rooms } = shell(26, 10)
-    const fl = condensersOf(layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' }).fixtures)
-    expect(fl.length).toBe(2)
-    expect(fl[0]?.label).toContain('assumed 1 ton/450 sqft')
-    expect(fl[0]?.label).toContain('zone 2A')
+    // FL resolves zone 2A → the Manual-J-lite load sizes (M1401.3) and the
+    // label carries the basis: zone + the design temp the ΔT came from.
+    const fl = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
+    const flUnits = condensersOf(fl.fixtures)
+    expect(flUnits.length).toBeGreaterThanOrEqual(1)
+    expect(flUnits[0]?.label).toContain('Manual J-lite, zone 2A design 35°C')
+    expect(flUnits[0]?.meta?.sizingBasis).toBe('manual-j-lite')
+    // …and the air handler sizes from the SAME plan (one system tonnage)
+    const ah = fl.fixtures.find((f) => f.label?.includes('Air handler'))
+    expect(ah?.label).toContain('Manual J-lite, zone 2A design 35°C')
+    expect(ah?.meta?.tons).toBe(flUnits[0]?.meta?.totalTons)
+    // No stateCode → climate zone unknown → the labeled sqft FALLBACK, with
+    // the trigger stated on the label — never a silent rule swap.
     const intl = condensersOf(layoutHvac(walls, rooms, LOD400).fixtures)
     expect(intl[0]?.label).toContain('assumed 1 ton/550 sqft')
+    expect(intl[0]?.label).toContain('Manual J-lite fallback: climate zone unknown')
+    expect(intl[0]?.meta?.sizingBasis).toBe('sqft-rule')
   })
 })
 
@@ -511,6 +523,11 @@ describe('takeoff — condenser rows mirror the rendered members/fixtures (S4)',
     expect(n).toBe(2)
     expect(find('AC condensers')?.quantity).toBe(n)
     expect(find('AC condensers')?.detail).toContain('tons total')
+    // PER-UNIT tonnage on the buy line, mirroring the fixture meta exactly
+    const perUnit = Number(condensersOf(fixtures)[0]?.meta?.tons)
+    expect(find('AC condensers')?.detail).toContain(`${n} × ${perUnit} tons`)
+    // this no-stateCode scene sized by the FALLBACK rule — the row says so
+    expect(find('AC condensers')?.detail).toContain('assumed sizing')
     expect(find('Condenser pads')?.quantity).toBe(padsOf(members).length)
     expect(find('AC disconnects')?.quantity).toBe(n)
     expect(find('Condenser whips')?.quantity).toBe(n)
@@ -1223,5 +1240,163 @@ describe('condenser election validation — false-exterior walls never place the
     const unitC = condensersOf(c.fixtures)[0] as Fixture
     expect(unitC.position[0]).toBeCloseTo(5.4, 6)
     expect(unitC.position[2]).toBeCloseTo(4, 6)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MANUAL-J-LITE system sizing (IRC M1401.3 — equipment per ACCA Manual S
+// from Manual J loads; the lite load's own hand-computed gate lives in
+// manual-j.test.ts — these gates prove the ENGINE composes from it)
+// ---------------------------------------------------------------------------
+
+/** Big glazed shell in a known state: W×D rect, laundry SW + bedroom +
+ * living, `eastWindows` windows of `winW`×`winH` on the east wall (facing
+ * +x = EAST under the stated axis assumption). Walls 2.7 h / 0.2 th,
+ * ceilings 2.5 — same fabric as shell(). */
+function glazedShell(W: number, D: number, eastWindows: number, winW = 2.4, winH = 2.4) {
+  const wins: OpeningSlice[] = Array.from({ length: eastWindows }, (_, i) =>
+    opening(`win_e_${i}`, 1.5 + i * ((D - 3) / Math.max(1, eastWindows)), winW + 0.05, 'window'),
+  ).map((o) => ({ ...o, width: winW, height: winH, sillHeight: 0.3, roughHeight: winH + 0.1 }))
+  const walls = [
+    wall('w_south', [0, 0], [W, 0], true),
+    wall('w_north', [0, D], [W, D], true),
+    wall('w_west', [0, 0], [0, D], true),
+    wall('w_east', [W, 0], [W, D], true, wins),
+  ]
+  const rooms = [
+    room('r_laundry', 'Laundry', 'laundry', [[0, 0], [3, 0], [3, 3], [0, 3]]),
+    room('r_living', 'Living', 'other', [[3, 0], [W, 0], [W, D], [3, D]]),
+    room('r_bed', 'Bedroom', 'bedroom', [[0, 3], [3, 3], [3, D], [0, D]]),
+  ]
+  return { walls, rooms }
+}
+
+describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, climate divergence', () => {
+  test('HAND-COMPUTED: the engine tonnage equals the four-term load selected per Manual S (FL, zone 2A)', () => {
+    // 70×30 m shell, 10 east windows 2.4×2.4 — every term derived here with
+    // independent arithmetic; the engine must land the same equipment tons.
+    const { walls, rooms } = glazedShell(70, 30, 10)
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
+    // hand: zone 2A → ΔT = 35−24 = 11 K; wall R-13, ceiling R-49
+    const winArea = 10 * 2.4 * 2.4 // 57.6 m²
+    const wallNet = 2 * (70 + 30) * 2.7 - winArea
+    const uaWalls = wallNet / (13 * 0.1761)
+    const uaWindows = winArea * 0.32 * 5.678263
+    const uaCeiling = (70 * 30) / (49 * 0.1761)
+    const envelopeW = (uaWalls + uaWindows + uaCeiling) * 11
+    const solarW = winArea * 220 * 0.3 // east facade
+    const internalW = 2 * 67.4 + 351.7 // 1 bedroom → 2 occupants
+    const infiltrationW = 0.33 * 0.35 * (70 * 30 * 2.5) * 11
+    const loadTons = ((envelopeW + solarW + internalW + infiltrationW) * 3.412142) / 12000
+    const handTons = Math.max(1.5, Math.ceil(loadTons * 2) / 2)
+    const ah = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    expect(ah.meta?.tons).toBe(handTons)
+    expect(ah.meta?.sizingBasis).toBe('manual-j-lite')
+    expect(Number(ah.meta?.loadBtuH)).toBe(Math.round(loadTons * 12000))
+    // sanity on the pinned scene itself: the load really is in the 4.5–5
+    // band this gate was built around (a fabric change should trip this)
+    expect(loadTons).toBeGreaterThan(4.5)
+    expect(loadTons).toBeLessThanOrEqual(5)
+    expect(handTons).toBe(5)
+    // ≤ 5 tons → ONE unit carrying the whole tonnage
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBe(1)
+    expect(units[0]?.meta?.tons).toBe(5)
+    expect(units[0]?.label).toContain('5 tons (Manual J-lite, zone 2A design 35°C)')
+  })
+
+  test('5-TON SPLIT: the same fabric with two more windows crosses 5 tons → 2 units, per-unit labels', () => {
+    const { walls, rooms } = glazedShell(70, 30, 12)
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
+    // oracle: the module load crosses 5 tons (hand gate above pins the math)
+    const load = manualJLite(walls, rooms, 'FL')
+    expect(load.ok).toBe(true)
+    if (!load.ok) return
+    expect(load.loadTons).toBeGreaterThan(5)
+    const total = manualSTons(load.loadTons).tons // 5.5
+    expect(total).toBe(5.5)
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBe(2)
+    // per-unit tonnage on EVERY cabinet + fixture label (#k — X tons)
+    const unitTons = Math.round((total / 2) * 2) / 2 // 3
+    for (let k = 0; k < units.length; k++) {
+      const u = units[k] as Fixture
+      expect(u.label).toContain(`AC Condenser #${k + 1} — ${unitTons} tons`)
+      expect(u.label).toContain('Manual J-lite, zone 2A design 35°C')
+      expect(u.meta?.tons).toBe(unitTons)
+      expect(u.meta?.totalTons).toBe(total)
+    }
+    const cabs = cabinetsOf(out.members)
+    expect(cabs.length).toBe(2)
+    for (let k = 0; k < cabs.length; k++) {
+      const cab = cabs[k] as Member
+      // A6 TRIPLE on every unit: system/role/material pin the asset swap
+      expect(cab.system).toBe('hvac')
+      expect(cab.role).toBe('equipment')
+      expect(cab.material).toBe('steel')
+      expect(cab.label).toBe(`AC condenser #${k + 1} — ${unitTons} tons outdoor unit`)
+    }
+    // placement machinery untouched: both units OUTSIDE the shell, on the
+    // row wall, ≥ 0.6 m clear (the row composes, not just the count)
+    for (const box of [...padsOf(out.members), ...cabs]) {
+      const inside =
+        box.position[0] > 0 && box.position[0] < 70 && box.position[2] > 0 && box.position[2] < 30
+      expect(inside).toBe(false)
+    }
+    const [a, b] = cabs as [Member, Member]
+    expect(
+      Math.hypot(a.position[0] - b.position[0], a.position[2] - b.position[2]) - 0.9,
+    ).toBeGreaterThanOrEqual(0.6 - 1e-9)
+    // multi-system honesty: ONE air handler drawn, the split stated on the
+    // label AND as a level warning — never a silent single-coil 5.5-ton box
+    const ah = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
+    expect(ah.label).toContain('serves 2 condensers, single indoor coil assumption')
+    expect(
+      out.warnings.some((w) =>
+        w.includes('ONE air handler/duct system drawn') && w.includes('2 condensers'),
+      ),
+    ).toBe(true)
+    // takeoff mirrors the split with per-unit tonnage + the basis (S4)
+    const rowT = computeTakeoff(out.members, out.fixtures).find((r) => r.item === 'AC condensers')
+    expect(rowT?.quantity).toBe(2)
+    // the buy line sums INSTALLED units (2 × 3-ton cabinets = 6 tons of
+    // equipment) — per-unit rounding to stock half tons runs above the
+    // 5.5-ton plan total, which is what you actually purchase
+    expect(rowT?.detail).toContain('2 × 3 tons (6 tons total)')
+    expect(rowT?.detail).toContain('Manual J-lite sizing')
+  })
+
+  test('CLIMATE DIVERGENCE: the same house buys more tonnage in FL (zone 2) than MN (zone 6)', () => {
+    const { walls, rooms } = glazedShell(70, 30, 10)
+    const fl = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
+    const mn = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'MN' })
+    const flTons = Number(
+      (fl.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture).meta?.tons,
+    )
+    const mnTons = Number(
+      (mn.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture).meta?.tons,
+    )
+    expect(flTons).toBe(5)
+    expect(mnTons).toBeLessThan(flTons) // ΔT 7 vs 11 + R-30 walls, R-60 ceiling
+    expect(condensersOf(mn.fixtures)[0]?.label).toContain(
+      'Manual J-lite, zone 6A design 31°C',
+    )
+  })
+
+  test('MANUAL S BAND: a tiny FL home floors at 1.5 tons and says the selection left the band', () => {
+    const { walls, rooms } = shell(10, 8)
+    const out = layoutHvac(walls, rooms, LOD400, undefined, { stateCode: 'FL' })
+    const units = condensersOf(out.fixtures)
+    expect(units.length).toBe(1)
+    expect(units[0]?.meta?.tons).toBe(1.5)
+    expect(
+      out.warnings.some(
+        (w) => w.includes('outside the Manual S 95–115% band') && w.includes('M1401.3'),
+      ),
+    ).toBe(true)
+    // …and the fallback path never makes a Manual S band claim (its label
+    // already states which rule sized it)
+    const intl = layoutHvac(walls, rooms, LOD400)
+    expect(intl.warnings.some((w) => w.includes('Manual S'))).toBe(false)
   })
 })

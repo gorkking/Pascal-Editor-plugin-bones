@@ -1194,10 +1194,20 @@ export function computeTakeoff(
     const totalTons = round1(
       condensers.reduce((sum, f) => sum + (Number(f.meta?.tons) || 0), 0),
     )
+    // PER-UNIT tonnage on the row (Manual-J-lite batch): '2 × 3 tons', with
+    // the sizing basis the fixture labels carry — the buy line must say what
+    // each cabinet IS, not only the sum. Mixed per-unit tonnage (no engine
+    // emits it today) keeps the total-only wording.
+    const perUnit = [...new Set(condensers.map((f) => round1(Number(f.meta?.tons) || 0)))]
+    const basis = condensers.every((f) => f.meta?.sizingBasis === 'manual-j-lite')
+      ? 'Manual J-lite sizing'
+      : 'assumed sizing'
     push(
       'HVAC',
       'AC condensers',
-      `${totalTons} tons total — assumed sizing, Manual S governs (M1401.3)`,
+      perUnit.length === 1
+        ? `${condensers.length} × ${perUnit[0]} tons (${totalTons} tons total) — ${basis}, Manual S governs (M1401.3)`
+        : `${totalTons} tons total — ${basis}, Manual S governs (M1401.3)`,
       condensers.length,
       'pcs',
     )

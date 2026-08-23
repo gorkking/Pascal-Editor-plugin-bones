@@ -1048,10 +1048,35 @@ AND a gate — a checklist line without a test is a wish.
   invisible grilles).
   Gates: `src/engines/hvac.plates.test.ts` +
   `src/framing/compute.multistorey.test.ts` (M1 soffit storey)
-- **M2 The AC condenser row is sized, placed and booked honestly.** Outdoor
-  units are a labeled ASSUMPTION (1 ton per 450/550/650 sqft by IECC zone
-  band 1-2/3-4/5+, cited in the fixture label — Manual J/S govern per
-  M1401.3), one condenser per ≤ 5 tons, tiny homes floor at 1 unit/1.5 tons.
+- **M2 The AC condenser row is sized, placed and booked honestly.** ONE
+  system tonnage (IRC M1401.3 — equipment per ACCA Manual S from Manual J
+  loads) sizes the air handler, the duct cfm, the return grille AND the
+  condenser row: the MANUAL-J-LITE v1 sensible load (src/engines/manual-j.ts
+  — envelope UA at prescriptive R including the ceiling × per-zone
+  ASHRAE/ACCA-style design ΔT + per-orientation glazing solar × assumed
+  SHGC 0.30 + Manual-J internal gains at bedrooms+1 occupancy + ACH-0.35
+  infiltration over the conditioned volume; every constant cited in
+  data/mep-rules.json hvac.manualJLite, every fixture label carries the
+  basis — 'Manual J-lite, zone 2A design 35°C' — and 'verify local design
+  conditions' rides the notes), selected in half-ton steps within the
+  Manual S 95–115% band (an out-of-band selection — stock steps, the
+  1.5-ton floor — warns, never silent). FALLBACK, stated ON THE LABEL:
+  unknown climate zone (INTL/unset) / no straight exterior envelope / no
+  conditioned volume → the labeled sqft rule (1 ton per 450/550/650 sqft
+  by IECC zone band 1-2/3-4/5+, 'Manual J-lite fallback: <trigger>'); LOD
+  never gates the load (walls/rooms exist at every LOD). One condenser per
+  ≤ 5 tons — a >5-ton load splits into N units with per-unit tonnage on
+  every cabinet/fixture label and on the takeoff buy line ('N × X tons
+  (installed total)'); ONE air handler is drawn with the
+  single-indoor-coil/exchanger assumption stated on its label PLUS a level
+  warning (the duct machinery models one trunk network; inventing zoning
+  dampers would be a lie). Tiny homes floor at 1 unit/1.5 tons.
+  Manual-J-lite gates: `src/engines/manual-j.test.ts` (hand-computed
+  four-term load, zone divergence, fallback triggers, Manual S band) +
+  the 'Manual-J-lite engine sizing' describe in
+  `src/engines/hvac.condensers.test.ts` (hand-derived engine tonnage,
+  5-ton split with A6 triple + row compose, climate divergence, band
+  warning, takeoff mirror).
   Every pad + cabinet sits OUTSIDE an exterior wall, ≥ 0.6 m clear between
   units, cabinet ≥ 0.3 m off the wall face (per mfr clearance + IRC M1403),
   the pad slab's inner edge clears the worst-case exterior assembly
