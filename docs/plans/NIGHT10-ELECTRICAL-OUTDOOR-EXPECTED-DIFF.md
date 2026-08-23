@@ -1,9 +1,13 @@
 # NIGHT-10 expected-diff manifest — electrical outdoor-zone honesty + B14 ordinal stability
 
-Branch `feat/electrical-outdoor-honesty` (base master db7ada2, suite 1644 → 1663).
+Branch `feat/electrical-outdoor-honesty` (base master db7ada2, suite 1644 → 1665).
 Owner: `src/engines/electrical.ts` (+ tests). `wall-model.ts` / `compute.ts`
 untouched (sibling owns the classifier tonight — this branch consumes
 category `'outdoor'` exactly as it exists on master).
+Round-1 REVISE folded in: F1 indoor-first entrance lookup, F2
+interior-typed fences, F3 full-serialization probe (this file's class-1
+enumeration replaced the earlier lossy fixture-only projection and its
+false "one fixture line" claim).
 
 ## Scope trigger
 
@@ -15,17 +19,10 @@ face (class 7) — change. Everything else is byte-identical:
   (1644 baseline tests untouched);
 - the E5 master-baseline byte-equality pin (`compute.devices.test.ts` ×
   `master-baseline.json`) holds — the baseline scene has no outdoor
-  zones and no placed sinks;
-- starter-template compose (canonical orientation): the FULL diff is
-  ONE fixture line (class 1 below) — members, devices, warnings and all
-  other fixtures byte-equal (probe evidence, 2026-08-23):
-
-```
-< light | Light — Back garden | [0.00,2.70,-7.00] | LTG-2
-> light | Exterior light — Back garden entrance (NEC 210.70(A)(2)) | [-3.00,2.29,-4.09] | LTG-1
-```
+  zones and no placed sinks.
 
 ## Class 1 — outdoor ceiling lights removed; entrance lights added
+## (+ the wiring/panel/plane deltas that FOLLOW the fixture swap)
 
 `Light — <zone>` at the zone centroid × `ceilingHeight` (a ceiling
 fixture floating in open air) no longer composes for any outdoor zone.
@@ -38,7 +35,36 @@ indoor room's LTG circuit). A zone no dwelling door opens into gets the
 level warning `outdoor zone “<name>”: open air — ceiling lighting not
 modeled; exterior fixtures by site plan (no dwelling entrance adjoins
 it)` instead of a fixture. Garden gates in fences are NOT dwelling
-entrances (no light, no switch).
+entrances (no light, no switch). INDOOR-FIRST (round-1 F1): the
+outdoor-face point of a candidate door must be genuinely open air — an
+outdoor polygon double-claiming an indoor slice mints no phantom
+entrance light and never swallows the zone's honesty warning (gated
+both ways).
+
+The fixture swap drags FOUR in-family member/meta deltas with it —
+enumerated from the FULL-serialization probe (every fixture incl. meta,
+every member field, devices, warnings — round-1 F3). Garden-house probe
+at canonical orientation, 2026-08-23: the full diff is 2 fixture lines
++ 23↔23 member lines; TOTALS unchanged (fixtures 27, members 496,
+devices 16, warnings 6):
+
+1. FIXTURE SWAP: `Light — Back garden` (LTG-2, ceiling y=2.7 mid-yard)
+   → `Exterior light — Back garden entrance` (LTG-1, y≈2.29 on the
+   wall_n garden face; light-meta `va` follows its circuit's room).
+2. WIRE-FOLLOWS-FIXTURE: the dead LTG-2 legs disappear (its homerun
+   drop + the 3 m ceiling crossing at y=2.7 out to the yard light) and
+   LTG-1 gains the entrance-light legs (rise in wall_n's bay + the
+   y≈2.29 stubs onto the outdoor face).
+3. PANEL META: `meta.circuits` 6 → 5 — LTG-2 ceased to exist (class 5).
+4. SERVICE-PLANE RE-INDEX: circuits AFTER the dead LTG-2 in homerun
+   order drop one 12 mm drill plane (`WIRE_RUN_Y + (circuitIndex % 8) ×
+   0.012` — SD-1/EXT-1 runs shift y 0.5172 → 0.5052 etc.), re-lengthing
+   their vertical rise legs by the same 12 mm.
+
+Member-LINE counts vary with probe-scene details (windows, fence nodes,
+orientation) — independent probes measured ~36-46 changed member lines
+on starter-shaped scenes; the CLASS SET above is the contract, not a
+line total.
 
 ## Class 2 — smoke alarms never in outdoor zones (R314 is interior)
 
@@ -64,26 +90,43 @@ yard); the meter / panel / WR boxes flip to the TRUE outside
 (`exteriorFaceOf` reads an outdoor zone as the outside, including the
 un-zoned-interior fallback); wire-runs re-route to the flipped faces;
 switches now standing in their real room join its legitimate 3-way
-group. Reversed-orientation probe (garden-house with wall_n flipped):
-master put 4 receptacles + the garden-door switch IN the garden, the
-meter and the front WR box INDOORS; branch relocates all of them,
-members 469 → 488 (wire re-route + entrance light legs).
+group. Reversed-orientation FULL probe (garden-house with wall_n
+flipped): master put 4 receptacles + the garden-door switch IN the
+garden, the meter and the front WR box INDOORS; branch relocates all of
+them — members 469 → 488 (wire re-route + entrance-light legs), 10
+fixture lines + 5 device-manifest lines (the face-suffix re-keys) +
+94↔113 member lines.
 
-## Class 4 — wall-typed garden enclosures stop minting devices
+## Class 4 — garden enclosures stop minting devices (EITHER wall typing)
 
-A wall whose ONLY resolved side is an outdoor zone (wall-typed garden
-fences / freestanding garden walls — note: type-`fence` nodes are never
-extracted as electrical walls; this class is wall-typed enclosures)
-gets NO interior faces: its 210.52(A) receptacles and gate-door
-switches disappear. Outdoor coverage remains the B14a WR machinery's
-job (front/back WR GFCI boxes unaffected).
+A wall whose only resolved sides are open air / uncovered gets NO
+interior faces — its 210.52(A) receptacles and gate-door switches
+disappear:
+
+- EXTERIOR-typed: a wall bounding an outdoor zone with no indoor room
+  behind it.
+- INTERIOR-typed (round-1 F2 — the extraction REALITY for fences: both
+  sides uncovered leaves exposedSides=2 and the host fallback marks
+  exactly-1, so real fences classify `exterior=false`): one open-air
+  side + one UNCOVERED side is a freestanding garden wall, not a
+  partition — master minted 4 receptacles + a gate switch on the outer
+  face at 15". A face survives on an interior-typed wall touching open
+  air only by resolving a REAL indoor room (courtyard partitions keep
+  their indoor face; zone-less interior walls keep legacy both-sides
+  service).
+
+Note: type-`fence` NODES are never extracted as electrical walls —
+this class is wall-typed enclosures. Outdoor coverage remains the B14a
+WR machinery's job (front/back WR GFCI boxes unaffected).
 
 ## Class 5 — LTG circuit renumbering on mixed scenes
 
 Outdoor zones no longer pack phantom 220.12 lighting VA (3 VA/ft² is
 dwelling floor area, not yard area — a 72 m² garden burned a whole
 circuit). Downstream rooms' LTG circuit numbers shift down (probe:
-garden-door switch LTG-2 → LTG-1); paper circuit colors/labels follow.
+garden-door switch LTG-2 → LTG-1); paper circuit colors/labels and the
+panel `meta.circuits` count follow (class-1 items 3-4 are this class's
+member-side shadow).
 
 ## Class 6 — moved-device spacing census honesty
 
@@ -125,7 +168,7 @@ node is never re-minted or re-anchored (gated).
 
 ## Gates
 
-`src/engines/electrical.outdoor.test.ts` (14 tests) + the night-10
+`src/engines/electrical.outdoor.test.ts` (16 tests) + the night-10
 ordinal-stability describe in
 `src/engines/electrical.receptacles.test.ts` (5 tests). Mutation
 probes (reverted from /tmp backups, per-probe gate failures): item 1 —
@@ -134,4 +177,6 @@ M1 interiorFaces indoor filter (4), M2 per-story all-rooms election
 light dropped (1), M6 census skip (1), M7 exteriorFaceOf outdoor
 fallback (1), M8 outdoor ceiling lights (4); item 2 — N1 running-count
 offset restored (3), N2 zone block dropped (4), N3 block count frozen
-(2). Checklist rows E5 / E6 / E8 / M4 amended in the behavior commits.
+(2); round-1 fixes — P1 F1 indoor-first skip removed (1), P2 F2
+interior-branch filter reverted (1). Checklist rows E5 / E6 / E8 / M4
+amended in the behavior commits.

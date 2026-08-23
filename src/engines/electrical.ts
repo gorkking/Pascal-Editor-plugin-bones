@@ -292,20 +292,32 @@ function isOpenAirFace(wall: WallSlice, side: 1 | -1, rooms: RoomSlice[]): boole
  * open air (M4): a face opening onto one is never an interior mounting face
  * (day-9 residual: gardens minted interior-style 15" receptacles), and a
  * wall whose only resolved side is an outdoor zone (garden fences,
- * freestanding garden walls) bounds NO habitable space — the 210.52(A) walk
- * skips it entirely; outdoor coverage is the B14a WR machinery's job.
+ * freestanding garden walls — EITHER wall typing: fences classify
+ * interior-typed too, both faces uncovered leaves exposedSides=2 and the
+ * host's fallback marks exactly-1; round-1 F2) bounds NO habitable space —
+ * the 210.52(A) walk skips it entirely; outdoor coverage is the B14a WR
+ * machinery's job.
  * ASSUMPTION: face choice is made once at the wall midpoint; walls whose
  * interior side flips mid-run (rare) would need per-segment resolution.
  */
 function interiorFaces(wall: WallSlice, rooms: RoomSlice[]): WallFace[] {
   const plus = faceOf(wall, 1)
   const minus = faceOf(wall, -1)
-  if (!wall.exterior) {
-    return [plus, minus].filter((f) => !isOpenAirFace(wall, f.side, rooms))
-  }
   const mid = wall.length / 2
   const indoor = rooms.filter((r) => r.category !== 'outdoor')
   const inIndoor = (f: WallFace) => indoor.some((r) => pointInPolygon(f.plan(mid), r.polygon))
+  if (!wall.exterior) {
+    const openPlus = isOpenAirFace(wall, 1, rooms)
+    const openMinus = isOpenAirFace(wall, -1, rooms)
+    // no outdoor contact: legacy both-sides service (zone-less scenes stay
+    // byte-identical)
+    if (!openPlus && !openMinus) return [plus, minus]
+    // The wall touches open air: only a face resolving a REAL indoor room
+    // survives. One open-air side + one UNCOVERED side is a freestanding
+    // garden wall (interior-TYPED fences, round-1 F2 — they minted 15"
+    // receptacles + a gate switch on the outer face), not a partition.
+    return [plus, minus].filter((f) => !isOpenAirFace(wall, f.side, rooms) && inIndoor(f))
+  }
   if (inIndoor(plus)) return [plus]
   if (inIndoor(minus)) return [minus]
   // No indoor room resolves a side. An outdoor zone on either face means the
@@ -588,6 +600,12 @@ export function layoutElectrical(
           const op = outFace.plan(opening.u)
           const zone = outdoorZones.find((z) => pointInPolygon(op, z.polygon))
           if (!zone) continue
+          // INDOOR-FIRST, like isOpenAirFace (round-1 F1): the outdoor-face
+          // point must be genuinely OPEN AIR — a courtyard polygon
+          // double-claiming an indoor slice used to compose a phantom
+          // 'Exterior light — Courtyard entrance' INSIDE the living room
+          // AND swallow the courtyard's honesty warning via litZones.
+          if (indoorRooms.some((r) => pointInPolygon(op, r.polygon))) continue
           // the entrance must come FROM the dwelling: the opposite face
           // stands in an indoor room (garden gates in fences don't count)
           const ip = faceOf(wall, side === 1 ? -1 : 1).plan(opening.u)

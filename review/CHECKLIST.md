@@ -292,10 +292,17 @@ AND a gate — a checklist line without a test is a wish.
   from the indoor side on some orientations) and on garden fences; an
   exterior wall resolves its interior side against INDOOR rooms only,
   a wall whose only resolved side is outdoor (fences, freestanding
-  garden walls) gets NO faces at all, and the moved-device spacing
-  census skips open-air faces exactly like exterior faces (a
-  courtyard partition's outdoor side is a by-design zero, not a >12ft
-  gap). `exteriorFaceOf` reads an outdoor zone as the OUTSIDE when no
+  garden walls — EITHER wall typing: real fences classify
+  interior-typed since both-sides-uncovered leaves exposedSides=2 and
+  the host fallback marks exactly-1, and an interior-typed wall
+  touching open air keeps a face only by resolving a REAL indoor room;
+  round-1 F2) gets NO faces at all, the exterior-entrance-light zone
+  lookup is INDOOR-FIRST like the face predicate (an outdoor polygon
+  double-claiming an indoor slice mints no phantom entrance light and
+  never swallows the zone's honesty warning; round-1 F1), and the
+  moved-device spacing census skips open-air faces exactly like
+  exterior faces (a courtyard partition's outdoor side is a by-design
+  zero, not a >12ft gap). `exteriorFaceOf` reads an outdoor zone as the OUTSIDE when no
   indoor room resolves a side, so the meter/WR boxes stop flipping
   indoors on garden-backed walls. Outdoor coverage stays the B14a WR
   machinery's job — the two required WR boxes are UNAFFECTED by the

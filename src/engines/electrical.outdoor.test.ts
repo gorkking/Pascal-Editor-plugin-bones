@@ -262,6 +262,21 @@ describe('outdoor zones — garden-only level (the day-9 exhibit)', () => {
     expect(fixtures.filter((f) => f.kind === 'switch')).toEqual([])
     expect(fixtures.filter((f) => f.kind === 'light')).toEqual([])
   })
+
+  test('interior-TYPED fences (exterior=false — the extraction reality) mint nothing either (round-1 F2)', () => {
+    // real fences classify interior-typed: both sides uncovered leaves
+    // exposedSides=2 and the host fallback marks exactly-1 — the exhibit
+    // minted 4 receptacles + a gate switch on the OUTER face at 15"
+    const { walls, rooms } = gardenOnly(true)
+    for (const w of walls) (w as { exterior: boolean }).exterior = false
+    const fixtures = layoutElectrical(walls, rooms)
+    expect(
+      fixtures.filter(
+        (f) => f.kind === 'receptacle' || f.kind === 'receptacle-gfci' || f.kind === 'switch',
+      ),
+    ).toEqual([])
+    expect(fixtures.filter((f) => f.kind === 'light')).toEqual([])
+  })
 })
 
 describe('outdoor zones — R314.3(2) proxy never elects open air', () => {
@@ -413,6 +428,72 @@ describe('outdoor zones — courtyard (interior walls) + census honesty', () => 
     // the living face stays walked; the courtyard face is open air — its
     // permanent zero receptacles are BY DESIGN, not a >12ft gap
     expect(applied.warnings.filter((w) => w.includes('spacing exceeds'))).toEqual([])
+  })
+
+  test('a courtyard polygon double-claiming an indoor slice never mints a phantom entrance light (round-1 F1)', () => {
+    // living/dining partition with an interior door; the 'Courtyard'
+    // outdoor polygon double-claims the WHOLE dining slice. The outdoor-
+    // first zone lookup composed 'Exterior light — Courtyard entrance'
+    // INSIDE the dining room AND litZones swallowed the courtyard's
+    // honest warning — indoor-first must win, like isOpenAirFace.
+    const walls = [
+      wall('w_s', [0, 0], [12, 0]),
+      wall('w_e', [12, 0], [12, 8]),
+      wall('w_n', [12, 8], [0, 8]),
+      wall('w_w', [0, 8], [0, 0]),
+      wall('w_mid', [6, 0], [6, 8], {
+        exterior: false,
+        thickness: 0.114,
+        openings: [door(4, 0.9, 'door_mid')],
+      }),
+    ]
+    const living = room(
+      'other',
+      [
+        [0, 0],
+        [6, 0],
+        [6, 8],
+        [0, 8],
+      ],
+      { id: 'zone_living', name: 'Living' },
+    )
+    const dining = room(
+      'other',
+      [
+        [6, 0],
+        [12, 0],
+        [12, 8],
+        [6, 8],
+      ],
+      { id: 'zone_dining', name: 'Dining' },
+    )
+    const courtyard = room(
+      'outdoor',
+      [
+        [6, 0],
+        [12, 0],
+        [12, 8],
+        [6, 8],
+      ],
+      { id: 'zone_court', name: 'Courtyard' },
+    )
+    const warnings: string[] = []
+    const fixtures = layoutElectrical(walls, [living, dining, courtyard], undefined, warnings)
+    // no phantom: the door's outdoor-face point stands in the DINING room
+    expect(
+      fixtures.filter((f) => f.kind === 'light' && f.label?.startsWith('Exterior light')),
+    ).toEqual([])
+    // …and the courtyard's honesty warning is NOT swallowed by litZones
+    expect(
+      warnings.some((w) => w.includes('Courtyard') && w.includes('ceiling lighting not modeled')),
+    ).toBe(true)
+    // the double-claimed partition still serves BOTH indoor rooms
+    // (overlap conservatism — indoor-first, both faces walked)
+    const onMid = fixtures.filter(
+      (f) => (f.kind === 'receptacle' || f.kind === 'receptacle-gfci') && f.sourceId === 'w_mid',
+    )
+    expect(onMid.some((f) => String(f.meta?.deviceId).endsWith('-p'))).toBe(true)
+    expect(onMid.some((f) => String(f.meta?.deviceId).endsWith('-m'))).toBe(true)
   })
 
   test('overlap resolves indoor-first: a zone seam over the wall keeps BOTH faces serving the room', () => {
