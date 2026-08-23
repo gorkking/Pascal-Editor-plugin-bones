@@ -101,7 +101,7 @@ import {
   wallPath,
   wallPlan,
 } from './electrical'
-import { manualJLite, manualSTons, type ManualJLiteLoad } from './manual-j'
+import { MANUAL_S_MAX, MANUAL_S_MIN, manualJLite, manualSTons, type ManualJLiteLoad } from './manual-j'
 import { routePipe, type PipeSpec } from './plumbing'
 
 type Pt = readonly [number, number]
@@ -435,6 +435,15 @@ export type CoolingPlan = {
   /** False when stock half-ton steps / the 1.5-ton floor push the Manual S
    * selection outside the 95–115% band — layoutHvac warns, never silent. */
   withinManualSBand: boolean
+  /** count × unitTons — the capacity actually INSTALLED. Splitting rounds
+   * each unit to the nearest stock half ton, so a 5.5-ton selection ships
+   * as 2 × 3.0 = 6.0 tons of cabinets (skeptic F2: the plan total passed
+   * the band while the installed sum quietly exceeded it, and the AH said
+   * 5.5 while the cabinets said 6.0). */
+  installedTons: number
+  /** False when the INSTALLED sum leaves the Manual S 95–115% band
+   * (manual-j basis; the fallback rule makes no band claim). */
+  installedWithinBand: boolean
 }
 
 /**
@@ -470,6 +479,13 @@ export function sizeCoolingPlan(
     const latentNote = load.moistureRegime
       ? `${sens} t sensible × ${load.latentFactor} latent (regime ${load.moistureRegime})`
       : `${sens} t sensible, no latent allowance (no regime letter)`
+    // INSTALLED capacity (skeptic F2): per-unit rounding to stock half
+    // tons makes count × unitTons ≥ the selection — band-check what is
+    // actually bought, not only the plan figure.
+    const installedTons = count * unitTons
+    const installedWithinBand =
+      installedTons >= MANUAL_S_MIN * load.loadTons &&
+      installedTons <= MANUAL_S_MAX * load.loadTons + 1e-9
     return {
       totalTons,
       count,
@@ -479,6 +495,8 @@ export function sizeCoolingPlan(
       zone: load.zone,
       load,
       withinManualSBand: sel.withinBand,
+      installedTons,
+      installedWithinBand,
     }
   }
   const fallback = condenserPlan(conditionedAreaM2, stateCode)
@@ -497,6 +515,8 @@ export function sizeCoolingPlan(
     // The fallback rule is its own labeled basis — it makes no Manual S
     // band claim (the label already says which rule sized it).
     withinManualSBand: true,
+    installedTons: fallback.count * fallback.unitTons,
+    installedWithinBand: true,
   }
 }
 
@@ -1278,11 +1298,33 @@ export function layoutHvac(
   // grille and the condenser row all size from this plan (the old engine
   // ran the AH at 1 ton/500 sqft NEXT TO condensers at 450/550/650).
   const plan = sizeCoolingPlan(walls, rooms, areaM2, context?.stateCode)
-  const tons = plan.totalTons
+  // The system figure is the INSTALLED capacity (count × unitTons — what
+  // the cabinets actually add up to; == the selection for single-unit
+  // plans). The drawn single indoor coil serves the installed units, so
+  // the AH label/cfm/grille must say 6.0 when the cabinets say 2 × 3.0 —
+  // an AH reading 5.5 beside 6.0 tons of cabinets was its own honesty gap
+  // (skeptic F2); the plan-vs-installed distinction is stated on the AH
+  // label when they differ.
+  const tons = plan.installedTons
   const totalCfm = tons * CFM_PER_TON
   if (plan.basis === 'manual-j-lite' && !plan.withinManualSBand && plan.load) {
     warnings.push(
-      `cooling selection ${tons} tons sits outside the Manual S 95–115% band for the ${plan.load.loadTons.toFixed(2)}-ton Manual J-lite load (stock half-ton steps / 1.5-ton floor) — verify equipment selection (M1401.3)`,
+      `cooling selection ${plan.totalTons} tons sits outside the Manual S 95–115% band for the ${plan.load.loadTons.toFixed(2)}-ton Manual J-lite load (stock half-ton steps / 1.5-ton floor) — verify equipment selection (M1401.3)`,
+    )
+  }
+  // INSTALLED-SUM band (skeptic F2): the ≤5-ton split rounds each unit to
+  // a stock half ton, so the installed sum can leave the band the plan
+  // total passed — say so, never silently.
+  if (
+    plan.basis === 'manual-j-lite' &&
+    plan.load &&
+    plan.withinManualSBand &&
+    !plan.installedWithinBand
+  ) {
+    // one-decimal percent: a 115.1% overrun rounded to '115%' would read
+    // as '115% exceeds the 115% band' — a printed contradiction
+    warnings.push(
+      `installed ${plan.installedTons} tons = ${((plan.installedTons / plan.load.loadTons) * 100).toFixed(1)}% of the ${plan.load.loadTons.toFixed(2)}-ton Manual J-lite load — exceeds the Manual S 115% band (stock unit steps after the ≤5-ton split); verify selection`,
     )
   }
   // MULTI-SYSTEM HONESTY: the load takes N>1 condensers, but this engine's
@@ -1335,10 +1377,17 @@ export function layoutHvac(
     label:
       `Air handler — ${tons} ton (${plan.sizingNote}; Manual J/S govern)` +
       (plan.count > 1
-        ? ` — serves ${plan.count} condensers, single indoor coil assumption`
+        ? ` — serves ${plan.count} condensers (${plan.count} × ${plan.unitTons} t installed${
+            plan.installedTons !== plan.totalTons
+              ? ` vs ${plan.totalTons} t selected`
+              : ''
+          }), single indoor coil assumption`
         : ''),
     meta: {
       tons,
+      // the Manual S SELECTION, when the installed sum diverged from it
+      // (split rounding) — single-unit scenes carry no duplicate key
+      ...(plan.installedTons !== plan.totalTons ? { selectedTons: plan.totalTons } : {}),
       conditionedSqft: Math.round(areaM2 * 10.7639),
       cfm: totalCfm,
       sizingBasis: plan.basis,

@@ -1362,10 +1362,31 @@ describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, cli
     // multi-system honesty: ONE air handler drawn, the split stated on the
     // label AND as a level warning — never a silent single-coil 5.5-ton box
     const ah = out.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture
-    expect(ah.label).toContain('serves 2 condensers, single indoor coil assumption')
     expect(
       out.warnings.some((w) =>
         w.includes('ONE air handler/duct system drawn') && w.includes('2 condensers'),
+      ),
+    ).toBe(true)
+    // INSTALLED-SUM honesty (skeptic F2): this scene's design load sits in
+    // the (5.0, 5.22] window — the 5.5-ton selection is IN band (≤115%)
+    // while the installed 2 × 3.0 = 6.0 t EXCEEDS it. The AH reconciles to
+    // the installed figure (its coil serves the cabinets that exist), the
+    // plan-vs-installed distinction is stated, and the overrun warns.
+    expect(load.loadTons).toBeGreaterThan(5.0)
+    expect(load.loadTons).toBeLessThanOrEqual(5.22)
+    expect(5.5 / load.loadTons).toBeLessThanOrEqual(1.15) // selection in band
+    expect(6.0 / load.loadTons).toBeGreaterThan(1.15) // installed out of band
+    expect(ah.meta?.tons).toBe(6)
+    expect(ah.meta?.selectedTons).toBe(5.5)
+    expect(ah.label).toContain('Air handler — 6 ton')
+    expect(ah.label).toContain(
+      'serves 2 condensers (2 × 3 t installed vs 5.5 t selected), single indoor coil assumption',
+    )
+    expect(
+      out.warnings.some(
+        (w) =>
+          w.startsWith('installed 6 tons = 118.1% of the') &&
+          w.includes('exceeds the Manual S 115% band (stock unit steps after the ≤5-ton split)'),
       ),
     ).toBe(true)
     // takeoff mirrors the split with per-unit tonnage + the basis (S4)
@@ -1390,7 +1411,18 @@ describe('Manual-J-lite engine sizing — hand-derived tonnage, 5-ton split, cli
     const mnTons = Number(
       (mn.fixtures.find((f) => f.label?.includes('Air handler')) as Fixture).meta?.tons,
     )
-    expect(flTons).toBe(6.5) // 4.87 t sensible × 1.25 → 6.09 → 6.5 selected
+    // 4.86 t sensible × 1.25 → 6.079 → 6.5 selected → 2 × 3.5 = 7 installed
+    // = 115.1% — a HAIR over the band, and the overrun still says so
+    // (one-decimal percent: '115% exceeds the 115% band' would print as a
+    // contradiction)
+    expect(flTons).toBe(7)
+    expect(
+      fl.warnings.some(
+        (w) =>
+          w.startsWith('installed 7 tons = 115.1% of the') &&
+          w.includes('exceeds the Manual S 115% band (stock unit steps'),
+      ),
+    ).toBe(true)
     expect(mnTons).toBeLessThan(flTons) // ΔT 7 vs 11 + R-30 walls, R-60 ceiling
     expect(condensersOf(mn.fixtures)[0]?.label).toContain(
       'Manual J-lite, zone 6A design 31°C',
