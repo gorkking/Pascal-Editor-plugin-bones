@@ -1068,7 +1068,14 @@ function computeLevelUncached(
           (n) => n.type === 'wall' && n.parentId === l.id && n.visible !== false,
         )
       })
-    const hvac = layoutHvac(activeWalls, activeRooms, spec, services, { hasLevelAbove, stateCode: code })
+    // Coverage for the condenser-spot validation: the SAME probe the wall
+    // classification uses (probeSlabsFor — A4 parity), so "under floor
+    // coverage" means exactly "inside the footprint the election trusted".
+    const hvac = layoutHvac(activeWalls, activeRooms, spec, services, {
+      hasLevelAbove,
+      stateCode: code,
+      coverage: probeSlabs,
+    })
     members.push(...hvac.members)
     fixtures.push(...hvac.fixtures)
     warnings.push(...hvac.warnings)

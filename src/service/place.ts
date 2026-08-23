@@ -98,7 +98,9 @@ export function buildServicePointNodes(
   // handler — `position` is the anchor (like the sewer exit), so the node
   // stands free and the lineset re-anchors wherever it's dragged.
   if (!existing.has('heat-pump')) {
-    const pad = placeCondenserSeedSpot(walls, rooms)
+    // Coverage rides along (A4 parity with the engine's own election): a
+    // seed elected without it could validate a spot the engine rejects.
+    const pad = placeCondenserSeedSpot(walls, rooms, probeSlabs)
     if (pad) {
       out.push(ServiceNode.parse({ serviceType: 'heat-pump', position: [pad[0], 0, pad[1]] }))
     }
