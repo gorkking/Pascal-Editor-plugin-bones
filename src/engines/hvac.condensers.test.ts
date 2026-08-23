@@ -1068,6 +1068,100 @@ describe('condenser election validation — false-exterior walls never place the
     expect(disc.sourceId).toBe('w_south')
   })
 
+  test('fence+RO compound (round-2 gate): seed == engine unit #1, post-seed compose == auto, byte', () => {
+    // THE round-2 finding: window RO where the auto anchor lands + a garden
+    // fence just outside the shell. The engine slides unit #1 clear of the
+    // RO; the OLD seed guard asked nearestExteriorExit(slid) — the fence
+    // (0.4 m from the pad) always beat the elected wall (0.6 m by
+    // construction) — so the seed bailed to the RAW anchor, which fed back
+    // as a verbatim override and recomposed DEAD-CENTER on the window with
+    // the disconnect re-hosted to the fence, silently. A4: creation alone
+    // must never move anything.
+    const { walls, rooms, coverage } = misclassifiedScene()
+    walls[0]?.openings.push(opening('win_s', 5, 1.2, 'window'))
+    walls.push(wall('w_fence', [2, -1], [8, -1], true))
+    const auto = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
+    const unit = condensersOf(auto.fixtures)[0] as Fixture
+    // the engine slid clear of the RO span [4.4, 5.6] (+ half-pad + slack)
+    expect(unit.position[0]).toBeCloseTo(6.125, 6)
+    expect(unit.position[2]).toBeCloseTo(-0.6, 6)
+    expect((auto.fixtures.find((f) => f.kind === 'disconnect') as Fixture).sourceId).toBe(
+      'w_south',
+    )
+    // A4 seed parity: the seed IS the engine's slid unit-#1 anchor
+    const seed = placeCondenserSeedSpot(walls, rooms, coverage)
+    expect(seed?.[0]).toBeCloseTo(unit.position[0], 12)
+    expect(seed?.[1]).toBeCloseTo(unit.position[2], 12)
+    // the seeded node feeds back as a verbatim override — the ε-anchor
+    // recognizes the machine's own point and keeps the ELECTED wall:
+    // post-seed compose is BYTE-equal to the auto compose
+    const post = layoutHvac(
+      walls,
+      rooms,
+      LOD400,
+      { heatPump: { position: [seed?.[0] as number, 0, seed?.[1] as number] } },
+      { coverage },
+    )
+    expect(JSON.stringify(post.members)).toBe(JSON.stringify(auto.members))
+    expect(JSON.stringify(post.fixtures)).toBe(JSON.stringify(auto.fixtures))
+    expect(JSON.stringify(post.warnings)).toBe(JSON.stringify(auto.warnings))
+  })
+
+  test('fence-only: seeding must not flip the disconnect w_south → w_fence', () => {
+    // No RO — the seed equals the raw election spot; the post-seed compose
+    // must still anchor the row to the ELECTED wall, not race the fence.
+    const { walls, rooms, coverage } = misclassifiedScene()
+    walls.push(wall('w_fence', [2, -1], [8, -1], true))
+    const auto = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
+    const seed = placeCondenserSeedSpot(walls, rooms, coverage)
+    expect(seed?.[0]).toBeCloseTo(5, 6)
+    expect(seed?.[1]).toBeCloseTo(-0.6, 6)
+    const post = layoutHvac(
+      walls,
+      rooms,
+      LOD400,
+      { heatPump: { position: [seed?.[0] as number, 0, seed?.[1] as number] } },
+      { coverage },
+    )
+    expect((post.fixtures.find((f) => f.kind === 'disconnect') as Fixture).sourceId).toBe(
+      'w_south',
+    )
+    expect(JSON.stringify(post.members)).toBe(JSON.stringify(auto.members))
+    expect(JSON.stringify(post.fixtures)).toBe(JSON.stringify(auto.fixtures))
+    // a REAL user drag (metres from the machine point) stays verbatim-
+    // nearest — the ε-anchor is a float tolerance, not a snap radius
+    const dragged = layoutHvac(
+      walls,
+      rooms,
+      LOD400,
+      { heatPump: { position: [5, 0, -1.4] } },
+      { coverage },
+    )
+    const dUnit = condensersOf(dragged.fixtures)[0] as Fixture
+    expect(dUnit.position[0]).toBeCloseTo(5, 6)
+    expect(dUnit.position[2]).toBeCloseTo(-1.4, 6)
+    expect((dragged.fixtures.find((f) => f.kind === 'disconnect') as Fixture).sourceId).toBe(
+      'w_fence',
+    )
+  })
+
+  test('a slide that runs OFF the elected wall keeps the raw anchor (guard bail arm)', () => {
+    // Near-full-width glazing: both slide directions exit the wall span, so
+    // unit #1 lands past the wall end — the seed must NOT follow it there.
+    const win: OpeningSlice = opening('win_full', 2, 3.8, 'window')
+    const walls = [
+      wall('w_south', [0, 0], [4, 0], true, [win]),
+      wall('w_east', [4, 0], [4, 4]),
+      wall('w_north', [4, 4], [0, 4]),
+      wall('w_west', [0, 4], [0, 0]),
+    ]
+    const rooms = [room('r_laundry', 'Laundry', 'laundry', [[1, 1], [3, 1], [3, 3], [1, 3]])]
+    const seed = placeCondenserSeedSpot(walls, rooms)
+    // raw election spot (2, -0.6), not the off-wall slid spot (4.425, -0.6)
+    expect(seed?.[0]).toBeCloseTo(2, 6)
+    expect(seed?.[1]).toBeCloseTo(-0.6, 6)
+  })
+
   test('courtyard decision: an OUTDOOR zone legitimizes a pad even over a patio slab', () => {
     // Court walls face real open air; the slab still runs under the court
     // (patio pour). DECIDED: outdoor zones validate — a courtyard condenser

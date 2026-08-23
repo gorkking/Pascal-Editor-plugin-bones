@@ -1009,12 +1009,19 @@ export function placeCondenserSeedSpot(
   const row = condenserRow(walls, anchor, false, 1, equipAt, election.wall)
   const slid = row.slots[0]?.at
   if (!slid) return anchor
-  // Corner-flip guard (dawn review 1e): if the slid spot's nearest exterior
-  // wall differs from the ELECTED anchor wall, seeding there would re-derive
-  // the whole row on the OTHER wall — keep the raw anchor in that case (the
-  // engine's own slide still applies at compute time).
-  const slidExit = nearestExteriorExit(walls, slid)
-  if (slidExit && election.wall.id !== slidExit.wall.id) return anchor
+  // Corner-flip guard (dawn review 1e, re-oracled round 2): the slid spot
+  // must still DERIVE from the elected wall — its along-wall projection
+  // stays within the wall's span; a slide that ran off the wall keeps the
+  // raw anchor. The old oracle asked nearestExteriorExit(slid) — the exact
+  // wrong-wall race the row fix retired: a garden fence 0.4 m from the pad
+  // ALWAYS beats the elected wall (0.6 m by construction), so the guard
+  // bailed to the raw anchor and the seeded node recomposed dead-center on
+  // the very RO the engine had slid past (round-2 finding). Compose-time
+  // coherence for the seeded node is layoutHvac's ε-anchor.
+  const u =
+    (slid[0] - election.wall.start[0]) * election.wall.dir[0] +
+    (slid[1] - election.wall.start[1]) * election.wall.dir[1]
+  if (u < 0 || u > election.wall.length) return anchor
   return slid
 }
 
@@ -1700,10 +1707,35 @@ export function layoutHvac(
     // wall.exterior is input, not truth — the election walks exterior
     // candidates by distance until one's pad spot really is outdoors; an
     // exhausted walk keeps the least-bad spot and says so (flag + warning
-    // below). A verbatim override skips the election entirely (A4).
-    const election = hpPlan ? null : electHeatPumpExit(walls, zonesAll, context?.coverage ?? [])
+    // below). A verbatim override still wins its POSITION outright (A4) —
+    // the election runs anyway to recognize the machine's own seed (below).
+    const election = electHeatPumpExit(walls, zonesAll, context?.coverage ?? [])
     let anchor = hpPlan ?? election?.spot ?? null
-    const electionUnvalidated = election !== null && !election.validated
+    const electionUnvalidated = hpPlan == null && election !== null && !election.validated
+    // MACHINE-SEEDED OVERRIDE COHERENCE (round-2 finding — the fence+RO
+    // compound): the seed action writes the engine's own unit-#1 anchor
+    // back as a bones:service node, and every activated scene seeds
+    // automatically — so the default lifecycle turns the auto anchor into
+    // a verbatim override on the very next compose. Re-deriving that row's
+    // wall by nearest flipped the disconnect onto a garden fence 0.4 m
+    // from the pad (the elected wall stands 0.6 m away BY CONSTRUCTION, so
+    // any exterior segment beyond the shell wins the race). DECISION: an
+    // override standing within ε of the election spot or of the engine's
+    // own slid unit-#1 spot IS the machine's point — its row keeps the
+    // ELECTED wall (post-seed compose == auto compose, byte). Any other
+    // point is a real user drag and stays verbatim-nearest (A4: never
+    // silently re-anchored); ε is a float round-trip tolerance, not a
+    // snap radius — a deliberate drag lands metres away, not nanometres.
+    let rowWall = hpPlan ? undefined : election?.wall
+    if (hpPlan && election) {
+      const near = (p: Pt, q: Pt): boolean =>
+        Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9
+      const autoUnit1 = condenserRow(walls, election.spot, false, 1, equipAt, election.wall)
+        .slots[0]?.at
+      if (near(hpPlan, election.spot) || (autoUnit1 && near(hpPlan, autoUnit1))) {
+        rowWall = election.wall
+      }
+    }
     // CONTRACT (never silent): placeHeatPumpSpot fails only when the level
     // has no straight EXTERIOR wall (hosts marking both wall faces
     // 'interior', all-curved shells). Skipping here used to drop the whole
@@ -1730,7 +1762,7 @@ export function layoutHvac(
     }
     {
       const plan = condenserPlan(areaM2, context?.stateCode)
-      const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt, election?.wall)
+      const row = condenserRow(walls, anchor, hpPlan != null, plan.count, equipAt, rowWall)
       warnings.push(...row.warnings)
       if (electionUnvalidated) warnings.push(COND_UNVALIDATED_WARNING)
       // ⚠ flag on every pad + cabinet when the anchor is a guess: the
