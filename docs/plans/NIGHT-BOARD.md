@@ -1,3 +1,18 @@
+# DAY-9 LIVE QUEUE (evening)
+- Z-FIGHT at duct×air-handler junction (Julien screenshots, day-9):
+  the supply trunk's end face is COPLANAR with the AH/plenum cabinet
+  face → per-frame color oscillation at the contact patch. FIX
+  (queued behind feat/manual-j-sizing merge — same hvac.ts owner):
+  bury the duct end ~5mm INSIDE the plenum (ducts connect INTO
+  cabinets — physical truth), junction stays a legal S1 connection;
+  gate = no coplanar face pairs at equipment junctions (sweep all
+  duct/plenum/AH contacts, not just the one exhibit). Check the
+  RETURN drop + plenum top too (same emission pattern).
+- Manual-J-lite (feat/manual-j-sizing) in verify round 1 — lead
+  attack: humid-zone latent omission (TX 2.5→1.5t smell).
+- Heat-pump fast-follow (election 486957c + AC-block eb27037 merged)
+  in pre-ship visual check → chain on SHIP.
+
 # CONDENSER ELECTION FIX — fix/condenser-election (2026-08-22, pilot)
 
 ## SHIPPED ON BRANCH: validated condenser election (Julien exhibit root cause)
