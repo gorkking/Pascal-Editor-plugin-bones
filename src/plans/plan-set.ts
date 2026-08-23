@@ -14,7 +14,7 @@ import type { Fixture, Member, OpeningSlice, WallSlice } from '../core/types'
 import { formatFtIn, inches } from '../core/units'
 import { type BuildingCharacteristics, zeroAreaNa } from '../engines/characteristics'
 import { openingSpans } from '../engines/electrical'
-import { computeTakeoff } from '../engines/takeoff'
+import { computeTakeoff, type TakeoffAreas } from '../engines/takeoff'
 import {
   DUCT_COLORS,
   PLUMBING_COLORS,
@@ -66,6 +66,18 @@ export type PlanSetOptions = {
    * TODO(B21d panel wiring — sibling pilot owns panel.tsx): the
    * ExportPlansButton hookup is the one-liner `walls: result.walls`. */
   walls?: WallSlice[]
+  /** Gross sheet-goods areas from computeLevel (`result.areas`) — the
+   * LOD-200 takeoff FALLBACK rows (B21e: wall sheathing gross / subfloor
+   * net-of-openings / drywall gross) book from these when no layer members
+   * are framed. The panel's own computeTakeoff call already passes them;
+   * before NIGHT-10 the schedules sheet called computeTakeoff WITHOUT
+   * areas, so a LOD-200 export silently dropped every fallback row the
+   * panel showed (C5 — paper and panel must book the SAME takeoff, one
+   * source of truth). Absent → byte-equal paper (computeTakeoff defaults
+   * the argument).
+   * TODO(panel wiring — sibling pilot owns panel.tsx): the
+   * ExportPlansButton hookup is the one-liner `areas: result.areas`. */
+  areas?: TakeoffAreas
 }
 
 // Sheet canvas (landscape letter at 96dpi: 11in × 8.5in).
@@ -175,6 +187,69 @@ const deviceTag = (f: Fixture): string =>
       : f.meta?.basin === true
         ? 'GB'
         : (FIXTURE_TAG[f.kind] ?? '\u00b7')
+
+/** Surface-steel hardware glyphs (NIGHT-10 plan-set legend grammar — the
+ * B9/B10/B18 examiner debt): the plan symbols for the strap/connector
+ * family + the foundation HDU body. The anchor-bolt-dot class — small
+ * geometric marks censused 1:1 against members — with shapes distinct
+ * from everything already keyed on those sheets (filled dot = anchor
+ * bolt, open circle = rebar dowel, dashed square = pad footing, r=8
+ * bubble = opening mark). Centered on (0,0); the draw pass translates
+ * them to the member's plan position, the legend rows reuse the exact
+ * markup as the key swatch (P2). */
+const HARDWARE_GLYPHS = {
+  /** CS-PF portal strap (B9) — filled diamond. */
+  strap: '<path d="M0 -3 L3 0 L0 3 L-3 0 Z" fill="#444"/>',
+  /** WFCM header-to-jack uplift strap (B10) — open diamond. */
+  'uplift-strap':
+    '<path d="M0 -3.4 L3.4 0 L0 3.4 L-3.4 0 Z" fill="none" stroke="#444" stroke-width="0.9"/>',
+  /** H2.5-class stud-to-plate connector (B10) — open triangle, apex up. */
+  'uplift-connector':
+    '<path d="M0 -3.6 L3.2 2.6 L-3.2 2.6 Z" fill="none" stroke="#444" stroke-width="0.9"/>',
+  /** Plate-to-foundation uplift strap (B10) — filled triangle, apex down
+   * (anchored into the slab). */
+  'foundation-strap': '<path d="M0 3.4 L3 -2.4 L-3 -2.4 Z" fill="#444"/>',
+  /** Seismic HDU body (foundation sheet) — filled square, the body's own
+   * footprint shape, now keyed instead of reading as an unlabeled smudge. */
+  'hold-down': '<rect x="-2.5" y="-2.5" width="5" height="5" fill="#444"/>',
+  /** CS-PF portal hold-down post MARKER — open square OVER the post's
+   * lumber rect (the post is real structure and keeps its rect; before
+   * NIGHT-10 it keyed only through a roleSizes-cap accident). */
+  'portal-post': '<rect x="-3.5" y="-3.5" width="7" height="7" fill="none" stroke="#444" stroke-width="0.9"/>',
+} as const
+type HardwareGlyphKind = keyof typeof HARDWARE_GLYPHS
+
+/** Which hardware family member (if any) a sheet keys with a glyph. The
+ * portal post is claimed by CONTENT (its R602.10.6.4 label), never by the
+ * bare 'post' role — the girder/roof posts on other sheets stay ordinary
+ * lumber (the B18 pad-footing label-claim precedent). */
+const hardwareGlyphKind = (sheetKey: string, m: Member): HardwareGlyphKind | null => {
+  if (sheetKey === 'wall' && m.system === 'wall-framing') {
+    if (m.role === 'strap') return 'strap'
+    if (m.role === 'uplift-strap') return 'uplift-strap'
+    if (m.role === 'uplift-connector') return 'uplift-connector'
+    if (m.role === 'foundation-strap') return 'foundation-strap'
+    if (m.role === 'post' && (m.label ?? '').includes('R602.10.6.4')) return 'portal-post'
+  }
+  if (sheetKey === 'foundation' && m.role === 'hold-down') return 'hold-down'
+  return null
+}
+
+/** Legend row text for a hardware member — name + cite pulled from the
+ * MEMBER LABEL, never hardcoded (the wave-2 derived-bolt-legend rule: a
+ * fixed string once contradicted the drawn hardware on the same sheet).
+ * Name = the label's first ' — ' segment; cite = the label's last
+ * code/standard parenthetical (R…, WFCM, NEC, CS-PF). The portal post's
+ * '(doubled stud)' reads back the drawn size — the info the accidental
+ * roleSizes row carried. */
+const hardwareRowText = (m: Member): string => {
+  const label = (m.label ?? m.role).trim()
+  let name = (label.split(' — ')[0] ?? label).trim()
+  if (m.size) name = name.replace('(doubled stud)', `(doubled ${m.size})`)
+  const cite = [...label.matchAll(/\(([^)]*(?:R\d[\d.]*|WFCM|NEC|CS-PF)[^)]*)\)/g)].at(-1)?.[1]
+  if (!cite || name.includes(cite)) return name
+  return name.endsWith(')') ? `${name} — ${cite}` : `${name} (${cite})`
+}
 
 const esc = (s: string): string =>
   s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
@@ -581,6 +656,12 @@ function planSheet(
     textRects.every(
       (r) => Math.abs(r.x - cx2) >= r.hw + hw2 + pad || Math.abs(r.y - cy2) >= r.hh + hh2 + pad,
     )
+  // Surface-steel hardware (NIGHT-10 legend grammar): members collected in
+  // the rect loop, drawn as keyed glyphs AFTER it — glyphSpots is the
+  // sheet's small-glyph registry (anchor-bolt dots and dowel circles
+  // register as obstacles; every placed hardware glyph joins it).
+  const hardwareMarks: { m: Member; kind: HardwareGlyphKind }[] = []
+  const glyphSpots: { x: number; y: number }[] = []
   for (const m of sorted) {
     if (stroked.has(m)) continue
     // Slab field already printed as the layer-ZERO underlay above; the
@@ -598,14 +679,32 @@ function planSheet(
       (m.role === 'anchor-bolt' ||
         (m.role === 'rebar' && m.dims[1] > m.dims[0] && m.dims[1] > m.dims[2]))
     ) {
-      const cx = X(m.position[0]).toFixed(1)
-      const cy = Z(m.position[2]).toFixed(1)
+      const cxN = X(m.position[0])
+      const cyN = Z(m.position[2])
+      // dots stay at their TRUE positions but register as obstacles so the
+      // HDU glyphs below dodge them (NIGHT-10 — the crowded seismic sheet
+      // packs bolts @4 ft, washers and HDUs onto the same plate line)
+      glyphSpots.push({ x: cxN, y: cyN })
+      const cx = cxN.toFixed(1)
+      const cy = cyN.toFixed(1)
       shapes.push(
         m.role === 'anchor-bolt'
           ? `<circle cx="${cx}" cy="${cy}" r="2.2" fill="#444"/>`
           : `<circle cx="${cx}" cy="${cy}" r="2.6" fill="none" stroke="#444" stroke-width="0.9"/>`,
       )
       continue
+    }
+    // Surface-steel hardware family (NIGHT-10): straps/connectors/HDUs
+    // never draw the generic rect — at plan scale it is a ~1.6 px unkeyed
+    // fleck (B9 examiner) or an unlabeled dark square (HDU). They print as
+    // keyed glyphs after the loop instead. Portal POSTS are real lumber:
+    // the rect stays, the glyph pass adds an open-square marker over it.
+    {
+      const kind = hardwareGlyphKind(def.key, m)
+      if (kind) {
+        hardwareMarks.push({ m, kind })
+        if (kind !== 'portal-post') continue
+      }
     }
     // Plan projection from the FULL euler (XYZ: M = Rx·Ry·Rz applied Rz
     // first): rolled members (outlookers) ignore neither rx nor the yaw —
@@ -767,6 +866,57 @@ function planSheet(
         `<g transform="translate(${px.toFixed(1)} ${py.toFixed(1)})"><circle r="7" fill="#fff" stroke="#a05c10" stroke-width="1.2"/><text y="3.5" font-size="8" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" fill="#a05c10">${esc(tag)}</text></g>`,
       )
     }
+  }
+
+  // Surface-steel hardware glyphs (NIGHT-10 plan-set legend grammar — the
+  // debt B9/B10/B12 examiners each flagged): every strap / connector /
+  // HDU / portal post prints ONE glyph of the anchor-bolt-dot class at its
+  // member position. Plan projection collapses height, so co-located
+  // pieces (a stud-top connector over a plate-line foundation strap at the
+  // SAME u, two walls' corner HDUs a few px apart) de-collide through the
+  // device-bubble spiral — first clear candidate against the glyph
+  // registry (bolt dots + dowels + earlier glyphs) and the bubble
+  // registry; a spot that cannot fully clear keeps the least-crowded
+  // candidate + an SVG comment (the crowded convention) — a symbol must
+  // ALWAYS print: glyph census == member census per role is the gate.
+  // Drawn after the rect loop so the tiny marks read ON TOP of the
+  // framing ink; final spots join placed[] so the later A-A/opening-mark
+  // bubbles dodge them.
+  const GLYPH_CLEAR = 7
+  for (const { m, kind } of hardwareMarks) {
+    const gx = X(m.position[0])
+    const gy = Z(m.position[2])
+    const gapAt = (px: number, py: number): number =>
+      [...glyphSpots, ...placed].reduce(
+        (m2, q) => Math.min(m2, Math.hypot(q.x - px, q.y - py)),
+        Number.POSITIVE_INFINITY,
+      )
+    let best: { x: number; y: number; gap: number } | null = null
+    for (let attempt = 0; attempt < 13; attempt++) {
+      // attempt 0 = the true spot; then two deterministic 6-spoke rings
+      const r = attempt === 0 ? 0 : attempt <= 6 ? 8 : 12
+      const ang = ((attempt - 1) * Math.PI) / 3
+      const px = gx + r * Math.cos(ang)
+      const py = gy + r * Math.sin(ang)
+      const gap = gapAt(px, py)
+      if (gap >= GLYPH_CLEAR) {
+        best = { x: px, y: py, gap }
+        break
+      }
+      if (!best || gap > best.gap) best = { x: px, y: py, gap }
+    }
+    const px = best?.x ?? gx
+    const py = best?.y ?? gy
+    if (best && best.gap < GLYPH_CLEAR) {
+      shapes.push(
+        `<!-- hardware-glyph crowded: ${kind} ${m.sourceId} gap=${best.gap.toFixed(1)} -->`,
+      )
+    }
+    glyphSpots.push({ x: px, y: py })
+    placed.push({ x: px, y: py })
+    shapes.push(
+      `<g transform="translate(${px.toFixed(1)} ${py.toFixed(1)})">${HARDWARE_GLYPHS[kind]}</g>`,
+    )
   }
 
   // Sleeve annotations (examiner P1: the engine labels every concrete
@@ -1232,6 +1382,10 @@ function planSheet(
   const roleSizeCounts = new Map<string, Map<string, number>>()
   for (const m of mine) {
     if (!m.size) continue
+    // Portal posts key through the HARDWARE legend row below (glyph +
+    // cite + count + size) — the generic 'post — 2x6' row only ever
+    // printed by a legend-cap accident (NIGHT-10; B9 examiner).
+    if (hardwareGlyphKind(def.key, m) === 'portal-post') continue
     const counts = roleSizeCounts.get(m.role) ?? new Map<string, number>()
     counts.set(m.size, (counts.get(m.size) ?? 0) + 1)
     roleSizeCounts.set(m.role, counts)
@@ -1542,6 +1696,33 @@ function planSheet(
             `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`post pad ${size} — under girder posts (R403.1/R407.3) — ${count} pcs`)}</text>`,
         )
       }
+    }
+  }
+  // Surface-steel hardware legend rows (NIGHT-10, P2): every glyph drawn
+  // above keys here — swatch = the exact glyph markup, text = name + cite
+  // DERIVED from the member labels (the wave-2 derived-bolt-legend rule),
+  // count appended. One row per distinct derived text, so the per-opening
+  // uplift-strap variants ('over door' / 'over window') book separately —
+  // the pad-footing per-size precedent. Rows append past the roleSizes
+  // cap (the B6 cap-grow lesson: a fixed cap silently re-dropped the rows
+  // a batch just added); the legend box height already derives from
+  // legendLines.length.
+  if (hardwareMarks.length > 0) {
+    const byText = new Map<string, { kind: HardwareGlyphKind; count: number }>()
+    for (const { m, kind } of hardwareMarks) {
+      const text = hardwareRowText(m)
+      const rec = byText.get(text)
+      if (rec) rec.count += 1
+      else byText.set(text, { kind, count: 1 })
+    }
+    for (const [text, { kind, count }] of [...byText.entries()].sort(([a], [b]) =>
+      a.localeCompare(b),
+    )) {
+      const y = MARGIN + 14 + legendLines.length * 14
+      legendLines.push(
+        `<g transform="translate(${MARGIN + 7} ${y - 3})">${HARDWARE_GLYPHS[kind]}</g>` +
+          `<text x="${MARGIN + 17}" y="${y}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(`${text} — ${count} pcs`)}</text>`,
+      )
     }
   }
   if (def.key === 'wall' && opts.studSpacingIn) {
@@ -2248,7 +2429,12 @@ function schedulesSheets(
 ): { sheets: PlanSheet[]; folded: boolean } {
   // Flags render as their own ⚑ list — the 'Flags · FLAG — 1 ea' rows
   // read as nonsense in the grid (quality C5).
-  const rows = computeTakeoff(members, fixtures).filter((r) => r.section !== 'Flags')
+  // `opts.areas` threads through to computeTakeoff EXACTLY like the
+  // panel's call (NIGHT-10 C5): without it a LOD-200 export dropped the
+  // B21e gross/net fallback rows the panel showed — paper and panel must
+  // book the same takeoff. Absent → undefined → computeTakeoff's default
+  // {} → byte-equal rows for every existing caller.
+  const rows = computeTakeoff(members, fixtures, opts.areas).filter((r) => r.section !== 'Flags')
   if (rows.length === 0) return { sheets: [], folded: false }
   const flags = [
     ...new Set([
