@@ -266,17 +266,59 @@ export const PHYSICAL_SERVICE_TYPES: ReadonlySet<ServiceType> = new Set<ServiceT
   'electric-meter',
 ])
 
+/**
+ * Kinds whose PHYSICAL counterpart the engines render AT THE SAME ANCHOR
+ * (the service node is the engines' authoritative override, so the volumes
+ * land coincident — heat-pump A/B evidence 2026-08-22: the grey placeholder
+ * body swallowed the hvac condenser's AC-block asset with z-fight slivers,
+ * W×H identical → coplanar faces), mapped to the framing-node toggle that
+ * gates that engine's render:
+ *  - heat-pump      → hvac condenser cabinet member (unit #1 sits AT the
+ *                     anchor; renders as the AC-block asset in X-ray);
+ *  - water-heater   → plumbing tank/tankless member, verbatim at the node's
+ *                     wall point (the tankless box is FULLY inside the body);
+ *  - electric-meter → electrical meter-socket fixture on the exterior face
+ *                     (~90% embedded in the body).
+ * In 'xray' with the engine toggle ON the body yields to the engine's
+ * render and only the sign plate stays (Julien 2026-08-22: keep the label).
+ * Toggle OFF → the body RETURNS as the visual anchor (the toggle lives on
+ * the same framing node the view mode does — reachable here). When the
+ * toggle is ON but the engine emits nothing (the no-zones honesty case:
+ * no served rooms ⇒ no condenser), the engine's silence is NOT readable
+ * from scene nodes, so the sign stands alone — an accepted, stated trade.
+ * Same-class but NOT suppressed (small/benign today, follow-up candidates):
+ * panel (grey-in-grey fixture interpenetration), thermostat + water-entry
+ * (small engine fixtures embedded at the same centerline point).
+ */
+export const ENGINE_RENDERED_SERVICE_TYPES: Partial<
+  Record<ServiceType, 'showHvac' | 'showPlumbing' | 'showElectrical'>
+> = {
+  'heat-pump': 'showHvac',
+  'water-heater': 'showPlumbing',
+  'electric-meter': 'showElectrical',
+}
+
+/** The level's bones:framing node (lowest id wins on duplicates —
+ * extraction parity); null = no X-ray on this level. */
+export function levelFramingNode(
+  nodes: Record<string, Record<string, unknown>>,
+  levelId: string | null | undefined,
+): Record<string, unknown> | null {
+  let best: Record<string, unknown> | null = null
+  for (const node of Object.values(nodes)) {
+    if (node.type !== 'bones:framing' || node.parentId !== levelId) continue
+    if (!best || String(node.id ?? '') < String(best.id ?? '')) best = node
+  }
+  return best
+}
+
 /** The level's view mode, resolved from its bones:framing node (lowest id
  * wins on duplicates — extraction parity); null = no X-ray on this level. */
 export function levelViewMode(
   nodes: Record<string, Record<string, unknown>>,
   levelId: string | null | undefined,
 ): ViewMode | null {
-  let best: Record<string, unknown> | null = null
-  for (const node of Object.values(nodes)) {
-    if (node.type !== 'bones:framing' || node.parentId !== levelId) continue
-    if (!best || String(node.id ?? '') < String(best.id ?? '')) best = node
-  }
+  const best = levelFramingNode(nodes, levelId)
   return best ? effectiveViewMode(best as { viewMode?: unknown; seeThrough?: unknown }) : null
 }
 
@@ -284,7 +326,18 @@ export function servicePresentation(
   nodes: Record<string, Record<string, unknown>>,
   node: Pick<ServicePlacementNode, 'serviceType' | 'parentId'>,
 ): ServicePresentation {
-  const mode = levelViewMode(nodes, node.parentId) ?? 'xray'
-  if (mode !== 'off') return { body: true, sign: true }
-  return { body: PHYSICAL_SERVICE_TYPES.has(node.serviceType), sign: false }
+  const framing = levelFramingNode(nodes, node.parentId)
+  // No framing node → no engines render on this level → pre-automation
+  // presentation (box + sign), unchanged.
+  const mode = framing
+    ? effectiveViewMode(framing as { viewMode?: unknown; seeThrough?: unknown })
+    : null
+  if (mode === 'off') return { body: PHYSICAL_SERVICE_TYPES.has(node.serviceType), sign: false }
+  if (mode === 'xray' && framing) {
+    const toggle = ENGINE_RENDERED_SERVICE_TYPES[node.serviceType]
+    // Absent toggle field = schema default true (legacy nodes never re-parse).
+    if (toggle && framing[toggle] !== false) return { body: false, sign: true }
+  }
+  // 'basement', 'xray' non-engine kinds, and no-framing levels: box + sign.
+  return { body: true, sign: true }
 }
