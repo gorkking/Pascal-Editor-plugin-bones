@@ -37,7 +37,15 @@ pin change annotated not silent, tz legacy sweep clean (only
 tiny-population Pangnirtung/Coral_Harbour links unmapped — noted).
 ★ MERGED TO MASTER 7f30a82 + manifest-count companion 524f3da
 (2026-08-24; suite 1946, tsc clean). Jonathan Nusbaum's authorship
-preserved on master. Ships with LGS Phase 2.
+preserved on master.
+★ SHIPPED TO PROD 2026-08-24 (2nd ship of the day): plugin 5679260
+→ editor #717 (4c34032c) → private-editor #410 (6fcf3502), full
+CI green incl. both E2E + Bugbot, Vercel prod. LGS PHASE 2 machine
+UX + 16 CANADIAN JURISDICTIONS live on editor.pascal.app. The
+X.com LGS ask is now answered end-to-end (Phases 0-2 shipped;
+Phase 3 floors/roofs remains). Day tally: 3 prod ships (CMU fix,
+HP+LGS-P1, P2+Canada), 5 branches merged, suite 1743 → 1946,
+2 community PRs adopted/answered.
 Original brief follows:
 TODO-1 (ADOPT, reworked): PR #1 Canadian jurisdictions — 16 rows
 (10 provinces, 3 territories, Ontario split S/E/N on frost/seismic
