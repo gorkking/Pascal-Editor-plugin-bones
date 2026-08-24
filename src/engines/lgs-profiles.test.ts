@@ -70,6 +70,14 @@ describe('AISI designator parsing', () => {
     // every catalog lookup — rejected at parse.
     expect(parseDesignator('0350S162-33')).toBeNull()
     expect(parseDesignator('0550T125-43')).toBeNull()
+    // Zero-padded MILS are the same alias class in the LAST field
+    // ('350S162-033' used to parse to mils 33 while the catalog key is
+    // '350S162-33' — silent lookup miss, round-2 residual): real mils run
+    // 18-118, never 0-leading.
+    expect(parseDesignator('350S162-033')).toBeNull()
+    expect(parseDesignator('0550T125-033')).toBeNull()
+    expect(parseDesignator('350S162-05')).toBeNull() // nonsense sub-10 mils
+    expect(parseDesignator('1000S162-118')?.mils).toBe(118) // real ceiling still parses
   })
 })
 

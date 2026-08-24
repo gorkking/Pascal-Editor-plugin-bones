@@ -147,11 +147,13 @@ export const LGS_FALLBACK_STATUS = LGS.fallbackStatus
  * (SFIA prints 075U050-54 — web 3/4"; flange '050' = 1/2" on every U050
  * row), so they parse; a FOUR-digit web starting with 0 ('0350S162-33')
  * is a padded alias of a real designator that would MISS catalog lookups
- * silently — rejected (skeptic F5). `null` when malformed. */
+ * silently — rejected (skeptic F5); zero-padded MILS ('350S162-033') are
+ * the same alias class in the last field (real mils run 18-118, never
+ * 0-leading) — also rejected (round 2). `null` when malformed. */
 export function parseDesignator(
   designator: string,
 ): { webIn: number; section: 'S' | 'T' | 'U' | 'F' | 'L'; flangeIn: number; mils: number } | null {
-  const m = /^(0\d{2}|[1-9]\d{2,3})([STUFL])(\d{3})-(\d{2,3})$/.exec(
+  const m = /^(0\d{2}|[1-9]\d{2,3})([STUFL])(\d{3})-([1-9]\d{1,2})$/.exec(
     designator.trim().toUpperCase(),
   )
   if (!m) return null
