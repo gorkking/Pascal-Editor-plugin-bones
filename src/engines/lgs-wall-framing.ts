@@ -768,7 +768,32 @@ function frameLgsWall(
       }
       spans = next
     }
+    const droppedSpans = spans.filter((sp) => sp.max - sp.min <= inches(6))
     spans = spans.filter((sp) => sp.max - sp.min > inches(6))
+    // NEVER a silent bracing deletion (round-3 F1, the S13 doctrine): a
+    // remnant under 6" is unbuildable strap and drops — but the drop is a
+    // real unbraced band the ADVISORY channel cannot carry (advisories
+    // ride strap members; a whole-run drop leaves none). The engine
+    // computed the drop, so it SAYS it — a per-wall LEVEL warning (P4
+    // prints warnings on paper). CMU-conditioned: a pure-steel stub too
+    // short for any strap is the pre-existing quiet class (byte parity —
+    // no cmuNeighbors, no new warnings).
+    if (ctx.cmuNeighbors.length > 0 && lenU1 - u0 > inches(6)) {
+      if (spans.length === 0) {
+        warnings.add(
+          `Wall ${wall.id}: R603.3.3 strap bracing omitted — run(s) shorter than 6 in after ` +
+            `CMU trims; verify bracing at the junction`,
+        )
+      } else {
+        for (const sp of droppedSpans) {
+          warnings.add(
+            `Wall ${wall.id}: R603.3.3 strap bracing interrupted at CMU junction — ` +
+              `${(sp.max - sp.min).toFixed(2)} m unbraced band at ${sp.min.toFixed(2)}–${sp.max.toFixed(2)} m ` +
+              `along the run; verify bracing at the junction`,
+          )
+        }
+      }
+    }
     const cmuTrimmed =
       strapU0 > u0 + EPS ||
       strapU1 < lenU1 - EPS ||

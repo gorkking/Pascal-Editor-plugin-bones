@@ -232,6 +232,65 @@ describe('LGS strap bracing by wall height (R603.3.3)', () => {
   })
 })
 
+describe('R603.3.3 strap drops are NEVER silent (round-3 F1 — the S13 doctrine)', () => {
+  const cmuStem = (id: string, u: number, t: number): WallSlice =>
+    wall({ id, start: [u, 0], end: [u, 2.5], thickness: t })
+
+  test('exhibit (a): remnants under 6" on BOTH sides of a mid-run stem — zero straps + the omitted warning', () => {
+    // 0.5 m steel stub, 0.2 m CMU stem at mid-run: both remnants 0.15 m
+    // < 6" → every span drops. The pure-steel twin frames straps; the
+    // CMU-adjacent scene must never lose them WORDLESSLY (the advisory
+    // channel rides strap members — none exist here).
+    const stub = wall({ id: 'w_f1a', start: [0, 0], end: [0.5, 0], thickness: 0.114 })
+    const twin = lgsFrameWalls([stub], spec400)
+    expect(twin.members.filter((m) => m.role === 'strap-bracing').length).toBe(2)
+    const r = lgsFrameWalls([stub], spec400, undefined, {
+      cmuNeighbors: [cmuStem('w_f1a_stem', 0.25, 0.2)],
+    })
+    expect(r.members.filter((m) => m.role === 'strap-bracing').length).toBe(0)
+    expect(
+      r.warnings.some(
+        (w) =>
+          w.includes('Wall w_f1a') &&
+          w.includes('R603.3.3 strap bracing omitted') &&
+          w.includes('run(s) shorter than 6 in after CMU trims'),
+      ),
+    ).toBe(true)
+    // …and the twin carries NO such warning (byte-parity: no cmuNeighbors,
+    // no new warnings — the level-warning delta is the trace)
+    expect(twin.warnings.some((w) => w.includes('strap bracing'))).toBe(false)
+  })
+
+  test('exhibit (b): stems at 1.4/1.7 on a 3 m wall — the 0.15 m middle remnant drops WITH its warning', () => {
+    const w3 = wall({ id: 'w_f1b', start: [0, 0], end: [3, 0], thickness: 0.114 })
+    const r = lgsFrameWalls([w3], spec400, undefined, {
+      cmuNeighbors: [cmuStem('w_f1b_s1', 1.4, 0.15), cmuStem('w_f1b_s2', 1.7, 0.15)],
+    })
+    // outer spans survive (straps + junction advisories ride them)
+    const straps = r.members.filter((m) => m.role === 'strap-bracing')
+    expect(straps.length).toBeGreaterThan(0)
+    for (const st of straps) expect(st.advisory).toContain('run trimmed clear of a CMU junction')
+    // the dropped middle span [1.475, 1.625] states its extent, on the
+    // LEVEL channel (P4 prints warnings on paper)
+    const warning = r.warnings.find((w) => w.includes('strap bracing interrupted at CMU junction'))
+    expect(warning).toBeDefined()
+    expect(warning).toContain('Wall w_f1b')
+    expect(warning).toContain('0.15 m unbraced band at 1.47–1.63 m')
+    expect(warning).toContain('verify bracing at the junction')
+  })
+
+  test('no drop → no warning: a clean mid-run split stays warning-free (round-3 interaction pin)', () => {
+    const w6 = wall({ id: 'w_f1c', start: [0, 0], end: [6, 0], thickness: 0.114 })
+    const r = lgsFrameWalls([w6], spec400, undefined, {
+      cmuNeighbors: [cmuStem('w_f1c_stem', 3, 0.15)],
+    })
+    // the split survives on both sides — the advisory is the trace, the
+    // warning channel stays quiet
+    expect(r.members.filter((m) => m.role === 'strap-bracing').length).toBe(4)
+    expect(r.warnings.some((w) => w.includes('strap bracing'))).toBe(false)
+  })
+})
+
 describe('LGS opening structure (R603.6 / R603.7 / R603.8)', () => {
   const withOpenings = wall({
     id: 'w_open',

@@ -207,7 +207,16 @@ LOD-200 convention).
   shifts along u by z·cotθ — a 45° stem bored a grouted cell 32 mm past
   the centerline-only band; perpendicular stems keep the exact
   centerline band, byte parity) — advisory states the trimmed
-  anchorage; the pure-
+  anchorage. TRIM REMNANTS UNDER 6" DROP (unbuildable strap) and the
+  drop is NEVER SILENT (round-3 F1, the S13 doctrine): every dropped
+  span raises a per-wall LEVEL warning naming the wall and the unbraced
+  band extent ('R603.3.3 strap bracing interrupted at CMU junction — …
+  verify bracing at the junction'; whole-run variant 'strap bracing
+  omitted — run(s) shorter than 6 in after CMU trims'), and warnings
+  print on paper via P4 — the advisory channel alone cannot carry a
+  whole-run drop (advisories ride strap members, and none exist then).
+  CMU-conditioned: a pure-steel stub too short for any strap stays the
+  pre-existing quiet class (byte parity); the pure-
   length clamp (minimum-run re-extension on stubs) states its own truth
   ('strap run clamped to the wall length'), never a masonry claim
   (round-2 B). Gated on the FL-default composition AND the CMU-stem-into-
