@@ -1160,6 +1160,45 @@ AND a gate — a checklist line without a test is a wish.
   to the CLOSED seam: LA flat ties 2-per-joist end-to-end AND the roof-
   bearing warning absent; INTL stays tie-less and silent).
 
+- **S18 The LGS honesty chain: steel claims only what the catalog and
+  the code research verify — everything else states its basis.**
+  (a) Every steel member label carries a designator that EXISTS in
+  data/lgs-profiles.json (exact-token parse, no invented '-HD' variants,
+  no invented weights on labels or rows — takeoff books length +
+  'weight requires vendor data'); printed grade re-derives from the
+  catalog's yieldKsi per row (S230 A4.4: 33/43 → Gr 33, 54/68 → Gr 50),
+  never a constant. (b) NO R603.3.2 table cell is encoded: conservative
+  picks (thickest table-domain variant) state 'conservative: R603.3.2
+  table cell unverified' on EVERY role's label (studs, kings, jacks,
+  cripples, headers, tracks, sills, backing-stud) plus a level warning;
+  the bridging channel states its own only-catalog-variant truth.
+  (c) profileFor's fallback chain order is gated: verified machine roll
+  → vendor-own profile with the dims-delta note ON the label (grade
+  'per vendor spec', never inherited from the nearest generic) → generic
+  + loud 'unverified — generic AISI fallback' → 'engineered design
+  required'; unverified machines can claim NO rollable rows (data-shape
+  gate + code guard, both legs pinned). (d) Steel walls carry the
+  energy-code truth wherever the cavity-R + IECC cite prints, at every
+  LOD: '— wood-frame prescriptive; steel-frame walls take R402.2.6/
+  N1102.2.6, not evaluated' rides insulation.citation itself; lumber
+  scenes never carry it (both leak directions gated). (e) R603.3.3
+  strap bracing is NEVER silently absent: CMU-junction trims that drop
+  a span or a whole run raise a per-wall warning with the unbraced
+  extent (P4 prints it); trim attribution never claims CMU for a pure
+  length clamp; the oblique-stem band widens by |z|·cotθ so straps
+  never bore grouted cells (band domain = detectTees tees, sinθ ≥ 0.3
+  — sub-17.5° crossings stay in the documented S1 junction-residual
+  family, straps included). (f) The LOD ladder claims only what each
+  rung does: 200 = generic 33-mil, ZERO R603 cites on labels/warnings;
+  300 = conservative + straps; 400 = + punchout metadata (S240 A5.9,
+  never drawn as holes). Existing framed/cmu corpora and the E5
+  baseline stay byte-identical — steel is a new-input class only.
+  Gates: src/engines/lgs-wall-framing.test.ts (label sweeps, basis-off
+  + grade-flip + qualifier-off mutant kills, drop-warning exhibits),
+  src/engines/lgs-profiles.test.ts (chain + citation gates),
+  src/engines/interpenetration.test.ts (round-3 F2 oblique SAT),
+  src/engines/takeoff.test.ts (zero-nail steel + grade rows).
+
 ## M — Mechanical (HVAC)
 
 - **M1 Ducts never cross plate bands; interior storeys route in soffits.**
