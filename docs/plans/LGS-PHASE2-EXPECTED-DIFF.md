@@ -86,10 +86,16 @@ shipped them. Generic (no machine): zero machine warnings, all LODs.
 
 `· machine <key> (constraint warnings land in Phase 2)` →
 `· machine <key>` plus, only when this wall's resolutions fall back, the
-honest count: `(1 profile falls back)` / `(2 profiles fall back)` —
-counted from the SAME resolver the members build from (lgsWallProfiles:
-stud + track), so the card can't disagree with the 3D/warnings. No
-machine → no suffix (byte-stable card line).
+honest count: `(1 profile falls back)` / `(2 profiles fall back)` /
+`(3 profiles fall back)` — counted from the SAME resolver the members
+build from (lgsWallProfiles: stud + track + the bridging resolution, the
+last counted ONLY when backing members actually compose on the wall —
+round-1 skeptic F2: the stud+track-only count printed '1' on the exhibit
+wall whose drawn steel carried fallback labels in two classes). The gate
+derives the expected count from the drawn members' own fallback labels,
+so card and 3D can't disagree; the exhibit (baseline w_s + TF550H) pins
+2, a backing-free wall (w_mid) pins 1, F325iT pins 3. No machine → no
+suffix (byte-stable card line).
 
 ## 5. Machine select content (the catalog verbatim, honesty as ordering)
 

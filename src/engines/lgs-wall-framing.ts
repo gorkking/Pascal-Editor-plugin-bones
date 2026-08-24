@@ -143,16 +143,24 @@ export type LgsWallProfiles = {
   /** Track resolution (bottom/top/sill) — same minimum mils as the studs
    * (R603.3.2 verbatim rule). */
   track: LgsProfileResolution
-  /** The mils both resolutions were asked for + the stated basis (null at
-   * LOD 200 — generic members make no code claims). */
+  /** Bridging-channel resolution (partition backing, 150U050) at the
+   * structural floor — the channel is the only catalog variant, never an
+   * R603.3.2 table selection. Members of this class compose only where
+   * the wall carries backing tees, so the CARD counts its fallback only
+   * when backing members are actually drawn on the wall (round-1 skeptic
+   * F2); the engine consumes this same resolution for the members and
+   * the can't-roll warning. */
+  backing: LgsProfileResolution
+  /** The mils the stud/track resolutions were asked for + the stated
+   * basis (null at LOD 200 — generic members make no code claims). */
   minMils: number
   basis: string | null
 }
 
-/** Resolve one wall's stud + track profiles under a spec (+ per-wall
- * engineering override). The wall's lumber-equivalent size (thickness
- * heuristic or explicit studSize override) picks the depth-matched web so
- * wall thickness stays byte-stable. */
+/** Resolve one wall's stud + track + bridging profiles under a spec (+
+ * per-wall engineering override). The wall's lumber-equivalent size
+ * (thickness heuristic or explicit studSize override) picks the
+ * depth-matched web so wall thickness stays byte-stable. */
 export function lgsWallProfiles(
   wall: WallSlice,
   spec: FramingSpec,
@@ -172,6 +180,9 @@ export function lgsWallProfiles(
   return {
     stud: profileFor('stud', lgsSpec, { minMils }),
     track: profileFor('bottom-plate', lgsSpec, { minMils }),
+    // structural-floor mils (the engine's historical call — '150U050' is
+    // size-independent, so lgsSpec vs wallSpec cannot differ here)
+    backing: profileFor('backing', lgsSpec),
     minMils,
     basis: generic ? null : LGS_CONSERVATIVE_BASIS,
   }
@@ -735,7 +746,9 @@ function frameLgsWall(
   }
 
   // ---- partition backing at tees: CFS blocking (150U050 channel) ----
-  const backingRes = profileFor('backing', specForWall(spec, override))
+  // ONE resolver (round-1 skeptic F2): the members, the can't-roll warning
+  // AND the card's fallback count all read profiles.backing.
+  const backingRes = profiles.backing
   if (isResolvedProfile(backingRes) && (hints.backing?.length ?? 0) > 0) {
     const bFam = backingRes.family
     const bWeb = bFam.webMm / 1000

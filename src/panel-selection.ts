@@ -204,9 +204,18 @@ export function selectedWallInfo(
       return 'Steel (LGS) — engineered design required (no prescriptive member class)'
     }
     const basis = profiles.basis ? ` — ${profiles.basis}` : ''
-    const fallbacks = [profiles.stud, profiles.track].filter(
-      (r) => isResolvedProfile(r) && r.status !== 'verified',
-    ).length
+    // The count spans every fallback CLASS drawn on THIS wall (round-1
+    // skeptic F2: stud + track always compose; the bridging channel only
+    // where the wall carries backing members — counting it always would
+    // overstate, dropping it understated the exhibit's 2 classes).
+    const hasBacking = result.members.some(
+      (m) => m.sourceId === wall.id && m.role === 'backing' && m.material === 'steel',
+    )
+    const fallbacks = [
+      profiles.stud,
+      profiles.track,
+      ...(hasBacking ? [profiles.backing] : []),
+    ].filter((r) => isResolvedProfile(r) && r.status !== 'verified').length
     const machineNote = result.spec.lgsMachine
       ? ` · machine ${result.spec.lgsMachine}` +
         (fallbacks > 0
