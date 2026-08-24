@@ -94,8 +94,8 @@ describe('floating inspector keeps the FULL wall engineering surface', () => {
   const card = read('./inspector/wall-engineering.tsx')
 
   test('every option the sidebar card used to carry', () => {
-    // construction override
-    for (const needle of ["value: 'framed'", "value: 'cmu'", "value: 'skip'"]) {
+    // construction override (LGS Phase 2 added Steel to the same control)
+    for (const needle of ["value: 'framed'", "value: 'lgs'", "value: 'cmu'", "value: 'skip'"]) {
       expect(card).toContain(needle)
     }
     // CMU height slider
@@ -113,6 +113,23 @@ describe('floating inspector keeps the FULL wall engineering surface', () => {
 
   test('its X-Ray call to action uses the same coherent activation', () => {
     expect(card).toContain('activateXray(')
+  })
+
+  // LGS Phase 2 — the Steel segment rides the ONE existing construction
+  // control (LGS-PLAN UI/UX principle 1a: a 4th segment, no new rows), in
+  // the boarded order Framed · Steel · CMU · Skip, and the control's value
+  // is the RESOLVED construction (info.construction) so an MCP-set 'lgs'
+  // wall highlights its segment (the Phase-0 documented gap).
+  test("Phase 2: Steel is a 4th segment of the SAME construction control — no new rows", () => {
+    const options = card.match(
+      /options=\{\[\s*\{ label: 'Framed', value: 'framed' \},\s*\{ label: 'Steel', value: 'lgs' \},\s*\{ label: 'CMU', value: 'cmu' \},\s*\{ label: 'Skip', value: 'skip' \},\s*\]\}/,
+    )
+    expect(options).not.toBeNull()
+    // exactly one construction control — Steel did not grow a second one
+    expect(card.match(/value: 'framed'/g) ?? []).toHaveLength(1)
+    expect(card.match(/value: 'lgs'/g) ?? []).toHaveLength(1)
+    // the segment highlight reads the RESOLVED construction
+    expect(card).toContain('value={info.construction}')
   })
 })
 
