@@ -1318,8 +1318,18 @@ function computeLevelUncached(
   }
 
   // Whole-building metrics (floor area / volume / envelope UA…) — shared by
-  // the panel drawer and the blueprints' schedules block.
-  const characteristics = computeCharacteristics(activeWalls, activeRooms, slabs, spec, code)
+  // the panel drawer and the blueprints' schedules block. Steel (LGS)
+  // walls make the wood-frame IECC cavity claim dishonest — the flag keys
+  // on wall CONSTRUCTION resolution (not member emission) so the note
+  // holds even with the walls system toggled off (round-1 F2).
+  const hasSteelWalls = activeWalls.some(
+    (w) =>
+      !w.curved &&
+      resolveWallConstruction(w, config, profile.exteriorWallDefault).construction === 'lgs',
+  )
+  const characteristics = computeCharacteristics(activeWalls, activeRooms, slabs, spec, code, {
+    ...(hasSteelWalls ? { steelWalls: true } : {}),
+  })
 
   return {
     members,

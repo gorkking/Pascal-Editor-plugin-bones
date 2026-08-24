@@ -95,6 +95,16 @@ Warnings channel (per level with steel walls, 300+):
 - `spec.highWindUplift` + exterior steel walls → 'LGS wall uplift
   strapping not modeled' (the B10 hardware is lumber-only; steel walls
   book no uplift connectors).
+- ENERGY CODE (round-1 F2): every cavity R the plugin prints is the
+  WOOD-frame prescriptive figure — steel-frame walls take 2021 IECC
+  R402.2.6 / IRC N1102.2.6 (cavity + continuous insulation, or U-factor
+  path), not evaluated, and steel-stud thermal bridging is not modeled in
+  the UA/Manual-J arithmetic. Stated in THREE channels, all steel-gated:
+  the level warning (P4 prints it), a characteristics note (keys on wall
+  CONSTRUCTION resolution, so it holds with walls toggled off), and the
+  card's insulation line qualifier. The old Phase-0-derived
+  insulation-equality pin was rewritten into a truth pin (content equal
+  PLUS the steel qualifier present).
 
 Takeoff (new rows only when steel members exist):
 
@@ -149,7 +159,11 @@ LOD-200 convention).
 6. **Screw counts per sheet**: derived arithmetic from the verified 6/12
    and 12 spacings on a stated 4x8-vertical/16"-o.c. layout assumption
    (printed on the row).
-7. **Machine constraint**: `profileFor` resolution status rides member
+7. **Energy code (F2)**: the IECC figures are wood-frame prescriptive
+   values used as-is for UA/Manual-J — R402.2.6 steel-frame equivalence
+   and thermal bridging are NOT evaluated; three stated channels (card,
+   characteristics, level warning) carry the caveat.
+8. **Machine constraint**: `profileFor` resolution status rides member
    labels (verified machines brand; can't-roll/unknown/unverified fall
    back to generic dims with the loud Phase-0 status string). Real
    finding, gated: TF550H's published flange range (34–63 mm) covers the

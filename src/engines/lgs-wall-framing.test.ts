@@ -496,10 +496,27 @@ describe('END-TO-END: computeLevel with framingSystem lgs (the level default)', 
     expect(machineFor('framecad/f325it')?.status).toBe('verified')
   })
 
-  test('honesty warnings surface at the LEVEL: conservative mils + R603.9', () => {
+  test('honesty warnings surface at the LEVEL: conservative mils + R603.9 + energy code', () => {
     const r = computeLevel(baselineScene(), lgsConfig())
     expect(r.warnings.some((w) => w.includes('R603.3.2 table cells not encoded'))).toBe(true)
     expect(r.warnings.some((w) => w.includes('R603.9'))).toBe(true)
+    // F2: the energy-code caveat reaches the warnings channel (P4 prints
+    // it verbatim on paper) AND the characteristics notes…
+    expect(r.warnings.some((w) => w.includes('IECC R402.2.6'))).toBe(true)
+    expect(
+      r.characteristics?.notes.some((n) => n.includes('R402.2.6') && n.includes('thermal')),
+    ).toBe(true)
+    // …and NEVER leaks into lumber corpora (the byte-parity guard)
+    const lumber = computeLevel(baselineScene(), baselineConfig('INTL'))
+    expect(lumber.warnings.some((w) => w.includes('R402.2.6'))).toBe(false)
+    expect(lumber.characteristics?.notes.some((n) => n.includes('R402.2.6'))).toBe(false)
+  })
+
+  test('F2: the steel-frame characteristics note keys on wall CONSTRUCTION, not member emission', () => {
+    // walls toggled OFF still resolve 'lgs' — the printed wall R would be
+    // just as dishonest, so the note holds.
+    const r = computeLevel(baselineScene(), { ...lgsConfig(), showWalls: false })
+    expect(r.characteristics?.notes.some((n) => n.includes('R402.2.6'))).toBe(true)
   })
 
   test('high-wind jurisdiction: LGS walls state that lumber-only uplift hardware does not cover them', () => {

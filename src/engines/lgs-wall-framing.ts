@@ -293,6 +293,15 @@ export function lgsFrameWalls(
       `LGS wall bracing (R603.9 structural sheathing) not evaluated — the R603.3.3 ` +
         `strap rows are stud stability bracing, not shear bracing; verify braced wall design`,
     )
+    // Energy-code honesty (round-1 F2): every cavity R this plugin prints
+    // (card, characteristics, UA/Manual-J inputs) is the WOOD-frame
+    // prescriptive figure — steel-frame walls have their OWN IECC
+    // requirement and thermal-bridging story, and nothing evaluates it.
+    warnings.add(
+      `LGS energy code: cavity R-values shown are wood-frame prescriptive figures — ` +
+        `steel-frame walls require 2021 IECC R402.2.6 / IRC N1102.2.6 compliance ` +
+        `(cavity + continuous insulation, or U-factor path) — not evaluated`,
+    )
     if (spec.highWindUplift && walls.some((w) => w.exterior)) {
       warnings.add(
         `high-wind uplift connectors (R802.11/WFCM continuation) are modeled for lumber ` +

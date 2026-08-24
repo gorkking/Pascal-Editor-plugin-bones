@@ -460,7 +460,18 @@ describe("'lgs' walls route FULLY — steel bones, framed-twin sheet goods (F1, 
     // family + spacing; insulation/cladding ride the same layer stack)
     expect(info.engineering).not.toBeNull()
     expect(info.engineering).toEqual(framedInfo.engineering)
-    expect(info.insulation).toEqual(framedInfo.insulation)
+    // TRUTH pin, not an equality pin (round-1 F2 — the old
+    // insulation-equality assertion PINNED the wood-frame IECC claim onto
+    // steel walls): the steel card keeps the framed twin's R/zone CONTENT
+    // and adds the steel-frame qualifier — R402.2.6 is the steel wall's
+    // own requirement and it is stated as NOT evaluated.
+    expect(framedInfo.insulation).not.toBeNull()
+    expect(info.insulation).toContain(String(framedInfo.insulation))
+    expect(info.insulation).toContain('wood-frame prescriptive')
+    expect(info.insulation).toContain('R402.2.6')
+    expect(info.insulation).toContain('not evaluated')
+    // …and the framed twin never carries the steel qualifier
+    expect(framedInfo.insulation).not.toContain('R402.2.6')
   })
 })
 

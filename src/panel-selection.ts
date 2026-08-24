@@ -217,9 +217,17 @@ export function selectedWallInfo(
           : 'Skipped — excluded from every system'
 
   const ins = result.characteristics?.insulation
+  // Steel-frame honesty (round-1 F2): the R figure is the WOOD-frame
+  // prescriptive cell — 2021 IECC R402.2.6 / IRC N1102.2.6 give
+  // steel-frame walls their own requirement (cavity + continuous
+  // insulation, or U-factor path) and nothing here evaluates it. The
+  // card line says so instead of letting the wood claim ride.
+  const steelInsNote =
+    ' — wood-frame prescriptive value; steel framing takes IECC R402.2.6 ' +
+    'continuous insulation / U-factor — not evaluated'
   const insulation =
     framedAssembly(construction) && wall.exterior && ins
-      ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}`
+      ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}${construction === 'lgs' ? steelInsNote : ''}`
       : null
 
   const codeMinR = ins?.wallR ?? 13
