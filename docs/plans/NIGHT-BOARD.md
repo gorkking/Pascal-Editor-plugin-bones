@@ -27,9 +27,17 @@ FALSE 'below 130 mph' label AND escapes both enumeration pins (S16
 'or says it can't' violated); F2 VERMONT is the unenumerated 18th
 confession member (ircBase:null at base — honest behavior, missing
 enumeration + incoherent no-code wording tail). Nits: AB/SK
-value-vs-note rounding, legacy America/Montreal tz id. FIX ROUND
-DISPATCHED (keep Jonathan's researched flag — honest label + third
-enumeration arm, never invented ties). Closing round after tip.
+value-vs-note rounding, legacy America/Montreal tz id. FIX TIP db61c5c
+(F1 highWindTiesOnly third class {CA-NU} w/ true label + third
+enumeration arm; F2 confession set exactly-18 pin + VT no-code tail;
+nits: AB 71/SK 83 note==value at 25.4, America/Montreal→CA-QC).
+ROUND 2 (wf_d2e9556a): skeptic APPROVE closing-grade — /^No/ scope
+proven safe (11 US 'No…' rows all non-null ircBase), Jonathan's 84
+pin change annotated not silent, tz legacy sweep clean (only
+tiny-population Pangnirtung/Coral_Harbour links unmapped — noted).
+★ MERGED TO MASTER 7f30a82 + manifest-count companion 524f3da
+(2026-08-24; suite 1946, tsc clean). Jonathan Nusbaum's authorship
+preserved on master. Ships with LGS Phase 2.
 Original brief follows:
 TODO-1 (ADOPT, reworked): PR #1 Canadian jurisdictions — 16 rows
 (10 provinces, 3 territories, Ontario split S/E/N on frost/seismic
