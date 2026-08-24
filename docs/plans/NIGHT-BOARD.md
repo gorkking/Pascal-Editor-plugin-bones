@@ -30,7 +30,12 @@ estimators compute panel-identical quantities without mounting
 (computeLevelUncached exists for rollup loops vs the 1-deep memo).
 Gate: exports stay pure (no viewer import — a grep gate). Small.
 
-CLOSED-AS-SUPERSEDED (respond when Julien says how): PR #2's wall-
+BOTH PRs COMMENTED + CLOSED PUBLICLY 2026-08-24 (Julien's go-ahead):
+#1 closed with the adopt-via-cherry-pick plan + authorship-preserved
+promise; #2 closed as superseded with the master-timeline
+explanation + exports-idea-adopted credit + the dead-key find
+acknowledged. TODO-1 now owes the cherry-pick landing.
+CLOSED-AS-SUPERSEDED: PR #2's wall-
 mode takeover — the bug was real at their base but master's
 activation-scoped imposeLowWalls/releaseLowWalls (with the W1
 multi-X-ray invariant they lack, + user-action-scoped imposition
@@ -94,8 +99,10 @@ numeric-only ≤1.5px — manifest addendum landed at merge).
 1783, tsc clean, E5 pin green). QUEUE: u-direction end-face +
 corner butt-gap (one end-treatment item); framed-layers bury
 (not-contained assessment stands); host WallCutout self-heal.
-SHIP CHAIN STARTING: master 7ee49a9 → editor pin → private-editor
-(carries LGS Phase 0 inert + CMU bury).
+★ SHIPPED TO PROD 2026-08-24: plugin c05c13e → editor #714
+(dd3585f9) → private-editor #400 (549675f0), all CI green incl.
+both E2E, Vercel prod deploy. CMU paint-flicker fix + LGS Phase 0
+(inert) live on editor.pascal.app.
 
 # HP POLISH — feat/hp-polish DELIVERED, VERIFY ROUND RUNNING (2026-08-23)
 
