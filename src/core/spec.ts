@@ -279,6 +279,19 @@ export type FramingSpec = {
    * ('ultimateWindMph >= 130 && flags.hurricaneTies').
    */
   highWindUplift: boolean
+  /**
+   * ≥ 130 mph design wind WITHOUT the researched `hurricaneTies` flag
+   * (today exactly CA-NU — extreme Arctic wind, NBC-researched flags carry
+   * no prescriptive uplift-continuation claim): `applyJurisdiction`'s wind
+   * leg still mints roof ties, but BOTH shipped tie labels would lie here —
+   * the belt clause says 'below 130 mph' (false at 140) and the plain
+   * label implies B10's wall continuation (not built). The spec carries
+   * the third class so `tieAt` can state exactly what holds. OPTIONAL,
+   * folded only when the class applies (the LGS convention) — absent keeps
+   * the spec object byte-identical to master (the E5 baseline pins the
+   * spec).
+   */
+  highWindTiesOnly?: boolean
   // ---- wall bracing (R602.10, LOD-400 B9) ----
   /**
    * Declared braced-wall METHOD. v1 ships CS-WSP only (continuous

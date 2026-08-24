@@ -650,7 +650,10 @@ describe('jurisdiction sweep — the uplift path answered in every state', () =>
     }
     // Sanity enumeration of what the data derives to TODAY (the predicate
     // above stays data-driven; this pin just catches silent data drift).
-    expect(upliftStates.sort()).toEqual(['HI', 'LA'])
+    // Atlantic Canada joined 2026-08 (docs/plans/CANADA-EXPECTED-DIFF.md):
+    // NL 140 / NS 130 / PE 130 mph with hurricaneTies — ≥130 books the
+    // full wall path, same rule that serves HI/LA.
+    expect(upliftStates.sort()).toEqual(['CA-NL', 'CA-NS', 'CA-PE', 'HI', 'LA'])
     expect(cmuHighWindStates).toEqual(['FL'])
   })
 

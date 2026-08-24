@@ -655,6 +655,12 @@ function deckPlane(
  * itself states its scope instead of implying a full path. ≥ 130 mph
  * (`highWindUplift` — LA/HI/FL) keeps the plain label: B10's wall
  * connectors/straps ARE the continuation there.
+ * CANADA round-1 skeptic (2026-08-24): a THIRD class exists since the CA
+ * rows — ≥ 130 mph WITHOUT the researched flag (`highWindTiesOnly`, today
+ * exactly CA-NU at 140 mph): the belt clause's 'below 130 mph' would be
+ * factually false there and the plain label would imply a wall
+ * continuation S16 never builds, so this class states exactly what holds
+ * (its compute also carries the non-IRC confession — CA-NU is NBC).
  */
 function tieAt(emit: Emit, spec: FramingSpec, x: number, z: number, y: number) {
   emit(
@@ -668,7 +674,9 @@ function tieAt(emit: Emit, spec: FramingSpec, x: number, z: number, y: number) {
     'steel',
     spec.highWindUplift
       ? 'hurricane tie'
-      : 'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)',
+      : spec.highWindTiesOnly
+        ? 'hurricane tie (roof-to-wall ties only — high-wind wall/foundation uplift continuation not modeled for this jurisdiction (no prescriptive-uplift flag in its researched data); verify against the governing code)'
+        : 'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)',
   )
 }
 

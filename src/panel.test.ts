@@ -60,6 +60,20 @@ test('C5: the plan-set export passes the gross-fallback areas (one source of tru
   expect(src).toContain('areas: result.areas')
 })
 
+describe('jurisdiction notes reach the PANEL (the CA territories\u2019 PERMAFROST channel)', () => {
+  const panel = read('./panel.tsx')
+
+  test('the picker receives AND renders profile.notes \u2014 the channel exists end-to-end', () => {
+    // profileFor builds `Frost: \u2026` / `Snow: \u2026` strings (incl. the
+    // territories' PERMAFROST warning) into profile.notes; before 2026-08-24
+    // NOTHING rendered them \u2014 the warning lived only in the data file.
+    // Source gate (the sanctioned grep-level form for this harness): the
+    // call site passes them and the component prints them.
+    expect(panel).toContain('notes={profile.notes}')
+    expect(panel).toContain('{notes.join(' + "' \u00b7 '" + ')}')
+  })
+})
+
 describe('day-9 declutter: warnings + flags fold away, the summary stays', () => {
   const panel = read('./panel.tsx')
 

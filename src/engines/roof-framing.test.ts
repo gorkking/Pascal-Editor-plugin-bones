@@ -1549,6 +1549,10 @@ describe('NIGHT-10: sub-130 mph roof ties state their wall-path scope (B10 skept
   const PLAIN = 'hurricane tie'
   const BELT =
     'hurricane tie (roof-to-wall ties only — wall/foundation uplift path not modeled below 130 mph design wind)'
+  // ≥130 mph WITHOUT the researched flag (CANADA r1 skeptic — today exactly
+  // CA-NU at 140 mph): 'below 130' would be false, plain would overclaim.
+  const TIES_ONLY =
+    'hurricane tie (roof-to-wall ties only — high-wind wall/foundation uplift continuation not modeled for this jurisdiction (no prescriptive-uplift flag in its researched data); verify against the governing code)'
   const beltSpec: FramingSpec = { ...DEFAULT_SPEC, detail: '400', hurricaneTies: true }
   const fullSpec: FramingSpec = { ...beltSpec, highWindUplift: true }
   const tiesOf = (ms: Member[]) => ms.filter((m) => m.label?.startsWith(PLAIN))
@@ -1604,7 +1608,10 @@ describe('NIGHT-10: sub-130 mph roof ties state their wall-path scope (B10 skept
       else belt.push(code)
     }
     expect(belt.sort()).toEqual(['AL', 'CT', 'DE', 'GA', 'MA', 'MS', 'NC', 'NJ', 'NY', 'RI', 'SC', 'TX'])
-    expect(full.sort()).toEqual(['FL', 'HI', 'LA'])
+    // Atlantic Canada (CA-NL 140 / CA-NS 130 / CA-PE 130 mph, hurricaneTies)
+    // joined the ≥130 FULL-path set 2026-08 — the belt is unchanged
+    // (docs/plans/CANADA-EXPECTED-DIFF.md).
+    expect(full.sort()).toEqual(['CA-NL', 'CA-NS', 'CA-PE', 'FL', 'HI', 'LA'])
     for (const code of belt) {
       const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
       expect({ code, ties: sp.hurricaneTies, uplift: sp.highWindUplift }).toEqual({
@@ -1629,6 +1636,61 @@ describe('NIGHT-10: sub-130 mph roof ties state their wall-path scope (B10 skept
     expect(JSON.stringify(intlMembers)).toBe(
       JSON.stringify(frameRoofs([seg()], [], { ...DEFAULT_SPEC, detail: '400' })),
     )
+  })
+
+  test('THIRD arm (CANADA r1 skeptic): ≥130 mph WITHOUT the researched flag — enumerated, and its ties never lie', () => {
+    // CA-NU (140 mph, flags.hurricaneTies:false — the row's NBC research
+    // carries no prescriptive uplift-continuation claim) is the first-ever
+    // profile on applyJurisdiction's '|| >= 130' wind leg alone. Both
+    // flag-first arms above SKIP it (profile.hurricaneTies is false), so
+    // this arm exists for exactly the reason the others do: boundary drift
+    // must show up HERE, not silently swap tie labels.
+    const tiesOnly: string[] = []
+    for (const { code } of jurisdictionOptions()) {
+      const p = profileFor(code)
+      if (!p.hurricaneTies && p.ultimateWindMph >= 130) tiesOnly.push(code)
+    }
+    expect(tiesOnly.sort()).toEqual(['CA-NU'])
+    for (const code of tiesOnly) {
+      const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
+      expect({ code, ties: sp.hurricaneTies, uplift: sp.highWindUplift, third: sp.highWindTiesOnly }).toEqual({
+        code,
+        ties: true,
+        uplift: false,
+        third: true,
+      })
+      const ties = tiesOf(frameRoofs([seg()], [], sp))
+      expect(ties.length).toBeGreaterThan(0)
+      for (const tie of ties) {
+        expect(tie.label).toBe(TIES_ONLY)
+        // the two FALSE claims are banned on this class: the belt clause
+        // ('below 130 mph' — false at 140) and the plain label (implies
+        // B10's wall continuation, which S16 never builds here)
+        expect(tie.label).not.toBe(BELT)
+        expect(tie.label).not.toBe(PLAIN)
+        expect(tie.label?.includes('below 130')).toBe(false)
+      }
+    }
+    // spec purity: the third-class field folds ONLY on this class — belt
+    // and full states never carry it (absent, not false: E5 spec bytes)
+    for (const code of ['TX', 'LA', 'INTL'] as const) {
+      const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
+      expect('highWindTiesOnly' in sp, code).toBe(false)
+    }
+  })
+
+  test('THIRD arm: the label is the ONLY delta — normalizing reproduces the ≥130 bytes on every tying shape', () => {
+    const tiesOnlySpec: FramingSpec = { ...beltSpec, highWindTiesOnly: true }
+    for (const [name, over] of SHAPES) {
+      const normalized = frameRoofs([seg(over)], [], tiesOnlySpec).map((m) =>
+        m.label === TIES_ONLY ? { ...m, label: PLAIN } : m,
+      )
+      const full = frameRoofs([seg(over)], [], fullSpec)
+      expect({ name, eq: JSON.stringify(normalized) === JSON.stringify(full) }).toEqual({
+        name,
+        eq: true,
+      })
+    }
   })
 
   test('takeoff: the tie row counts by role+material+system — the clause books nothing new', () => {

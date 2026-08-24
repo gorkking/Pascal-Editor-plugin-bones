@@ -219,6 +219,7 @@ function XraySection({
         guess={guess}
         options={options}
         codeName={profile.residentialCode}
+        notes={profile.notes}
       />
 
       <FramingRow framingNode={framingNode} />
@@ -631,12 +632,14 @@ function JurisdictionPicker({
   guess,
   options,
   codeName,
+  notes,
 }: {
   framingNodeId: AnyNodeId
   value: string
   guess: { code: string; reason: string } | null
   options: { code: string; name: string }[]
   codeName: string
+  notes: string[]
 }) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
@@ -714,6 +717,17 @@ function JurisdictionPicker({
       >
         {codeName} ↗
       </a>
+      {/* The profile's researched notes — amendment flavor + the per-row
+          frost/snow climate notes. This is the channel that carries the
+          territories' PERMAFROST warning to the user (it lived only in the
+          data file before 2026-08-24 — profileFor built the strings and
+          nothing rendered them). Same muted style as the characteristics
+          notes paragraph. */}
+      {notes.length > 0 && (
+        <p className="text-[10px] text-sidebar-foreground/40 leading-relaxed">
+          {notes.join(' · ')}
+        </p>
+      )}
     </div>
   )
 }
