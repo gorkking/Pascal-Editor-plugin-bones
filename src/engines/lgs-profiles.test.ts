@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
-import { FramingNode, WallOverride } from '../framing/schema'
+import { baselineConfig, baselineScene } from '../framing/baseline-scene'
+import { computeLevel } from '../framing/compute'
+import { FramingNode, framesAsLumber, WallOverride } from '../framing/schema'
+import { selectedWallInfo } from '../panel-selection'
 import {
   DEFAULT_STRUCTURAL_MILS,
   familyStemFor,
@@ -282,6 +285,53 @@ describe('citation completeness (the data-shape gate)', () => {
       expect(c.fetched).toBe('2026-08-23')
     }
     expect(LGS.fallbackStatus).toContain('unverified')
+  })
+})
+
+describe("'lgs' walls frame AS LUMBER — never half-routed (skeptic F1)", () => {
+  const cfgWith = (overrides?: Record<string, WallOverride>) => ({
+    ...baselineConfig('INTL'),
+    ...(overrides ? { wallOverrides: overrides } : {}),
+  })
+
+  test('framesAsLumber: the ONE predicate — framed + lgs in, cmu + skip out', () => {
+    expect(framesAsLumber('framed')).toBe(true)
+    expect(framesAsLumber('lgs')).toBe(true)
+    expect(framesAsLumber('cmu')).toBe(false)
+    expect(framesAsLumber('skip')).toBe(false)
+  })
+
+  test("an 'lgs' wall is BYTE-EQUAL to the untouched baseline — members, areas, everything", () => {
+    // Kills the F1 mutants at all three compute sites: dropping 'lgs' from
+    // the grouping loses the wall's members; dropping it from either areas
+    // site loses sheathing/drywall m² (the silent under-buy class).
+    const base = computeLevel(baselineScene(), cfgWith())
+    const lgs = computeLevel(baselineScene(), cfgWith({ w_s: 'lgs', w_mid: 'lgs' }))
+    expect(base.members.length).toBeGreaterThan(50) // the walls really frame
+    expect(lgs.areas).toEqual(base.areas) // sheathing + drywall both booked
+    expect(JSON.stringify(lgs.members)).toBe(JSON.stringify(base.members))
+    expect(JSON.stringify(lgs.fixtures)).toBe(JSON.stringify(base.fixtures))
+    expect(lgs.warnings).toEqual(base.warnings)
+  })
+
+  test('the wall card tells the truth: never "Skipped", engineering populated', () => {
+    const nodes = baselineScene()
+    const select = { levelId: 'level_1', selectedIds: ['w_s'] }
+    const framedCfg = cfgWith({ w_s: 'framed' })
+    const lgsCfg = cfgWith({ w_s: 'lgs' })
+    const framedInfo = selectedWallInfo(nodes, select, framedCfg, computeLevel(nodes, framedCfg))
+    const info = selectedWallInfo(nodes, select, lgsCfg, computeLevel(nodes, lgsCfg))
+    if (!info || !framedInfo) throw new Error('missing wall info')
+    expect(info.construction).toBe('lgs')
+    expect(info.assembly).toContain('Steel (LGS)')
+    expect(info.assembly).toContain('framed as lumber')
+    expect(info.assembly).toContain('Phase 1')
+    expect(info.assembly).not.toContain('Skipped')
+    // the engineering block IS the framed twin's — members exist, the
+    // recipe printed is what's built (insulation line rides along too)
+    expect(info.engineering).not.toBeNull()
+    expect(info.engineering).toEqual(framedInfo.engineering)
+    expect(info.insulation).toEqual(framedInfo.insulation)
   })
 })
 

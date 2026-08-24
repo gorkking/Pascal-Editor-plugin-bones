@@ -167,3 +167,15 @@ catalog's live example of the unverified-vendor fallback path).
 4. Anything unverifiable ships as `"unverified — generic AISI fallback"` and
    resolves generic dims — the status string surfaces on every resolution.
 5. 2024 IRC: nothing encoded (text unverified).
+6. **E5 byte-parity scope (the F1 caveat, spelled out):** the master-baseline
+   pin proves byte-identity for every EXISTING input — no stored scene
+   carries an `'lgs'` wall or `framingSystem`, and absent fields round-trip
+   absent. `'lgs'` walls are a NEW INPUT CLASS the pin cannot see: they are
+   governed instead by the `framesAsLumber` predicate (framing/schema.ts) +
+   the F1 gates — an `'lgs'` wall must stay byte-equal to its `'framed'`
+   twin on members AND takeoff areas, and the wall card must say "framed as
+   lumber until the steel engine lands", never "Skipped". A value that
+   parses but half-routes (members without booked sheathing, or a card that
+   denies the members on screen) is the F1 defect class — any new
+   construction value must land with the same three-site routing +
+   card-truth gates.

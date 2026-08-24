@@ -19,15 +19,16 @@ import {
   probeSlabsFor,
   resolveWallConstruction,
 } from './framing/compute'
-import type {
-  FramingNode,
-  WallCladding,
-  WallConstruction,
-  WallEngineeringOverride,
-  WallInsulation,
-  WallOverride,
-  WallSpacingIn,
-  WallStudSize,
+import {
+  framesAsLumber,
+  type FramingNode,
+  type WallCladding,
+  type WallConstruction,
+  type WallEngineeringOverride,
+  type WallInsulation,
+  type WallOverride,
+  type WallSpacingIn,
+  type WallStudSize,
 } from './framing/schema'
 import { profileFor } from './jurisdiction/profiles'
 
@@ -180,22 +181,28 @@ export function selectedWallInfo(
   const defaultSpacingIn = Math.round(result.spec.studSpacing / METERS_PER_INCH) as WallSpacingIn
   const studSize = resolved.studSize ?? defaultStudSize
   const spacingIn = resolved.spacingIn ?? defaultSpacingIn
+  // 'lgs' says the TRUTH: the members on screen ARE lumber until the
+  // Phase-1 steel engine lands — never "Skipped" (skeptic F1: that string
+  // on a wall rendering 98 members was a flat lie), and the engineering
+  // block stays populated because the framed recipe is what's built.
   const assembly =
     construction === 'framed'
       ? `${studSize} studs @ ${spacingIn}" o.c.`
-      : construction === 'cmu'
-        ? '8" CMU block · running bond'
-        : 'Skipped — excluded from every system'
+      : construction === 'lgs'
+        ? `Steel (LGS) — framed as lumber (${studSize} @ ${spacingIn}" o.c.) until the steel engine lands (Phase 1)`
+        : construction === 'cmu'
+          ? '8" CMU block · running bond'
+          : 'Skipped — excluded from every system'
 
   const ins = result.characteristics?.insulation
   const insulation =
-    construction === 'framed' && wall.exterior && ins
+    framesAsLumber(construction) && wall.exterior && ins
       ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}`
       : null
 
   const codeMinR = ins?.wallR ?? 13
   const engineering: WallEngineeringInfo | null =
-    construction === 'framed'
+    framesAsLumber(construction)
       ? {
           studSize,
           spacingIn,
