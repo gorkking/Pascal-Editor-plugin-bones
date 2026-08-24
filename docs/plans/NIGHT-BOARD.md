@@ -1,3 +1,32 @@
+# HP POLISH — feat/hp-polish DELIVERED, VERIFY ROUND RUNNING (2026-08-23)
+
+## Julien's 4-part feedback (red / tilted / off-grid / no-R) — pilot done
+Branch tip 308ee22 on 1a5e627, suite 1743 → 1771, tsc clean, manifest
+docs/plans/HP-POLISH-EXPECTED-DIFF.md. (1) COLOR: clone retint to
+CONDENSER_SCHEMATIC_TINT #8b8f96 (bones equipment-gray; host item path
+keeps authored GLB materials whenever textures-on — themed clay is a
+monochrome-only theme path plugins can't reach, so NOT the host
+treatment). (2) TILT: whole assembly wall-square (yaw = outward wall
+normal, padRotY==rotY rigid); machine placements square to ELECTED
+wall, verbatim drags square to their OWN row wall, rowless fallback
+keeps legacy bearing (⚠-flagged). (3) GRID SNAP: auto anchors snap in
+wall frame to EDITOR_GRID_STEP_M=0.5 (host snapToHalf convention,
+read-only); along = nearest RO-clear multiple (honest off-grid flag if
+none), outward = CEIL ONLY so 24" face clearance is a floor; verbatim
+drags never snap (A4); ε-anchor recognizes 3 machine spellings incl.
+unit1Presnap so legacy seeds keep their elected wall. (4) ROTATION:
+additive nullable yawOverride (bones:service → ServicePointOverride.yaw
+→ hvac); R/T + arc-gizmo wired via keyboardActions + handles
+'rotate' descriptor in service/definition.ts (heat-pump only);
+steppedRotation semantics MIRRORED (host doesn't export it — drift
+risk pinned); STATED LIMITATION: host group-rotate writes raw rotation,
+no registry seam — group-rotate won't turn the assembly.
+VERIFY ROUND: wf_5c97d6cc-d1d (skeptic: material aliasing across
+multi-unit splits, oblique-wall wall-frame-vs-world-grid gap — the
+heart of the complaint, ε 4th-spelling hunt, steppedRotation drift;
+examiner: pad-label ≥24" wording; visual: 4 complaints reproduced at
+308ee22 pin + prod-regression compare). Merge only after APPROVE.
+
 # LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
 
 ## THE ASK: LGS framing option + machine profile libraries
@@ -9,9 +38,16 @@ AISI S240 (designation system, e.g. 350S162-33). Per-wall material
 override channel exists (the CMU precedent). MEP marquee integration:
 punch-aligned routing (steel studs' pre-punched service holes replace
 drilled bores).
-PHASES: 0 data model + catalog (PILOT LAUNCHED, feat/lgs-phase0 —
-verified-or-labeled-fallback vendor data, additive spec fields, pure
-profile module, zero behavior change, E5 byte-parity gated) →
+PHASES: 0 data model + catalog (PILOT LIVE, feat/lgs-phase0 — both
+research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
+[archived vendor PDFs + live tables, discrepancies recorded both-ways
+with dates; phantom machines FRAMA 900/X-CALIBUR/Vertek killed] and
+IRC R603-2021 + AISI S240/S230 + SFIA designator system [5 type
+letters S/T/U/F/L, mils table, 3 distinct punchout regimes; 2024 IRC
+unverifiable — encode nothing]. Catalog rule: every row cites source
+or carries explicit unverified flag, gated by a citation-completeness
+test. Verified-or-labeled-fallback vendor data, additive spec fields,
+pure profile module, zero behavior change, E5 byte-parity gated) →
 1 walls @400 (C-studs/tracks/R603 assemblies, screw+strap takeoff by
 length/weight, box-envelope members with profile-truth labels first)
 → 2 machine selection UX (panel selector + can't-roll warnings) →
