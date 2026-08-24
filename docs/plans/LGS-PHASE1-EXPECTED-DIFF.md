@@ -202,6 +202,11 @@ LOD-200 convention).
   honest, takeoff honest, no phantom wood.
 - **Mixed CMU + lgs object form**: `cmuHeightM` stays CMU-only (schema
   refine) — no steel knee-wall variant.
+- **Member-label UX (round-1 visual advisory)**: designators live in
+  `member.label` data, on the wall card and on paper — the plugin has NO
+  member-tooltip machinery, so there is no hover surface that shows them
+  in the 3D view. A member-label hover affordance is a Phase-2 UX item
+  (board note); nothing in Phase 1 claims one.
 - **R603.9 shear bracing**: not evaluated (warned); R603.3.3 rows are
   stud stability bracing only (stated).
 - **Wind uplift**: LGS walls carry no WFCM uplift hardware; warned when

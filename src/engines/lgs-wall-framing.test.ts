@@ -600,6 +600,28 @@ describe('END-TO-END: computeLevel with framingSystem lgs (the level default)', 
     expect(r.characteristics?.notes.some((n) => n.includes('R402.2.6'))).toBe(true)
   })
 
+  test('LIFTED window end-to-end: the R603.8 sill track composes through computeLevel (round-1 visual advisory)', () => {
+    // The stock baselineScene window node sits at y=0 (extraction derives
+    // sillHeight from the node's center y), so the R603.8 sill-track path
+    // was engine-tested but never scene-composed. Lift the window: center
+    // 1.5 m − 1.2/2 → sill 0.9 m.
+    const nodes = baselineScene()
+    nodes.win_s = { ...(nodes.win_s as Record<string, unknown>), position: [8.5, 1.5, 0] }
+    const r = computeLevel(nodes, lgsConfig())
+    const sills = r.members.filter((m) => m.role === 'sill' && m.profile !== undefined)
+    expect(sills.length).toBe(1)
+    expect(sills[0]?.profile).toBe('550T125-68')
+    expect(sills[0]?.label).toContain('Sill track')
+    expect(sills[0]?.label).toContain('R603.8')
+    // cripples under the sill made it too
+    const sillY = sills[0]?.position[1] ?? 0
+    expect(
+      r.members.some(
+        (m) => m.role === 'cripple' && m.sourceId === 'w_s' && m.position[1] < sillY,
+      ),
+    ).toBe(true)
+  })
+
   test('high-wind jurisdiction: LGS walls state that lumber-only uplift hardware does not cover them', () => {
     const r = computeLevel(baselineScene(), lgsConfig('LA'))
     expect(
