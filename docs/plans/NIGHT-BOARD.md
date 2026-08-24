@@ -305,7 +305,21 @@ omitted-variant text says 'run(s) shorter than 6 in' even when the
 band swallows the span (conservative, same remedy).
 ★ MERGED TO MASTER 17bdd64 + S18 checklist row ca2a1ab (2026-08-24;
 suite 1883, tsc clean). LGS PHASE 1 COMPLETE — steel walls live
-behind the 'lgs' override. ★ SHIPPED TO PROD 2026-08-24: plugin 9f86f12 → editor #716
+behind the 'lgs' override. PHASE 2 DELIVERED (feat/lgs-phase2 tip d368631, 5 commits, suite
+1883 → 1910, E5 cmp-identical): Steel segment on the wall card
+(resolved-construction highlight closes the MCP gap), panel Framing
+row + progressive-disclosure Machine select (vendor optgroups,
+unverified suffixed + sunk, absent-keys byte parity), can't-roll
+warning channel (TF550H exhibit: T125 track warns, studs never;
+warnings==labels agreement; geometry boundary held — profileFor
+untouched). Pilot self-caught a surviving ladder probe and widened
+the gate (44d5ff6). Synthetic-vendor no-warning gate because NO real
+machine rolls T125 (vendor flange floors > 1-1/4" — honest data
+state). VERIFY: wf_74bb6d6d (skeptic: write-path truth + machine-
+key-on-lumber leak + synthetic-vendor honesty check vs the data;
+examiner: P4 verbatim + no-positive-capability-claims; visual: the
+two-controls clutter mandate judged honestly + pixel-parity).
+★ SHIPPED TO PROD 2026-08-24: plugin 9f86f12 → editor #716
 (e7b5abdf) → private-editor #405 (75a8afa8), full-stack CI green
 incl. both E2E + Bugbot, Vercel prod deploy. HP 4-part feedback +
 LGS Phase 1 steel walls LIVE on editor.pascal.app. Note: p-e main
