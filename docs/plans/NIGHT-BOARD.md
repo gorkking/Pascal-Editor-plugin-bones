@@ -132,9 +132,24 @@ rejections). ONE residual: padded-MILS alias ('350S162-033' parsed,
 missed catalog) + F3 doc-label cosmetic. CLOSING TIP c5794a6
 (c175673 mils group [1-9]\\d{1,2} + 4 pins; c5794a6 derivation label
 names the real SFIA min-base convention). ROUND 3 (closing):
-wf_3b1f5b6c-e95 — narrow: diff-scope proof, exhaustive-parse re-run,
-mutation on the old regex. Merge on APPROVE. Phase-2 note: inspector
-SegmentedControl highlight for MCP-set 'lgs' walls (documented).
+wf_3b1f5b6c-e95 APPROVE — scope proven to the byte (jq-diff, sorted
+sha equal outside the one doc line), >1000-token real-designator
+corpus zero rejections, mutant dies, E5 11/11.
+★ MERGED TO MASTER 3d63133 (2026-08-23; suite 1775, tsc clean, E5
+pin green at merge). PHASE 1 PILOT LAUNCHED: feat/lgs-phase1
+(worktree /private/tmp/pilot-lgs1, base 3d63133) — steel walls @400
+per R603: C-studs/tracks (track-mil==stud-mil verbatim rule),
+R603.7 opening structure, R603.3.3 straps, S240 A5.9 punchout
+metadata (MEP hooks), steel takeoff by length(+weight only if
+cited), verified fastening schedule; NEVER invent table cells —
+conservative-with-stated-basis or engineered-design-required;
+'framed'/cmu byte-identical + baseline recapture byte-equal gated.
+Round-3 advisories carried: CHECKLIST gains the LGS honesty-chain
+row at Phase-1 verify; no generator exists for the data file
+(hand-maintained, citation-gated — fine); unreal-but-well-formed
+mils (10-17/119-999) fall through the honest chain (not an alias
+class). Phase-2 note: inspector SegmentedControl highlight for
+MCP-set 'lgs' walls (documented).
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
