@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test'
 import adoptionData from '../../data/jurisdictions-adoption.json'
 import climateData from '../../data/jurisdictions-climate.json'
-import { DEFAULT_SPEC } from '../core/spec'
+import { DEFAULT_SPEC, HEADER_RULES_SNOW70 } from '../core/spec'
 import { INCH } from '../core/units'
-import { applyJurisdiction, jurisdictionOptions, profileFor } from './profiles'
+import { baselineConfig, baselineScene } from '../framing/baseline-scene'
+import { computeLevel } from '../framing/compute'
+import { applyJurisdiction, jurisdictionOptions, nonIrcCodeWarning, profileFor } from './profiles'
 
 /**
  * Canada rides the same data path as the US states: two JSON rows merged by
@@ -255,5 +257,104 @@ describe('citation completeness — the CA data gate', () => {
       (climateRows[c] as CaClimateRow).frostLineNote.includes('PERMAFROST'),
     )
     expect(flagged.sort()).toEqual(['CA-NT', 'CA-NU', 'CA-YT'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ircBase:null honesty — the seam the CA rows expose. NOTHING in the engines
+// keys IRC citations on the adoption row's `ircBase` (swept 2026-08-24:
+// zero src/ consumers existed): member labels, flags and prescriptive checks
+// cite IRC/IECC/NEC sections unconditionally. On a jurisdiction whose
+// researched code is NOT an IRC adoption (WI's UDC — the precedent row —
+// and all 16 CA-* rows) that silence implied local law. The honest, gated
+// answer is the compute-level confession below; the panel warnings drawer
+// and the paper P4 flag block both print level warnings, so one channel
+// serves all three surfaces. Per-label suppression/re-citation is the real
+// fix and stays board-tracked (blast radius: every engine).
+// ---------------------------------------------------------------------------
+
+describe('ircBase:null honesty — non-IRC jurisdictions confess their generic-IRC machinery', () => {
+  const NON_IRC = /^non-IRC jurisdiction/
+
+  it('every CA jurisdiction computes with exactly ONE non-IRC confession naming its code', () => {
+    for (const code of ['CA-GEN', 'CA-SK', 'CA-QC'] as const) {
+      const result = computeLevel(baselineScene(), baselineConfig(code))
+      const hits = result.warnings.filter((w) => NON_IRC.test(w))
+      expect(hits, code).toHaveLength(1)
+      expect(hits[0], code).toContain(profileFor(code).name)
+      expect(hits[0], code).toContain(profileFor(code).residentialCode)
+      expect(hits[0], code).toContain('generic practice')
+    }
+  })
+
+  it('Wisconsin (the UDC precedent row) carries the same confession — the gap was never CA-only', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('WI'))
+    expect(result.warnings.filter((w) => NON_IRC.test(w))).toHaveLength(1)
+  })
+
+  it('IRC adopters and INTL never confess: no warning on TX, CA (California), INTL', () => {
+    for (const code of ['TX', 'CA', 'INTL'] as const) {
+      const result = computeLevel(baselineScene(), baselineConfig(code))
+      expect(result.warnings.filter((w) => NON_IRC.test(w)), code).toEqual([])
+      expect(nonIrcCodeWarning(profileFor(code)), code).toBeNull()
+    }
+  })
+
+  it('LOD 200 makes no code claims — the confession stays out with the rest of them', () => {
+    const config = { ...baselineConfig('CA-GEN'), detail: '200' as const }
+    const result = computeLevel(baselineScene(), config)
+    expect(result.warnings.filter((w) => NON_IRC.test(w))).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Canadian compose — the E5-class end-to-end gate: the PR's motivating case
+// (prairie frost deeper than any US state) must reach composed GEOMETRY,
+// not just the spec; snow rides the documented kPa→psf conversion into the
+// header/rafter machinery; the seismic field is exercised on the Ontario
+// split that exists because of it.
+// ---------------------------------------------------------------------------
+
+describe('Canadian compose — frost, snow and seismic reach the composed level', () => {
+  it('CA-SK digs its footings to 84 in — deeper than EVERY US jurisdiction — in real members', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('CA-SK'))
+    expect(result.spec.footingDepth).toBeCloseTo(84 * INCH, 9)
+    // the composed foundation actually reaches frost depth: the deepest
+    // foundation member bottom sits exactly at −footingDepth
+    const foundation = result.members.filter((m) => m.system === 'foundation')
+    expect(foundation.length).toBeGreaterThan(0)
+    const minY = Math.min(...foundation.map((m) => m.position[1] - m.dims[1] / 2))
+    expect(minY).toBeCloseTo(-result.spec.footingDepth, 9)
+    // …and no US state (nor INTL) digs that deep — the reason a US proxy
+    // under-dug Canadian footings by a foot or more
+    for (const { code } of jurisdictionOptions()) {
+      if (code.startsWith('CA-')) continue
+      const spec = applyJurisdiction(DEFAULT_SPEC, profileFor(code))
+      expect(spec.footingDepth, code).toBeLessThan(result.spec.footingDepth)
+    }
+  })
+
+  it('CA-ON-E rides its kPa-converted 52 psf into the deepened snow machinery', () => {
+    const result = computeLevel(baselineScene(), baselineConfig('CA-ON-E'))
+    expect(profileFor('CA-ON-E').groundSnowLoadPsf).toBe(52)
+    expect(result.spec.rafterSize).toBe('2x8') // ≥50 psf bump
+    // 52 psf snaps UP to the 70-psf header column, assumption stated
+    expect(result.spec.headerRules).toBe(HEADER_RULES_SNOW70)
+    expect(result.spec.headerAssumption).toContain('70 psf ground snow')
+  })
+
+  it('the seismic field is live on the Ontario split: ON-E carries SDC C — noted, below the hold-down line', () => {
+    // Ontario is split S/E/N partly on seismic spread: the Ottawa Valley
+    // (CA-ON-E) is Canada's second-highest hazard zone but sits at SDC C —
+    // BELOW the D threshold that builds hold-down hardware. The field must
+    // be real data (not a fallback 'B') and must NOT trip the SDC-D kit.
+    const onE = profileFor('CA-ON-E')
+    expect(onE.seismicSdc).toBe('C')
+    const spec = applyJurisdiction(DEFAULT_SPEC, onE)
+    expect(spec.seismicHoldDowns).toBe(false)
+    expect(spec.anchorBoltSpacing).toBeCloseTo(6 * 12 * INCH, 9)
+    // the contrast pair: BC's D-class DOES trip it (pinned above) — the
+    // field drives the split, not the CA- prefix
+    expect(profileFor('CA-BC').seismicSdc).toBe('D')
   })
 })

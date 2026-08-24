@@ -63,7 +63,7 @@ import {
   upliftPathWarnings,
 } from '../engines/wall-framing'
 import { LUMBER_CROSS_SECTIONS } from '../lumber'
-import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
+import { applyJurisdiction, nonIrcCodeWarning, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
 import type { TakeoffAreas } from '../engines/takeoff'
 import {
@@ -480,7 +480,14 @@ function computeLevelUncached(
   if (config.framingSystem !== undefined) spec = { ...spec, framingSystem: config.framingSystem }
   if (config.lgsMachine !== undefined) spec = { ...spec, lgsMachine: config.lgsMachine }
   // 400 (fabrication) builds ON TOP of the code-sized pass — jurisdiction applies to both.
-  if (config.detail !== '200') spec = applyJurisdiction(spec, profile)
+  if (config.detail !== '200') {
+    spec = applyJurisdiction(spec, profile)
+    // ircBase:null honesty (WI-UDC / Canadian-NBC class): the engines cite
+    // IRC sections unconditionally — on a non-IRC jurisdiction that is
+    // generic practice, not local law, and the level says so out loud.
+    const nonIrc = nonIrcCodeWarning(profile)
+    if (nonIrc) warnings.push(nonIrc)
+  }
 
   // ALL level arithmetic stays inside THIS level's building — a second
   // building's ground floor is still a ground floor (verify round: global
