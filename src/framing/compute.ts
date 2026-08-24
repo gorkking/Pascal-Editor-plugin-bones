@@ -66,7 +66,12 @@ import { LUMBER_CROSS_SECTIONS } from '../lumber'
 import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
 import type { TakeoffAreas } from '../engines/takeoff'
-import type { FramingNode, WallConstruction, WallEngineeringOverride } from './schema'
+import {
+  framesAsLumber,
+  type FramingNode,
+  type WallConstruction,
+  type WallEngineeringOverride,
+} from './schema'
 
 export type ComputeResult = {
   members: Member[]
@@ -563,7 +568,10 @@ function computeLevelUncached(
         }
       }
       if (construction === 'cmu') masonry.push(wall)
-      else {
+      else if (framesAsLumber(construction)) {
+        // 'framed' AND 'lgs' — steel walls frame as lumber until the
+        // Phase-1 engine lands, through the ONE predicate the areas and
+        // the selection card also consume (F1: no half-routing).
         framed.push(wall)
         engineering.set(wall.id, resolved)
         // An EXPLICIT stud override deeper than the drawn wall can hold
@@ -1207,16 +1215,19 @@ function computeLevelUncached(
     if (wall.curved) continue
     const construction = wallConstruction(wall, config, profile.exteriorWallDefault)
     const faceArea = wall.length * wall.height
-    // WSP sheathing wraps FRAMED exterior walls only (CMU gets stucco/furring).
-    if (wall.exterior && construction === 'framed') {
+    // WSP sheathing wraps lumber-FRAMED exterior walls only (CMU gets
+    // stucco/furring). framesAsLumber, not === 'framed': an 'lgs' wall
+    // renders the identical lumber members + layers today, so booking it
+    // zero sheathing/drywall was a silent under-buy (skeptic F1).
+    if (wall.exterior && framesAsLumber(construction)) {
       areas.wallSheathingM2 = (areas.wallSheathingM2 ?? 0) + faceArea
     }
     // Drywall: both faces of interior walls, the inside face of exterior
-    // ones — FRAMED walls only (LOD-400 audit B4 sibling): the layer engine
-    // never sees masonry walls, so a CMU wall renders ZERO gypsum and
+    // ones — lumber-framed walls only (LOD-400 audit B4 sibling): the layer
+    // engine never sees masonry walls, so a CMU wall renders ZERO gypsum and
     // booking its faces was a ghost buy on every CMU scene. Mixed walls
     // resolve 'cmu' too and follow the CMU layer treatment whole-wall (v1).
-    if (construction === 'framed') {
+    if (framesAsLumber(construction)) {
       areas.drywallM2 = (areas.drywallM2 ?? 0) + faceArea * (wall.exterior ? 1 : 2)
     }
   }
