@@ -38,7 +38,15 @@
  * line-set are untouched.
  */
 
-import { Box3, Group, type Mesh, type Object3D, Vector3 } from 'three'
+import {
+  Box3,
+  Group,
+  type Material,
+  type Mesh,
+  MeshStandardMaterial,
+  type Object3D,
+  Vector3,
+} from 'three'
 import type { Member } from '../core/types'
 
 /** Host item-catalog id of the substituted asset — "AC block". */
@@ -106,19 +114,59 @@ export function normalizeToUnitBox(scene: Object3D): Group {
 }
 
 /**
- * Per-instance clone of the normalized asset (geometry/materials shared,
- * hierarchy cloned), conformed to the X-ray mesh conventions: every mesh
+ * X-RAY SCHEMATIC TINT (HP polish item 1 — Julien: "first of all it's red…
+ * grayed out normally like the object would be"): the AC-block GLB ships
+ * AUTHORED materials (a red-toned cabinet), and the clone used to render
+ * them raw — one saturated red object inside an otherwise schematic X-ray.
+ * HOST INVESTIGATION (read-only, packages/nodes/src/item/renderer.tsx):
+ * the host item renderer shows the AUTHORED materials whenever `textures`
+ * is on (the viewer default), and only collapses to a themed 'furnishing'
+ * clay (createSurfaceRoleMaterial + colorPreset) in monochrome mode — so
+ * "reproduce the host treatment" would KEEP the red by default, and the
+ * clay path rides host theme state a plugin can't reach. DECISION:
+ * neutralize the clone to the bones equipment-gray schematic family —
+ * #8b8f96 is the EXACT steel tone the cabinet member rendered as a box
+ * before the asset swap (framing/renderer colorOf 'steel'), roughness 0.82
+ * like every bucket material. ONE module-cached material shared by all
+ * clones (the night-8 material-identity doctrine: no per-clone shader
+ * compiles, census-stable), the CACHED asset's own materials untouched.
+ * Geometry, label and tonnage surfaces stay exactly as they were.
+ */
+export const CONDENSER_SCHEMATIC_TINT = '#8b8f96'
+
+let schematicMaterial: MeshStandardMaterial | null = null
+export function condenserSchematicMaterial(): MeshStandardMaterial {
+  if (!schematicMaterial) {
+    schematicMaterial = new MeshStandardMaterial({
+      color: CONDENSER_SCHEMATIC_TINT,
+      roughness: 0.82,
+    })
+  }
+  return schematicMaterial
+}
+
+/**
+ * Per-instance clone of the normalized asset (geometry shared, hierarchy
+ * cloned), conformed to the X-ray mesh conventions: every mesh
  * raycast-disabled (`clone` does NOT carry an own raycast override, so
  * this must run per clone — the X-ray never intercepts the host's event
- * raycast, F2) and shadow-casting like the solid buckets.
+ * raycast, F2), shadow-casting like the solid buckets, and RETINTED to the
+ * shared schematic equipment gray (see CONDENSER_SCHEMATIC_TINT above) —
+ * the clone never shows the GLB's authored materials. Multi-material
+ * meshes collapse to the same tint (the schematic has one equipment tone).
  */
 export function prepareCondenserClone(asset: Object3D): Object3D {
   const clone = asset.clone(true)
+  const tint = condenserSchematicMaterial()
   clone.traverse((obj) => {
     obj.raycast = () => {}
     if ((obj as Mesh).isMesh) {
       obj.castShadow = true
       obj.receiveShadow = true
+      const mesh = obj as Mesh
+      mesh.material = Array.isArray(mesh.material)
+        ? (mesh.material as Material[]).map(() => tint)
+        : tint
     }
   })
   return clone

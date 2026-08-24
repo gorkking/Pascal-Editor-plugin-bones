@@ -1,8 +1,99 @@
-import type { MovableConfig, NodeDefinition, ParametricDescriptor } from '@pascal-app/core'
+import {
+  type AnyNodeId,
+  type HandleDescriptor,
+  type KeyboardActions,
+  type MovableConfig,
+  type NodeDefinition,
+  type ParametricDescriptor,
+  type SceneApi,
+  useScene,
+} from '@pascal-app/core'
+import { CONDENSER_PAD_THICKNESS, CONDENSER_UNIT_DIMS } from '../engines/hvac'
 import { serviceParentFrame } from './frame'
+import { resolveHeatPumpAssemblyYaw } from './proxy'
 import { SERVICE_TYPES, ServiceNode } from './schema'
 
 type ServiceDefinition = NodeDefinition<typeof ServiceNode> & Record<string, unknown>
+
+/**
+ * HEAT-PUMP ROTATE PARITY (HP polish item 4 — Julien: "it looks like I
+ * can't rotate it like a normal object or with R"). HOST INVESTIGATION
+ * (read-only): the standard gestures reach a selected node two ways —
+ *  - R / T (use-keyboard.ts): multi-select group rotate → references →
+ *    door/window flips → `nodeRegistry.get(type)?.keyboardActions?.r/t`
+ *    (definition seam) → the plain `'rotation' in node` fallback that
+ *    writes rotation[1] directly;
+ *  - ⌘-drag rotate + the 2D floorplan rotate (selection-manager.tsx /
+ *    floorplan-registry-layer.tsx → lib/direct-manipulation.ts): a
+ *    definition `handles` entry with kind 'arc-resize' + shape 'rotate'
+ *    wins (`getDirectRotateHandle(...).apply`), else the same raw
+ *    rotation[1] write.
+ * The engine composes the heat-pump assembly from the SERVICE node, so a
+ * raw rotation[1] write changed nothing visible — R "did nothing". Both
+ * definition seams below intercept the gestures for heat-pump nodes ONLY
+ * and write the additive `yawOverride` field the hvac engine consumes
+ * (absent/null ⇒ wall-square auto). Other service types keep the host
+ * default (an inert rotation write — pre-existing behavior).
+ */
+const isHeatPumpNode = (node: unknown): boolean =>
+  (node as { serviceType?: unknown } | null)?.serviceType === 'heat-pump'
+
+/** Host R/T semantics, mirrored from private-editor placement-math.ts
+ * `steppedRotation` (not exported by the pinned @pascal-app/editor index —
+ * mirrored like parentFrame): round the CURRENT angle to the nearest 45°,
+ * then step ONE increment, so any starting yaw lands on a clean multiple. */
+const ROTATION_QUANTUM = Math.PI / 4
+const steppedYaw = (current: number, direction: 1 | -1): number =>
+  (Math.round(current / ROTATION_QUANTUM) + direction) * ROTATION_QUANTUM
+
+/** The rotate keystroke: step `yawOverride` from the assembly's CURRENT
+ * yaw (override, else the engine's derived wall-square — stepping from 0
+ * would jump the unit to an absolute 45° on the first press). */
+const rotateHeatPump = (node: ServiceNode, direction: 1 | -1): void => {
+  const nodes = useScene.getState().nodes as unknown as Record<string, Record<string, unknown>>
+  const yaw = resolveHeatPumpAssemblyYaw(nodes, node as never)
+  useScene
+    .getState()
+    .updateNode(node.id as AnyNodeId, { yawOverride: steppedYaw(yaw, direction) } as never)
+}
+
+const serviceKeyboardActions: KeyboardActions = {
+  r: { appliesTo: isHeatPumpNode, run: (node) => rotateHeatPump(node as never, 1) },
+  t: { appliesTo: isHeatPumpNode, run: (node) => rotateHeatPump(node as never, -1) },
+}
+
+/** ⌘-drag / floorplan rotate arc (and the on-canvas rotate gizmo the host
+ * arrow renderer mounts from this descriptor): the host measures the
+ * angular delta and calls `apply` — write the same `yawOverride`, with the
+ * host sign convention (a positive delta turns clockwise: `base − delta`,
+ * matching direct-manipulation's `rotation[1] − delta`). */
+const heatPumpRotateHandle: HandleDescriptor<ServiceNode> = {
+  kind: 'arc-resize',
+  axis: 'angular',
+  shape: 'rotate',
+  apply: (initial, delta, sceneApi: SceneApi) => {
+    const nodes = sceneApi.nodes() as unknown as Record<string, Record<string, unknown>>
+    return { yawOverride: resolveHeatPumpAssemblyYaw(nodes, initial as never) - delta } as never
+  },
+  placement: {
+    // Above the cabinet's +X/+Z shoulder — clear of the sign plate and the
+    // pick proxy, reading as attached to the unit (column-gizmo convention).
+    position: () => [
+      CONDENSER_UNIT_DIMS[0] / 2,
+      CONDENSER_PAD_THICKNESS + CONDENSER_UNIT_DIMS[1] + 0.12,
+      CONDENSER_UNIT_DIMS[2] / 2,
+    ],
+    rotationY: () => -Math.PI / 4,
+  },
+  decoration: {
+    kind: 'ring',
+    radius: () => Math.hypot(CONDENSER_UNIT_DIMS[0] / 2, CONDENSER_UNIT_DIMS[2] / 2) + 0.06,
+    y: () => CONDENSER_PAD_THICKNESS + CONDENSER_UNIT_DIMS[1] / 2,
+  },
+}
+
+const serviceHandles = (node: ServiceNode): HandleDescriptor<ServiceNode>[] =>
+  isHeatPumpNode(node) ? [heatPumpRotateHandle] : []
 
 const serviceParametrics: ParametricDescriptor<ServiceNode> = {
   groups: [
@@ -75,6 +166,13 @@ export const serviceDefinition: ServiceDefinition = {
 
   parametrics: serviceParametrics,
 
+  // Heat-pump rotate parity (see the module note above): the R/T registry
+  // seam + the arc-rotate handle both write `yawOverride`; every other
+  // service type returns appliesTo=false / no handles and keeps the host
+  // default path untouched.
+  keyboardActions: serviceKeyboardActions,
+  handles: serviceHandles,
+
   renderer: { kind: 'parametric', module: () => import('./renderer') },
 
   // Window-parity move (wall-mount move tool, shared with bones:device):
@@ -98,6 +196,6 @@ export const serviceDefinition: ServiceDefinition = {
 
   mcp: {
     description:
-      'Bones service point node. serviceType: panel | water-heater | water-entry | sewer-exit | power-entry | thermostat | heat-pump | electric-meter. Wall-mounted via wallId + wallT (0..1 along the wall) + heightAff, or floor-placed via position; editor drags slide wall types along their wall and commit wallT (position resets to [0,0,0]); a position written off the default [0,0,0] outranks the wall anchor. The engines treat an existing node as the authoritative location and re-route wiring/piping to it; deleting it restores auto-placement.',
+      'Bones service point node. serviceType: panel | water-heater | water-entry | sewer-exit | power-entry | thermostat | heat-pump | electric-meter. Wall-mounted via wallId + wallT (0..1 along the wall) + heightAff, or floor-placed via position; editor drags slide wall types along their wall and commit wallT (position resets to [0,0,0]); a position written off the default [0,0,0] outranks the wall anchor. heat-pump only: yawOverride (radians, world Y) turns the whole outdoor assembly (cabinet + pad); null/absent = the engine’s wall-square auto orientation. The engines treat an existing node as the authoritative location and re-route wiring/piping to it; deleting it restores auto-placement.',
   },
 }

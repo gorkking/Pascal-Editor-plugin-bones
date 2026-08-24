@@ -285,6 +285,12 @@ function extractExtraServiceOverrides(
     if (pos && pos.length >= 3) {
       override.position = [num(pos[0], 0), num(pos[1], 0), num(pos[2], 0)]
     }
+    // Assembly-yaw override (heat-pump rotate parity, HP polish item 4):
+    // the node's nullable `yawOverride` threads through as `yaw`; null /
+    // absent / non-finite all mean "derive" (hvac squares to the wall).
+    if (typeof node.yawOverride === 'number' && Number.isFinite(node.yawOverride)) {
+      override.yaw = node.yawOverride
+    }
     overrides[key] = override
   }
   return { overrides, duplicates: [...duplicates].sort() }

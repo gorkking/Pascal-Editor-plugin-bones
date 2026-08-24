@@ -214,6 +214,20 @@ const COND_FACE_CLEAR = COND?.faceClearM ?? inches(24)
 function condenserStandoff(wallThickness: number): number {
   return wallThickness / 2 + COND_FACE_CLEAR + COND_DIMS[2] / 2
 }
+/**
+ * HOST EDITOR GRID (HP polish 2026-08-23, Julien: "by default it's not
+ * aligned to the grid"): the host's grid-snap convention — read-only
+ * investigation of private-editor — is `snapToHalf(v) = round(v/step)·step`
+ * (packages/editor/src/components/tools/item/placement-math.ts) with
+ * `useEditor.gridSnapStep` DEFAULT **0.5 m**, user-cyclable through
+ * [0.5, 0.25, 0.1, 0.05] (store/use-editor.tsx + the contextual helper
+ * panel's GRID_SNAP_STEPS). The engine is headless and cannot read the
+ * live store, so the AUTO anchor snaps to the COARSEST host step: every
+ * finer option divides 0.5, so a 0.5-aligned point sits on a grid line at
+ * EVERY host setting. Verbatim overrides never snap here (checklist A4 —
+ * the user's own snap already happened in the host move tool).
+ */
+export const EDITOR_GRID_STEP_M = 0.5
 /** Refrigerant line-set: suction ¾" (insulated) + liquid ⅜" pair, through
  * ONE wall penetration at ~0.4 m, then wall-following to the air handler. */
 const LINESET_SUCTION_DIA = COND?.linesetSuctionDiaM ?? 0.019
@@ -1199,10 +1213,13 @@ type CondenserSlot = {
  */
 /**
  * Where the heat-pump SERVICE NODE should seed: the engine's unit-#1 anchor
- * AFTER the condenser row's RO slide — seeding at the raw spot let the sign
- * sit fronting a window the engine had already slid away from (A4 seed
- * parity, night-4 narrow round). equipAt only matters for the degenerate
- * on-wall-anchor fallback, so the anchor itself is a safe stand-in.
+ * AFTER the condenser row's RO slide AND its grid snap (HP polish item 3 —
+ * the seed must be the exact spot the engine composes, or creation alone
+ * would move the unit; the ε-anchor's post-seed == auto byte parity rides
+ * this identity) — seeding at the raw spot let the sign sit fronting a
+ * window the engine had already slid away from (A4 seed parity, night-4
+ * narrow round). equipAt only matters for the degenerate on-wall-anchor
+ * fallback, so the anchor itself is a safe stand-in.
  */
 export function placeCondenserSeedSpot(
   walls: WallSlice[],
@@ -1247,7 +1264,18 @@ function condenserRow(
    * could re-elect a false-exterior partition standing closer to the pad.
    * Verbatim overrides keep the nearest-exit derivation (unchanged). */
   electedWall?: WallSlice,
-): { wall: WallSlice | null; slots: CondenserSlot[]; warnings: string[] } {
+): {
+  wall: WallSlice | null
+  slots: CondenserSlot[]
+  warnings: string[]
+  /** Unit #1's PRE-grid-snap spot (the pre-polish auto anchor) — the
+   * ε-anchor consumes it so service nodes SEEDED BEFORE the grid snap
+   * shipped are still recognized as the machine's own point (their row
+   * keeps the elected wall; A4 — an old seed is never silently
+   * re-anchored). Equals `slots[0].at` for verbatim anchors and whenever
+   * the snap is an identity. */
+  unit1Presnap: Pt | null
+} {
   const warnings: string[] = []
   const exit = electedWall
     ? {
@@ -1268,7 +1296,7 @@ function condenserRow(
       out: [0, 1] as Pt,
     }))
     if (count > 0) warnings.push('no exterior wall — condenser row placed at the anchor, verify')
-    return { wall: null, slots, warnings }
+    return { wall: null, slots, warnings, unit1Presnap: slots[0]?.at ?? null }
   }
   const wall = exit.wall
   const u0 = Math.max(0, Math.min(wall.length, (anchor[0] - wall.start[0]) * wall.dir[0] + (anchor[1] - wall.start[1]) * wall.dir[1]))
@@ -1313,6 +1341,7 @@ function condenserRow(
     return v
   }
   const inRange = (u: number): boolean => u >= halfW && u <= wall.length - halfW
+  const inKeepout = (u: number): boolean => keepouts.some((k) => u > k.lo && u < k.hi)
   // Unit #1: verbatim override anchors exactly; the auto spot slides to the
   // NEAREST clear along-wall position when it fronts an RO.
   let u1 = u0
@@ -1324,19 +1353,58 @@ function condenserRow(
       ? (cands.reduce((best, c) => (Math.abs(c - u0) < Math.abs(best - u0) ? c : best)) as number)
       : fwd
   }
-  const slots: CondenserSlot[] = []
-  const at1: Pt =
+  const unit1Presnap: Pt =
     anchorVerbatim || u1 === u0 ? anchor : (() => {
       const p = wallPointAt(wall, u1)
       return [p[0] + out[0] * rowOff, p[1] + out[1] * rowOff] as Pt
     })()
-  slots.push({ at: at1, u: u1, out })
+  // GRID SNAP — AUTO anchors only (HP polish, Julien: "let's make sure it's
+  // aligned normally"): the machine's unit-#1 spot lands on host-grid
+  // multiples ({@link EDITOR_GRID_STEP_M}) so it reads like a hand-placed
+  // object. In the wall frame (dir ⊥ out — the world plan point decomposes
+  // exactly as p·dir along + p·out outward):
+  //  - ALONG the wall: round to the NEAREST grid multiple that stays on the
+  //    wall span AND clear of the RO keepouts — physics beats the grid, so
+  //    when neither neighboring multiple is clear the slid spot stays
+  //    unsnapped (an RO-slide result is already a code truth);
+  //  - OUTWARD: ceil only — the snap moves AWAY from the wall, never
+  //    toward it, so the 24" face clearance (condenserStandoff) is a FLOOR
+  //    the grid can only raise. The pad label states the basis as '≥ 24"'.
+  // Verbatim anchors never snap (A4 — the host move tool already applied
+  // the user's own grid mode); row units 2..N share the snapped stand-off
+  // but keep the mfr-clearance pitch (grid alignment is the ANCHOR's
+  // property; unit spacing is a clearance truth, not a layout nicety).
+  let uFinal = u1
+  let rowOffFinal = rowOff
+  if (!anchorVerbatim) {
+    const step = EDITOR_GRID_STEP_M
+    const sAlong = unit1Presnap[0] * wall.dir[0] + unit1Presnap[1] * wall.dir[1]
+    let uSnap: number | null = null
+    for (const c of [Math.floor(sAlong / step) * step, Math.ceil(sAlong / step) * step]) {
+      const u = u1 + (c - sAlong)
+      if (!inRange(u) || inKeepout(u)) continue
+      if (uSnap === null || Math.abs(u - u1) < Math.abs(uSnap - u1)) uSnap = u
+    }
+    if (uSnap !== null) uFinal = uSnap
+    const sOut = unit1Presnap[0] * out[0] + unit1Presnap[1] * out[1]
+    // 1e-9 slack keeps an already-on-grid stand-off where it is instead of
+    // ceiling a float-dust overshoot up a whole step.
+    rowOffFinal = rowOff + (Math.ceil(sOut / step - 1e-9) * step - sOut)
+  }
+  const slots: CondenserSlot[] = []
+  const at1: Pt = anchorVerbatim
+    ? anchor
+    : (() => {
+        const p = wallPointAt(wall, uFinal)
+        return [p[0] + out[0] * rowOffFinal, p[1] + out[1] * rowOffFinal] as Pt
+      })()
+  slots.push({ at: at1, u: uFinal, out })
   // Subsequent units: step along the wall at pad + clear pitch, sliding past
   // ROs; grow the other way when a direction runs out of wall.
   const pitch = COND_PAD_SIDE + COND_UNIT_CLEAR
-  const d0: 1 | -1 = wall.length - u1 >= u1 ? 1 : -1
-  let fwdCursor = u1
-  let bwdCursor = u1
+  const d0: 1 | -1 = wall.length - uFinal >= uFinal ? 1 : -1
+  let fwdCursor = uFinal
+  let bwdCursor = uFinal
   for (let k = 1; k < count; k++) {
     let u = slide(fwdCursor + d0 * pitch, d0)
     if (inRange(u)) fwdCursor = u
@@ -1352,9 +1420,9 @@ function condenserRow(
       }
     }
     const p = wallPointAt(wall, u)
-    slots.push({ at: [p[0] + out[0] * rowOff, p[1] + out[1] * rowOff] as Pt, u, out })
+    slots.push({ at: [p[0] + out[0] * rowOffFinal, p[1] + out[1] * rowOffFinal] as Pt, u, out })
   }
-  return { wall, slots, warnings }
+  return { wall, slots, warnings, unit1Presnap }
 }
 
 export function layoutHvac(
@@ -1940,6 +2008,19 @@ export function layoutHvac(
   // (condenserPlan floors at 1 unit / 1.5 tons). Only the condensate drain
   // stays LOD-400 scope. ----
   const hpPlan = overridePlanPoint(walls, overrides?.heatPump)
+  // ROTATION OVERRIDE (HP polish item 4 — R-key / rotate-gesture parity):
+  // the heat-pump service node's `yawOverride` (written by the host's
+  // standard rotate gestures through the bones:service definition) beats
+  // the derived wall-square orientation for unit #1's ASSEMBLY — cabinet,
+  // pad, and the service pick proxy that reads the fixture's rotationY.
+  // Absent/null ⇒ wall-square auto (never a stored copy of the derivation).
+  // The disconnect + line-set stay DERIVED: the box mounts flat on the
+  // wall face and the whip/line-set attach points recompute from the
+  // assembly's plan anchor, whatever its yaw.
+  const hpYaw =
+    typeof overrides?.heatPump?.yaw === 'number' && Number.isFinite(overrides.heatPump.yaw)
+      ? overrides.heatPump.yaw
+      : null
   // HEAT-PUMP OVERRIDE HONESTY (condenser-honesty set, hunt 5a/5f): the
   // service node WINS verbatim (checklist A4 — never silently relocated),
   // but a mis-dragged point told no one: a unit in the living room and one
@@ -2039,9 +2120,18 @@ export function layoutHvac(
     if (hpPlan && election) {
       const near = (p: Pt, q: Pt): boolean =>
         Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9
-      const autoUnit1 = condenserRow(walls, election.spot, false, 1, equipAt, election.wall)
-        .slots[0]?.at
-      if (near(hpPlan, election.spot) || (autoUnit1 && near(hpPlan, autoUnit1))) {
+      const autoRow = condenserRow(walls, election.spot, false, 1, equipAt, election.wall)
+      const autoUnit1 = autoRow.slots[0]?.at
+      // Three machine spellings of the same point: the raw election spot,
+      // TODAY's slid+grid-snapped unit-#1 spot, and the PRE-snap slid spot
+      // (unit1Presnap) — nodes seeded before the grid snap shipped carry
+      // that older coordinate and must keep reading as the machine's own
+      // point (elected wall, not verbatim-nearest).
+      if (
+        near(hpPlan, election.spot) ||
+        (autoUnit1 && near(hpPlan, autoUnit1)) ||
+        (autoRow.unit1Presnap && near(hpPlan, autoRow.unit1Presnap))
+      ) {
         rowWall = election.wall
       }
     }
@@ -2092,12 +2182,26 @@ export function layoutHvac(
         const slot = row.slots[i] as CondenserSlot
         const n = i + 1
         const at = slot.at
-        // Cabinet back faces the house: unit #1 keeps the legacy facing (the
-        // anchor's bearing from the equipment room); row units face outward.
+        // WALL-SQUARE ASSEMBLY (HP polish item 2 — Julien: "it's tilted…
+        // let's make sure it's aligned normally"): every unit sits SQUARE
+        // to its row wall — yaw = the outward wall normal, back to the
+        // house — the real-install truth. Unit #1's old yaw was its bearing
+        // from the equipment room (legacy single-unit facing), which on
+        // off-axis scenes read as an arbitrary tilt (rotY ≈ 2.99) against a
+        // wall-aligned pad. THE RULE: a machine placement squares to the
+        // ELECTED wall; a verbatim user drag squares to ITS OWN row wall —
+        // the nearest exterior exit (A4 keeps the dragged POSITION; the
+        // orientation is derived truth, same as the pad always was). A
+        // node-level yawOverride (item 4) beats wall-square for unit #1;
+        // only the rowless no-exterior-wall fallback keeps the legacy
+        // equipment-room bearing (no wall to square to, already ⚠-flagged).
+        const wallSquareYaw = Math.atan2(slot.out[0], slot.out[1])
         const rotY =
-          i === 0
-            ? Math.atan2(at[0] - equipAt[0], at[1] - equipAt[1])
-            : Math.atan2(slot.out[0], slot.out[1])
+          i === 0 && hpYaw !== null
+            ? hpYaw
+            : i === 0 && !row.wall
+              ? Math.atan2(at[0] - equipAt[0], at[1] - equipAt[1])
+              : wallSquareYaw
         // The pad's inner edge must clear the wall's exterior assembly —
         // brick veneer reaches ~0.13 m past the face (R703.8). AUTO anchors
         // now stand off far enough by construction (24" face clearance >
@@ -2110,16 +2214,29 @@ export function layoutHvac(
         // caused by the too-close anchor itself: flag pad + cabinet, never
         // silent (unwarp round 2026-08-23; the slim 0.35 m cabinet had
         // 0.3 m of slack and could never overhang).
+        // Pad reach toward the wall: the pad turns WITH the assembly (one
+        // rigid object — HP polish items 2+4), so a yawOverride'd square
+        // pad reaches (|sin φ|+|cos φ|)·half along the wall normal (φ =
+        // assembly yaw − wall-square yaw; φ = 0 ⇒ the old half-side
+        // exactly). The clearance math grows with the obliqueness, so the
+        // night-4 F1 punch-through class cannot come back through the
+        // rotation override. Cabinet slack scales the same way.
+        const padPhi = rotY - wallSquareYaw
+        const obliq = Math.abs(Math.sin(padPhi)) + Math.abs(Math.cos(padPhi))
         let padCenter: Pt = at
         let overhangFlag: string | null = null
         if (row.wall) {
           const foot = wallPointAt(row.wall, slot.u)
           const standOff = (at[0] - foot[0]) * slot.out[0] + (at[1] - foot[1]) * slot.out[1]
-          const needed = row.wall.thickness / 2 + PAD_CLADDING_ALLOW + COND_PAD_SIDE / 2
+          const needed =
+            row.wall.thickness / 2 + PAD_CLADDING_ALLOW + (COND_PAD_SIDE / 2) * obliq
           const push = Math.max(0, needed - standOff)
           if (push > 0) {
             padCenter = [at[0] + slot.out[0] * push, at[1] + slot.out[1] * push]
-            if (push > (COND_PAD_SIDE - COND_DIMS[2]) / 2 + 1e-9) {
+            const cabinetReach =
+              (COND_DIMS[0] / 2) * Math.abs(Math.sin(padPhi)) +
+              (COND_DIMS[2] / 2) * Math.abs(Math.cos(padPhi))
+            if (push > (COND_PAD_SIDE / 2) * obliq - cabinetReach + 1e-9) {
               overhangFlag = COND_PAD_OVERHANG_FLAG
             }
           }
@@ -2130,12 +2247,13 @@ export function layoutHvac(
           return out
         }
         const padCabinetFlag = slotFlag(rowFlag)
-        // The PAD is always poured parallel to the row wall — only the
-        // CABINET keeps unit #1's legacy facing. An oblique square pad
-        // reaches (|sin|+|cos|)·half toward the wall and punched through
-        // the assembly after an RO slide (verify night-4 batch F1); the
-        // wall-aligned pad is exactly what the clearance math assumes.
-        const padRotY = row.wall ? Math.atan2(slot.out[0], slot.out[1]) : rotY
+        // PAD YAW == ASSEMBLY YAW: cabinet, pad and pick proxy turn as one
+        // rigid object. With the cabinet now wall-square (item 2) this is
+        // the old wall-parallel pad for every derived orientation; under a
+        // yawOverride the pad follows the user's rotation and the oblique
+        // reach above keeps the clearance math honest (the night-4 F1
+        // punch-through class stays dead — `needed` grows with |φ|).
+        const padRotY = rotY
         members.push({
           system: 'hvac',
           role: 'equipment',
@@ -2145,7 +2263,11 @@ export function layoutHvac(
           rotation: [0, padRotY, 0],
           material: 'concrete',
           sourceId: equipRoom.id,
-          label: 'Condenser pad 4" — concrete (24" face clearance basis; per mfr clearance + IRC M1403)',
+          // '≥ 24"': the grid snap only ever raises the auto stand-off
+          // (outward ceil — HP polish item 3), so 24" is a floor, not the
+          // exact figure; a verbatim drag can still stand closer (S1 slide
+          // + overhang honesty above).
+          label: 'Condenser pad 4" — concrete (≥ 24" face clearance basis; per mfr clearance + IRC M1403)',
           ...(padCabinetFlag ? { flag: padCabinetFlag } : {}),
         })
         members.push({

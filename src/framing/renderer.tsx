@@ -402,16 +402,19 @@ function splitAssetMembers(
 /** Condenser-asset wrapper groups per built group, in cabinet-member order —
  * the patch path rewrites their matrices exactly like bucket instances.
  * WeakMap like bucketIndex: dies with the group, no teardown needed (the
- * wrappers' geometry/materials are SHARED with the module-cached asset and
- * must never be disposed — disposeGroup only frees InstancedMesh state). */
+ * wrappers' geometry is SHARED with the module-cached asset and their one
+ * material is the module-cached schematic tint — neither may ever be
+ * disposed; disposeGroup only frees InstancedMesh state). */
 const assetWrapperIndex = new WeakMap<Group, Group[]>()
 
 /** Mount one asset wrapper per cabinet member onto the group. The wrapper
  * takes the box's exact instance matrix (matrixAutoUpdate off — the matrix
  * IS the source of truth, patch rewrites it in place); the clone inside is
  * normalized to a unit cube, so the model fills precisely the volume the
- * box occupied. Clones share geometry/materials with the cached asset and
- * follow the X-ray mesh conventions (no-op raycast, shadow flags). */
+ * box occupied. Clones share geometry with the cached asset, wear the
+ * shared schematic equipment-gray tint (condenser-asset.ts — never the
+ * GLB's authored red) and follow the X-ray mesh conventions (no-op
+ * raycast, shadow flags). */
 function attachCondenserAssets(
   group: Group,
   condensers: Member[],
