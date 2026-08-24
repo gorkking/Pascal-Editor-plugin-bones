@@ -67,6 +67,7 @@ import {
 } from './lgs-profiles'
 import { mixedWallInsets } from './cmu'
 import {
+  detectTees,
   fitAcross,
   frameHints,
   type FrameHints,
@@ -707,32 +708,76 @@ function frameLgsWall(
   // R603.3.3 is not modeled — the advisory says so. Walls past the 10 ft
   // R603.1.1 limit carry the engineered flag instead of extrapolated rows.
   if (codeClaims && !tooTall) {
-    // Strap runs TRIM clear of CMU through-wall bodies (round-1 F4d): the
-    // shared lumber+steel hint graph never sees masonry (the documented S1
-    // 'partition tees into full-CMU' class — the stud/track run keeps
+    // Strap runs TRIM clear of masonry BOTH ways (round-1 F4d + round-2 A):
+    // the shared lumber+steel hint graph never sees masonry (the documented
+    // S1 'partition tees into full-CMU' class — the stud/track run keeps
     // lumber-twin symmetry with it), but the NEW role must not extend the
     // class — a flat steel strap boring into block cells is neither the
-    // documented residual nor buildable. mixedWallInsets is the one
-    // corner/tee butt-inset truth for masonry neighbors.
+    // documented residual nor buildable. Two masonry geometries:
+    //  - this wall ENDS on a CMU wall (corner, or this wall is the tee
+    //    STEM): mixedWallInsets clamps the strap ends (round-1 F4d);
+    //  - a CMU STEM tees INTO this wall (round-2 A — mixedWallInsets only
+    //    claims stem-side tees, so the grouted stem crossed the strap
+    //    plane mid-run): the strap SPLITS around each masonry stem's
+    //    station band on this run.
     const cmuIns =
       ctx.cmuNeighbors.length > 0
         ? mixedWallInsets(wall, ctx.cmuNeighbors)
         : { startInset: 0, endInset: 0 }
+    // The pure-length clamp is its OWN truth (round-2 B): u1's 4·tS
+    // minimum-run re-extension can overrun a short stub's drawn length —
+    // that clamp is geometry hygiene, never a masonry claim.
+    const lenU1 = Math.min(u1, len)
+    const lenClamped = lenU1 < u1 - EPS
     const strapU0 = Math.max(u0, cmuIns.startInset)
-    const strapU1 = Math.min(u1, len - cmuIns.endInset)
-    const strapLen = strapU1 - strapU0
-    const trimmed = strapLen < runLen - EPS
+    const strapU1 = Math.min(lenU1, len - cmuIns.endInset)
+    // Masonry stems teeing INTO this wall: block bodies cross the strap
+    // plane over the stem's width-aware station band (the S5 oblique
+    // convention, stem side).
+    const stemBands: { min: number; max: number }[] = []
+    if (ctx.cmuNeighbors.length > 0) {
+      const cmuIds = new Set(ctx.cmuNeighbors.map((n) => n.id))
+      for (const tee of detectTees([wall, ...ctx.cmuNeighbors])) {
+        if (tee.through.id !== wall.id || !cmuIds.has(tee.stem.id)) continue
+        const sinT = Math.max(
+          0.2,
+          Math.abs(tee.stem.dir[0] * wall.dir[1] - tee.stem.dir[1] * wall.dir[0]),
+        )
+        const half = tee.stem.thickness / (2 * sinT)
+        stemBands.push({ min: tee.u - half, max: tee.u + half })
+      }
+    }
+    let spans: { min: number; max: number }[] = [{ min: strapU0, max: strapU1 }]
+    for (const band of stemBands) {
+      const next: { min: number; max: number }[] = []
+      for (const sp of spans) {
+        if (band.max <= sp.min || band.min >= sp.max) {
+          next.push(sp)
+          continue
+        }
+        if (band.min > sp.min) next.push({ min: sp.min, max: band.min })
+        if (band.max < sp.max) next.push({ min: band.max, max: sp.max })
+      }
+      spans = next
+    }
+    spans = spans.filter((sp) => sp.max - sp.min > inches(6))
+    const cmuTrimmed =
+      strapU0 > u0 + EPS ||
+      strapU1 < lenU1 - EPS ||
+      spans.length !== 1 ||
+      (spans[0] !== undefined && (spans[0].max - spans[0].min < strapU1 - strapU0 - EPS))
     const rows = H <= LGS_MID_HEIGHT_MAX ? [H / 2] : [H / 3, (2 * H) / 3]
     const rowNote = rows.length === 1 ? 'mid-height' : 'third points'
-    if (strapLen > inches(6)) {
+    for (const sp of spans) {
+      const spanLen = sp.max - sp.min
       for (const y of rows) {
         for (const side of [-1, 1] as const) {
           members.push({
             system: 'wall-framing',
             role: 'strap-bracing',
-            dims: [strapLen, LGS_STRAP_WIDTH, LGS_STRAP_THICKNESS],
-            length: strapLen,
-            position: place((strapU0 + strapU1) / 2, y, side * (wFit / 2 + LGS_STRAP_THICKNESS / 2)),
+            dims: [spanLen, LGS_STRAP_WIDTH, LGS_STRAP_THICKNESS],
+            length: spanLen,
+            position: place((sp.min + sp.max) / 2, y, side * (wFit / 2 + LGS_STRAP_THICKNESS / 2)),
             rotation: [0, yaw, 0],
             material: 'steel',
             sourceId: wall.id,
@@ -740,7 +785,10 @@ function frameLgsWall(
             advisory:
               'R603.3.3 stud bracing v1 — flat strap on both flange faces (layout assumption); ' +
               'end anchorage + periodic blocking per R603.3.3 not modeled; verify detail' +
-              (trimmed ? '; run stopped clear of a CMU through wall — verify strap anchorage at the junction' : ''),
+              (cmuTrimmed
+                ? '; run trimmed clear of a CMU junction — verify strap anchorage at the junction'
+                : '') +
+              (lenClamped ? '; strap run clamped to the wall length' : ''),
             flag: wallFlag,
           })
         }

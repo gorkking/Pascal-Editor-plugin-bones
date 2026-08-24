@@ -2033,7 +2033,7 @@ describe('LGS steel walls compose SAT-clean (Phase 1 / S1)', () => {
     const straps = steel.members.filter((m) => m.role === 'strap-bracing')
     expect(straps.length).toBeGreaterThan(0)
     for (const st of straps) {
-      expect(st.advisory).toContain('run stopped clear of a CMU through wall')
+      expect(st.advisory).toContain('run trimmed clear of a CMU junction')
     }
     const masonry = cmuWalls([cmuS, cmuN], spec400)
     // ZERO strap × masonry contact — proven on the ISOLATED pair set (the
@@ -2050,6 +2050,69 @@ describe('LGS steel walls compose SAT-clean (Phase 1 / S1)', () => {
     const untrimmed = lgsFrameWalls([stem], spec400, eng)
     const rawStraps = untrimmed.members.filter((m) => m.role === 'strap-bracing')
     expect(violations([...rawStraps, ...masonry]).length).toBeGreaterThan(0)
+  })
+
+  test('round-2 A: a CMU STEM teeing INTO a steel through wall — straps SPLIT around the stem band', () => {
+    // The round-1 trim only engaged when the steel wall was the corner
+    // party or the tee STEM (mixedWallInsets skips through-side tees) — a
+    // grouted CMU stem crossing the steel run left straps boring its block
+    // cells. The executed round-2 exhibit: steel through [0,0]→[6,0]
+    // 0.114 m + CMU stem [3,0]→[3,3] 0.15 m.
+    const steelThru = wall({ id: 'w_thru', start: [0, 0], end: [6, 0], thickness: 0.114 })
+    const cmuStem = wall({ id: 'w_cstem', start: [3, 0], end: [3, 3], thickness: 0.15 })
+    const eng = lgsMap(['w_thru'])
+    const steel = lgsFrameWalls([steelThru], spec400, eng, { cmuNeighbors: [cmuStem] })
+    const straps = steel.members.filter((m) => m.role === 'strap-bracing')
+    // 2.44 m wall → mid-height row × both faces, SPLIT in two per face
+    expect(straps.length).toBe(4)
+    for (const st of straps) {
+      expect(st.advisory).toContain('run trimmed clear of a CMU junction')
+      // no strap crosses the stem band [3 − 0.075, 3 + 0.075]
+      const min = st.position[0] - st.dims[0] / 2
+      const max = st.position[0] + st.dims[0] / 2
+      expect(max <= 3 - 0.075 + 1e-9 || min >= 3 + 0.075 - 1e-9).toBe(true)
+    }
+    // the non-maskable straps-only SAT scan against the stem's blockwork
+    const masonry = cmuWalls([cmuStem], spec400)
+    expect(violations([...straps, ...masonry])).toEqual([])
+    // guard: WITHOUT the neighbors the straps bore the stem's blocks
+    const raw = lgsFrameWalls([steelThru], spec400, eng)
+    const rawStraps = raw.members.filter((m) => m.role === 'strap-bracing')
+    expect(violations([...rawStraps, ...masonry]).length).toBeGreaterThan(0)
+    // …and the steel wall's OWN members are byte-identical apart from the
+    // straps (the trim must only touch the new role — round-2 held item)
+    const others = (ms: Member[]) => ms.filter((m) => m.role !== 'strap-bracing')
+    expect(JSON.stringify(others(steel.members))).toBe(JSON.stringify(others(raw.members)))
+  })
+
+  test('round-2 B: trim attribution is honest — a stub teeing into LUMBER never claims CMU', () => {
+    // Short steel stub into a lumber through wall: the 4·tS minimum-run
+    // re-extension (u0 0.057 + 0.165 = 0.222 > the 0.215 m drawn length)
+    // overruns the drawn length; the clamp is geometry hygiene and says
+    // so — zero masonry in the scene, zero CMU claims.
+    const lumberThru = wall({ id: 'w_lthru', start: [0, 0], end: [4, 0], thickness: 0.114 })
+    const stub = wall({ id: 'w_stub', start: [1, 0], end: [1, 0.215], thickness: 0.114 })
+    const eng = new Map<string, { construction: 'framed' | 'lgs' }>([
+      ['w_lthru', { construction: 'framed' }],
+      ['w_stub', { construction: 'lgs' }],
+    ])
+    const { members } = lgsFrameWalls([stub], spec400, eng, { hintWalls: [lumberThru, stub] })
+    const straps = members.filter((m) => m.role === 'strap-bracing')
+    expect(straps.length).toBeGreaterThan(0)
+    for (const st of straps) {
+      expect(st.advisory).not.toContain('CMU')
+      expect(st.advisory).toContain('strap run clamped to the wall length')
+    }
+    // …and a REAL CMU end-trim still claims CMU, never the length clamp
+    const cmuThru = wall({ id: 'w_cthru', start: [0, 0], end: [4, 0], thickness: 0.15 })
+    const stem = wall({ id: 'w_sstem', start: [1, 0], end: [1, 3], thickness: 0.114 })
+    const cmuSide = lgsFrameWalls([stem], spec400, lgsMap(['w_sstem']), { cmuNeighbors: [cmuThru] })
+    const cmuStraps = cmuSide.members.filter((m) => m.role === 'strap-bracing')
+    expect(cmuStraps.length).toBeGreaterThan(0)
+    for (const st of cmuStraps) {
+      expect(st.advisory).toContain('run trimmed clear of a CMU junction')
+      expect(st.advisory).not.toContain('clamped to the wall length')
+    }
   })
 
   test('taller strap wall (third points) with 24" spacing: clean', () => {

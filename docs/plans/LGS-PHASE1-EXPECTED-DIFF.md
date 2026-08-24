@@ -186,14 +186,19 @@ LOD-200 convention).
   per-wall split, so its 8d nail basis still covers steel walls' sheets
   at 200 (no code claims at 200; the member-derived 300+ path splits
   correctly).
-- **Steel × CMU junctions (round-1 F4d)**: the shared hint graph is
-  masonry-blind, so a steel partition's stud/track run tees into full-CMU
-  through walls exactly like the documented lumber class (S1 residual,
-  lumber-twin symmetry kept). The NEW strap-bracing role does NOT join
-  that class: strap runs trim clear of CMU bodies via `mixedWallInsets`
-  (the one masonry butt-inset truth), advisory stating the trimmed
-  anchorage; gated on the FL-default composition (CMU shell + steel
-  partitions) with a non-maskable straps-only SAT scan.
+- **Steel × CMU junctions (round-1 F4d + round-2 A)**: the shared hint
+  graph is masonry-blind, so a steel partition's stud/track run tees into
+  full-CMU through walls exactly like the documented lumber class (S1
+  residual, lumber-twin symmetry kept). The NEW strap-bracing role does
+  NOT join that class IN EITHER DIRECTION: strap ENDS trim clear of CMU
+  corner/through walls via `mixedWallInsets`, and strap RUNS split around
+  the station band of every CMU stem teeing INTO the steel wall (the
+  width-aware S5 band) — advisory states the trimmed anchorage; the pure-
+  length clamp (minimum-run re-extension on stubs) states its own truth
+  ('strap run clamped to the wall length'), never a masonry claim
+  (round-2 B). Gated on the FL-default composition AND the CMU-stem-into-
+  steel-through exhibit, both with non-maskable straps-only SAT scans;
+  pure-steel strap geometry byte-identical (proven vs the round-1 tip).
 - **Steel↔steel corner claims**: both walls follow the through/butt
   insets from the shared hint graph; no interlock/clip-angle detail is
   modeled or claimed (junction fastening per R603 is the builder's).
