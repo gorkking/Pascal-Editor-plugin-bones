@@ -823,6 +823,25 @@ describe('TAKEOFF gates — steel rows, screw schedule, no invented weights', ()
     expect(dw(rowsOne)?.quantity).toBe(dw(rows(base))?.quantity)
   })
 
+  test('round-3 F3: the takeoff grade RE-DERIVES per row — a 33-mil member books (Gr 33), never a hardcoded Gr 50', () => {
+    // The whole-scene grade gates ran conservative (all-68) scenes only,
+    // so a hardcoded '(Gr 50)' in the takeoff item survived — a false
+    // S230 A4.4 claim on paper the moment a thinner row books (and a C4
+    // disagreement with the legend, which derives independently). LOD 200
+    // keeps the generic 33-mil members: their rows must print Gr 33.
+    const lgs200 = computeLevel(baselineScene(), {
+      ...baselineConfig('INTL'),
+      detail: '200' as const,
+      framingSystem: 'lgs' as const,
+    })
+    const rows200 = computeTakeoff(lgs200.members, lgs200.fixtures, lgs200.areas)
+    const gr33 = rows200.filter((r) => /^LGS \S+-33 \(Gr 33\)$/.test(r.item))
+    expect(gr33.length).toBeGreaterThanOrEqual(2) // 350S162-33 + 550S162-33 at least
+    expect(rows200.some((r) => r.item.includes('-33 (Gr 50)'))).toBe(false)
+    // …and the 400 scene keeps its Gr 50 rows (both grades reachable)
+    expect(rows(lgsAll).some((r) => /-68 \(Gr 50\)$/.test(r.item))).toBe(true)
+  })
+
   test('F4a: an all-steel level books ZERO framing-nail rows — the wood-material filter is pinned', () => {
     // Steel verticals share the lumber roles (stud/king/…): without the
     // WOOD_MATERIALS gate on ROLE_CONNECTIONS the takeoff would book
