@@ -305,8 +305,14 @@ omitted-variant text says 'run(s) shorter than 6 in' even when the
 band swallows the span (conservative, same remedy).
 ★ MERGED TO MASTER 17bdd64 + S18 checklist row ca2a1ab (2026-08-24;
 suite 1883, tsc clean). LGS PHASE 1 COMPLETE — steel walls live
-behind the 'lgs' override. SHIP CHAIN: master ca2a1ab (hp-polish +
-lgs-phase1 + S18) → editor pin → private-editor → prod.
+behind the 'lgs' override. ★ SHIPPED TO PROD 2026-08-24: plugin 9f86f12 → editor #716
+(e7b5abdf) → private-editor #405 (75a8afa8), full-stack CI green
+incl. both E2E + Bugbot, Vercel prod deploy. HP 4-part feedback +
+LGS Phase 1 steel walls LIVE on editor.pascal.app. Note: p-e main
+had moved (Aymeric's #404 bumped editor to community #702 slab fix)
+— our chain built cleanly on top. NEXT LGS: Phase 2 machine-
+selection UX (panel selector + can't-roll warnings, the boarded
+two-controls design) then Phase 3 floors/roofs.
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
