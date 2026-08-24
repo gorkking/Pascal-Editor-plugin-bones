@@ -15,11 +15,22 @@ suppression queued, blast radius = every engine). Also:
 profile.notes (incl. PERMAFROST) was built but never rendered — now
 prints in JurisdictionPicker source-gated. CA compose gates: CA-SK
 84in footings reach GEOMETRY, ON-E kPa-converted snow drives header
-columns, BC trips SDC-D. 9 mutants die. VERIFY: wf_505d3b82
-(skeptic: cherry-pick purity + conversion arithmetic ×16 + the
-confession wording; examiner: honest-pair rule — IRC cites print
-WITH the confession; visual: dropdown + permafrost note + footing
-depth side-by-side). Original brief follows:
+columns, BC trips SDC-D. 9 mutants die. ROUND 1 (wf_505d3b82): visual PASS/SHIP (dropdown contiguity
+DOM-proven, confession collapsed per clutter rule, 0/1.26M px TX
+parity), examiner APPROVE (confession verbatim on paper w/ correct
+per-province adoption strings; FLAG-1 title-block clips long
+residentialCode strings — pre-exists on WI, QUEUED; FLAG-2 LOD-200
+sheets print code cites confession-free — pre-existing US class,
+owned by the QUEUED per-label suppression item), skeptic REVISE:
+F1 CA-NU (140mph + ties:false, first-ever such row) mints ties w/ a
+FALSE 'below 130 mph' label AND escapes both enumeration pins (S16
+'or says it can't' violated); F2 VERMONT is the unenumerated 18th
+confession member (ircBase:null at base — honest behavior, missing
+enumeration + incoherent no-code wording tail). Nits: AB/SK
+value-vs-note rounding, legacy America/Montreal tz id. FIX ROUND
+DISPATCHED (keep Jonathan's researched flag — honest label + third
+enumeration arm, never invented ties). Closing round after tip.
+Original brief follows:
 TODO-1 (ADOPT, reworked): PR #1 Canadian jurisdictions — 16 rows
 (10 provinces, 3 territories, Ontario split S/E/N on frost/seismic
 spread, NBC-2020 generic fallback). Discipline matches house
