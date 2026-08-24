@@ -245,9 +245,48 @@ describe('citation completeness (the data-shape gate)', () => {
       for (const m of Object.values(vendor.machines)) {
         const sourced = m.sourceUrls.length > 0 && m.sourceUrls.every((u) => u.startsWith('http'))
         expect(m.status === 'verified' ? sourced : m.status === LGS.fallbackStatus).toBe(true)
-        // unverified machines carry sources for what little WAS seen, but may not claim rows
-        if (m.status !== 'verified') expect(rollableDesignators(m)).toEqual([])
+        // DATA-shape leg (skeptic F4): an unverified machine's rollableFamilies
+        // must be EMPTY IN THE DATA — the code guard alone would hide a forged
+        // capability row without any gate ever seeing it.
+        if (m.status !== 'verified') expect(m.rollableFamilies).toEqual([])
       }
+    }
+  })
+
+  test('CODE-guard leg (skeptic F4): a forged row on an unverified machine still resolves nothing', () => {
+    // Complementary to the data gate above: if the data gate ever regressed
+    // and an unverified machine DID carry rows, the code must still refuse
+    // to expand them — both defenses pinned independently.
+    const forged = {
+      name: 'Forged Unverified',
+      status: LGS_FALLBACK_STATUS,
+      sourceUrls: ['https://example.com'],
+      rollableFamilies: [
+        { family: '350S162', rollableMils: [33], basis: 'derived: forged for the gate' },
+        {
+          designator: 'FORGE-89C41',
+          webMm: 89,
+          flangeMm: 41,
+          lipMm: 10,
+          rollableMils: [33],
+          nearestGeneric: '350S162',
+          note: 'forged vendor row',
+        },
+      ],
+    }
+    expect(rollableDesignators(forged)).toEqual([])
+    // …and the full resolution path takes the unverified fallback, never
+    // the machine's forged generic OR forged vendor-profile branch.
+    const vendors = LGS.vendors as Record<string, (typeof LGS.vendors)[string]>
+    vendors.zzforge = { name: 'ZZ Forge', website: 'https://example.com', machines: { fake: forged } }
+    try {
+      const r = profileFor('stud', { ...DEFAULT_SPEC, lgsMachine: 'zzforge/fake' }, { interior: true })
+      if (!('designator' in r)) throw new Error('unexpected')
+      expect(r.status).toBe(LGS_FALLBACK_STATUS)
+      expect(r.designator).toBe('350S162-33') // generic substituted
+      expect(r.machineProfile).toBeUndefined() // forged vendor row never surfaces
+    } finally {
+      delete vendors.zzforge
     }
   })
 
