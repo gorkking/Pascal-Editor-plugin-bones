@@ -473,6 +473,70 @@ describe("'lgs' walls route FULLY — steel bones, framed-twin sheet goods (F1, 
     // …and the framed twin never carries the steel qualifier
     expect(framedInfo.insulation).not.toContain('R402.2.6')
   })
+
+  test("Phase 2 — the machine suffix tells the REAL constraint state: '· machine <key>' + the honest fallback count, no IOU", () => {
+    const nodes = baselineScene()
+    // The card's count == the distinct fallback CLASSES actually drawn on
+    // the wall (round-1 skeptic F2: the old stud+track-only count printed
+    // '1' on a wall whose drawn steel carried fallback labels in TWO
+    // classes). Derived here from the members themselves so the gate
+    // can't drift from the 3D.
+    const CLASS_OF: Record<string, string> = {
+      stud: 'stud', 'king-stud': 'stud', trimmer: 'stud', cripple: 'stud', header: 'stud',
+      'bottom-plate': 'track', 'top-plate': 'track', sill: 'track',
+      backing: 'bridging',
+    }
+    const drawnFallbackClasses = (
+      result: ReturnType<typeof computeLevel>,
+      wallId: string,
+    ): Set<string> =>
+      new Set(
+        result.members
+          .filter(
+            (m) =>
+              m.sourceId === wallId &&
+              m.material === 'steel' &&
+              (m.label ?? '').includes(LGS_FALLBACK_STATUS) &&
+              CLASS_OF[m.role] !== undefined,
+          )
+          .map((m) => CLASS_OF[m.role] as string),
+      )
+    const cardOn = (wallId: string, lgsMachine?: string) => {
+      const cfg = {
+        ...cfgWith({ [wallId]: 'lgs' }),
+        ...(lgsMachine !== undefined ? { lgsMachine } : {}),
+      }
+      const result = computeLevel(nodes, cfg)
+      const info = selectedWallInfo(nodes, { levelId: 'level_1', selectedIds: [wallId] }, cfg, result)
+      if (!info) throw new Error('missing wall info')
+      return { info, result }
+    }
+    // THE EXHIBIT (pins 2): TF550H rolls the 550S162-68 studs; T125 track
+    // AND the wall's 3 drawn bridging channels both fall back
+    const two = cardOn('w_s', 'framecad/tf550h')
+    expect(drawnFallbackClasses(two.result, 'w_s').size).toBe(2) // non-vacuous
+    expect(two.info.assembly).toContain('· machine framecad/tf550h (2 profiles fall back)')
+    expect(two.info.assembly).not.toContain('constraint warnings land in Phase 2')
+    // a wall with NO drawn bridging (w_mid carries no backing tees):
+    // track only → 1 — the bridging class never pads a wall it isn't on
+    const one = cardOn('w_mid', 'framecad/tf550h')
+    expect(one.result.members.some((m) => m.sourceId === 'w_mid' && m.role === 'backing')).toBe(false)
+    expect(drawnFallbackClasses(one.result, 'w_mid').size).toBe(1)
+    expect(one.info.assembly).toContain('(1 profile falls back)')
+    // F325iT (33/43 mil only) rolls nothing composed here → all 3 classes
+    const three = cardOn('w_s', 'framecad/f325it')
+    expect(drawnFallbackClasses(three.result, 'w_s').size).toBe(3)
+    expect(three.info.assembly).toContain('· machine framecad/f325it (3 profiles fall back)')
+    // count == drawn classes on every scenario above (the F2 invariant)
+    for (const { info, result } of [two, one, three]) {
+      const m = /\((\d) profiles? falls? back\)/.exec(info.assembly)
+      expect(Number(m?.[1])).toBe(drawnFallbackClasses(result, info.wallId).size)
+    }
+    // no machine → no machine suffix at all (byte-stable card line)
+    const none = cardOn('w_s')
+    expect(none.info.assembly).not.toContain('· machine')
+    expect(none.info.assembly).not.toContain('falls back')
+  })
 })
 
 describe('schema round-trip (framingSystem absent == lumber, byte-parity)', () => {

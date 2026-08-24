@@ -571,6 +571,19 @@ describe('engineeringOverride / constructionOverride / cmuHeightWrite', () => {
     )
   })
 
+  test("Phase 2: the Steel segment writes 'lgs' through the SAME channel — string form, fields preserved, schema round-trip", () => {
+    // fresh pick → the plain string, byte-shaped like CMU's writes
+    expect(constructionOverride(undefined, 'lgs')).toBe('lgs')
+    // engineering fields survive a framed↔steel flip (studSize picks the
+    // depth-matched web on steel; insulation/cladding ride the same stack)
+    expect(
+      constructionOverride({ construction: 'framed', studSize: '2x6' }, 'lgs'),
+    ).toEqual({ construction: 'lgs', studSize: '2x6' })
+    // …and cmuHeightM drops when leaving CMU for steel (schema rejects it)
+    expect(constructionOverride({ construction: 'cmu', cmuHeightM: 1.016 }, 'lgs')).toBe('lgs')
+    expect(FramingNode.shape.wallOverrides.parse({ w: 'lgs' })).toEqual({ w: 'lgs' })
+  })
+
   test('cmuHeightWrite: string collapse at full height, merge with fields kept', () => {
     const H = 2.5
     // no other fields: byte-equal to the legacy slider write

@@ -195,7 +195,7 @@ type SelectedNodeLike = { id: string; parentId?: string | null }
 /**
  * "Engineering" section for the wall's floating inspector card — the same
  * per-wall engineering the sidebar's SelectedWallCard prints, surfaced on
- * the element itself: exterior/interior, framed/CMU/skip (writes the
+ * the element itself: exterior/interior, framed/steel/CMU/skip (writes the
  * per-wall override), the stud recipe and the climate-zone insulation.
  * All resolution goes through the gated `selectedWallInfo` (shared probe +
  * colinear dedupe), so this card and the sidebar can never disagree.
@@ -291,10 +291,17 @@ export default function WallEngineering({ node }: { node: SelectedNodeLike }) {
           {info.exterior ? 'Exterior' : 'Interior'}
         </span>
       </div>
+      {/* Per-wall construction — ONE control, LGS Phase 2 adds the Steel
+          segment to the channel users already know from CMU (same
+          wallOverrides persistence). Because `value` is the RESOLVED
+          construction, an MCP-set 'lgs' wall (override or level
+          framingSystem) shows its segment highlighted — the Phase-0
+          documented gap, closed. */}
       <SegmentedControl
         onChange={(v: WallConstruction) => writeOverride(constructionOverride(info.override, v))}
         options={[
           { label: 'Framed', value: 'framed' },
+          { label: 'Steel', value: 'lgs' },
           { label: 'CMU', value: 'cmu' },
           { label: 'Skip', value: 'skip' },
         ]}

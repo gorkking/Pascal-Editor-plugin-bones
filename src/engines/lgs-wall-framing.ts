@@ -42,9 +42,22 @@
  *    members, never silent.
  *  - machine resolution (spec.lgsMachine → profileFor): the resolution
  *    STATUS rides every member label (verified machines brand the label,
- *    anything else carries the honest fallback string); can't-roll
- *    WARNINGS are Phase-2 scope (machine selection UX) — the wall card
- *    says so.
+ *    anything else carries the honest fallback string), and — Phase 2 —
+ *    every fallback resolution raises a per-level warning
+ *    (`machineConstraintWarning`): a VERIFIED machine that can't roll the
+ *    resolved profile earns the "cannot roll" claim (its published ranges
+ *    are the rollable derivation's basis); an unverified or unknown
+ *    machine never does — nothing was checked, so the warning states THAT
+ *    instead. Machine scope (LGS-PLAN principle 4: a machine choice only
+ *    CONSTRAINS + BRANDS — Phase 2 adds WARNS): at 300+ the conservative
+ *    pick already sits at the table-domain maximum, so members are
+ *    byte-identical with or without a machine (labels/flags/warnings
+ *    only — round-1 byte-proved across the catalog); at 200 a machine
+ *    NARROWS the generic 33-mil pick to its thinnest rollable variant
+ *    (550S162-33 → -43 under TF550H: designator + flag text, identical
+ *    envelope), and the vendor-own-profile path draws the vendor's
+ *    verified dims (Howick 89 mm web vs 88.9 generic). Both are Phase-1
+ *    resolution behaviors, unwidened this phase.
  *
  * Cross-material junctions: compute passes ONE hint graph over lumber +
  * steel walls (frameHints) — corners/tees resolve through the same
@@ -62,6 +75,7 @@ import {
   familyVariants,
   LGS,
   type LgsProfileResolution,
+  machineFor,
   parseDesignator,
   profileFor,
 } from './lgs-profiles'
@@ -136,16 +150,24 @@ export type LgsWallProfiles = {
   /** Track resolution (bottom/top/sill) — same minimum mils as the studs
    * (R603.3.2 verbatim rule). */
   track: LgsProfileResolution
-  /** The mils both resolutions were asked for + the stated basis (null at
-   * LOD 200 — generic members make no code claims). */
+  /** Bridging-channel resolution (partition backing, 150U050) at the
+   * structural floor — the channel is the only catalog variant, never an
+   * R603.3.2 table selection. Members of this class compose only where
+   * the wall carries backing tees, so the CARD counts its fallback only
+   * when backing members are actually drawn on the wall (round-1 skeptic
+   * F2); the engine consumes this same resolution for the members and
+   * the can't-roll warning. */
+  backing: LgsProfileResolution
+  /** The mils the stud/track resolutions were asked for + the stated
+   * basis (null at LOD 200 — generic members make no code claims). */
   minMils: number
   basis: string | null
 }
 
-/** Resolve one wall's stud + track profiles under a spec (+ per-wall
- * engineering override). The wall's lumber-equivalent size (thickness
- * heuristic or explicit studSize override) picks the depth-matched web so
- * wall thickness stays byte-stable. */
+/** Resolve one wall's stud + track + bridging profiles under a spec (+
+ * per-wall engineering override). The wall's lumber-equivalent size
+ * (thickness heuristic or explicit studSize override) picks the
+ * depth-matched web so wall thickness stays byte-stable. */
 export function lgsWallProfiles(
   wall: WallSlice,
   spec: FramingSpec,
@@ -165,6 +187,9 @@ export function lgsWallProfiles(
   return {
     stud: profileFor('stud', lgsSpec, { minMils }),
     track: profileFor('bottom-plate', lgsSpec, { minMils }),
+    // structural-floor mils (the engine's historical call — '150U050' is
+    // size-independent, so lgsSpec vs wallSpec cannot differ here)
+    backing: profileFor('backing', lgsSpec),
     minMils,
     basis: generic ? null : LGS_CONSERVATIVE_BASIS,
   }
@@ -268,6 +293,47 @@ export function lgsLabelHead(res: LgsResolvedProfile): string {
   if (res.machine && res.status === 'verified') return `${head} (${res.machine})`
   if (res.status !== 'verified') return `${head} — ${res.status}`
   return head
+}
+
+/**
+ * The per-level machine-constraint warning for one FALLBACK resolution
+ * (Phase 2 — the can't-roll honesty payload; P4 prints it verbatim on
+ * paper). Three honest shapes, never conflated:
+ *  - VERIFIED machine that can't roll the resolved profile → the "cannot
+ *    roll" claim (its published web/flange/coil ranges are the basis of
+ *    the rollable derivation — the exhibit: TF550H rolls the S162 studs
+ *    but its 34–63 mm flange range excludes T125 track);
+ *  - UNVERIFIED machine → "is unverified" — nothing was checked, so the
+ *    warning never claims incapability (an unchecked machine can claim
+ *    NO rollable rows, but also earns no can't-roll verdicts);
+ *  - unknown key → "not found in the catalog".
+ * Null when there is nothing to warn about (no machine requested, or the
+ * machine rolls the pick). `roleWord` names the member class the
+ * resolution feeds ('studs' | 'tracks' | 'bridging channels').
+ */
+export function machineConstraintWarning(
+  res: LgsProfileResolution,
+  roleWord: string,
+): string | null {
+  if (!('designator' in res)) return null
+  if (res.machine === undefined || res.status === 'verified') return null
+  const machine = machineFor(res.machine)
+  if (!machine) {
+    return (
+      `Machine '${res.machine}' not found in the catalog — ` +
+      `generic AISI profiles used for all steel members; check the machine key`
+    )
+  }
+  if (machine.status !== 'verified') {
+    return (
+      `Machine ${machine.name} is unverified — generic AISI dims used for ` +
+      `every steel profile; verify capability with the vendor`
+    )
+  }
+  return (
+    `Machine ${machine.name} cannot roll ${res.designator} (${roleWord}) — ` +
+    `generic AISI fallback used; verify with vendor`
+  )
 }
 
 /**
@@ -476,6 +542,13 @@ function frameLgsWall(
     runLen,
     `Top track ${trackHead}${trackNote}${basisSuffix}`,
   )
+  // Phase 2 — machine can't-roll honesty (LOD 300+ like every LGS warning;
+  // 200 makes no claims). Emitted per composed member CLASS so the level
+  // warning is exactly as wide as what's actually drawn/booked.
+  if (codeClaims) {
+    const trackWarning = machineConstraintWarning(trackRes, 'tracks')
+    if (trackWarning !== null) warnings.add(trackWarning)
+  }
 
   // Studs seat INSIDE the tracks: ends against the track webs. The box
   // nesting (stud inside the track flange band) is a design-intent contact
@@ -484,6 +557,13 @@ function frameLgsWall(
   const studTop = H - trackWeb
   const studHeight = studTop - studBottom
   if (studHeight <= tS) return // degenerate pony wall — tracks only
+
+  // Stud-family members (studs/kings/jacks/cripples/headers) all emit from
+  // here down — the stud resolution's can't-roll status warns once.
+  if (codeClaims) {
+    const studWarning = machineConstraintWarning(studRes, 'studs')
+    if (studWarning !== null) warnings.add(studWarning)
+  }
 
   const studDims: [number, number, number] = [tS, studHeight, wFit]
   const spacingIn = Math.round(spacing / 0.0254)
@@ -673,11 +753,14 @@ function frameLgsWall(
   }
 
   // ---- partition backing at tees: CFS blocking (150U050 channel) ----
-  const backingRes = profileFor('backing', specForWall(spec, override))
+  // ONE resolver (round-1 skeptic F2): the members, the can't-roll warning
+  // AND the card's fallback count all read profiles.backing.
+  const backingRes = profiles.backing
   if (isResolvedProfile(backingRes) && (hints.backing?.length ?? 0) > 0) {
     const bFam = backingRes.family
     const bWeb = bFam.webMm / 1000
     const bFlange = (bFam.flangeMm ?? bFam.webMm / 3) / 1000
+    const backingMark = members.length // warn only if a member really emits
     for (const tee of hints.backing ?? []) {
       const uu = Math.min(Math.max(tee.u, u0 + tS), u1 - tS)
       const left = Math.max(u0 + halfT, ...studUs.filter((su) => su < uu - EPS))
@@ -697,6 +780,10 @@ function frameLgsWall(
           `Partition backing ${lgsLabelHead(backingRes)} — CFS blocking${codeClaims ? ' (bridging channel: only catalog variant — not an R603.3.2 stud-table selection)' : ''}`,
         )
       }
+    }
+    if (codeClaims && members.length > backingMark) {
+      const backingWarning = machineConstraintWarning(backingRes, 'bridging channels')
+      if (backingWarning !== null) warnings.add(backingWarning)
     }
   }
 
