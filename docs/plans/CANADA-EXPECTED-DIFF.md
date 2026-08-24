@@ -160,5 +160,5 @@ engine; queued on the board, not smuggled into a cherry-pick adoption.
 
 ## SUITE
 
-Base master 7743886: 1883 pass. Branch tip: 1912 pass / 1 todo / 0 fail,
+Base master 7743886: 1883 pass. Branch tip: 1916 pass / 1 todo / 0 fail (round-2 fixes added 4 tests),
 tsc clean, E5 recapture byte-identical at every slice.
