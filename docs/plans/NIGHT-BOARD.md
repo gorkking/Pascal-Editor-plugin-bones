@@ -150,10 +150,24 @@ COND_OFF_GRID_FLAG on exhaustion, fully honest un-snapped fallback;
 unobstructed — NOTE the old ≤1m figure died at unwarp and rode
 stale through two rounds, loop lesson; c4ffc93 REC-1/2: manifest
 enumerates takeoff lf + elevation recenter classes, pad buy line
-states size/basis). RE-VERIFY: wf_78bf0f80-cfb (skeptic: ±3-window
-sufficiency + tie-break totality + M2 arithmetic re-derivation;
-examiner re-runs — paper moved via pad buy line; visual: oblique
-now ON the world lattice). Merge only after APPROVE.
+states size/basis). ROUND 2 (wf_78bf0f80): examiner APPROVE (manifest complete, pad
+line honest+gated, M2 arithmetic re-derived, T1/P1 cell-by-cell),
+skeptic REVISE + visual NO-SHIP converging on ONE core defect:
+the off-grid flag dies on the DEFAULT auto-seed lifecycle (ε-anchor
+recognizes the machine seed but drops unit1OffGrid on recompose —
+flag shows one compose then vanishes silently; the two gates
+collide at hvac.polish.test.ts:316/:298). Plus: amended M2 row is
+an axis-aligned theorem stated as a class bound (5,450-scene sweep:
+99 S-bound violations, worst 2.87m 3D on oblique+fronting-RO — the
+stale-bound class in subtler form), and the flag wording claims a
+whole-wall property the ±3-step window never checks (54/54 firings
+had a valid spot beyond the window). Oblique lattice fix itself
+VERIFIED WORKING (unit at exact 0.5m world multiples, residuals
+0→0). FIX ROUND 2 DISPATCHED (flag rides recognized machine seeds;
+row becomes a class theorem via min-extra-first tie-break or honest
+split + class-sweep gate; one-string wording fix). LOOP LESSON
+boarded: numeric class bounds for a search need a CLASS-SWEEP gate,
+not a scene gate. Round 3 after tip.
 
 # LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
 
