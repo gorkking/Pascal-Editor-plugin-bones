@@ -1946,3 +1946,55 @@ describe('LOD-400 B21e: stated waste factors never inflate member truth (S4)', (
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// CMU face bury — takeoff truth (the painted-host z-fight fix, 2026-08-23)
+// ---------------------------------------------------------------------------
+
+import { cmuWall } from './cmu'
+
+describe('CMU face bury — count/length takeoff rows are bury-independent', () => {
+  // The bury shrinks block DEPTH only; blocks/mortar/grout/rebar book by
+  // count and long-dim, so these rows are pinned to the exact values the
+  // PRE-BURY engine produced (captured at base 1719674 on this wall). The
+  // one row that legitimately moves is the CONCRETE pour (bond beam):
+  // pours book yd³ from member volume (S4 member-truth) — its net still
+  // prints 0.1 yd³ here, but the +5% BUY figure drops 0.2 → 0.1 and gains
+  // the display-collapse note. Enumerated in
+  // docs/plans/CMU-BURY-EXPECTED-DIFF.md.
+  const wall: WallSlice = {
+    id: 'w1',
+    start: [0, 0],
+    end: [4, 0],
+    length: 4,
+    dir: [1, 0],
+    thickness: 0.1, // the host default — the prod flicker configuration
+    height: 2.4384,
+    exterior: true,
+    openings: [],
+    curved: false,
+  }
+  const rows = computeTakeoff(cmuWall(wall, DEFAULT_SPEC), [])
+  const row = (item: string) => rows.find((r) => r.item === item)
+
+  test('block / mortar / grout / rebar rows byte-equal to the pre-bury capture', () => {
+    expect(row('CMU block')?.quantity).toBe(115)
+    expect(row('CMU block')?.unit).toBe('pcs')
+    expect(row('CMU block')?.detail).toBe('8x8x16 running bond')
+    expect(row('Mortar (Type S)')?.quantity).toBe(6)
+    expect(row('Grout')?.quantity).toBe(0.5)
+    expect(row('Grout')?.detail).toBe('44 reinforced cells (R606.12)')
+    expect(row('Rebar')?.quantity).toBe(43.8)
+    expect(row('Rebar')?.detail).toBe('5 bars, laps not included')
+  })
+
+  test('the bond-beam pour follows the buried member volume (S4 member-truth)', () => {
+    const pour = row('Concrete')
+    expect(pour?.detail).toContain('lintels/beams')
+    expect(pour?.quantity).toBe(0.1) // net unchanged at display rounding
+    // Pre-bury the buy printed '≈ 0.2 yd³'; the buried beam is 10% slimmer
+    // and the ceiled buy meets the net at the 0.1 yd³ batch step.
+    expect(pour?.detail).toContain('≈ 0.1 yd³')
+    expect(pour?.detail).toContain('display rounding')
+  })
+})

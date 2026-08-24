@@ -7,6 +7,7 @@ import {
   BLOCK_DEPTH_ACTUAL,
   BLOCK_LENGTH,
   CELL_CENTER,
+  CMU_FACE_BURY,
   COURSE_HEIGHT,
   LINTEL_BEARING,
   MORTAR_JOINT,
@@ -15,10 +16,12 @@ import {
   cmuDowelPositions,
   cmuWall,
   cmuWalls,
+  mixedCmuWall,
   mixedWallInsets,
   courseIntervals,
   snapCmuHeight,
   verticalBarPositions,
+  THIN_BURY_FLAG,
 } from './cmu'
 
 // The 8" module in meters — spelled out so the assertions read as numbers.
@@ -167,12 +170,19 @@ describe('cmuWall — solid 4m × 2.4m wall', () => {
     expect(full.length).toBeCloseTo(B - M, 6)
   })
 
-  test('block depth clamps to min(wall thickness, 7-5/8" actual)', () => {
-    // 0.2m wall → actual 8" unit depth (7-5/8")
-    expect(blocks[0]?.dims[2]).toBeCloseTo(BLOCK_DEPTH_ACTUAL, 6)
-    // 0.15m architectural wall → 6"-style unit clamped to the drawn thickness
+  test('block depth clamps to min(thickness − 2×face bury, 7-5/8" actual)', () => {
+    // 0.2m wall → the drawn thickness less CMU_FACE_BURY each side, so the
+    // block faces sit strictly inside the host wall's drawn face planes
+    // (the painted-host z-fight fix — the true 7-5/8" unit only fits
+    // un-buried past 0.2037m).
+    expect(blocks[0]?.dims[2]).toBeCloseTo(0.2 - 2 * CMU_FACE_BURY, 6)
+    // 0.15m architectural wall → 6"-style unit, clamped inside the bury
     const thin = cmuWall(makeWall({ thickness: 0.15 }), DEFAULT_SPEC)
-    expect(byRole(thin, 'block')[0]?.dims[2]).toBeCloseTo(0.15, 6)
+    expect(byRole(thin, 'block')[0]?.dims[2]).toBeCloseTo(0.15 - 2 * CMU_FACE_BURY, 6)
+    // A wall deeper than the unit + both buries keeps the TRUE 7-5/8" unit
+    // — today's behavior preserved where the natural clearance ≥ the bury.
+    const deep = cmuWall(makeWall({ thickness: 0.21 }), DEFAULT_SPEC)
+    expect(byRole(deep, 'block')[0]?.dims[2]).toBeCloseTo(BLOCK_DEPTH_ACTUAL, 6)
   })
 
   test('bond beam caps the wall: top course, full length, grouted label', () => {
@@ -446,7 +456,10 @@ describe('cmuWall — bond-beam horizontal bars (LOD 350+)', () => {
   test('two #5 bars run the full beam, 2" clear off each face', () => {
     expect(beamBars).toHaveLength(2)
     const offs = beamBars.map((b) => b.position[2] ?? 0).sort((a, b) => a - b)
-    const expected = BLOCK_DEPTH_ACTUAL / 2 - inches(2) // 0.19/2 − 0.0508
+    // Depth on the 0.2m wall is buried (0.19), so the 2" clear cover
+    // measures off the BURIED faces — bars ride the real block, never the
+    // drawn wall face.
+    const expected = (0.2 - 2 * CMU_FACE_BURY) / 2 - inches(2) // 0.19/2 − 0.0508
     expect(offs[0]).toBeCloseTo(-expected, 6)
     expect(offs[1]).toBeCloseTo(expected, 6)
     for (const bar of beamBars) {
@@ -639,5 +652,163 @@ describe('cmuDowelPositions — foundation-facing dowel layout (B18b)', () => {
   test('guards: curved walls and sub-course walls carry no dowels', () => {
     expect(cmuDowelPositions(makeWall({ curved: true }))).toEqual({ us: [], barTop: 0 })
     expect(cmuDowelPositions(makeWall({ height: 0.15 }))).toEqual({ us: [], barTop: 0 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// CMU face bury — the painted-host z-fight fix (prod report 2026-08-23)
+// ---------------------------------------------------------------------------
+// A CMU wall painted with ANY host material (even a flat white color)
+// flickered/z-fought camera-dependently: the block outer faces sat EXACTLY
+// on the host wall's drawn face planes (±thickness/2 — the host default
+// 0.1m wall is thinner than the 7-5/8" unit, so depth clamped to the drawn
+// thickness). The unpainted case only LOOKED clean because the plugin's
+// wall mode keeps the host face transparent + depthWrite:false; painting
+// resurrects an opaque host face and the two contest the depth buffer.
+// The fix is geometric and paint-state independent: every CMU face sits
+// ≥ CMU_FACE_BURY strictly inside the drawn planes (the DUCT_JUNCTION_BURY
+// precedent, hvac.ts). These are the coplanarity detector gates — reverting
+// the bury (depth = min(thickness, BLOCK_DEPTH_ACTUAL)) kills them.
+
+import { FramingNode } from '../framing/schema'
+import { computeLevel } from '../framing/compute'
+
+describe('CMU face bury — block faces sit strictly inside the drawn wall faces', () => {
+  /** Across-wall face offset of a member on an X-aligned wall (centerline
+   * z = 0): |v-center| + half the across-wall dim. */
+  const faceOffset = (m: Member): number => Math.abs(m.position[2] ?? 0) + m.dims[2] / 2
+
+  test('default 0.1m host wall: EVERY member face ≤ t/2 − CMU_FACE_BURY (strictly inside)', () => {
+    const wall = makeWall({ thickness: 0.1, openings: [window_(2)] })
+    const members = cmuWall(wall, DEFAULT_SPEC)
+    // Non-vacuous: blocks, lintel, bond beam and rebar are all in the sweep.
+    for (const role of ['block', 'lintel', 'bond-beam', 'rebar']) {
+      expect(byRole(members, role).length).toBeGreaterThan(0)
+    }
+    for (const m of members) {
+      expect(faceOffset(m)).toBeLessThanOrEqual(0.05 - CMU_FACE_BURY + 1e-9)
+    }
+    // The blocks did not vanish making room for the bury.
+    expect(byRole(members, 'block')[0]?.dims[2]).toBeCloseTo(0.1 - 2 * CMU_FACE_BURY, 9)
+  })
+
+  test('thinnest host wall (0.05m panel floor): the full 5mm bury still holds', () => {
+    // The host wall panel clamps thickness to ≥ 0.05m (wall-panel.tsx
+    // Math.max(0.05, v)) — at that floor the blocks keep 0.04m of depth,
+    // no degenerate handling needed and no flag.
+    const members = cmuWall(makeWall({ thickness: 0.05 }), DEFAULT_SPEC)
+    expect(byRole(members, 'block')[0]?.dims[2]).toBeCloseTo(0.04, 9)
+    for (const m of members.filter((x) => x.material === 'concrete')) {
+      expect(faceOffset(m)).toBeLessThanOrEqual(0.025 - CMU_FACE_BURY + 1e-9)
+    }
+    expect(members.some((m) => m.flag?.includes(THIN_BURY_FLAG))).toBe(false)
+  })
+
+  test('degenerate sub-2cm wall (raw-API only): depth floors at t/2 — flagged, never vanishing', () => {
+    // Below 4×bury the full bury would leave ≤ half the wall; the floor
+    // keeps blocks at HALF the drawn thickness (bury degrades to t/4 per
+    // side — still strictly inside) and the bond beam confesses.
+    const members = cmuWall(makeWall({ thickness: 0.015 }), DEFAULT_SPEC)
+    const block = byRole(members, 'block')[0] as Member
+    expect(block.dims[2]).toBeCloseTo(0.0075, 9)
+    expect(block.dims[2]).toBeGreaterThan(0)
+    // Masonry stays strictly inside the drawn planes (rebar excluded: a
+    // 5/8" bar is physically deeper than a 15mm wall — garbage-in class,
+    // pre-existing at every thickness < the bar size).
+    for (const m of members.filter((x) => x.material === 'concrete')) {
+      expect(faceOffset(m)).toBeLessThan(0.0075)
+    }
+    expect(byRole(members, 'bond-beam')[0]?.flag).toBe(THIN_BURY_FLAG)
+  })
+
+  test('mixed knee wall on the default 0.1m wall: both zones strictly inside', () => {
+    const { members } = mixedCmuWall(makeWall({ thickness: 0.1 }), DEFAULT_SPEC, 1.0)
+    for (const role of ['block', 'bond-beam', 'mudsill', 'anchor-bolt', 'stud']) {
+      expect(byRole(members, role).length).toBeGreaterThan(0)
+    }
+    for (const m of members) {
+      expect(faceOffset(m)).toBeLessThanOrEqual(0.05 - CMU_FACE_BURY + 1e-9)
+    }
+  })
+
+  test('corner interlock: through-blocks stay buried in BOTH walls of the pair', () => {
+    // Perpendicular 0.1m walls sharing the corner at the origin — the
+    // interlock extends blocks ALONG the neighbor (u), never across (v),
+    // so every member must still hold its own wall's bury.
+    const a = makeWall({ id: 'wall_a', thickness: 0.1 })
+    const b = makeWall({ id: 'wall_b', thickness: 0.1, start: [0, 0], end: [0, 4] })
+    const members = cmuWalls([a, b], DEFAULT_SPEC)
+    expect(members.length).toBeGreaterThan(0)
+    for (const m of members) {
+      // wall_a runs along X (centerline z=0); wall_b along Z (centerline x=0)
+      const v = m.sourceId === 'wall_a' ? (m.position[2] ?? 0) : (m.position[0] ?? 0)
+      expect(Math.abs(v) + m.dims[2] / 2).toBeLessThanOrEqual(0.05 - CMU_FACE_BURY + 1e-9)
+    }
+  })
+
+  test('computeLevel CMU scene (the E5 substitute — the baseline corpus has no CMU walls): end-to-end bury', () => {
+    // The master-baseline scene contains NO CMU walls (recaptured
+    // byte-identical under the bury), so the end-to-end truth lives here:
+    // a host-default-thickness CMU shell through computeLevel — the exact
+    // prod configuration that flickered (default walls carry NO thickness
+    // field; extractWalls defaults to 0.1m).
+    const wallNode = (id: string, start: [number, number], end: [number, number]) => ({
+      id,
+      type: 'wall',
+      parentId: 'level_1',
+      start,
+      end,
+      height: 2.5,
+      frontSide: 'exterior',
+      backSide: 'interior',
+      children: [],
+    })
+    const scene = {
+      level_1: { id: 'level_1', type: 'level', level: 0, height: 2.5 },
+      w_s: wallNode('w_s', [0, 0], [6, 0]),
+      w_e: wallNode('w_e', [6, 0], [6, 4]),
+      w_n: wallNode('w_n', [6, 4], [0, 4]),
+      w_w: wallNode('w_w', [0, 4], [0, 0]),
+    }
+    const config = {
+      ...FramingNode.parse({
+        jurisdiction: 'INTL',
+        detail: '400',
+        showWalls: true,
+        showFloor: false,
+        showRoof: false,
+        showFoundation: false,
+        showElectrical: false,
+        showPlumbing: false,
+        showHvac: false,
+        wallOverrides: {
+          w_s: 'cmu',
+          w_e: 'cmu',
+          w_n: 'cmu',
+          w_w: { construction: 'cmu', cmuHeightM: 1.2 },
+        },
+      }),
+      parentId: 'level_1' as FramingNode['parentId'],
+    }
+    const result = computeLevel(scene, config)
+    expect(result.members.some((m) => m.role === 'block')).toBe(true)
+    // Each wall's centerline: w_s z=0 alongX · w_n z=4 alongX · w_w x=0
+    // alongZ · w_e x=6 alongZ. Across-wall extent per member vs its OWN
+    // wall, strictly inside 0.1/2 − CMU_FACE_BURY.
+    const centerline: Record<string, { axis: 0 | 2; at: number }> = {
+      w_s: { axis: 2, at: 0 },
+      w_n: { axis: 2, at: 4 },
+      w_w: { axis: 0, at: 0 },
+      w_e: { axis: 0, at: 6 },
+    }
+    let swept = 0
+    for (const m of result.members) {
+      const line = centerline[m.sourceId ?? '']
+      if (!line) continue
+      swept += 1
+      const v = Math.abs((m.position[line.axis] ?? 0) - line.at)
+      expect(v + m.dims[2] / 2).toBeLessThanOrEqual(0.05 - CMU_FACE_BURY + 1e-9)
+    }
+    expect(swept).toBeGreaterThan(100) // the sweep really saw the shell
   })
 })

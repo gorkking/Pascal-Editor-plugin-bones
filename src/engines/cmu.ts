@@ -58,6 +58,22 @@ export const COURSE_HEIGHT = inches(8) // 0.2032 m
 export const BLOCK_LENGTH = inches(16) // 0.4064 m
 /** Actual (manufactured) block depth — 7-5/8" for a nominal 8" unit. */
 export const BLOCK_DEPTH_ACTUAL = inches(7.625)
+/**
+ * Face bury — how far every block face sits strictly INSIDE the host wall's
+ * drawn face planes (the DUCT_JUNCTION_BURY precedent, hvac.ts). CONSTRAINT:
+ * the host draws its wall skin at ±thickness/2; a block face landing exactly
+ * on that plane z-fights the host face the moment the host face renders
+ * opaque — the plugin's 'down' wall mode keeps the host face depth-silent,
+ * but PAINTING a material onto a Bones CMU wall resurrects an opaque host
+ * face (prod report 2026-08-23: painted CMU walls flicker/"display both
+ * textures at once", camera-angle dependent). Block outer faces must
+ * therefore never contest the depth buffer with the drawn wall: they stop
+ * CMU_FACE_BURY inside each drawn face plane, in every mode and paint state.
+ */
+export const CMU_FACE_BURY = 0.005
+/** Canonical thin-wall bury flag (gates grep it) — rides the bond beam. */
+export const THIN_BURY_FLAG =
+  'wall too thin for the CMU face bury — blocks floored at half the drawn thickness; verify'
 /** Standard mortar joint — 3/8". Blocks shrink by this so joints read in 3D. */
 export const MORTAR_JOINT = inches(0.375)
 /** Precast lintel: nominal 8" tall (one course), bears 8" past each jamb. */
@@ -317,8 +333,22 @@ export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}
   const len = wall.length
 
   // Block depth: full 8" nominal walls get the actual 7-5/8" unit; thinner
-  // architectural walls clamp to the drawn thickness (4"/6" units exist).
-  const depth = Math.min(wall.thickness, BLOCK_DEPTH_ACTUAL)
+  // architectural walls clamp to the drawn thickness (4"/6" units exist)
+  // LESS the face bury on each side, so the block faces sit strictly inside
+  // the host wall's drawn face planes (CMU_FACE_BURY — never coplanar with
+  // a painted/opaque host face). Walls deeper than the actual unit + both
+  // buries keep the true 7-5/8" unit unchanged (its natural clearance is
+  // ≥ the bury by construction). A wall too thin for the full bury
+  // (< 4×bury = 2 cm — below the host panel's 0.05 m thickness floor, only
+  // raw-API scenes can draw one) floors the depth at HALF the drawn
+  // thickness (the bury degrades to thickness/4 per side, still strictly
+  // inside) and the bond beam carries an honest flag instead of the blocks
+  // vanishing or breaking the bury.
+  const depth = Math.min(
+    Math.max(wall.thickness - 2 * CMU_FACE_BURY, wall.thickness / 2),
+    BLOCK_DEPTH_ACTUAL,
+  )
+  const thinBuryFloor = wall.thickness - 2 * CMU_FACE_BURY < wall.thickness / 2 - EPS
 
   // Whole courses that fit under the wall height (EPS guards an exact-fit
   // height like 8'-0" from float-rounding down to 11 courses).
@@ -492,6 +522,12 @@ export function cmuWall(wall: WallSlice, spec: FramingSpec, hints: CmuHints = {}
     COURSE_HEIGHT,
     'bond beam — grouted + rebar',
   )
+  if (thinBuryFloor) {
+    // The bond beam always exists (any wall with ≥1 course), so it carries
+    // the wall's thin-bury honesty — one flag per wall, B1 ' | ' compose.
+    const beam = members[members.length - 1]
+    if (beam) beam.flag = beam.flag ? `${beam.flag} | ${THIN_BURY_FLAG}` : THIN_BURY_FLAG
+  }
 
   // ---- reinforcing steel (LOD 350+) ----
   if (fab) {
@@ -645,6 +681,10 @@ export function mixedWallInsets(
     // frameWalls.
     const crossD = Math.abs(wall.dir[0] * other.dir[1] - wall.dir[1] * other.dir[0])
     const dotD = Math.abs(wall.dir[0] * other.dir[0] + wall.dir[1] * other.dir[1])
+    // Deliberately the UN-buried width: the corner retreat only has to
+    // clear the neighbor's face, and CMU_FACE_BURY makes the real block
+    // strictly NARROWER than this — over-retreating by ≤ bury·|cosθ| terms
+    // is the safe direction and keeps the inset layout byte-equal.
     const ownWidth = Math.min(wall.thickness, BLOCK_DEPTH_ACTUAL)
     const k = crossD < 0.1 ? 1 : Math.min(4, (1 + dotD) / crossD)
     const kOwn =
@@ -781,8 +821,11 @@ export function mixedCmuWall(
   if (crossings > 0) {
     // The bond beam is the seam element — it carries the canonical flag so
     // the takeoff's Flags section surfaces the crossing (one line per wall).
+    // Composed ' | ' (B1 convention): the beam may already carry the
+    // thin-bury honesty flag from cmuWall.
     for (const m of members) {
-      if (m.role === 'bond-beam') m.flag = SEAM_CROSSING_FLAG
+      if (m.role === 'bond-beam')
+        m.flag = m.flag ? `${m.flag} | ${SEAM_CROSSING_FLAG}` : SEAM_CROSSING_FLAG
     }
   }
 
