@@ -20,6 +20,16 @@ import { computeTakeoff, cutList, cutListCsv, takeoffCsv } from './engines/takeo
 import { guessJurisdiction } from './jurisdiction/guess'
 import { jurisdictionOptions, profileFor } from './jurisdiction/profiles'
 import { LUMBER_CROSS_SECTIONS, LUMBER_SIZES, type LumberSize } from './lumber'
+import {
+  type FramingSystemValue,
+  framingSystemPatch,
+  framingSystemValue,
+  LGS_MACHINE_NONE,
+  LGS_MACHINE_NONE_LABEL,
+  lgsMachineGroups,
+  lgsMachinePatch,
+  lgsMachineSelectExtra,
+} from './panel-framing'
 import { groupWarnings, warningCount } from './panel-warnings'
 import { useBonesStore } from './store'
 
@@ -210,6 +220,8 @@ function XraySection({
         options={options}
         codeName={profile.residentialCode}
       />
+
+      <FramingRow framingNode={framingNode} />
 
       <div className="flex gap-2">
         <div className="flex-1">
@@ -544,6 +556,64 @@ function LumberSection() {
         />
       </div>
     </details>
+  )
+}
+
+/**
+ * 'Framing' row — LGS Phase 2, UI/UX principle 1b (the second of the two
+ * controls total): ONE compact Lumber | Steel control, slotted between the
+ * JurisdictionPicker (its code-basis peer — the framing system picks the
+ * IRC chapter, R602 wood vs R603 steel) and the detail/spacing row.
+ * PROGRESSIVE DISCLOSURE: the Machine select exists ONLY while Steel is
+ * selected — lumber users see zero change. The select is the cited catalog
+ * verbatim (grouped by vendor, verified rows first, unverified rows keep
+ * their honest suffix); a machine only BRANDS labels and WARNS on
+ * can't-roll resolutions — profiles resolve identically with or without it
+ * (the engine's constraint channel carries the truth to the Warnings
+ * drawer and the paper Flags block). Lumber and 'None' writes REMOVE their
+ * keys, so untouched-equivalent scenes persist byte-identically (Phase 0).
+ */
+function FramingRow({ framingNode }: { framingNode: FramingNode & { id: string } }) {
+  const system = framingSystemValue(framingNode)
+  const write = (patch: Record<string, unknown>) =>
+    useScene
+      .getState()
+      .updateNode(framingNode.id as AnyNodeId, patch as Partial<AnyNode> as never)
+  const extra = lgsMachineSelectExtra(framingNode.lgsMachine)
+  return (
+    <div className="flex flex-col gap-1 text-xs">
+      <span className="text-sidebar-foreground/60">Framing</span>
+      <SegmentedControl
+        onChange={(v: string) => write(framingSystemPatch(v as FramingSystemValue))}
+        options={[
+          { label: 'Lumber', value: 'lumber' },
+          { label: 'Steel', value: 'lgs' },
+        ]}
+        value={system}
+      />
+      {system === 'lgs' && (
+        <>
+          <span className="mt-1 text-sidebar-foreground/60">Machine</span>
+          <select
+            className="w-full rounded-md border border-sidebar-border/60 bg-sidebar-accent/40 px-2 py-1.5 text-sidebar-foreground text-xs outline-none"
+            onChange={(e) => write(lgsMachinePatch(e.target.value))}
+            value={framingNode.lgsMachine ?? LGS_MACHINE_NONE}
+          >
+            <option value={LGS_MACHINE_NONE}>{LGS_MACHINE_NONE_LABEL}</option>
+            {lgsMachineGroups().map((group) => (
+              <optgroup key={group.vendor} label={group.vendor}>
+                {group.machines.map((m) => (
+                  <option key={m.key} value={m.key}>
+                    {m.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+            {extra && <option value={extra.key}>{extra.label}</option>}
+          </select>
+        </>
+      )}
+    </div>
   )
 }
 

@@ -133,6 +133,56 @@ describe('floating inspector keeps the FULL wall engineering surface', () => {
   })
 })
 
+describe("LGS Phase 2: the panel 'Framing' row (source gates)", () => {
+  const panel = read('./panel.tsx')
+
+  test('slots between the JurisdictionPicker and the detail/spacing row (a code-basis peer of jurisdiction)', () => {
+    const jurisdiction = panel.indexOf('<JurisdictionPicker')
+    const framing = panel.indexOf('<FramingRow')
+    const detail = panel.indexOf("{ label: 'Generic', value: '200' }")
+    expect(jurisdiction).toBeGreaterThan(-1)
+    expect(framing).toBeGreaterThan(jurisdiction)
+    expect(detail).toBeGreaterThan(framing)
+  })
+
+  test('ONE compact Lumber | Steel control riding the existing SegmentedControl idiom', () => {
+    expect(panel).toContain("{ label: 'Lumber', value: 'lumber' }")
+    expect(panel).toContain("{ label: 'Steel', value: 'lgs' }")
+    // the row's label matches the JurisdictionPicker label idiom
+    expect(panel).toContain('>Framing</span>')
+  })
+
+  test('PROGRESSIVE DISCLOSURE: the Machine select exists ONLY inside the Steel conditional — lumber users see zero change', () => {
+    expect(panel).toContain("{system === 'lgs' && (")
+    const conditional = panel.indexOf("{system === 'lgs' && (")
+    // the machine label, the None option and the vendor optgroups all live
+    // AFTER the guard, exactly once (one Machine row in the whole file;
+    // LGS_MACHINE_NONE_LABEL also appears once in the import list)
+    for (const needle of [
+      '>Machine</span>',
+      '{LGS_MACHINE_NONE_LABEL}',
+      '<optgroup',
+    ]) {
+      const at = panel.indexOf(needle)
+      expect(at).toBeGreaterThan(conditional)
+      expect(panel.indexOf(needle, at + 1)).toBe(-1)
+    }
+  })
+
+  test('writes ride the pure byte-parity patches (panel-framing.ts), never raw field pokes', () => {
+    expect(panel).toContain("from './panel-framing'")
+    expect(panel).toContain('framingSystemPatch(')
+    expect(panel).toContain('lgsMachinePatch(')
+    // no literal 'lumber' write — Lumber removes the key (Phase-0 parity)
+    expect(panel).not.toContain("framingSystem: 'lumber'")
+  })
+
+  test('a stored-but-unknown machine key stays visible (the honest extra option)', () => {
+    expect(panel).toContain('lgsMachineSelectExtra(')
+    expect(panel).toContain('{extra && <option value={extra.key}>{extra.label}</option>}')
+  })
+})
+
 describe('renderer: wall-mode mount magic is gone (Change A root-cause fix)', () => {
   test('no setWallMode anywhere in the renderer', () => {
     expect(read('./framing/renderer.tsx')).not.toContain('setWallMode')
