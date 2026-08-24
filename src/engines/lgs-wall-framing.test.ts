@@ -949,6 +949,63 @@ describe("MACHINE CONSTRAINTS — the Phase-2 can't-roll warning channel", () =>
     expect(machineLines(warnings)).toEqual([])
   })
 
+  test('BRIDGING-only fallback: the class word is verbatim, the warning is exactly as wide as what composes (round-1 skeptic F1)', () => {
+    // A synthetic verified machine that rolls the stud AND track families
+    // but NOT the 150U050 bridging channel — the only-bridging-falls-back
+    // scenario that tracks all three previously-untracked mutants:
+    // (a) deleting the backing-site emission, (b) lying about the class
+    // word ('studs' while studs are branded verified), (c) dropping the
+    // emits-guard (a warning wider than what's drawn). Injected +
+    // restored per the zzforge precedent.
+    const vendors = LGS.vendors as Record<string, (typeof LGS.vendors)[string]>
+    vendors.zztrack = {
+      name: 'ZZ Track',
+      website: 'https://example.com',
+      machines: {
+        all: {
+          name: 'ZZ Track-All 5000',
+          status: 'verified',
+          sourceUrls: ['https://example.com/spec'],
+          rollableFamilies: [
+            { family: '350S162', basis: 'derived — test fixture' },
+            { family: '550S162', basis: 'derived — test fixture' },
+            { family: '350T125', basis: 'derived — test fixture' },
+            { family: '550T125', basis: 'derived — test fixture' },
+          ],
+        },
+      },
+    }
+    const teeWalls = [
+      wall({ id: 'through', start: [0, 0], end: [6, 0], thickness: 0.15, exterior: true }),
+      wall({ id: 'stem', start: [3, 0], end: [3, 3], thickness: 0.114 }),
+    ]
+    try {
+      const spec: FramingSpec = { ...spec400, lgsMachine: 'zztrack/all' }
+      const { members, warnings } = lgsFrameWalls(teeWalls, spec)
+      // non-vacuous: bridging really composes on the through wall
+      expect(members.filter((m) => m.role === 'backing').length).toBeGreaterThan(0)
+      // (a) the emission exists + (b) the class word is VERBATIM — the
+      // one designator only bridging resolves, never another class's word
+      expect(machineLines(warnings)).toEqual([
+        'Machine ZZ Track-All 5000 cannot roll 150U050-54 (bridging channels) — ' +
+          'generic AISI fallback used; verify with vendor',
+      ])
+      // …and the branded classes never leak into a warning
+      expect(warnings.some((w) => w.includes('(studs)') || w.includes('(tracks)'))).toBe(
+        false,
+      )
+      // (c) emits-guard: the SAME tee at a spacing whose stud-to-stud gap
+      // is under the 3" buildable minimum composes ZERO backing members —
+      // the backing tee still exists in the hint graph, so an un-guarded
+      // emission would warn about members that are not drawn
+      const tight = lgsFrameWalls(teeWalls, { ...spec, studSpacing: inches(2.5) })
+      expect(tight.members.filter((m) => m.role === 'backing')).toEqual([])
+      expect(machineLines(tight.warnings)).toEqual([])
+    } finally {
+      delete vendors.zztrack
+    }
+  })
+
   test('UNVERIFIED machine (Pinnacle): the honest unverified warning — NEVER a cannot-roll claim (nothing was checked)', () => {
     const { warnings } = lgsFrameWalls(walls, { ...spec400, lgsMachine: 'pinnacle/x1' })
     expect(warnings).toContain(

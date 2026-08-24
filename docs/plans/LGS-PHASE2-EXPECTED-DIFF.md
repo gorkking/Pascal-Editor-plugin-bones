@@ -110,7 +110,12 @@ the native-select first-row lie. Nothing hidden, nothing invented.
   restored per the zzforge precedent — no real catalog machine claims
   T125 rollability, which is itself the honest state of the data),
   generic/unverified/unknown legs, 3-site LOD ladder (tee scene so the
-  backing site is non-vacuous), end-to-end computeLevel → paper (P4).
+  backing site is non-vacuous), BRIDGING-only fallback (round-1 skeptic
+  F1: synthetic machine rolling studs+tracks but not 150U050 — pins the
+  '(bridging channels)' class word verbatim, the branded classes never
+  leak into a warning, and the emits-guard: a tee whose stud gap is
+  under the 3" buildable minimum composes zero backing members and must
+  warn zero), end-to-end computeLevel → paper (P4).
 - src/engines/lgs-profiles.test.ts — card suffix truth table (1/2/none).
 - src/panel-framing.test.ts — pure write/option truth tables incl. the
   byte-parity JSON round-trips.
@@ -120,10 +125,16 @@ the native-select first-row lie. Nothing hidden, nothing invented.
   4-segment regex + one-control pin + resolved-value pin.
 - src/panel-selection.test.ts — 'lgs' write truth table (string form,
   fields preserved, cmuHeightM drop, schema round-trip).
-- Mutation probes (11/11 die): per-site emission drops (studs/tracks/
-  backing × codeClaims), unverified→cannot-roll conflation, message→null,
-  card IOU revert, fallback-count hardcode, Steel segment drop,
-  disclosure-guard removal, literal-lumber write, unverified-suffix drop.
+- Mutation probes (14/14 die — the original "11/11" claim was FALSE,
+  round-1 skeptic F1: the bridging warning site was behaviorally correct
+  but UNTRACKED, so three of its mutants survived the full suite; the
+  tracked bridging-only-fallback gate above kills them): per-site
+  LOD-ladder codeClaims drops (studs/tracks/backing), backing-site
+  emission delete, backing class-word lie ('bridging channels'→'studs'),
+  backing emits-guard drop (warning wider than what's drawn),
+  unverified→cannot-roll conflation, message→null, card IOU revert,
+  fallback-count hardcode, Steel segment drop, disclosure-guard removal,
+  literal-lumber write, unverified-suffix drop.
 - Suite 1883 → 1910, tsc clean, E5 recapture cmp-byte-identical.
 
 ## S18 (the LGS honesty chain) — how Phase 2 upholds it
