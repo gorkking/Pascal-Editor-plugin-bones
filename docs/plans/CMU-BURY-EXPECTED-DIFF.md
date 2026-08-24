@@ -158,3 +158,31 @@ DECISION: queued as its own loop item with this assessment; the host-side
 suppression-aware repaint follow-up (the actual blinking mechanism) also
 covers the framed symptom when it lands, so the plugin-side layer bury is
 not the urgent half there.
+
+## POST-VERIFY ADDENDA (round wf_193a3cd0, merge companion)
+
+PAPER MIRROR (examiner REC-1 — the round's one over-claim): "every
+sheet byte-equal except the pour buy cell" is the WEAK form only. On
+CMU-bearing scenes the wall framing plan, all four elevations, Section
+A-A and the cover axon also move — 100% numeric-only attribute drift
+(zero text/element changes; max 1.5px at 1:25, 0.1px at 1:100; raster
+diffs 0.004%–0.49%, invisible at print size) tracing 1:1 to member
+delta classes 1–2 (the sheets draw the buried members — correct S4
+member-truth). Zero-CMU scenes: all 18 sheets byte-identical.
+
+CORNER BUTT-GAP CLASS (skeptic advisory, quantified): blocks slimmed
+5mm/side widen claimed-corner BUTT joints by exactly the bury —
+yielding-course block ends 4.76 → 9.76mm (≈ a full 9.5mm mortar
+joint, visually defensible); bond-beam yielding end vs through-beam
+face 0mm flush → 5.0mm air gap (poured elements have no mortar-joint
+alibi), and the through beam stands 5mm proud of the neighbor's
+blockwork face. X-ray-only visibility (inside the host wall volume in
+solid/painted modes); no gated invariant regresses (S1 is
+overlap-only). ABSORBED BY the queued u-direction end-face item: an
+end-bury/end-extend treatment should close both the end-plane
+coplanarity residual and this gap class together.
+
+PRE-EXISTING, NOTED (examiner REC-3/4, not this fix): nominal
+'8x8x16 running bond' takeoff detail names a unit that fits neither
+drawn nor buried depth on sub-8" walls (byte-equal to base, pinned);
+wall-sheet CMU coursing has no legend row.
