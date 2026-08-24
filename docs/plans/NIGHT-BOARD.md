@@ -267,9 +267,18 @@ masonry-free scenes); examiner REVISE (FAIL: legend slice(0,13) cap
 silently drops steel rows on mixed levels — F3 re-manifest through
 the cap; FLAG: LOD-200 steel paper prints cavity-R + IECC cite
 unqualified — F2 rides 200-suppressed channels). ROUND-3 FIXES
-DISPATCHED (A trim masonry tee-stems, B truthful clamp attribution,
-C cap never drops a drawn family, D qualifier rides the cite at
-200). Closing round after tip.
+(tip 81a76db): B/C/D CLOSED (examiner APPROVE — worst-case 24-line
+legend layout holds, qualifier claim-sheet==qualifier-sheet 14/14,
+advisories never crossed). ROUND 3 skeptic REVISE on fix A's seam:
+F1 BLOCKER sub-6" remnant drop silently deletes R603.3.3 bracing
+(0.5m stub + mid-run stem → ZERO straps, empty warning delta,
+unpinned — S13 doctrine); F2 BLOCKER oblique CMU stem still bores
+32mm at the strap plane (band misses ±zOffset·cotθ shift); F3
+takeoff grade re-derivation unpinned (hardcoded Gr-50 survives).
+ROUND-4 FIXES DISPATCHED (per-wall drop warning on P4 channel,
+band widened by |zOffset·cotθ| + oblique SAT scenario, one -33
+grade pin; F2-before-F1 ordering noted). Examiner APPROVE carries
+if paper only gains the new warnings on gate scenes.
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
