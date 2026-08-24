@@ -23,6 +23,22 @@ unexpected mesh.material as a trigger; paint-preview restore should
 re-resolve the current variant, not restore a stale snapshot) — fixes
 the resurrection class for ALL plugins/modes; also benefits 'up'/
 'cutaway' modes where the stipple never applies.
+DELIVERED: fix/cmu-face-bury tip bfec7c6 (74eef20 + manifest; suite
+1751, tsc clean). depth = min(max(t−2·0.005, t/2), BLOCK_DEPTH);
+walls ≥0.203675 byte-equal; THIN_BURY_FLAG when t/2 floor engages
+(host UI floor 0.05 → full bury holds, sub-2cm raw-API degrades to
+t/4/side, blocks never vanish). E5: baseline has ZERO CMU roles —
+recapture byte-identical, computeLevel CMU scene gate substitutes.
+Honest deviation: lintels/beams buy detail '≈0.2'→'≈0.1' (net 0.1
+yd³ unchanged). FRAMED-LAYERS TWIN: assessed NOT-contained (cavity
+keystone interpenetrates; 38 members/jurisdiction pin churn; x-ray
+lip) → QUEUED, host self-heal also covers it. NEW RESIDUAL QUEUED:
+u-direction end-face class (bond-beam/lintel END faces on host wall
+end caps at CMU×CMU corners; blocks immune via length shrink).
+VERIFY: wf_193a3cd0-502 (skeptic: all-roles coplanarity sweep +
+boundary t's + pre-bury takeoff re-derivation; examiner: the one
+buy cell; visual: paint-a-CMU-wall repro — flicker must be GONE,
+framed still flickers honestly, x-ray unchanged at distance).
 
 # HP POLISH — feat/hp-polish DELIVERED, VERIFY ROUND RUNNING (2026-08-23)
 
@@ -108,9 +124,17 @@ complementary-defense gap (unverified machines could claim rollable
 rows), F5 parser 'L'/leading-zero nits. FIX TIP 73d55d9 (one commit
 per finding, suite 1775, all mutants die; F5 deviation documented:
 SFIA ships real 075U050-54 so only padded 4-digit aliases rejected).
-RE-VERIFY: wf_2f96f711-d34 (sweep ALL 'framed' literals for missed
-half-routes, all-19-machine mil-set convention sweep, F5 deviation
-adjudicated against the PDF). Merge only after APPROVE.
+ROUND 2 (wf_2f96f711): near-APPROVE — F1–F4 hold under extended
+attack (byte-equality incl. FL cmu-default + object-form overrides +
+LOD-200/400 plan sets; 19-machine sweep ZERO mismatches; F5
+deviation CONFIRMED against PDFs — 443+51 real designators, zero
+rejections). ONE residual: padded-MILS alias ('350S162-033' parsed,
+missed catalog) + F3 doc-label cosmetic. CLOSING TIP c5794a6
+(c175673 mils group [1-9]\\d{1,2} + 4 pins; c5794a6 derivation label
+names the real SFIA min-base convention). ROUND 3 (closing):
+wf_3b1f5b6c-e95 — narrow: diff-scope proof, exhaustive-parse re-run,
+mutation on the old regex. Merge on APPROVE. Phase-2 note: inspector
+SegmentedControl highlight for MCP-set 'lgs' walls (documented).
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
