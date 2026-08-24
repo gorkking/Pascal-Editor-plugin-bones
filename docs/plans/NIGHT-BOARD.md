@@ -230,10 +230,20 @@ NO R603.3.2 cells encoded). REAL VENDOR FINDING: TF550H rolls
 generic fallback, labeled. Deviations (a)-(e) in manifest incl.
 steel exits R602.10 braced lines (warnings only) + S240 anchorage
 residual (bolt kit clamps track — queued). 11 mutants die.
-VERIFY: wf_2b2bb186-c14 (skeptic: mil-selection honesty + routing
-half-route hunt + deviations adjudication; examiner: designators/
-citations/weight-honesty on paper + lumber corpora byte-equal;
-visual: steel assembly at 400 + mixed corners + lumber pixel-parity).
+ROUND 1 (wf_2b2bb186): visual PASS (assembly/junctions/twin-parity/
+punchout-metadata/lumber-0px/HP+duct all hold; advisory: NO member-
+tooltip surface exists — labels live in data/card/paper; Phase-2 UX
+affordance queued), skeptic REVISE (F1 basis clause on 1/8 roles,
+orphaned basisSuffix var; F2 steel walls inherit wood-frame IECC
+claims unqualified — R402.2.6 steel rule unstated, gate PINS the
+lie; F3 steel legend-invisible; F4 four surviving mutants incl.
+phantom-nails filter + substring-only label truth + block×strap SAT
+on FL's CMU-shell+steel-partition default; F5 LOD-200 header cite
+ungated, vendor-label inherited grade), examiner REVISE (P6 FAIL:
+door/window schedule prints dishonest '—' for existing steel
+headers — plan-set.ts:2968 size??'—'; FLAGS: gradeless takeoff,
+strap unkeyed-fleck B9 class; sill track needs lifted-window gate).
+FIX ROUND DISPATCHED. Re-verify before merge.
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
