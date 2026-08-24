@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { DEFAULT_SPEC } from '../core/spec'
 import { baselineConfig, baselineScene } from '../framing/baseline-scene'
 import { computeLevel } from '../framing/compute'
-import { FramingNode, framesAsLumber, WallOverride } from '../framing/schema'
+import { framedAssembly, FramingNode, framesAsLumber, WallOverride } from '../framing/schema'
 import { selectedWallInfo } from '../panel-selection'
 import {
   DEFAULT_STRUCTURAL_MILS,
@@ -376,33 +376,68 @@ describe('citation completeness (the data-shape gate)', () => {
   })
 })
 
-describe("'lgs' walls frame AS LUMBER — never half-routed (skeptic F1)", () => {
+describe("'lgs' walls route FULLY — steel bones, framed-twin sheet goods (F1, Phase 1)", () => {
   const cfgWith = (overrides?: Record<string, WallOverride>) => ({
     ...baselineConfig('INTL'),
     ...(overrides ? { wallOverrides: overrides } : {}),
   })
 
-  test('framesAsLumber: the ONE predicate — framed + lgs in, cmu + skip out', () => {
+  test('the predicates split honestly: framesAsLumber = framed only; framedAssembly adds lgs', () => {
+    // Phase 1 delivered on the Phase-0 comment's promise: 'lgs' left
+    // framesAsLumber in the SAME commit that gave it the steel engine.
     expect(framesAsLumber('framed')).toBe(true)
-    expect(framesAsLumber('lgs')).toBe(true)
+    expect(framesAsLumber('lgs')).toBe(false)
     expect(framesAsLumber('cmu')).toBe(false)
     expect(framesAsLumber('skip')).toBe(false)
+    expect(framedAssembly('framed')).toBe(true)
+    expect(framedAssembly('lgs')).toBe(true)
+    expect(framedAssembly('cmu')).toBe(false)
+    expect(framedAssembly('skip')).toBe(false)
   })
 
-  test("an 'lgs' wall is BYTE-EQUAL to the untouched baseline — members, areas, everything", () => {
-    // Kills the F1 mutants at all three compute sites: dropping 'lgs' from
-    // the grouping loses the wall's members; dropping it from either areas
-    // site loses sheathing/drywall m² (the silent under-buy class).
+  test("an 'lgs' wall frames in STEEL while areas + layers + fixtures stay byte-equal to the framed twin", () => {
+    // The Phase-1 F1 contract: the SKELETON changes material (catalog-
+    // designated steel members replace the lumber set for those walls) but
+    // the sheet-goods story is untouched — areas, layer members and
+    // fixtures byte-equal. Kills the same mutant sites as Phase 0's gate:
+    // dropping 'lgs' from the grouping loses the wall's members entirely;
+    // dropping it from either areas site loses sheathing/drywall m² (the
+    // silent under-buy class).
     const base = computeLevel(baselineScene(), cfgWith())
     const lgs = computeLevel(baselineScene(), cfgWith({ w_s: 'lgs', w_mid: 'lgs' }))
     expect(base.members.length).toBeGreaterThan(50) // the walls really frame
     expect(lgs.areas).toEqual(base.areas) // sheathing + drywall both booked
-    expect(JSON.stringify(lgs.members)).toBe(JSON.stringify(base.members))
+    // steel bones exist for BOTH overridden walls, labeled from the catalog
+    for (const id of ['w_s', 'w_mid']) {
+      const steel = lgs.members.filter((m) => m.sourceId === id && m.profile !== undefined)
+      expect(steel.length).toBeGreaterThan(10)
+      for (const m of steel) expect(m.material).toBe('steel')
+      // no lumber skeleton remains on the steel wall
+      expect(
+        lgs.members.some(
+          (m) => m.sourceId === id && m.material === 'lumber' && m.role === 'stud',
+        ),
+      ).toBe(false)
+    }
+    // layer members (sheathing/drywall/WRB/cladding) byte-equal — the sheet
+    // goods hang on steel bones exactly as they did on lumber
+    const layerRoles = new Set(['drywall', 'sheathing', 'wrb', 'cladding'])
+    const layers = (r: { members: { role: string }[] }) =>
+      r.members.filter((m) => layerRoles.has(m.role))
+    expect(JSON.stringify(layers(lgs))).toBe(JSON.stringify(layers(base)))
     expect(JSON.stringify(lgs.fixtures)).toBe(JSON.stringify(base.fixtures))
-    expect(lgs.warnings).toEqual(base.warnings)
+    // warnings grow by the LGS honesty channels; the ONLY legitimate drops
+    // are R602.10 braced-wall LINE warnings (steel walls leave the wood
+    // bracing method's lines exactly like CMU does — their R603.9 shear
+    // story is its own LGS warning)
+    for (const w of base.warnings) {
+      if (w.includes('braced wall line')) continue
+      expect(lgs.warnings).toContain(w)
+    }
+    expect(lgs.warnings.some((w) => w.includes('R603.9'))).toBe(true)
   })
 
-  test('the wall card tells the truth: never "Skipped", engineering populated', () => {
+  test('the wall card tells the STEEL truth: designator + stated basis, engineering populated', () => {
     const nodes = baselineScene()
     const select = { levelId: 'level_1', selectedIds: ['w_s'] }
     const framedCfg = cfgWith({ w_s: 'framed' })
@@ -412,14 +447,31 @@ describe("'lgs' walls frame AS LUMBER — never half-routed (skeptic F1)", () =>
     if (!info || !framedInfo) throw new Error('missing wall info')
     expect(info.construction).toBe('lgs')
     expect(info.assembly).toContain('Steel (LGS)')
-    expect(info.assembly).toContain('framed as lumber')
-    expect(info.assembly).toContain('Phase 1')
+    // the printed profile is the one the engine built (ONE resolver:
+    // lgsWallProfiles feeds both the card and the members)
+    expect(info.assembly).toContain('550S162-68')
+    expect(info.assembly).toContain('(Gr 50)')
+    expect(info.assembly).toContain('@ 16" o.c.')
+    // stated basis — the R603.3.2 mil table cells are unverified
+    expect(info.assembly).toContain('conservative: R603.3.2 table cell unverified')
+    expect(info.assembly).not.toContain('framed as lumber')
     expect(info.assembly).not.toContain('Skipped')
-    // the engineering block IS the framed twin's — members exist, the
-    // recipe printed is what's built (insulation line rides along too)
+    // engineering block stays populated (the recipe drives the steel
+    // family + spacing; insulation/cladding ride the same layer stack)
     expect(info.engineering).not.toBeNull()
     expect(info.engineering).toEqual(framedInfo.engineering)
-    expect(info.insulation).toEqual(framedInfo.insulation)
+    // TRUTH pin, not an equality pin (round-1 F2 — the old
+    // insulation-equality assertion PINNED the wood-frame IECC claim onto
+    // steel walls): the steel card keeps the framed twin's R/zone CONTENT
+    // and adds the steel-frame qualifier — R402.2.6 is the steel wall's
+    // own requirement and it is stated as NOT evaluated.
+    expect(framedInfo.insulation).not.toBeNull()
+    expect(info.insulation).toContain(String(framedInfo.insulation))
+    expect(info.insulation).toContain('wood-frame prescriptive')
+    expect(info.insulation).toContain('R402.2.6')
+    expect(info.insulation).toContain('not evaluated')
+    // …and the framed twin never carries the steel qualifier
+    expect(framedInfo.insulation).not.toContain('R402.2.6')
   })
 })
 

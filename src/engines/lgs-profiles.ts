@@ -351,8 +351,15 @@ export const DEFAULT_STRUCTURAL_MILS = 33
 export function profileFor(
   role: MemberRole,
   spec: FramingSpec,
-  opts?: { interior?: boolean },
+  opts?: {
+    interior?: boolean
+    /** Minimum mils the resolution must meet (Phase 1's selection passes
+     * its conservative pick here; R603.3.2's track rule rides it too —
+     * track ≥ stud thickness). Default = the 33-mil structural floor. */
+    minMils?: number
+  },
 ): LgsProfileResolution {
+  const minMils = opts?.minMils ?? DEFAULT_STRUCTURAL_MILS
   const stem = familyStemFor(role, spec, opts)
   if (!stem) {
     return {
@@ -361,13 +368,13 @@ export function profileFor(
       note: `no prescriptive cold-formed steel member class for role '${role}' (IRC R603/R505/R804 scope) — engineered design required`,
     }
   }
-  const designator = pickVariant(stem, DEFAULT_STRUCTURAL_MILS)
+  const designator = pickVariant(stem, minMils)
   const family = designator ? profileFamily(designator) : undefined
   if (!designator || !family) {
     return {
       status: 'engineered design required',
       role,
-      note: `no catalog row for family ${stem} at ≥ ${DEFAULT_STRUCTURAL_MILS} mil — engineered design required`,
+      note: `no catalog row for family ${stem} at ≥ ${minMils} mil — engineered design required`,
     }
   }
 
@@ -377,12 +384,11 @@ export function profileFor(
       const rollable = rollableDesignators(machine)
       const pick =
         rollable.find((d) => d === designator) ??
-        // machine rolls the family but not the default mils → its thinnest
-        // variant at/above the structural minimum still counts as rolled
+        // machine rolls the family but not the requested mils → its
+        // thinnest variant at/above the minimum still counts as rolled
         rollable.find(
           (d) =>
-            d.startsWith(`${stem}-`) &&
-            (parseDesignator(d)?.mils ?? 0) >= DEFAULT_STRUCTURAL_MILS,
+            d.startsWith(`${stem}-`) && (parseDesignator(d)?.mils ?? 0) >= minMils,
         )
       if (pick) {
         const pickFamily = profileFamily(pick)
@@ -403,7 +409,7 @@ export function profileFor(
         (rf) =>
           rf.designator &&
           rf.nearestGeneric?.toUpperCase() === stem &&
-          (!rf.rollableMils || rf.rollableMils.some((m) => m >= DEFAULT_STRUCTURAL_MILS)),
+          (!rf.rollableMils || rf.rollableMils.some((m) => m >= minMils)),
       )
       if (vendorRow?.designator) {
         return {

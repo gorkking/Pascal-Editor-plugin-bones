@@ -20,7 +20,12 @@ import {
   resolveWallConstruction,
 } from './framing/compute'
 import {
-  framesAsLumber,
+  isResolvedProfile,
+  lgsLabelHead,
+  lgsWallProfiles,
+} from './engines/lgs-wall-framing'
+import {
+  framedAssembly,
   type FramingNode,
   type WallCladding,
   type WallConstruction,
@@ -181,28 +186,53 @@ export function selectedWallInfo(
   const defaultSpacingIn = Math.round(result.spec.studSpacing / METERS_PER_INCH) as WallSpacingIn
   const studSize = resolved.studSize ?? defaultStudSize
   const spacingIn = resolved.spacingIn ?? defaultSpacingIn
-  // 'lgs' says the TRUTH: the members on screen ARE lumber until the
-  // Phase-1 steel engine lands — never "Skipped" (skeptic F1: that string
-  // on a wall rendering 98 members was a flat lie), and the engineering
-  // block stays populated because the framed recipe is what's built.
+  // 'lgs' says the STEEL truth (Phase 1): the assembly line prints the
+  // exact profile + spacing the steel engine builds — ONE resolver
+  // (lgsWallProfiles) feeds both, so the card can't drift from the 3D
+  // members — with the selection basis stated (the mil table cells are
+  // unverified; the conservative pick says so). A selected machine only
+  // brands/falls back labels in Phase 1 — can't-roll WARNINGS land with
+  // the machine UX in Phase 2, and the card says that too.
+  const lgsAssembly = (): string => {
+    const profiles = lgsWallProfiles(wall, result.spec, {
+      ...(resolved.studSize !== undefined ? { studSize: resolved.studSize } : {}),
+      ...(resolved.spacingIn !== undefined ? { spacingIn: resolved.spacingIn } : {}),
+    })
+    if (!isResolvedProfile(profiles.stud)) {
+      return 'Steel (LGS) — engineered design required (no prescriptive member class)'
+    }
+    const basis = profiles.basis ? ` — ${profiles.basis}` : ''
+    const machineNote = result.spec.lgsMachine
+      ? ` · machine ${result.spec.lgsMachine} (constraint warnings land in Phase 2)`
+      : ''
+    return `Steel (LGS) — ${lgsLabelHead(profiles.stud)} @ ${spacingIn}" o.c.${basis}${machineNote}`
+  }
   const assembly =
     construction === 'framed'
       ? `${studSize} studs @ ${spacingIn}" o.c.`
       : construction === 'lgs'
-        ? `Steel (LGS) — framed as lumber (${studSize} @ ${spacingIn}" o.c.) until the steel engine lands (Phase 1)`
+        ? lgsAssembly()
         : construction === 'cmu'
           ? '8" CMU block · running bond'
           : 'Skipped — excluded from every system'
 
   const ins = result.characteristics?.insulation
+  // Steel-frame honesty (round-1 F2): the R figure is the WOOD-frame
+  // prescriptive cell — 2021 IECC R402.2.6 / IRC N1102.2.6 give
+  // steel-frame walls their own requirement (cavity + continuous
+  // insulation, or U-factor path) and nothing here evaluates it. The
+  // card line says so instead of letting the wood claim ride.
+  const steelInsNote =
+    ' — wood-frame prescriptive value; steel framing takes IECC R402.2.6 ' +
+    'continuous insulation / U-factor — not evaluated'
   const insulation =
-    framesAsLumber(construction) && wall.exterior && ins
-      ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}`
+    framedAssembly(construction) && wall.exterior && ins
+      ? `R-${ins.wallR} cavity · IECC zone ${ins.climateZone}${construction === 'lgs' ? steelInsNote : ''}`
       : null
 
   const codeMinR = ins?.wallR ?? 13
   const engineering: WallEngineeringInfo | null =
-    framesAsLumber(construction)
+    framedAssembly(construction)
       ? {
           studSize,
           spacingIn,

@@ -123,6 +123,14 @@ export function computeCharacteristics(
   spec: FramingSpec = DEFAULT_SPEC,
   /** Resolved state code (drives the climate-zone insulation lookup). */
   stateCode = 'NY',
+  opts?: {
+    /** The level carries steel-frame (LGS) walls — the wood-frame IECC
+     * cavity figure does not hold for them (2021 IECC R402.2.6 / IRC
+     * N1102.2.6 give steel walls their OWN requirement) and the UA/load
+     * arithmetic ignores steel-stud thermal bridging; the notes say so
+     * instead of letting the wood claim ride (LGS Phase 1, round-1 F2). */
+    steelWalls?: boolean
+  },
 ): BuildingCharacteristics | null {
   if (walls.length === 0 && rooms.length === 0 && slabs.length === 0) return null
   const notes: string[] = []
@@ -222,6 +230,17 @@ export function computeCharacteristics(
         ? fallbackEntry
         : { value: 'R13', citation: '2021 IECC Table R402.1.3 / IRC N1102.1.3' }
   const wallR = Number.parseInt(picked.value.replace(/^R/i, ''), 10) || 13
+  // Steel-frame qualifier rides the CITATION STRING ITSELF (round-2 D):
+  // the R402 energy cite prints at EVERY LOD (paper's characteristics
+  // block, the notes line, the CSV) while the warning channel is 300+-
+  // gated — a steel set at 200 printed 'Wall cavity R-30 … Table
+  // R402.1.3' with zero qualifier. Qualifying the one source string
+  // means no surface can print the cite without the caveat. (The
+  // zero-R603-at-200 ladder rule is about STRUCTURAL claims; this cite
+  // already prints at 200, so honesty must accompany it there too.)
+  const citation = opts?.steelWalls
+    ? `${picked.citation} — wood-frame prescriptive; steel-frame walls take R402.2.6/N1102.2.6, not evaluated`
+    : picked.citation
   const climateZone = zone?.label ?? '4 (assumed)'
   if (!zone) {
     notes.push(
@@ -233,7 +252,20 @@ export function computeCharacteristics(
         (/[(/-]/.test(zoneRaw ?? '') ? ' (zone varies within the state — confirm with AHJ)' : ''),
     )
   }
-  notes.push(`Wall cavity ${picked.value} — ${picked.citation}`)
+  notes.push(`Wall cavity ${picked.value} — ${citation}`)
+  if (opts?.steelWalls) {
+    // Steel-frame honesty (LGS Phase 1): the cavity R above is the
+    // WOOD-frame prescriptive cell, and every UA/Manual-J figure below
+    // treats the cavity R at face value — steel studs short-circuit a
+    // cavity-only assembly and the code prices that (R402.2.6's
+    // cavity + continuous-insulation combos / effective-U path).
+    notes.push(
+      'Steel-frame (LGS) walls present — cavity R shown is the wood-frame prescriptive ' +
+        'value; steel-frame walls take 2021 IECC R402.2.6 / IRC N1102.2.6 (cavity + ' +
+        'continuous insulation, or U-factor path) — not evaluated, and steel-stud thermal ' +
+        'bridging is not modeled in the UA/load figures',
+    )
+  }
   // Does the prescriptive batt even fit the spec'd stud bay?
   if (picked.battThicknessIn) {
     const bayIn = toInches(LUMBER_CROSS_SECTIONS[spec.exteriorStudSize][1])
@@ -301,7 +333,7 @@ export function computeCharacteristics(
     windowCount,
     windowAreaM2,
     doorCount,
-    insulation: { climateZone, wallR, citation: picked.citation },
+    insulation: { climateZone, wallR, citation },
     uaWPerK,
     designHeatLossW,
     coolingTonsEstimate,

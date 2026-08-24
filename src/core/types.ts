@@ -80,6 +80,12 @@ export type MemberRole =
    * header-to-jack strap (R602.10.6.4, LOD-400 B9). Surface-mounted:
    * ~1.2 mm thick against the framing face, under the 2 mm SAT skin. */
   | 'strap'
+  /** LGS horizontal strap bracing (IRC R603.3.3, Phase 1): 1-1/2" × 33 mil
+   * flat strap across the stud flanges — mid-height on ≤ 8 ft walls,
+   * third-points on 9/10 ft. Its OWN role so the takeoff books it by
+   * LENGTH without perturbing B9's portal-strap census (the role-counted
+   * doctrine). Surface steel on the framing faces, under the SAT skin. */
+  | 'strap-bracing'
   // high-wind wall uplift path (R802.11 continuation / WFCM — LOD-400 B10).
   // Own roles so the takeoff counts each as a dedicated hardware line (the
   // 'counted by ROLE, never label regex' doctrine) without perturbing B9's
@@ -176,6 +182,30 @@ export type Member = {
    * layers carry it.
    */
   face?: readonly [number, number]
+  /**
+   * AISI member designator when the piece is a cold-formed steel profile
+   * from data/lgs-profiles.json ('350S162-68', vendor designators
+   * included) — the takeoff's grouping key for steel rows (the dedicated-
+   * field doctrine: never parsed back out of labels). Only LGS members
+   * carry it (LGS Phase 1).
+   */
+  profile?: string
+  /**
+   * Factory service punchouts (AISI S240 A5.9) on an LGS member's web —
+   * METADATA ONLY in Phase 1 (the box geometry carries no holes; the
+   * Phase-2 MEP engines snap runs to this rhythm instead of drilling).
+   * Centers run along the member axis: first ≥ `endDistanceIn` from each
+   * end, then `spacingIn` on-center; `count` is what fits the cut length.
+   */
+  punchouts?: {
+    /** Key into data/lgs-profiles.json punchPatterns. */
+    pattern: string
+    widthIn: number
+    lengthIn: number
+    spacingIn: number
+    endDistanceIn: number
+    count: number
+  }
 }
 
 /** Electrical / plumbing / HVAC device the engines placed. */

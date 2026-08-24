@@ -15,6 +15,7 @@ import { formatFtIn, inches } from '../core/units'
 import { type BuildingCharacteristics, zeroAreaNa } from '../engines/characteristics'
 import { openingSpans } from '../engines/electrical'
 import { computeTakeoff, type TakeoffAreas } from '../engines/takeoff'
+import { profileFamily } from '../engines/lgs-profiles'
 import {
   DUCT_COLORS,
   PLUMBING_COLORS,
@@ -216,6 +217,11 @@ const HARDWARE_GLYPHS = {
    * lumber rect (the post is real structure and keeps its rect; before
    * NIGHT-10 it keyed only through a roleSizes-cap accident). */
   'portal-post': '<rect x="-3.5" y="-3.5" width="7" height="7" fill="none" stroke="#444" stroke-width="0.9"/>',
+  /** LGS R603.3.3 horizontal strap bracing (Phase 1) — double bar (the
+   * strap rows on both faces). Joined the NIGHT-10 grammar with its role:
+   * 20 straps drew as unkeyed ~0.04 px flecks before (the B9 class). */
+  'strap-bracing':
+    '<path d="M-3.4 -1.3 H3.4 M-3.4 1.3 H3.4" fill="none" stroke="#444" stroke-width="0.9"/>',
 } as const
 type HardwareGlyphKind = keyof typeof HARDWARE_GLYPHS
 
@@ -226,6 +232,7 @@ type HardwareGlyphKind = keyof typeof HARDWARE_GLYPHS
 const hardwareGlyphKind = (sheetKey: string, m: Member): HardwareGlyphKind | null => {
   if (sheetKey === 'wall' && m.system === 'wall-framing') {
     if (m.role === 'strap') return 'strap'
+    if (m.role === 'strap-bracing') return 'strap-bracing'
     if (m.role === 'uplift-strap') return 'uplift-strap'
     if (m.role === 'uplift-connector') return 'uplift-connector'
     if (m.role === 'foundation-strap') return 'foundation-strap'
@@ -1389,14 +1396,27 @@ function planSheet(
   // on a 2x6-dominant house (quality C4).
   const roleSizeCounts = new Map<string, Map<string, number>>()
   for (const m of mine) {
-    if (!m.size) continue
+    // Steel (LGS Phase 1, round-1 F3): members carry no LumberSize — their
+    // family identity is the `profile` designator. A size-only legend drew
+    // an all-steel sheet with 159 members and ZERO legend rows, and a
+    // MIXED level printed 'stud — 2x6' while 28 drawn members were
+    // 550S162-68. Steel families key under their OWN role bucket
+    // ('stud (LGS)') so mixed levels list both, with the verified grade.
+    const steelKey = !m.size && m.profile ? `${m.role} (LGS)` : null
+    const sizeKey =
+      m.size ??
+      (m.profile
+        ? `${m.profile}${profileFamily(m.profile) ? ` (Gr ${profileFamily(m.profile)?.yieldKsi})` : ''}`
+        : null)
+    if (sizeKey === null) continue
     // Portal posts key through the HARDWARE legend row below (glyph +
     // cite + count + size) — the generic 'post — 2x6' row only ever
     // printed by a legend-cap accident (NIGHT-10; B9 examiner).
     if (hardwareGlyphKind(def.key, m) === 'portal-post') continue
-    const counts = roleSizeCounts.get(m.role) ?? new Map<string, number>()
-    counts.set(m.size, (counts.get(m.size) ?? 0) + 1)
-    roleSizeCounts.set(m.role, counts)
+    const roleKey = steelKey ?? m.role
+    const counts = roleSizeCounts.get(roleKey) ?? new Map<string, number>()
+    counts.set(sizeKey, (counts.get(sizeKey) ?? 0) + 1)
+    roleSizeCounts.set(roleKey, counts)
   }
   const roleSizes = new Map<string, string>()
   for (const [role, counts] of roleSizeCounts) {
@@ -1423,16 +1443,20 @@ function planSheet(
   for (const [role, desc] of Object.entries(SIZELESS_LEGEND)) {
     if (!roleSizes.has(role) && mine.some((m) => m.role === role)) roleSizes.set(role, desc)
   }
-  // Cap 13 (was 10, was 8): the size-less rows append LAST — the compose
-  // roof sheet already carries 9 SIZED roles, so a 10-cap re-dropped the
-  // B6 deck/underlayment/drip rows it just gained (the same failure mode
-  // as the 8-cap, one batch later).
-  const legendLines: string[] = [...roleSizes.entries()]
-    .slice(0, 13)
-    .map(
-      ([role, size], i) =>
-        `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
-    )
+  // NO CAP (round-2 examiner C — was 13, was 10, was 8): every fixed cap
+  // re-manifested the same silent-drop failure one batch later — the
+  // 10-cap dropped the B6 deck rows the batch just gained, and the 13-cap
+  // dropped 'stud (LGS)'/'king-stud (LGS)'/'cripple (LGS)' on the F3
+  // mixed exhibit (9 lumber + 7 steel rows), leaving 23/28 drawn steel
+  // members unkeyed beside a legend reading 'stud — 2x6'. A legend that
+  // drops a DRAWN family is a lie of omission (P2); the box height
+  // already derives from legendLines.length, so tall scenes buy legend
+  // height, never silence. roleSizes is one row per family (most-common
+  // size within it), so this is bounded by the role vocabulary.
+  const legendLines: string[] = [...roleSizes.entries()].map(
+    ([role, size], i) =>
+      `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
+  )
   // Legend BOX geometry: circuit rows may flow into a second column — the
   // backing rect must widen to cover it (examiner round-5: column 2 printed
   // on bare linework) and must not count wrapped rows twice in its height.
@@ -2965,12 +2989,17 @@ function openingRowInfo(
       Number.POSITIVE_INFINITY,
       ...(rec?.bondBeams.map((b) => b.position[1] - b.dims[1] / 2) ?? []),
     )
+    // A header member with no LumberSize is not headerless: LGS box
+    // headers carry their AISI designator in `profile` (round-1 P6 — the
+    // cell printed the banned dishonest '—' while the framed 2-C header's
+    // own R603.6 flag printed on the row below it; the CMU bond-beam
+    // precedent's exact class). '2×' states the box assembly.
     const headerText = head
       ? head.material === 'engineered'
         ? 'ENGINEERED (by supplier)'
         : head.role === 'lintel'
           ? 'precast lintel'
-          : (head.size ?? '—')
+          : (head.size ?? (head.profile ? `2× ${head.profile} box` : '—'))
       : bbBottom - roTop < BB_AS_LINTEL_TOL
         ? 'bond beam as lintel'
         : '—'

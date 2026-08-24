@@ -1875,6 +1875,11 @@ export function applyDeviceOverrides(
             const mid = (left.u + left.halfT + (right.u - right.halfT)) / 2
             const p = wallPlan({ wall, u: mid })
             const t = left.halfT * 2
+            // A LumberSize on the flanking vertical means a lumber wall —
+            // steel (LGS) verticals carry none, and their device blocking
+            // is CFS strap/track hardware the takeoff does not price (the
+            // label says so instead of booking phantom wood — LGS Phase 1).
+            const steelWall = left.size === undefined
             const block: Member = {
               system: 'wall-framing',
               role: 'blocking',
@@ -1883,9 +1888,11 @@ export function applyDeviceOverrides(
               length: blockLen,
               position: [p[0], h, p[1]],
               rotation: [0, Math.atan2(-wall.dir[1], wall.dir[0]), 0],
-              material: 'lumber',
+              material: steelWall ? 'steel' : 'lumber',
               sourceId: wall.id,
-              label: 'device blocking — box off-stud',
+              label: steelWall
+                ? 'device blocking — box off-stud (steel wall: CFS strap/track blocking per detail — not booked)'
+                : 'device blocking — box off-stud',
             }
             members.push(block)
             // later devices in the same bay mount to THIS block

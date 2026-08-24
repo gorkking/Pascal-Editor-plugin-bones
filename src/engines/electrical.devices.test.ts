@@ -261,6 +261,37 @@ describe('applyDeviceOverrides — code-aware snapping', () => {
     expect(block.dims[0]).toBeCloseTo(2.0 - 0.019 - 0.0381, 6)
   })
 
+  test('STEEL wall (LGS Phase 1): off-stud blocking is CFS steel, labeled not-booked — never phantom wood', () => {
+    const { wall, walls, fixtures } = rig()
+    // Synthetic sparse STEEL verticals: catalog C-studs carry no LumberSize.
+    const steelStud = (u: number): Member => ({
+      system: 'wall-framing',
+      role: 'stud',
+      dims: [0.0413, 2.3, 0.0889],
+      length: 2.3,
+      position: [wall.start[0] + wall.dir[0] * u, 0.0413 + 2.3 / 2, wall.start[1] + wall.dir[1] * u],
+      rotation: [0, 0, 0],
+      material: 'steel',
+      sourceId: wall.id,
+      profile: '350S162-68',
+    })
+    const members = [steelStud(0.021), steelStud(2.0)]
+    const id = String(fixtures.find((f) => f.kind === 'receptacle')?.meta?.deviceId)
+    const overrides = new Map<string, DeviceOverride>([
+      [id, { wallId: wall.id, wallT: 1.0 / wall.length, heightAff: 0.45 }],
+    ])
+    const applied = applyDeviceOverrides(fixtures, walls, [], members, overrides)
+    expect(applied.members).toHaveLength(1)
+    const block = applied.members[0] as Member
+    expect(block.role).toBe('blocking')
+    expect(block.material).toBe('steel')
+    expect(block.size).toBeUndefined()
+    expect(block.label).toContain('CFS strap/track blocking per detail — not booked')
+    // and the takeoff really books nothing for it: no LumberSize keeps it
+    // off the lumber pcs rows, no `profile` keeps it off the LGS lf rows —
+    // exactly what the label states.
+  })
+
   test('one blocking row serves a second off-stud box at the same height band', () => {
     const { wall, walls, fixtures } = rig()
     const stud = (u: number): Member => ({

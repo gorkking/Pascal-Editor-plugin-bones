@@ -67,11 +67,12 @@ import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { resolveJurisdiction } from '../jurisdiction/guess'
 import type { TakeoffAreas } from '../engines/takeoff'
 import {
-  framesAsLumber,
+  framedAssembly,
   type FramingNode,
   type WallConstruction,
   type WallEngineeringOverride,
 } from './schema'
+import { lgsFrameWalls } from '../engines/lgs-wall-framing'
 
 export type ComputeResult = {
   members: Member[]
@@ -115,10 +116,16 @@ export type ResolvedWallConstruction = { construction: WallConstruction } & Omit
   'construction'
 >
 
-/** Construction resolution for one wall: override → jurisdiction default → framed. */
+/** Construction resolution for one wall: override → jurisdiction default →
+ * the level's framing system → framed. `framingSystem: 'lgs'` (LGS Phase 1)
+ * makes steel the DEFAULT for otherwise-framed walls; explicit overrides
+ * (string or object form, 'framed' included) always win, and a
+ * jurisdiction CMU exterior default (FL) still beats the framing system —
+ * `framingSystem` chooses how FRAMED walls frame, never whether a wall is
+ * masonry. */
 export function resolveWallConstruction(
   wall: WallSlice,
-  config: Pick<FramingNode, 'wallOverrides'>,
+  config: Pick<FramingNode, 'wallOverrides' | 'framingSystem'>,
   exteriorDefault: 'framed' | 'cmu',
 ): ResolvedWallConstruction {
   const override = config.wallOverrides?.[wall.id]
@@ -135,13 +142,14 @@ export function resolveWallConstruction(
     }
   }
   if (wall.exterior && exteriorDefault === 'cmu') return { construction: 'cmu' }
+  if (config.framingSystem === 'lgs') return { construction: 'lgs' }
   return { construction: 'framed' }
 }
 
 /** Construction system only (back-compat for the panel/inspector cards). */
 export function wallConstruction(
   wall: WallSlice,
-  config: Pick<FramingNode, 'wallOverrides'>,
+  config: Pick<FramingNode, 'wallOverrides' | 'framingSystem'>,
   exteriorDefault: 'framed' | 'cmu',
 ): WallConstruction {
   return resolveWallConstruction(wall, config, exteriorDefault).construction
@@ -465,6 +473,12 @@ function computeLevelUncached(
     detail: config.detail,
     studSpacing: inches(config.studSpacingIn),
   }
+  // LGS Phase 1: the config's framing system rides the spec so the wall
+  // engines (and profileFor's machine resolution) see it. Folded ONLY when
+  // present — an absent field keeps the spec object byte-identical to
+  // master (the E5 baseline pins the spec).
+  if (config.framingSystem !== undefined) spec = { ...spec, framingSystem: config.framingSystem }
+  if (config.lgsMachine !== undefined) spec = { ...spec, lgsMachine: config.lgsMachine }
   // 400 (fabrication) builds ON TOP of the code-sized pass — jurisdiction applies to both.
   if (config.detail !== '200') spec = applyJurisdiction(spec, profile)
 
@@ -551,6 +565,15 @@ function computeLevelUncached(
     // instead (both zones inset to the neighbor's near face, per-corner
     // advisory), so mixedCmuWall gets the full active-wall neighbor context.
     const framed: WallSlice[] = []
+    /** Steel (LGS, IRC R603) walls — Phase 1: their SKELETON frames in the
+     * steel engine; their layer stack (sheathing/drywall/WRB/cladding/
+     * batts) rides the same layer pass as lumber walls, so sheet-goods
+     * members and areas stay byte-equal to a framed twin (F1). */
+    const steel: WallSlice[] = []
+    /** framed + steel in the ORIGINAL wall order — the shared hint graph,
+     * the junction warnings and the layer pass all consume this list so a
+     * construction flip never reorders another wall's output. */
+    const assemblies: WallSlice[] = []
     const masonry: WallSlice[] = []
     const mixed: { wall: WallSlice; seam: number }[] = []
     // Per-wall engineering (studSize/spacingIn/insulation/cladding…) rides
@@ -574,11 +597,17 @@ function computeLevelUncached(
         }
       }
       if (construction === 'cmu') masonry.push(wall)
-      else if (framesAsLumber(construction)) {
-        // 'framed' AND 'lgs' — steel walls frame as lumber until the
-        // Phase-1 engine lands, through the ONE predicate the areas and
-        // the selection card also consume (F1: no half-routing).
-        framed.push(wall)
+      else if (framedAssembly(construction)) {
+        // 'framed' AND 'lgs' share the framed-ASSEMBLY path (layers, areas,
+        // engineering, junction warnings); the skeleton splits below —
+        // lumber walls to frameWalls, steel walls to lgsFrameWalls — over
+        // ONE shared hint graph so corners/tees compose across materials.
+        // Both lists keep the activeWalls scan order, and `assemblies`
+        // below re-joins them IN that order so the layer pass emits
+        // byte-identically to a construction flip (F1 layer parity).
+        if (construction === 'lgs') steel.push(wall)
+        else framed.push(wall)
+        assemblies.push(wall)
         engineering.set(wall.id, resolved)
         // An EXPLICIT stud override deeper than the drawn wall can hold
         // still warns — the geometry now draws CAVITY-FIT (compressed to
@@ -600,15 +629,20 @@ function computeLevelUncached(
         }
       }
     }
+    // Lumber + steel walls share ONE junction/hint graph: corners and tees
+    // between the two materials resolve through the same through/butt
+    // conventions (cap-plate laps excepted — wood never laps onto a steel
+    // top track; frameHints suppresses those deltas at mixed-material
+    // corners). Scenes with no steel walls see the identical list.
     // Junction honesty (night-5 skeptic d1/e): the tee detector's
     // parallelism guard (cross < 0.3) means a NEAR-PARALLEL contact gets
     // no junction treatment AT ALL — warn instead of silently framing
     // through it; and a stem SHORTER than its junction insets re-extends
     // to the 4t minimum run — honest geometry, never silent.
-    for (const stem of framed) {
+    for (const stem of assemblies) {
       for (const which of ['start', 'end'] as const) {
         const p = which === 'start' ? stem.start : stem.end
-        for (const other of framed) {
+        for (const other of assemblies) {
           if (other.id === stem.id || other.curved) continue
           const cross = Math.abs(stem.dir[0] * other.dir[1] - stem.dir[1] * other.dir[0])
           if (cross >= 0.3) continue // real tees handle themselves
@@ -626,8 +660,8 @@ function computeLevelUncached(
       }
     }
     {
-      const hintMap = frameHints(framed, spec, engineering)
-      for (const w of framed) {
+      const hintMap = frameHints(assemblies, spec, engineering)
+      for (const w of assemblies) {
         const h = hintMap.get(w.id)
         if (!h) continue
         const insetSum = (h.startInset ?? 0) + (h.endInset ?? 0)
@@ -654,14 +688,47 @@ function computeLevelUncached(
     const storeyAbove =
       levelAbove !== undefined && extractSlabs(nodes, levelAbove.id).length > 0
     members.push(
-      ...frameWalls(framed, spec, engineering, { slabBearing: isGroundLevel, storeyAbove }),
+      ...frameWalls(framed, spec, engineering, {
+        slabBearing: isGroundLevel,
+        storeyAbove,
+        // Steel neighbors participate in the corner/tee hint graph so a
+        // lumber wall butting a steel one insets exactly like it would
+        // against lumber (identical when `steel` is empty).
+        ...(steel.length > 0 ? { hintWalls: assemblies } : {}),
+      }),
     )
+    // Steel (LGS) skeletons — IRC R603 C-stud/track assemblies from the
+    // cited catalog (Phase 1). Same hint graph as above; per-level honesty
+    // (conservative mil selection, R603.1.1 applicability, machine status)
+    // rides the warnings channel.
+    if (steel.length > 0) {
+      const storeys = levels.filter(
+        (l, i) => i === 0 || extractSlabs(nodes, l.id).length > 0,
+      ).length
+      const lgs = lgsFrameWalls(steel, spec, engineering, {
+        hintWalls: assemblies,
+        slabBearing: isGroundLevel,
+        groundSnowLoadPsf: profile.groundSnowLoadPsf,
+        ultimateWindMph: profile.ultimateWindMph,
+        storeys,
+        // masonry neighbors (full-CMU + mixed) — strap runs trim clear of
+        // their bodies (round-1 F4d; the hint graph is masonry-blind)
+        cmuNeighbors: [...masonry, ...mixed.map((mx) => mx.wall)],
+      })
+      members.push(...lgs.members)
+      warnings.push(...lgs.warnings)
+    }
     // Assembly layers (round 13): drywall / sheathing / WRB / cladding per
     // face, jurisdiction-defaulted cladding + climate labels. The renderer's
     // dollhouse cut hides the camera-facing stacks. Probe slabs (widened to
     // the storey below on slab-less levels) — exteriorSide needs the same
-    // inside/outside signal the exterior fallback used.
-    members.push(...layoutWallLayers(framed, activeRooms, spec, code, probeSlabs, engineering))
+    // inside/outside signal the exterior fallback used. Steel (LGS) walls
+    // ride the SAME pass: their sheet-goods stack is byte-identical to a
+    // framed twin's (F1 — the batt layout is steel-aware via the
+    // engineering map's construction).
+    members.push(
+      ...layoutWallLayers(assemblies, activeRooms, spec, code, probeSlabs, engineering),
+    )
     members.push(...cmuWalls(masonry, spec))
     for (const { wall, seam } of mixed) {
       const neighbors = activeWalls.filter((w) => w.id !== wall.id && !w.curved)
@@ -677,11 +744,13 @@ function computeLevelUncached(
       )
     }
     // Wall bracing declaration (R602.10, LOD-400 B9): braced wall lines are
-    // identified from the FRAMED exterior graph and each declares CS-WSP as
-    // its method with an honest not-verified assumption flag — the required
-    // panel length/spacing is panel-schedule math (v2). CMU walls brace as
-    // reinforced masonry (cmu.ts), never CS-WSP, so they stay out of the
-    // lines. LOD 200 emits nothing (no code claims).
+    // identified from the LUMBER-framed exterior graph and each declares
+    // CS-WSP as its method with an honest not-verified assumption flag —
+    // the required panel length/spacing is panel-schedule math (v2). CMU
+    // walls brace as reinforced masonry (cmu.ts), never CS-WSP, and STEEL
+    // (LGS) walls stay out too — R602.10 is the wood method; their R603.9
+    // shear story is a per-level honesty warning from lgsFrameWalls. LOD
+    // 200 emits nothing (no code claims).
     warnings.push(...bracingWarnings(framed, spec))
   }
 
@@ -1221,19 +1290,21 @@ function computeLevelUncached(
     if (wall.curved) continue
     const construction = wallConstruction(wall, config, profile.exteriorWallDefault)
     const faceArea = wall.length * wall.height
-    // WSP sheathing wraps lumber-FRAMED exterior walls only (CMU gets
-    // stucco/furring). framesAsLumber, not === 'framed': an 'lgs' wall
-    // renders the identical lumber members + layers today, so booking it
-    // zero sheathing/drywall was a silent under-buy (skeptic F1).
-    if (wall.exterior && framesAsLumber(construction)) {
+    // WSP sheathing wraps FRAMED-ASSEMBLY exterior walls only (CMU gets
+    // stucco/furring). framedAssembly, not === 'framed': an 'lgs' wall
+    // carries the identical sheet-goods stack on steel bones (screwed per
+    // R603.2.5 instead of nailed), so booking it zero sheathing/drywall
+    // would be the F1 silent under-buy — the areas are pinned byte-equal
+    // to the framed twin's.
+    if (wall.exterior && framedAssembly(construction)) {
       areas.wallSheathingM2 = (areas.wallSheathingM2 ?? 0) + faceArea
     }
     // Drywall: both faces of interior walls, the inside face of exterior
-    // ones — lumber-framed walls only (LOD-400 audit B4 sibling): the layer
+    // ones — framed-assembly walls only (LOD-400 audit B4 sibling): the layer
     // engine never sees masonry walls, so a CMU wall renders ZERO gypsum and
     // booking its faces was a ghost buy on every CMU scene. Mixed walls
     // resolve 'cmu' too and follow the CMU layer treatment whole-wall (v1).
-    if (framesAsLumber(construction)) {
+    if (framedAssembly(construction)) {
       areas.drywallM2 = (areas.drywallM2 ?? 0) + faceArea * (wall.exterior ? 1 : 2)
     }
   }
@@ -1256,8 +1327,18 @@ function computeLevelUncached(
   }
 
   // Whole-building metrics (floor area / volume / envelope UA…) — shared by
-  // the panel drawer and the blueprints' schedules block.
-  const characteristics = computeCharacteristics(activeWalls, activeRooms, slabs, spec, code)
+  // the panel drawer and the blueprints' schedules block. Steel (LGS)
+  // walls make the wood-frame IECC cavity claim dishonest — the flag keys
+  // on wall CONSTRUCTION resolution (not member emission) so the note
+  // holds even with the walls system toggled off (round-1 F2).
+  const hasSteelWalls = activeWalls.some(
+    (w) =>
+      !w.curved &&
+      resolveWallConstruction(w, config, profile.exteriorWallDefault).construction === 'lgs',
+  )
+  const characteristics = computeCharacteristics(activeWalls, activeRooms, slabs, spec, code, {
+    ...(hasSteelWalls ? { steelWalls: true } : {}),
+  })
 
   return {
     members,
