@@ -289,7 +289,7 @@ describe('grid-snapped auto anchor — aligned normally, clearance never violate
     expect(cab.position[2]).toBeCloseTo(-1.1846, 9) // honest stand-off kept
     for (const m of [pad, cab]) {
       expect(m.flag ?? '').toContain(
-        '⚠ off-grid — clearance/openings leave no 0.5 m grid position on this wall',
+        '⚠ off-grid — clearance/openings leave no 0.5 m grid position near the elected spot',
       )
     }
     // …and row siblings / verbatim scenes never carry the class (the

@@ -55,8 +55,12 @@ be." Base `1a5e627`. Anything outside the classes below is a defect.
    exact verbatim-path expressions — post-seed == auto stays BYTE-equal by
    construction, obliques included. Window exhausted (clearance/openings/
    span) ⇒ the fully honest un-snapped spot + the off-grid flag (**F3**,
-   '⚠ off-grid — clearance/openings leave no 0.5 m grid position on this
-   wall' composed onto pad + cabinet, B1 ' | ' convention). Pad label
+   '⚠ off-grid — clearance/openings leave no 0.5 m grid position near
+   the elected spot' composed onto pad + cabinet, B1 ' | ' convention;
+   wording per verify round 2 F3 — the search is deliberately
+   WINDOW-LOCAL, ±3 steps of the elected/slid spot, because roaming the
+   whole wall would betray the election; a farther grid spot may well
+   exist, so the flag claims only the neighborhood). Pad label
    restates the basis: `≥ 24" face clearance basis`. Verbatim drags never
    snap (A4 — the host move tool already applied the user's grid mode).
    STEP BASIS (skeptic F4, informational): `gridSnapStep` defaults to

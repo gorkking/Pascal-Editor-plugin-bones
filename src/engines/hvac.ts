@@ -302,7 +302,7 @@ const COND_PAD_OVERHANG_FLAG =
  * within the search window, so the unit stands at the honest un-snapped
  * position and SAYS SO — never a silent off-grid placement. */
 const COND_OFF_GRID_FLAG =
-  '⚠ off-grid — clearance/openings leave no 0.5 m grid position on this wall'
+  '⚠ off-grid — clearance/openings leave no 0.5 m grid position near the elected spot'
 /**
  * A verbatim heat-pump override farther (plan) than this from EVERY
  * exterior wall warns — almost certainly a mis-drag into the yard.
