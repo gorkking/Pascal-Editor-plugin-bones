@@ -1,6 +1,6 @@
 {
   "version": "2026-08-15",
-  "disclaimer": "Typical state-level values — site-specific design values (IRC Table R301.2(1), filled in by the local jurisdiction) govern; verify with the AHJ. Entries AL through MO + DC were reconstructed on 2026-08-13 after the climate-a research output was lost; see per-entry \"caveat\". Canadian provincial and territorial entries (CA-*) were added 2026-08-15 from NBC 2020 Appendix C and Ontario SB-1; see the per-entry \"caveat\".",
+  "disclaimer": "Typical state-level values — site-specific design values (IRC Table R301.2(1), filled in by the local jurisdiction) govern; verify with the AHJ. Entries AL through MO + DC were reconstructed on 2026-08-13 after the climate-a research output was lost; see per-entry \"caveat\". Canadian provincial and territorial entries (CA-*) were added 2026-08-15 from NBC 2020 Appendix C and Ontario SB-1; see the per-entry \"caveat\". CA-* unit conversions: ground snow Ss kPa → psf at 1 kPa = 20.885 psf; frost depth mm → in at 25.4 mm = 1 in — documented per row in snowNote/frostLineNote.",
   "sources": [
     "https://ascehazardtool.org/",
     "https://hazards.atcouncil.org/",
