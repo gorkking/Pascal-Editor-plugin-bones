@@ -331,10 +331,19 @@ warnings==labels agreement; geometry boundary held — profileFor
 untouched). Pilot self-caught a surviving ladder probe and widened
 the gate (44d5ff6). Synthetic-vendor no-warning gate because NO real
 machine rolls T125 (vendor flange floors > 1-1/4" — honest data
-state). VERIFY: wf_74bb6d6d (skeptic: write-path truth + machine-
-key-on-lumber leak + synthetic-vendor honesty check vs the data;
-examiner: P4 verbatim + no-positive-capability-claims; visual: the
-two-controls clutter mandate judged honestly + pixel-parity).
+state). ROUND 1 (wf_74bb6d6d): visual PASS/SHIP — clutter mandate held w/
+pixel proof (0 differing px at all 7 cameras outside the panel;
+Machine select styles byte-identical to Jurisdiction; card box
+unchanged; MCP-gap highlight visibly closed); examiner APPROVE
+(1560-member label/warning agreement; 3 warning shapes never
+conflated; zero positive capability claims on paper; geometry
+boundary proven at 400); skeptic REVISE narrow: F1 bridging-channel
+warning site un-gated (3 surviving mutants incl. a class-LIE swap),
+F2 card fallback count reads stud+track only (prints 1 where truth
+is 2 — backing class missed), F3 'never changes geometry' claim
+byte-false at LOD 200 (machine narrows the generic pick -33→-43;
+vendor-own dims draw) — scope to 300+/constrains+brands wording.
+FIX ROUND DISPATCHED. Closing round after tip.
 ★ SHIPPED TO PROD 2026-08-24: plugin 9f86f12 → editor #716
 (e7b5abdf) → private-editor #405 (75a8afa8), full-stack CI green
 incl. both E2E + Bugbot, Vercel prod deploy. HP 4-part feedback +
