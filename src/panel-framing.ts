@@ -33,7 +33,10 @@ export function framingSystemValue(
  * deliberately KEPT across a Steel→Lumber flip: it stays meaningful for
  * per-wall `'lgs'` overrides on a lumber level, survives an experiment
  * round-trip without losing the user's machine choice, and only ever
- * brands/warns — never geometry (the Phase-2 boundary).
+ * constrains + brands + warns: at the code LODs (300/400) it never
+ * re-sizes a member (the Phase-2 boundary, byte-proved); at 200 it
+ * narrows the generic pick to its thinnest rollable variant (Phase-1
+ * behavior, pinned).
  */
 export function framingSystemPatch(next: FramingSystemValue): {
   framingSystem: 'lgs' | undefined

@@ -16,15 +16,35 @@ No new section, no modal, no wizard. Machine constraints speak exclusively
 through the existing honesty channels (level warnings → Warnings drawer +
 paper Flags block; label statuses — Phase 1's channel, unchanged).
 
-## THE BOUNDARY (stated per the phase mandate)
+## THE BOUNDARY (stated per the phase mandate; scope corrected — round-1 skeptic F3)
 
-**Machine selection NEVER changes geometry.** Profiles resolve identically
-with or without a machine: `profileFor`'s chain is byte-untouched this
-phase — the machine only BRANDS labels (Phase 1) and now WARNS
-(`machineConstraintWarning`). The one place vendor dims reach geometry is
-`profileFor`'s vendor-own-profile path (machineProfile web/flange), which
-is **unwidened Phase-1 behavior** — Phase 2 adds no new consumer of vendor
-dims and no new resolution branch.
+**Phase 2 changes nothing about how a machine resolves profiles** —
+`profileFor`'s chain is byte-untouched this phase; Phase 2 only adds the
+WARN channel (`machineConstraintWarning`) on top of Phase 1's label
+branding. What a machine choice does, stated at the true scope (LGS-PLAN
+principle 4: it **CONSTRAINS + BRANDS**):
+
+- **At the code LODs (300/400)** the conservative pick already sits at the
+  table-domain maximum, so members are **byte-identical** with or without
+  a machine — labels/flags/warnings only (round-1 skeptic byte-proved it
+  across all 19 catalog machines + an unknown key).
+- **At LOD 200** a machine NARROWS the generic 33-mil pick to its thinnest
+  rollable variant — `550S162-33 → 550S162-43` under TF550H:
+  `member.profile` and the compression-flag text change, the envelope
+  does not (family dims are mil-invariant). Pinned as the stated
+  exception in lgs-wall-framing.test.ts.
+- **The vendor-own-profile path** (a verified machine standing its OWN
+  geometry in for the family, e.g. howick/frama3200 at 200) draws the
+  vendor's published dims (89 mm web vs the 88.9 mm generic) — verified
+  dims, delta noted on the label.
+
+Both non-300+ behaviors are **Phase-1 resolution behaviors, unwidened** —
+Phase 2 adds no new consumer of vendor dims and no new resolution branch.
+An earlier revision of this manifest claimed "machine selection NEVER
+changes geometry / profiles resolve identically", which is byte-false at
+200 and on the vendor-own path; the claim sites (this section,
+schema.ts's MCP describe, the engine header, the panel comments) are all
+scoped to the above.
 
 ## 1. EXISTING corpora: ZERO computed deltas
 

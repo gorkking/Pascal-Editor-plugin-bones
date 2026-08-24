@@ -567,11 +567,14 @@ function LumberSection() {
  * PROGRESSIVE DISCLOSURE: the Machine select exists ONLY while Steel is
  * selected — lumber users see zero change. The select is the cited catalog
  * verbatim (grouped by vendor, verified rows first, unverified rows keep
- * their honest suffix); a machine only BRANDS labels and WARNS on
- * can't-roll resolutions — profiles resolve identically with or without it
- * (the engine's constraint channel carries the truth to the Warnings
- * drawer and the paper Flags block). Lumber and 'None' writes REMOVE their
- * keys, so untouched-equivalent scenes persist byte-identically (Phase 0).
+ * their honest suffix); a machine CONSTRAINS + BRANDS (LGS-PLAN principle
+ * 4) + WARNS on can't-roll resolutions — at the code LODs (300/400)
+ * members are byte-identical with or without it (labels/flags/warnings
+ * only); at 200 it narrows the generic pick to its thinnest rollable
+ * variant (Phase-1 behavior). The engine's constraint channel carries the
+ * truth to the Warnings drawer and the paper Flags block. Lumber and
+ * 'None' writes REMOVE their keys, so untouched-equivalent scenes persist
+ * byte-identically (Phase 0).
  */
 function FramingRow({ framingNode }: { framingNode: FramingNode & { id: string } }) {
   const system = framingSystemValue(framingNode)

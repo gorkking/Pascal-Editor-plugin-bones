@@ -48,9 +48,16 @@
  *    resolved profile earns the "cannot roll" claim (its published ranges
  *    are the rollable derivation's basis); an unverified or unknown
  *    machine never does — nothing was checked, so the warning states THAT
- *    instead. Machine selection never changes geometry: profiles resolve
- *    identically with or without it (the vendor-own-dims path is Phase-1
- *    behavior, unwidened) — the machine only brands labels and warns.
+ *    instead. Machine scope (LGS-PLAN principle 4: a machine choice only
+ *    CONSTRAINS + BRANDS — Phase 2 adds WARNS): at 300+ the conservative
+ *    pick already sits at the table-domain maximum, so members are
+ *    byte-identical with or without a machine (labels/flags/warnings
+ *    only — round-1 byte-proved across the catalog); at 200 a machine
+ *    NARROWS the generic 33-mil pick to its thinnest rollable variant
+ *    (550S162-33 → -43 under TF550H: designator + flag text, identical
+ *    envelope), and the vendor-own-profile path draws the vendor's
+ *    verified dims (Howick 89 mm web vs 88.9 generic). Both are Phase-1
+ *    resolution behaviors, unwidened this phase.
  *
  * Cross-material junctions: compute passes ONE hint graph over lumber +
  * steel walls (frameHints) — corners/tees resolve through the same

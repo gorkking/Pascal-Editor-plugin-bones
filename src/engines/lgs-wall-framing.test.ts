@@ -1059,6 +1059,34 @@ describe("MACHINE CONSTRAINTS — the Phase-2 can't-roll warning channel", () =>
     expect(track200?.label).toContain(LGS.fallbackStatus)
   })
 
+  test('the LOD-200 exception, pinned (round-1 skeptic F3): a machine NARROWS the generic pick to its rollable floor — expected, stated; at 300+ the boundary holds byte-for-byte', () => {
+    // At 200 the generic ask is the 33-mil structural floor; TF550H's
+    // rollable 550S162 set starts at 43 — the machine flips the stud
+    // designator (Phase-1 resolution behavior, now stated at its true
+    // scope everywhere the boundary claim prints).
+    const no200 = lgsFrameWalls(walls, { ...DEFAULT_SPEC, detail: '200' } as FramingSpec)
+    const with200 = lgsFrameWalls(walls, {
+      ...DEFAULT_SPEC,
+      detail: '200',
+      lgsMachine: 'framecad/tf550h',
+    } as FramingSpec)
+    const studNo = no200.members.find((m) => m.role === 'stud')
+    const studWith = with200.members.find((m) => m.role === 'stud')
+    expect(studNo?.profile).toBe('550S162-33')
+    expect(studWith?.profile).toBe('550S162-43')
+    // the envelope does NOT move — family dims are mil-invariant
+    expect(studWith?.dims).toEqual(studNo?.dims as never)
+    // at 300+ the conservative pick already sits at the table-domain max:
+    // members byte-identical with/without the machine EXCEPT labels/flags
+    const strip = (ms: Member[]) =>
+      ms.map(({ label: _l, flag: _f, ...rest }) => rest)
+    const no400 = lgsFrameWalls(walls, spec400)
+    const with400 = lgsFrameWalls(walls, { ...spec400, lgsMachine: 'framecad/tf550h' })
+    expect(JSON.stringify(strip(with400.members))).toBe(
+      JSON.stringify(strip(no400.members)),
+    )
+  })
+
   test('end-to-end: the warning reaches computeLevel and prints on paper (P4)', () => {
     const lgs = computeLevel(baselineScene(), {
       ...baselineConfig('INTL'),
