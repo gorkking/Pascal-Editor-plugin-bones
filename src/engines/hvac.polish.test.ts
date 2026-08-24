@@ -15,11 +15,13 @@ import { EDITOR_GRID_STEP_M, layoutHvac, placeCondenserSeedSpot } from './hvac'
  *              wall-face box) shares the wall-square bearing. Rule: machine
  *              placements square to the ELECTED wall, a verbatim drag
  *              squares to ITS row wall (nearest exterior exit).
- *  3. GRID   — the AUTO anchor lands on host-grid multiples in the wall
- *              frame (along = nearest clear multiple, outward = ceil only)
- *              so the ≥ 24" face clearance is a FLOOR the snap never
- *              violates; verbatim drags stay verbatim (A4); physics beats
- *              the grid (RO keepouts / wall span reject a multiple).
+ *  3. GRID   — the AUTO anchor lands on **WORLD XZ** grid multiples (the
+ *              lattice the editor renders — the host floorStrategy
+ *              convention; verify round F1 corrected the frame), moving
+ *              only AWAY from the wall, so the ≥ 24" face clearance is a
+ *              FLOOR the snap never violates; verbatim drags stay verbatim
+ *              (A4); physics beats the grid (RO keepouts / wall span
+ *              exhaust the window → honest off-grid + the F3 flag).
  *  4. ROTATE — `yawOverride` (the service node's additive field) beats
  *              wall-square for unit #1's assembly, verbatim at any angle;
  *              absent == wall-square (never a stored derivation copy).
@@ -221,40 +223,84 @@ describe('grid-snapped auto anchor — aligned normally, clearance never violate
     expect(checked).toBe(24)
   })
 
-  test('off-axis azimuth: the snap lives in the WALL frame (along + outward projections on the grid)', () => {
+  test('off-axis azimuth: the snap lives on the WORLD XZ grid — the lattice the editor renders (verify F1)', () => {
+    // The skeptic's exhibit class: wall-frame multiples sit visibly OFF
+    // the world lattice on oblique walls (residuals 0.153/0.496). The host
+    // floorStrategy convention is the WORLD grid (placement-strategies.ts
+    // + world-grid-snap.ts): both world plan components land on 0.5 m
+    // multiples EXACTLY (the lattice point is taken verbatim), the yaw
+    // stays wall-square (rotation is not the snap's business), and the
+    // away-only stand-off floor holds.
     const theta = Math.atan2(2, 3)
-    const { walls, rooms, out } = shell(theta, [0.7, -0.3])
-    const cab = cabinetsOf(layoutHvac(walls, rooms, LOD400).members)[0] as Member
-    const dir: [number, number] = [Math.cos(theta), Math.sin(theta)]
-    const along = cab.position[0] * dir[0] + cab.position[2] * dir[1]
-    const outward = cab.position[0] * out[0] + cab.position[2] * out[1]
-    expect(onGrid(along)).toBe(true)
-    expect(onGrid(outward)).toBe(true)
+    const { walls, rooms } = shell(theta, [0.7, -0.3])
+    const { members, fixtures, warnings } = layoutHvac(walls, rooms, LOD400)
+    const cab = cabinetsOf(members)[0] as Member
+    expect(onGrid(cab.position[0])).toBe(true)
+    expect(onGrid(cab.position[2])).toBe(true)
+    // wall-square yaw survives the world snap — square to the ELECTED row
+    // wall (the disconnect names it: the laundry centroid stands exactly
+    // 1.5 m from BOTH the south and west walls, so the shifted/rotated tie
+    // may break either way in float — the contract is wall-squareness,
+    // not which of two equidistant candidates wins)
+    const rowWallId = (fixtures.find((f) => f.kind === 'disconnect') as Fixture).sourceId
+    const w = walls.find((x) => x.id === rowWallId) as WallSlice
+    const n: [number, number] = [-w.dir[1], w.dir[0]]
+    const side =
+      (cab.position[0] - w.start[0]) * n[0] + (cab.position[2] - w.start[1]) * n[1] >= 0
+        ? 1
+        : -1
+    const outW: [number, number] = [n[0] * side, n[1] * side]
+    expect(cab.rotation[1]).toBeCloseTo(Math.atan2(outW[0], outW[1]), 9)
+    // away-only floor: at least the raw condenserStandoff off the wall line
+    const s =
+      (cab.position[0] - w.start[0]) * outW[0] + (cab.position[2] - w.start[1]) * outW[1]
+    expect(s).toBeGreaterThanOrEqual(0.1 + 0.6096 + 0.475 - 1e-9)
+    // a lattice spot exists here — the honest path stays silent
+    expect(cab.flag).toBeUndefined()
+    expect(warnings.some((w2) => /grid/i.test(w2))).toBe(false)
   })
 
-  test('outward is CEIL-only: a stand-off already past a multiple rounds AWAY from the wall, never toward it', () => {
-    // t = 0.2 → raw stand-off 1.1846 → 1.5 (never 1.0, which would leave
-    // ~0.42 m face clearance — under the 24" floor). The along-wall snap
-    // may go either way; the outward snap may not.
+  test('outward is AWAY-only: the lattice search never accepts a spot closer than the honest stand-off', () => {
+    // t = 0.2 → raw stand-off 1.1846 → the accepted lattice point stands at
+    // 1.5 (never 1.0, which would leave ~0.42 m face clearance — under the
+    // 24\" floor). The along-wall coordinate may move either way; the
+    // stand-off may only grow.
     const { walls, rooms } = shell(0)
     const cab = cabinetsOf(layoutHvac(walls, rooms, LOD400).members)[0] as Member
     expect(cab.position[2]).toBeCloseTo(-1.5, 9)
   })
 
-  test('physics beats the grid: both neighboring multiples inside RO keepouts → the slid spot stays unsnapped along', () => {
+  test('physics beats the grid: window exhausted → HONEST un-snapped spot + the off-grid flag (verify F3)', () => {
     // Shell shifted +0.13: the raw anchor's along-wall world coord is 1.63.
-    // Window keepouts blanket BOTH grid candidates (1.5 and 2.0) while the
-    // raw spot sits in the clear gap between them — the along snap bails
-    // (honest off-grid beats fronting a window), the OUTWARD snap still
-    // applies (independent axis).
+    // Window keepouts blanket EVERY x-column of the search window (0.5–3.0:
+    // off-span, K1 [−0.2, 1.4] or K2 [1.6, 3.2]) while the raw spot sits in
+    // the clear gap between them — the lattice search exhausts, the unit
+    // stands at the fully HONEST pre-snap spot (no partial outward snap
+    // either — the honest position is the honest position), and pad +
+    // cabinet carry the promised off-grid honesty flag. Never silent.
     const win1 = opening('win1', 0.6, 0.5) // keepout ≈ [−0.2, 1.4] (u-space)
     const win2 = opening('win2', 2.4, 0.5) // keepout ≈ [1.6, 3.2]
     const { walls, rooms } = shell(0, [0.13, 0], 0.2, [win1, win2])
     const { members } = layoutHvac(walls, rooms, LOD400)
     const cab = cabinetsOf(members)[0] as Member
-    expect(cab.position[0]).toBeCloseTo(1.63, 9) // unsnapped along (u = 1.5)
+    const pad = padsOf(members)[0] as Member
+    expect(cab.position[0]).toBeCloseTo(1.63, 9) // honest along (u = 1.5)
     expect(onGrid(cab.position[0])).toBe(false)
-    expect(cab.position[2]).toBeCloseTo(-1.5, 9) // outward snap intact
+    expect(cab.position[2]).toBeCloseTo(-1.1846, 9) // honest stand-off kept
+    for (const m of [pad, cab]) {
+      expect(m.flag ?? '').toContain(
+        '⚠ off-grid — clearance/openings leave no 0.5 m grid position on this wall',
+      )
+    }
+    // …and row siblings / verbatim scenes never carry the class (the
+    // verbatim assertion lives in the A4 test below — drags never snap,
+    // so they can never exhaust a snap)
+    const dragged = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { position: [1.63, 0, -1.1846] },
+    })
+    for (const m of [...padsOf(dragged.members), ...cabinetsOf(dragged.members)]) {
+      expect(m.flag ?? '').not.toContain('off-grid')
+    }
   })
 
   test('verbatim drags NEVER snap (A4 — the host move tool already applied the user grid mode)', () => {
@@ -267,22 +313,32 @@ describe('grid-snapped auto anchor — aligned normally, clearance never violate
     expect(cab.position[2]).toBeCloseTo(-1.777, 12)
   })
 
-  test('seed parity on the SNAPPED geometry: seed == composed unit #1, post-seed compose == auto, byte', () => {
+  test('seed parity on the SNAPPED geometry: seed == composed unit #1, post-seed compose == auto, byte — oblique included', () => {
     // The ε-anchor machinery must hold byte-for-byte on the new spots (the
     // fence/RO exhibits re-pin the elected-wall side in the condensers
-    // suite; this is the plain-scene identity).
-    const { walls, rooms } = shell(0, [0.137, -0.261])
-    const seed = placeCondenserSeedSpot(walls, rooms)
-    const auto = layoutHvac(walls, rooms, LOD400)
-    const unit = condensersOf(auto.fixtures)[0] as Fixture
-    expect(seed?.[0]).toBe(unit.position[0])
-    expect(seed?.[1]).toBe(unit.position[2])
-    const post = layoutHvac(walls, rooms, LOD400, {
-      heatPump: { position: [seed?.[0] as number, 0, seed?.[1] as number] },
-    })
-    expect(JSON.stringify(post.members)).toBe(JSON.stringify(auto.members))
-    expect(JSON.stringify(post.fixtures)).toBe(JSON.stringify(auto.fixtures))
-    expect(JSON.stringify(post.warnings)).toBe(JSON.stringify(auto.warnings))
+    // suite). OBLIQUE azimuths ride the same guarantee BY CONSTRUCTION
+    // since the world-grid rework: the auto path takes the lattice point
+    // verbatim and re-derives u/out/stand-off with the exact verbatim-path
+    // expressions, so the seeded round-trip reproduces every bit — no
+    // normalize-ULP class on rotations (verify F1 hardening).
+    for (const [theta, shift] of [
+      [0, [0.137, -0.261]],
+      [Math.atan2(2, 3), [0.7, -0.3]],
+      [Math.PI / 7, [0, 0]],
+    ] as const) {
+      const { walls, rooms } = shell(theta, [shift[0], shift[1]])
+      const seed = placeCondenserSeedSpot(walls, rooms)
+      const auto = layoutHvac(walls, rooms, LOD400)
+      const unit = condensersOf(auto.fixtures)[0] as Fixture
+      expect(seed?.[0]).toBe(unit.position[0])
+      expect(seed?.[1]).toBe(unit.position[2])
+      const post = layoutHvac(walls, rooms, LOD400, {
+        heatPump: { position: [seed?.[0] as number, 0, seed?.[1] as number] },
+      })
+      expect(JSON.stringify(post.members)).toBe(JSON.stringify(auto.members))
+      expect(JSON.stringify(post.fixtures)).toBe(JSON.stringify(auto.fixtures))
+      expect(JSON.stringify(post.warnings)).toBe(JSON.stringify(auto.warnings))
+    }
   })
 
   test('legacy machine seeds (pre-snap coordinates) still read as the machine point — elected wall kept', () => {

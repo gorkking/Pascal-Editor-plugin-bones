@@ -216,18 +216,33 @@ function condenserStandoff(wallThickness: number): number {
 }
 /**
  * HOST EDITOR GRID (HP polish 2026-08-23, Julien: "by default it's not
- * aligned to the grid"): the host's grid-snap convention — read-only
- * investigation of private-editor — is `snapToHalf(v) = round(v/step)·step`
- * (packages/editor/src/components/tools/item/placement-math.ts) with
- * `useEditor.gridSnapStep` DEFAULT **0.5 m**, user-cyclable through
- * [0.5, 0.25, 0.1, 0.05] (store/use-editor.tsx + the contextual helper
- * panel's GRID_SNAP_STEPS). The engine is headless and cannot read the
- * live store, so the AUTO anchor snaps to the COARSEST host step: every
- * finer option divides 0.5, so a 0.5-aligned point sits on a grid line at
- * EVERY host setting. Verbatim overrides never snap here (checklist A4 —
- * the user's own snap already happened in the host move tool).
+ * aligned to the grid"; frame corrected in the verify round, F1): the host
+ * convention for ITEM floor placement — read-only investigation of
+ * private-editor — is the **WORLD XZ grid, the grid the editor renders**:
+ * `floorStrategy` snaps `snapToGrid(event.position[0/2])` and runs it
+ * through `snapWorldXZForActiveBuilding` "so item edges land on the
+ * visible grid even when the active building is rotated"
+ * (packages/editor/src/components/tools/item/placement-strategies.ts +
+ * lib/world-grid-snap.ts). NOT the wall frame: on oblique walls a
+ * wall-frame multiple sits visibly off the rendered lattice (skeptic
+ * exhibit: azimuth atan2(2,3), world residuals 0.153/0.496).
+ * Step basis: `useEditor.gridSnapStep` defaults to **0.5 m**, cyclable
+ * through [0.5, 0.25, 0.1, 0.05] (store/use-editor.tsx). The host's
+ * DEFAULT item snapping mode is 'lines' (getGridSnapStep() returns 0
+ * unless the mode is 'grid' — placement-math.ts), i.e. interactive
+ * placement is free + line-snap until the user opts into the grid; AUTO
+ * placement has no gesture to align to, so the machine picks the tidy
+ * default a user would — the 0.5 m world grid, the COARSEST host step
+ * (every finer option divides it, so the spot sits on a grid line at
+ * every setting). Verbatim overrides never snap here (checklist A4 — the
+ * user's own snap already happened in the host move tool).
  */
 export const EDITOR_GRID_STEP_M = 0.5
+/** World-grid candidate window around the honest spot, in grid steps per
+ * world axis (±): the search only TIDIES the RO-slid election result —
+ * roaming farther would betray the slide/election, so an exhausted window
+ * keeps the honest off-grid spot and flags it (COND_OFF_GRID_FLAG). */
+const COND_GRID_WINDOW_STEPS = 3
 /** Refrigerant line-set: suction ¾" (insulated) + liquid ⅜" pair, through
  * ONE wall penetration at ~0.4 m, then wall-following to the air handler. */
 const LINESET_SUCTION_DIA = COND?.linesetSuctionDiaM ?? 0.019
@@ -282,6 +297,12 @@ const COND_UNVALIDATED_WARNING =
  * by construction); the cabinet then overhangs its own slab. */
 const COND_PAD_OVERHANG_FLAG =
   '⚠ cabinet overhangs its pad — the unit stands too close to the wall for the exterior assembly (R703.8); move it out'
+/** The grid search came up empty (verify round F3 — the promised honesty
+ * channel): clearance/openings/wall span leave NO 0.5 m world-grid spot
+ * within the search window, so the unit stands at the honest un-snapped
+ * position and SAYS SO — never a silent off-grid placement. */
+const COND_OFF_GRID_FLAG =
+  '⚠ off-grid — clearance/openings leave no 0.5 m grid position on this wall'
 /**
  * A verbatim heat-pump override farther (plan) than this from EVERY
  * exterior wall warns — almost certainly a mis-drag into the yard.
@@ -1275,6 +1296,11 @@ function condenserRow(
    * re-anchored). Equals `slots[0].at` for verbatim anchors and whenever
    * the snap is an identity. */
   unit1Presnap: Pt | null
+  /** True when the world-grid candidate window exhausted (clearance /
+   * openings / wall span) and unit #1 stands at the honest UN-SNAPPED
+   * spot — layoutHvac flags the pad + cabinet (COND_OFF_GRID_FLAG, verify
+   * round F3). Always false for verbatim anchors (they never snap). */
+  unit1OffGrid: boolean
 } {
   const warnings: string[] = []
   const exit = electedWall
@@ -1296,7 +1322,8 @@ function condenserRow(
       out: [0, 1] as Pt,
     }))
     if (count > 0) warnings.push('no exterior wall — condenser row placed at the anchor, verify')
-    return { wall: null, slots, warnings, unit1Presnap: slots[0]?.at ?? null }
+    // rowless: no snap runs (already ⚠-warned) — never the off-grid class
+    return { wall: null, slots, warnings, unit1Presnap: slots[0]?.at ?? null, unit1OffGrid: false }
   }
   const wall = exit.wall
   const u0 = Math.max(0, Math.min(wall.length, (anchor[0] - wall.start[0]) * wall.dir[0] + (anchor[1] - wall.start[1]) * wall.dir[1]))
@@ -1359,46 +1386,85 @@ function condenserRow(
       return [p[0] + out[0] * rowOff, p[1] + out[1] * rowOff] as Pt
     })()
   // GRID SNAP — AUTO anchors only (HP polish, Julien: "let's make sure it's
-  // aligned normally"): the machine's unit-#1 spot lands on host-grid
-  // multiples ({@link EDITOR_GRID_STEP_M}) so it reads like a hand-placed
-  // object. In the wall frame (dir ⊥ out — the world plan point decomposes
-  // exactly as p·dir along + p·out outward):
-  //  - ALONG the wall: round to the NEAREST grid multiple that stays on the
-  //    wall span AND clear of the RO keepouts — physics beats the grid, so
-  //    when neither neighboring multiple is clear the slid spot stays
-  //    unsnapped (an RO-slide result is already a code truth);
-  //  - OUTWARD: ceil only — the snap moves AWAY from the wall, never
-  //    toward it, so the 24" face clearance (condenserStandoff) is a FLOOR
-  //    the grid can only raise. The pad label states the basis as '≥ 24"'.
-  // Verbatim anchors never snap (A4 — the host move tool already applied
-  // the user's own grid mode); row units 2..N share the snapped stand-off
-  // but keep the mfr-clearance pitch (grid alignment is the ANCHOR's
-  // property; unit spacing is a clearance truth, not a layout nicety).
+  // aligned normally"; verify round F1 corrected the FRAME): the machine's
+  // unit-#1 spot lands on **WORLD XZ** grid multiples
+  // ({@link EDITOR_GRID_STEP_M} — the grid the editor renders, the host
+  // floorStrategy convention), NOT wall-frame multiples (which sit visibly
+  // off the lattice on oblique walls — the skeptic's 0.153/0.496 residual
+  // exhibit). Deterministic candidate search over the world lattice within
+  // ±{@link COND_GRID_WINDOW_STEPS} steps of the honest (RO-slid) spot:
+  //  - VALID = on the wall span, clear of the RO keepouts, AND standing at
+  //    least the honest stand-off from the wall line (the snap only ever
+  //    moves AWAY from the wall — the ≥ 24" face clearance is a FLOOR);
+  //  - PICK = nearest to the honest spot; ties prefer the LEAST additional
+  //    stand-off (outward-normal-dominant correction first), then the
+  //    smaller along-wall coordinate — fully deterministic;
+  //  - EXHAUSTED window (clearance/openings/span leave no lattice spot) =
+  //    the honest un-snapped position + COND_OFF_GRID_FLAG (verify F3) —
+  //    physics beats the grid, and it says so.
+  // The chosen lattice point is taken VERBATIM as the anchor (exact world
+  // multiples, no reconstruction dust) and u/out/stand-off re-derive from
+  // it EXACTLY like the verbatim path — so the machine-seeded round-trip
+  // (post-seed == auto) stays byte-equal by construction, oblique walls
+  // included. Verbatim anchors never snap (A4 — the host move tool already
+  // applied the user's own grid mode); row units 2..N share the final
+  // stand-off but keep the mfr-clearance pitch (grid alignment is the
+  // ANCHOR's property; unit spacing is a clearance truth).
   let uFinal = u1
+  let outFinal = out
   let rowOffFinal = rowOff
+  let at1: Pt = anchor
+  let unit1OffGrid = false
   if (!anchorVerbatim) {
-    const step = EDITOR_GRID_STEP_M
-    const sAlong = unit1Presnap[0] * wall.dir[0] + unit1Presnap[1] * wall.dir[1]
-    let uSnap: number | null = null
-    for (const c of [Math.floor(sAlong / step) * step, Math.ceil(sAlong / step) * step]) {
-      const u = u1 + (c - sAlong)
-      if (!inRange(u) || inKeepout(u)) continue
-      if (uSnap === null || Math.abs(u - u1) < Math.abs(uSnap - u1)) uSnap = u
+    const h = EDITOR_GRID_STEP_M
+    const gx0 = Math.round(unit1Presnap[0] / h) * h
+    const gz0 = Math.round(unit1Presnap[1] / h) * h
+    let best: { g: Pt; d2: number; s: number; u: number } | null = null
+    for (let i = -COND_GRID_WINDOW_STEPS; i <= COND_GRID_WINDOW_STEPS; i++) {
+      for (let j = -COND_GRID_WINDOW_STEPS; j <= COND_GRID_WINDOW_STEPS; j++) {
+        const g: Pt = [gx0 + i * h, gz0 + j * h]
+        const uG =
+          (g[0] - wall.start[0]) * wall.dir[0] + (g[1] - wall.start[1]) * wall.dir[1]
+        if (!inRange(uG) || inKeepout(uG)) continue
+        // perpendicular offset from the wall LINE (out ⊥ dir ⇒ constant
+        // along the wall) — the away-only floor, with 1e-9 float grace so
+        // an exactly-on-grid honest spot keeps its own stand-off
+        const sG = (g[0] - wall.start[0]) * out[0] + (g[1] - wall.start[1]) * out[1]
+        if (sG < rowOff - 1e-9) continue
+        const dx = g[0] - unit1Presnap[0]
+        const dz = g[1] - unit1Presnap[1]
+        const d2 = dx * dx + dz * dz
+        if (
+          !best ||
+          d2 < best.d2 ||
+          (d2 === best.d2 && (sG < best.s || (sG === best.s && uG < best.u)))
+        ) {
+          best = { g, d2, s: sG, u: uG }
+        }
+      }
     }
-    if (uSnap !== null) uFinal = uSnap
-    const sOut = unit1Presnap[0] * out[0] + unit1Presnap[1] * out[1]
-    // 1e-9 slack keeps an already-on-grid stand-off where it is instead of
-    // ceiling a float-dust overshoot up a whole step.
-    rowOffFinal = rowOff + (Math.ceil(sOut / step - 1e-9) * step - sOut)
+    at1 = best ? best.g : unit1Presnap
+    unit1OffGrid = !best
+    // Re-derive the wall geometry from the FINAL point with the exact
+    // verbatim-path expressions (same clamp, same normalize) — the seeded
+    // node's recompose reproduces these bits, snapped or honest-off-grid.
+    uFinal = Math.max(
+      0,
+      Math.min(
+        wall.length,
+        (at1[0] - wall.start[0]) * wall.dir[0] + (at1[1] - wall.start[1]) * wall.dir[1],
+      ),
+    )
+    const footF = wallPointAt(wall, uFinal)
+    const ofx = at1[0] - footF[0]
+    const ofz = at1[1] - footF[1]
+    const offF = Math.hypot(ofx, ofz)
+    // offF ≥ the stand-off floor by construction (≫ the 1e-6 degenerate)
+    outFinal = [ofx / offF, ofz / offF]
+    rowOffFinal = Math.max(offF, minOff)
   }
   const slots: CondenserSlot[] = []
-  const at1: Pt = anchorVerbatim
-    ? anchor
-    : (() => {
-        const p = wallPointAt(wall, uFinal)
-        return [p[0] + out[0] * rowOffFinal, p[1] + out[1] * rowOffFinal] as Pt
-      })()
-  slots.push({ at: at1, u: uFinal, out })
+  slots.push({ at: at1, u: uFinal, out: outFinal })
   // Subsequent units: step along the wall at pad + clear pitch, sliding past
   // ROs; grow the other way when a direction runs out of wall.
   const pitch = COND_PAD_SIDE + COND_UNIT_CLEAR
@@ -1420,9 +1486,13 @@ function condenserRow(
       }
     }
     const p = wallPointAt(wall, u)
-    slots.push({ at: [p[0] + out[0] * rowOffFinal, p[1] + out[1] * rowOffFinal] as Pt, u, out })
+    slots.push({
+      at: [p[0] + outFinal[0] * rowOffFinal, p[1] + outFinal[1] * rowOffFinal] as Pt,
+      u,
+      out: outFinal,
+    })
   }
-  return { wall, slots, warnings, unit1Presnap }
+  return { wall, slots, warnings, unit1Presnap, unit1OffGrid }
 }
 
 export function layoutHvac(
@@ -2244,6 +2314,11 @@ export function layoutHvac(
         const slotFlag = (base: string | null): string | undefined => {
           let out: string | undefined = base ?? undefined
           if (overhangFlag) out = composeFlag(out, overhangFlag)
+          // Off-grid honesty (verify round F3): the world-grid search
+          // exhausted — unit #1 stands at the honest un-snapped spot and
+          // its pad + cabinet say so (' | ' composition, the B1 flag
+          // convention; verbatim anchors never snap ⇒ never this class).
+          if (i === 0 && row.unit1OffGrid) out = composeFlag(out, COND_OFF_GRID_FLAG)
           return out
         }
         const padCabinetFlag = slotFlag(rowFlag)
