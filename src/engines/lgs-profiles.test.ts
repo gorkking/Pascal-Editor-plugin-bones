@@ -473,6 +473,29 @@ describe("'lgs' walls route FULLY — steel bones, framed-twin sheet goods (F1, 
     // …and the framed twin never carries the steel qualifier
     expect(framedInfo.insulation).not.toContain('R402.2.6')
   })
+
+  test("Phase 2 — the machine suffix tells the REAL constraint state: '· machine <key>' + the honest fallback count, no IOU", () => {
+    const nodes = baselineScene()
+    const select = { levelId: 'level_1', selectedIds: ['w_s'] }
+    // TF550H rolls the 550S162-68 studs but not T125 track → 1 of the
+    // wall's 2 resolutions falls back (the canonical exhibit)
+    const oneCfg = { ...cfgWith({ w_s: 'lgs' }), lgsMachine: 'framecad/tf550h' }
+    const one = selectedWallInfo(nodes, select, oneCfg, computeLevel(nodes, oneCfg))
+    if (!one) throw new Error('missing wall info')
+    expect(one.assembly).toContain('· machine framecad/tf550h (1 profile falls back)')
+    expect(one.assembly).not.toContain('constraint warnings land in Phase 2')
+    // F325iT (33/43 mil only) rolls neither 68-mil pick → both fall back
+    const twoCfg = { ...cfgWith({ w_s: 'lgs' }), lgsMachine: 'framecad/f325it' }
+    const two = selectedWallInfo(nodes, select, twoCfg, computeLevel(nodes, twoCfg))
+    if (!two) throw new Error('missing wall info')
+    expect(two.assembly).toContain('· machine framecad/f325it (2 profiles fall back)')
+    // no machine → no machine suffix at all (byte-stable card line)
+    const noneCfg = cfgWith({ w_s: 'lgs' })
+    const none = selectedWallInfo(nodes, select, noneCfg, computeLevel(nodes, noneCfg))
+    if (!none) throw new Error('missing wall info')
+    expect(none.assembly).not.toContain('· machine')
+    expect(none.assembly).not.toContain('falls back')
+  })
 })
 
 describe('schema round-trip (framingSystem absent == lumber, byte-parity)', () => {

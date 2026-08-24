@@ -190,9 +190,11 @@ export function selectedWallInfo(
   // exact profile + spacing the steel engine builds — ONE resolver
   // (lgsWallProfiles) feeds both, so the card can't drift from the 3D
   // members — with the selection basis stated (the mil table cells are
-  // unverified; the conservative pick says so). A selected machine only
-  // brands/falls back labels in Phase 1 — can't-roll WARNINGS land with
-  // the machine UX in Phase 2, and the card says that too.
+  // unverified; the conservative pick says so). A selected machine (Phase
+  // 2) brands the suffix with the REAL constraint state: '· machine <key>'
+  // plus, when this wall's resolutions fall back to generic AISI dims, the
+  // honest count — the per-designator detail lives in the level warnings
+  // (machineConstraintWarning) and on the member labels themselves.
   const lgsAssembly = (): string => {
     const profiles = lgsWallProfiles(wall, result.spec, {
       ...(resolved.studSize !== undefined ? { studSize: resolved.studSize } : {}),
@@ -202,8 +204,14 @@ export function selectedWallInfo(
       return 'Steel (LGS) — engineered design required (no prescriptive member class)'
     }
     const basis = profiles.basis ? ` — ${profiles.basis}` : ''
+    const fallbacks = [profiles.stud, profiles.track].filter(
+      (r) => isResolvedProfile(r) && r.status !== 'verified',
+    ).length
     const machineNote = result.spec.lgsMachine
-      ? ` · machine ${result.spec.lgsMachine} (constraint warnings land in Phase 2)`
+      ? ` · machine ${result.spec.lgsMachine}` +
+        (fallbacks > 0
+          ? ` (${fallbacks} profile${fallbacks === 1 ? ' falls' : 's fall'} back)`
+          : '')
       : ''
     return `Steel (LGS) — ${lgsLabelHead(profiles.stud)} @ ${spacingIn}" o.c.${basis}${machineNote}`
   }

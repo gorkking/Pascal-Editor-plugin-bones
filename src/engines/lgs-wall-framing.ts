@@ -42,9 +42,15 @@
  *    members, never silent.
  *  - machine resolution (spec.lgsMachine → profileFor): the resolution
  *    STATUS rides every member label (verified machines brand the label,
- *    anything else carries the honest fallback string); can't-roll
- *    WARNINGS are Phase-2 scope (machine selection UX) — the wall card
- *    says so.
+ *    anything else carries the honest fallback string), and — Phase 2 —
+ *    every fallback resolution raises a per-level warning
+ *    (`machineConstraintWarning`): a VERIFIED machine that can't roll the
+ *    resolved profile earns the "cannot roll" claim (its published ranges
+ *    are the rollable derivation's basis); an unverified or unknown
+ *    machine never does — nothing was checked, so the warning states THAT
+ *    instead. Machine selection never changes geometry: profiles resolve
+ *    identically with or without it (the vendor-own-dims path is Phase-1
+ *    behavior, unwidened) — the machine only brands labels and warns.
  *
  * Cross-material junctions: compute passes ONE hint graph over lumber +
  * steel walls (frameHints) — corners/tees resolve through the same
@@ -62,6 +68,7 @@ import {
   familyVariants,
   LGS,
   type LgsProfileResolution,
+  machineFor,
   parseDesignator,
   profileFor,
 } from './lgs-profiles'
@@ -271,6 +278,47 @@ export function lgsLabelHead(res: LgsResolvedProfile): string {
 }
 
 /**
+ * The per-level machine-constraint warning for one FALLBACK resolution
+ * (Phase 2 — the can't-roll honesty payload; P4 prints it verbatim on
+ * paper). Three honest shapes, never conflated:
+ *  - VERIFIED machine that can't roll the resolved profile → the "cannot
+ *    roll" claim (its published web/flange/coil ranges are the basis of
+ *    the rollable derivation — the exhibit: TF550H rolls the S162 studs
+ *    but its 34–63 mm flange range excludes T125 track);
+ *  - UNVERIFIED machine → "is unverified" — nothing was checked, so the
+ *    warning never claims incapability (an unchecked machine can claim
+ *    NO rollable rows, but also earns no can't-roll verdicts);
+ *  - unknown key → "not found in the catalog".
+ * Null when there is nothing to warn about (no machine requested, or the
+ * machine rolls the pick). `roleWord` names the member class the
+ * resolution feeds ('studs' | 'tracks' | 'bridging channels').
+ */
+export function machineConstraintWarning(
+  res: LgsProfileResolution,
+  roleWord: string,
+): string | null {
+  if (!('designator' in res)) return null
+  if (res.machine === undefined || res.status === 'verified') return null
+  const machine = machineFor(res.machine)
+  if (!machine) {
+    return (
+      `Machine '${res.machine}' not found in the catalog — ` +
+      `generic AISI profiles used for all steel members; check the machine key`
+    )
+  }
+  if (machine.status !== 'verified') {
+    return (
+      `Machine ${machine.name} is unverified — generic AISI dims used for ` +
+      `every steel profile; verify capability with the vendor`
+    )
+  }
+  return (
+    `Machine ${machine.name} cannot roll ${res.designator} (${roleWord}) — ` +
+    `generic AISI fallback used; verify with vendor`
+  )
+}
+
+/**
  * Frame a set of LGS walls. Returns members + per-level honesty warnings
  * (deduped). Curved walls are skipped upstream like lumber.
  */
@@ -476,6 +524,13 @@ function frameLgsWall(
     runLen,
     `Top track ${trackHead}${trackNote}${basisSuffix}`,
   )
+  // Phase 2 — machine can't-roll honesty (LOD 300+ like every LGS warning;
+  // 200 makes no claims). Emitted per composed member CLASS so the level
+  // warning is exactly as wide as what's actually drawn/booked.
+  if (codeClaims) {
+    const trackWarning = machineConstraintWarning(trackRes, 'tracks')
+    if (trackWarning !== null) warnings.add(trackWarning)
+  }
 
   // Studs seat INSIDE the tracks: ends against the track webs. The box
   // nesting (stud inside the track flange band) is a design-intent contact
@@ -484,6 +539,13 @@ function frameLgsWall(
   const studTop = H - trackWeb
   const studHeight = studTop - studBottom
   if (studHeight <= tS) return // degenerate pony wall — tracks only
+
+  // Stud-family members (studs/kings/jacks/cripples/headers) all emit from
+  // here down — the stud resolution's can't-roll status warns once.
+  if (codeClaims) {
+    const studWarning = machineConstraintWarning(studRes, 'studs')
+    if (studWarning !== null) warnings.add(studWarning)
+  }
 
   const studDims: [number, number, number] = [tS, studHeight, wFit]
   const spacingIn = Math.round(spacing / 0.0254)
@@ -678,6 +740,7 @@ function frameLgsWall(
     const bFam = backingRes.family
     const bWeb = bFam.webMm / 1000
     const bFlange = (bFam.flangeMm ?? bFam.webMm / 3) / 1000
+    const backingMark = members.length // warn only if a member really emits
     for (const tee of hints.backing ?? []) {
       const uu = Math.min(Math.max(tee.u, u0 + tS), u1 - tS)
       const left = Math.max(u0 + halfT, ...studUs.filter((su) => su < uu - EPS))
@@ -697,6 +760,10 @@ function frameLgsWall(
           `Partition backing ${lgsLabelHead(backingRes)} — CFS blocking${codeClaims ? ' (bridging channel: only catalog variant — not an R603.3.2 stud-table selection)' : ''}`,
         )
       }
+    }
+    if (codeClaims && members.length > backingMark) {
+      const backingWarning = machineConstraintWarning(backingRes, 'bridging channels')
+      if (backingWarning !== null) warnings.add(backingWarning)
     }
   }
 

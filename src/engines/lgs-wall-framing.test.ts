@@ -861,3 +861,148 @@ describe('TAKEOFF gates — steel rows, screw schedule, no invented weights', ()
     ).toBe(true)
   })
 })
+
+describe("MACHINE CONSTRAINTS — the Phase-2 can't-roll warning channel", () => {
+  // 0.15 m wall → 2x6-equivalent → 550-web stems; conservative 68 mil at
+  // 400 (the exact resolutions the warnings must name).
+  const walls = [wall({ id: 'a', thickness: 0.15, exterior: true })]
+  const machineLines = (warnings: string[]) => warnings.filter((w) => w.startsWith('Machine'))
+
+  test('the TF550H exhibit (the real Phase-1 finding): S162 studs roll, T125 track cannot — the level warning says exactly that', () => {
+    const { members, warnings } = lgsFrameWalls(walls, {
+      ...spec400,
+      lgsMachine: 'framecad/tf550h',
+    })
+    expect(warnings).toContain(
+      'Machine FRAMECAD TF550H cannot roll 550T125-68 (tracks) — ' +
+        'generic AISI fallback used; verify with vendor',
+    )
+    // NEVER a stud claim — the machine's published ranges roll 550S162-68
+    expect(machineLines(warnings).some((w) => w.includes('(studs)'))).toBe(false)
+    // …and the warning agrees with the members: tracks carry the fallback
+    // status, studs the brand (the label channel and the warning channel
+    // tell ONE story)
+    for (const m of steelOf(members)) {
+      if (m.role === 'bottom-plate' || m.role === 'top-plate' || m.role === 'sill') {
+        expect(m.label).toContain(LGS.fallbackStatus)
+      } else if (m.role !== 'backing') {
+        expect(m.label).toContain('(framecad/tf550h)')
+      }
+    }
+  })
+
+  test('a machine that rolls NEITHER family composed here warns per designator (studs AND tracks)', () => {
+    // F325iT rolls 33/43 mil only — the conservative 68-mil picks both fall back
+    const { warnings } = lgsFrameWalls(walls, { ...spec400, lgsMachine: 'framecad/f325it' })
+    expect(warnings).toContain(
+      'Machine FRAMECAD F325iT cannot roll 550S162-68 (studs) — ' +
+        'generic AISI fallback used; verify with vendor',
+    )
+    expect(warnings).toContain(
+      'Machine FRAMECAD F325iT cannot roll 550T125-68 (tracks) — ' +
+        'generic AISI fallback used; verify with vendor',
+    )
+  })
+
+  test('a fully-rollable machine → ZERO machine warnings; every label branded (warnings derive from the rollable set, not from machine-set-ness)', () => {
+    // No real catalog machine claims T125 track rollability (the vendor
+    // flange floors sit above the 1-1/4" track flange), so the no-warning
+    // leg uses a synthetic verified machine — injected and RESTORED like
+    // the zzforge precedent in lgs-profiles.test.ts.
+    const vendors = LGS.vendors as Record<string, (typeof LGS.vendors)[string]>
+    vendors.zzroll = {
+      name: 'ZZ Roll',
+      website: 'https://example.com',
+      machines: {
+        all: {
+          name: 'ZZ Roll-All 9000',
+          status: 'verified',
+          sourceUrls: ['https://example.com/spec'],
+          rollableFamilies: [
+            { family: '350S162', basis: 'derived — test fixture' },
+            { family: '550S162', basis: 'derived — test fixture' },
+            { family: '350T125', basis: 'derived — test fixture' },
+            { family: '550T125', basis: 'derived — test fixture' },
+            { family: '150U050', basis: 'derived — test fixture' },
+          ],
+        },
+      },
+    }
+    try {
+      const { members, warnings } = lgsFrameWalls(walls, {
+        ...spec400,
+        lgsMachine: 'zzroll/all',
+      })
+      expect(machineLines(warnings)).toEqual([])
+      for (const m of steelOf(members)) {
+        if (m.role === 'backing') continue
+        expect(m.label).toContain('(zzroll/all)')
+        expect(m.label).not.toContain(LGS.fallbackStatus)
+      }
+    } finally {
+      delete vendors.zzroll
+    }
+  })
+
+  test('generic (no machine): no machine warnings at all', () => {
+    const { warnings } = lgsFrameWalls(walls, spec400)
+    expect(machineLines(warnings)).toEqual([])
+  })
+
+  test('UNVERIFIED machine (Pinnacle): the honest unverified warning — NEVER a cannot-roll claim (nothing was checked)', () => {
+    const { warnings } = lgsFrameWalls(walls, { ...spec400, lgsMachine: 'pinnacle/x1' })
+    expect(warnings).toContain(
+      'Machine Pinnacle X1 is unverified — generic AISI dims used for ' +
+        'every steel profile; verify capability with the vendor',
+    )
+    expect(warnings.some((w) => w.includes('cannot roll'))).toBe(false)
+  })
+
+  test('unknown machine key: loud not-found warning, no capability claims', () => {
+    const { warnings } = lgsFrameWalls(walls, { ...spec400, lgsMachine: 'acme/rocket' })
+    expect(warnings).toContain(
+      "Machine 'acme/rocket' not found in the catalog — " +
+        'generic AISI profiles used for all steel members; check the machine key',
+    )
+    expect(warnings.some((w) => w.includes('cannot roll'))).toBe(false)
+  })
+
+  test('LOD ladder: machine warnings at 300+, NONE at 200 (labels keep the honest fallback status there)', () => {
+    const spec200: FramingSpec = {
+      ...DEFAULT_SPEC,
+      detail: '200',
+      lgsMachine: 'framecad/tf550h',
+    }
+    const lod200 = lgsFrameWalls(walls, spec200)
+    expect(machineLines(lod200.warnings)).toEqual([])
+    // the label channel is not LOD-gated — the track still says the truth
+    const track200 = lod200.members.find((m) => m.role === 'bottom-plate')
+    expect(track200?.label).toContain(LGS.fallbackStatus)
+    const lod300 = lgsFrameWalls(walls, { ...DEFAULT_SPEC, detail: '300', lgsMachine: 'framecad/tf550h' } as FramingSpec)
+    expect(machineLines(lod300.warnings).length).toBeGreaterThan(0)
+  })
+
+  test('end-to-end: the warning reaches computeLevel and prints on paper (P4)', () => {
+    const lgs = computeLevel(baselineScene(), {
+      ...baselineConfig('INTL'),
+      framingSystem: 'lgs' as const,
+      lgsMachine: 'framecad/tf550h',
+    })
+    const trackWarnings = lgs.warnings.filter(
+      (w) => w.includes('cannot roll') && w.includes('(tracks)'),
+    )
+    // both stems compose in the baseline scene → both T125 designators warn
+    expect(trackWarnings.some((w) => w.includes('350T125-68'))).toBe(true)
+    expect(trackWarnings.some((w) => w.includes('550T125-68'))).toBe(true)
+    const sheets = buildPlanSet(lgs.members, lgs.fixtures, {
+      jurisdiction: lgs.jurisdiction,
+      warnings: lgs.warnings,
+      areas: lgs.areas,
+      walls: lgs.walls,
+      characteristics: lgs.characteristics ?? undefined,
+    })
+    const paper = sheets.map((sh) => sh.svg).join(' ')
+    expect(paper).toContain('cannot roll')
+    expect(paper).toContain('verify with vendor')
+  })
+})
