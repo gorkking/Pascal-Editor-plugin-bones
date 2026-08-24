@@ -58,6 +58,7 @@
  */
 
 import fastening from '../../data/fastening-schedule.json'
+import { profileFamily } from './lgs-profiles'
 import type { Fixture, FixtureKind, Member } from '../core/types'
 import { formatFtIn, toFeet } from '../core/units'
 import { LUMBER_SIZES, type LumberSize } from '../lumber'
@@ -638,9 +639,13 @@ export function computeTakeoff(
     }
     for (const profile of [...byProfile.keys()].sort()) {
       const tally = byProfile.get(profile) as { pcs: number; lf: number }
+      // Grade rides the row (round-1 F3b — 'Gr 50' printed nowhere on the
+      // set): from the catalog row's verified yieldKsi; vendor designators
+      // outside genericFamilies print bare (their grade is the vendor's).
+      const fam = profileFamily(profile)
       push(
         'Wall framing',
-        `LGS ${profile}`,
+        `LGS ${profile}${fam ? ` (Gr ${fam.yieldKsi})` : ''}`,
         `${tally.pcs} pcs, cut to length (roll-formed) — weight requires vendor data (no verified lb/ft in the catalog)`,
         round1(tally.lf),
         'lf',

@@ -4170,3 +4170,70 @@ describe('LGS steel walls on paper (Phase 1 round-1 P6)', () => {
     })
   }
 })
+
+describe('LGS paper identity (Phase 1 round-1 F3)', () => {
+  const spec400f3 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const mkWall = (id: string, s: [number, number], e: [number, number]): WallSlice => {
+    const dx = e[0] - s[0]
+    const dz = e[1] - s[1]
+    const length = Math.hypot(dx, dz)
+    return {
+      id,
+      start: s,
+      end: e,
+      length,
+      dir: [dx / length, dz / length],
+      thickness: 0.114,
+      height: 2.5,
+      exterior: true,
+      openings: [],
+      curved: false,
+    }
+  }
+  const wallSheetOf = (sheets: { key?: string; title: string; svg: string }[]) =>
+    sheets.find((sh) => sh.title.toLowerCase().includes('wall'))?.svg ?? ''
+
+  test('all-steel wall sheet: legend keys every drawn steel family (role (LGS) — designator (Gr NN))', () => {
+    const walls = [mkWall('a', [0, 0], [6, 0]), mkWall('b', [0, 0], [0, 4])]
+    const { members } = lgsFrameWalls(walls, spec400f3)
+    const svg = wallSheetOf(buildPlanSet(members, [], { walls }))
+    expect(svg.length).toBeGreaterThan(0)
+    // the sheet draws 100+ steel members — the legend must name the family
+    expect(svg).toContain('stud (LGS) — 350S162-68 (Gr 50)')
+    expect(svg).toContain('bottom-plate (LGS) — 350T125-68 (Gr 50)')
+    // grade prints ON the set now (F3b)
+    expect(svg).toContain('(Gr 50)')
+  })
+
+  test('MIXED level: lumber AND steel stud families key as DISTINCT legend rows', () => {
+    const steelW = mkWall('w_steel', [0, 0], [6, 0])
+    const lumberW = mkWall('w_wood', [0, 0], [0, 4])
+    const eng = new Map<string, { construction: 'framed' | 'lgs' }>([
+      ['w_steel', { construction: 'lgs' }],
+      ['w_wood', { construction: 'framed' }],
+    ])
+    const members = [
+      ...frameWalls([lumberW], spec400f3, eng, { hintWalls: [steelW, lumberW] }),
+      ...lgsFrameWalls([steelW], spec400f3, eng, { hintWalls: [steelW, lumberW] }).members,
+    ]
+    const svg = wallSheetOf(buildPlanSet(members, [], { walls: [steelW, lumberW] }))
+    // both families keyed — the steel members are never mislabeled lumber
+    expect(svg).toContain('stud (LGS) — 350S162-68 (Gr 50)')
+    expect(svg).toMatch(/>stud — 2x4</)
+  })
+
+  test('strap-bracing joined the hardware-glyph grammar: keyed glyphs + derived legend row, no flecks', () => {
+    const walls = [mkWall('a', [0, 0], [6, 0])]
+    const { members } = lgsFrameWalls(walls, spec400f3)
+    const straps = members.filter((m) => m.role === 'strap-bracing')
+    expect(straps.length).toBe(4) // 2.5 m wall > 8 ft: third points × both faces
+    const svg = wallSheetOf(buildPlanSet(members, [], { walls }))
+    // the double-bar glyph draws (per strap) and the legend row derives
+    // name + cite from the member label with the count
+    expect(svg).toContain('M-3.4 -1.3 H3.4 M-3.4 1.3 H3.4')
+    expect(svg).toContain('Strap bracing 1-1/2&quot; × 33 mil (R603.3.3) — 4 pcs')
+    // and no generic rect fleck is drawn for the strap role (glyph replaces it)
+    const glyphCount = (svg.match(/M-3\.4 -1\.3 H3\.4/g) ?? []).length
+    expect(glyphCount).toBeGreaterThanOrEqual(straps.length + 1) // per-mark + legend swatch
+  })
+})

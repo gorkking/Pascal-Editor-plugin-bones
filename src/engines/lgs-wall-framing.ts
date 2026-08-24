@@ -698,7 +698,7 @@ function frameLgsWall(
           rotation: [0, yaw, 0],
           material: 'steel',
           sourceId: wall.id,
-          label: `Strap bracing 1-1/2" × 33 mil — R603.3.3 (${rowNote})`,
+          label: `Strap bracing 1-1/2" × 33 mil (R603.3.3) — ${rowNote}`,
           advisory:
             'R603.3.3 stud bracing v1 — flat strap on both flange faces (layout assumption); ' +
             'end anchorage + periodic blocking per R603.3.3 not modeled; verify detail',

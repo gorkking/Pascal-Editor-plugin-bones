@@ -541,14 +541,21 @@ describe('TAKEOFF gates — steel rows, screw schedule, no invented weights', ()
   })
   const rows = (r: typeof base) => computeTakeoff(r.members, r.fixtures, r.areas)
 
-  test('steel books by designator + LENGTH; weight is never invented (stated basis instead)', () => {
-    const steelRows = rows(lgsAll).filter((r) => r.item.startsWith('LGS ') && r.item !== 'LGS strap bracing 1-1/2" × 33 mil')
+  test('steel books by designator + LENGTH + verified grade; weight is never invented', () => {
+    const steelRows = rows(lgsAll).filter(
+      (r) => r.item.startsWith('LGS ') && !r.item.startsWith('LGS strap bracing'),
+    )
     expect(steelRows.length).toBeGreaterThanOrEqual(4) // S+T per web family in the scene
     for (const r of steelRows) {
       expect(r.unit).toBe('lf')
       expect(r.detail).toContain('weight requires vendor data')
-      // designator in the item is a real catalog row
-      expect(LGS.genericFamilies[r.item.replace('LGS ', '')]).toBeDefined()
+      // item = 'LGS <designator> (Gr NN)' — a real catalog row whose
+      // printed grade equals the data (round-1 F3b: grade printed nowhere)
+      const m = /^LGS (\S+) \(Gr (\d+)\)$/.exec(r.item)
+      expect(m).not.toBeNull()
+      const fam = LGS.genericFamilies[m?.[1] ?? '']
+      expect(fam).toBeDefined()
+      expect(String(fam?.yieldKsi)).toBe(m?.[2] ?? '')
     }
     // NO steel framing row books pounds/kilograms
     for (const r of rows(lgsAll)) {
@@ -559,7 +566,7 @@ describe('TAKEOFF gates — steel rows, screw schedule, no invented weights', ()
   test('lf figures re-derive from the members exactly', () => {
     const steel = steelOf(lgsAll.members).filter((m) => m.profile === '550S162-68')
     const lf = steel.reduce((sum, m) => sum + m.length / 0.3048, 0)
-    const row = rows(lgsAll).find((r) => r.item === 'LGS 550S162-68')
+    const row = rows(lgsAll).find((r) => r.item === 'LGS 550S162-68 (Gr 50)')
     expect(row?.quantity).toBeCloseTo(Math.round(lf * 10) / 10, 1)
     expect(row?.detail).toContain(`${steel.length} pcs`)
   })

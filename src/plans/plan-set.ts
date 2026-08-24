@@ -15,6 +15,7 @@ import { formatFtIn, inches } from '../core/units'
 import { type BuildingCharacteristics, zeroAreaNa } from '../engines/characteristics'
 import { openingSpans } from '../engines/electrical'
 import { computeTakeoff, type TakeoffAreas } from '../engines/takeoff'
+import { profileFamily } from '../engines/lgs-profiles'
 import {
   DUCT_COLORS,
   PLUMBING_COLORS,
@@ -216,6 +217,11 @@ const HARDWARE_GLYPHS = {
    * lumber rect (the post is real structure and keeps its rect; before
    * NIGHT-10 it keyed only through a roleSizes-cap accident). */
   'portal-post': '<rect x="-3.5" y="-3.5" width="7" height="7" fill="none" stroke="#444" stroke-width="0.9"/>',
+  /** LGS R603.3.3 horizontal strap bracing (Phase 1) — double bar (the
+   * strap rows on both faces). Joined the NIGHT-10 grammar with its role:
+   * 20 straps drew as unkeyed ~0.04 px flecks before (the B9 class). */
+  'strap-bracing':
+    '<path d="M-3.4 -1.3 H3.4 M-3.4 1.3 H3.4" fill="none" stroke="#444" stroke-width="0.9"/>',
 } as const
 type HardwareGlyphKind = keyof typeof HARDWARE_GLYPHS
 
@@ -226,6 +232,7 @@ type HardwareGlyphKind = keyof typeof HARDWARE_GLYPHS
 const hardwareGlyphKind = (sheetKey: string, m: Member): HardwareGlyphKind | null => {
   if (sheetKey === 'wall' && m.system === 'wall-framing') {
     if (m.role === 'strap') return 'strap'
+    if (m.role === 'strap-bracing') return 'strap-bracing'
     if (m.role === 'uplift-strap') return 'uplift-strap'
     if (m.role === 'uplift-connector') return 'uplift-connector'
     if (m.role === 'foundation-strap') return 'foundation-strap'
@@ -1389,14 +1396,27 @@ function planSheet(
   // on a 2x6-dominant house (quality C4).
   const roleSizeCounts = new Map<string, Map<string, number>>()
   for (const m of mine) {
-    if (!m.size) continue
+    // Steel (LGS Phase 1, round-1 F3): members carry no LumberSize — their
+    // family identity is the `profile` designator. A size-only legend drew
+    // an all-steel sheet with 159 members and ZERO legend rows, and a
+    // MIXED level printed 'stud — 2x6' while 28 drawn members were
+    // 550S162-68. Steel families key under their OWN role bucket
+    // ('stud (LGS)') so mixed levels list both, with the verified grade.
+    const steelKey = !m.size && m.profile ? `${m.role} (LGS)` : null
+    const sizeKey =
+      m.size ??
+      (m.profile
+        ? `${m.profile}${profileFamily(m.profile) ? ` (Gr ${profileFamily(m.profile)?.yieldKsi})` : ''}`
+        : null)
+    if (sizeKey === null) continue
     // Portal posts key through the HARDWARE legend row below (glyph +
     // cite + count + size) — the generic 'post — 2x6' row only ever
     // printed by a legend-cap accident (NIGHT-10; B9 examiner).
     if (hardwareGlyphKind(def.key, m) === 'portal-post') continue
-    const counts = roleSizeCounts.get(m.role) ?? new Map<string, number>()
-    counts.set(m.size, (counts.get(m.size) ?? 0) + 1)
-    roleSizeCounts.set(m.role, counts)
+    const roleKey = steelKey ?? m.role
+    const counts = roleSizeCounts.get(roleKey) ?? new Map<string, number>()
+    counts.set(sizeKey, (counts.get(sizeKey) ?? 0) + 1)
+    roleSizeCounts.set(roleKey, counts)
   }
   const roleSizes = new Map<string, string>()
   for (const [role, counts] of roleSizeCounts) {
