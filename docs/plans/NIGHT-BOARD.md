@@ -63,7 +63,17 @@ optional, absent round-trips absent. Vendor contradictions recorded
 both-ways verbatim; phantoms dropped. VERIFY ROUND: wf_9b07c78d-4b0
 (skeptic: citation-gate mutation, 92mm→362S162-not-in-catalog
 derivation trap, invented-number hunt, fallback-branch mutations).
-Merge only after APPROVE.
+ROUND 1: REVISE — F1 'lgs' half-routing (card said "Skipped" while
+lumber members rendered; sheathing/drywall areas dropped the wall —
+silent under-buy, S4/M2 classes), F2 350S162-68 missing (real
+SFIA/S230 variant), F3 F450iT 33-mil derivation inconsistency, F4
+complementary-defense gap (unverified machines could claim rollable
+rows), F5 parser 'L'/leading-zero nits. FIX TIP 73d55d9 (one commit
+per finding, suite 1775, all mutants die; F5 deviation documented:
+SFIA ships real 075U050-54 so only padded 4-digit aliases rejected).
+RE-VERIFY: wf_2f96f711-d34 (sweep ALL 'framed' literals for missed
+half-routes, all-19-machine mil-set convention sweep, F5 deviation
+adjudicated against the PDF). Merge only after APPROVE.
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
