@@ -43,10 +43,33 @@ describe('AISI designator parsing', () => {
     expect(parseDesignator(' 350s162-33 ')?.mils).toBe(33)
   })
 
-  test('malformed designators return null, never a guess', () => {
+  test("all five S240/SFIA letters parse — incl. 'L' (angle/L-header, skeptic F5)", () => {
+    expect(parseDesignator('150L150-54')?.section).toBe('L')
+    expect(parseDesignator('350F125-33')?.section).toBe('F')
+    // no L/F rows in the catalog → lookups fall back honestly, never throw
+    expect(profileFamily('150L150-54')).toBeUndefined()
+    expect(familyVariants('150L150')).toEqual([])
+  })
+
+  test('leading-zero THREE-digit tokens are real products (SFIA 075U050-54) and parse', () => {
+    // Verified against the SFIA guide local copy: 075U050-54 is a shipped
+    // product row (web 3/4 in, flange 1/2 in) — the skeptic-F5 literal
+    // "reject leading-zero web/flange tokens" would break it AND our own
+    // 150U050-54 ('050' flange), so the parser keeps sub-1-inch tokens.
+    const u = parseDesignator('075U050-54')
+    expect(u?.webIn).toBe(0.75)
+    expect(u?.flangeIn).toBe(0.5)
+  })
+
+  test('malformed designators return null, never a guess — incl. padded aliases (F5)', () => {
     for (const bad of ['2x4', '350S162', 'S162-33', '35X162-33', '350S16-33', '']) {
       expect(parseDesignator(bad)).toBeNull()
     }
+    // A FOUR-digit web starting with 0 is a padded alias of a real
+    // designator ('0350S162-33' ≙ 350S162-33) that would silently MISS
+    // every catalog lookup — rejected at parse.
+    expect(parseDesignator('0350S162-33')).toBeNull()
+    expect(parseDesignator('0550T125-43')).toBeNull()
   })
 })
 

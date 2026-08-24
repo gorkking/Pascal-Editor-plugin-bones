@@ -31,8 +31,10 @@ import type { MemberRole } from '../core/types'
 
 /** One AISI-designated generic member family row (dims in mm + in). */
 export type LgsFamily = {
-  /** S = lipped C (stud/joist) · T = track · U = unlipped channel · F = furring. */
-  section: 'S' | 'T' | 'U' | 'F'
+  /** S = lipped C (stud/joist) · T = track · U = unlipped channel ·
+   * F = furring · L = angle/L-header (SFIA legend; no L rows in the
+   * catalog today — lookups fall back honestly). */
+  section: 'S' | 'T' | 'U' | 'F' | 'L'
   webIn: number
   webMm: number
   flangeIn: number
@@ -140,15 +142,22 @@ export const LGS_FALLBACK_STATUS = LGS.fallbackStatus
 // ---------------------------------------------------------------------------
 
 /** Parsed AISI S240 designator: 350S162-33 → web 3.50", S section, 1.62"
- * flange, 33 mil. Web/flange encode 1/100 in. `null` when malformed. */
+ * flange, 33 mil. Web/flange encode 1/100 in; all five S240/SFIA letters
+ * parse (S/T/U/F/L). Leading-zero THREE-digit tokens are real products
+ * (SFIA prints 075U050-54 — web 3/4"; flange '050' = 1/2" on every U050
+ * row), so they parse; a FOUR-digit web starting with 0 ('0350S162-33')
+ * is a padded alias of a real designator that would MISS catalog lookups
+ * silently — rejected (skeptic F5). `null` when malformed. */
 export function parseDesignator(
   designator: string,
-): { webIn: number; section: 'S' | 'T' | 'U' | 'F'; flangeIn: number; mils: number } | null {
-  const m = /^(\d{3,4})([STUF])(\d{3})-(\d{2,3})$/.exec(designator.trim().toUpperCase())
+): { webIn: number; section: 'S' | 'T' | 'U' | 'F' | 'L'; flangeIn: number; mils: number } | null {
+  const m = /^(0\d{2}|[1-9]\d{2,3})([STUFL])(\d{3})-(\d{2,3})$/.exec(
+    designator.trim().toUpperCase(),
+  )
   if (!m) return null
   return {
     webIn: Number(m[1]) / 100,
-    section: m[2] as 'S' | 'T' | 'U' | 'F',
+    section: m[2] as 'S' | 'T' | 'U' | 'F' | 'L',
     flangeIn: Number(m[3]) / 100,
     mils: Number(m[4]),
   }
