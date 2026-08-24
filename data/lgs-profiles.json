@@ -867,18 +867,20 @@
             {
               "family": "350S162",
               "rollableMils": [
+                33,
                 43,
                 54
               ],
-              "basis": "derived: family web/flange within published web 75-150mm / flange 34-50mm; 43/54 mil min-base within published 0.70-1.6mm coil range (match tolerance 0.5mm for imperial roundings); lip capability unpublished by FRAMECAD - dims resolve from the generic AISI row"
+              "basis": "derived: family web/flange within published web 75-150mm / flange 34-50mm; 33/43/54 mil min-base within published 0.70-1.6mm coil range (match tolerance 0.5mm for imperial roundings); lip capability unpublished by FRAMECAD - dims resolve from the generic AISI row"
             },
             {
               "family": "550S162",
               "rollableMils": [
+                33,
                 43,
                 54
               ],
-              "basis": "derived: family web/flange within published web 75-150mm / flange 34-50mm; 43/54 mil min-base within published 0.70-1.6mm coil range (match tolerance 0.5mm for imperial roundings); lip capability unpublished by FRAMECAD - dims resolve from the generic AISI row"
+              "basis": "derived: family web/flange within published web 75-150mm / flange 34-50mm; 33/43/54 mil min-base within published 0.70-1.6mm coil range (match tolerance 0.5mm for imperial roundings); lip capability unpublished by FRAMECAD - dims resolve from the generic AISI row"
             }
           ]
         },

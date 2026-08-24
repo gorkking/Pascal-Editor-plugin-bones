@@ -117,6 +117,17 @@ describe('machine catalog', () => {
     expect(set).not.toContain('800S162-43') // web 203mm > 150mm max
   })
 
+  test('the derivation rule is applied CONSISTENTLY (skeptic F3: F450iT includes 33 mil)', () => {
+    // 33 mil min-base 0.836mm sits inside F450iT's PDF-verified 0.70-1.6mm
+    // coil range — meta.derivation's own rule, no silent exclusions.
+    const m = machineFor('framecad/f450it')
+    if (!m) throw new Error('missing machine')
+    const set = rollableDesignators(m)
+    expect(set).toContain('350S162-33')
+    expect(set).toContain('550S162-33')
+    expect(set).not.toContain('550S162-68') // 68 mil base 1.720mm > 1.6mm coil max
+  })
+
   test('an UNVERIFIED machine constrains nothing — empty rollable set', () => {
     const m = machineFor('pinnacle/x1')
     if (!m) throw new Error('missing machine')
