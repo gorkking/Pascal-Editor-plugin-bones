@@ -1,3 +1,47 @@
+# COMMUNITY PRs REVIEWED (2026-08-24) — JonathanNus / Terra Modular
+
+## Context: contributor runs a white-labeled Bones ("Structural
+## Framing / Beta") in a "PreSell" deployment (terramodular.com —
+## modular construction; LGS-relevant audience). Quality is high.
+
+TODO-1 (ADOPT, reworked): PR #1 Canadian jurisdictions — 16 rows
+(10 provinces, 3 territories, Ontario split S/E/N on frost/seismic
+spread, NBC-2020 generic fallback). Discipline matches house
+conventions: NBC Div B Part 9 citations, per-row kPa→psf/mm→in
+conversions documented, ircBase:null on the Wisconsin-UDC precedent,
+permafrost warnings surfaced via frostLineNote, ISO codes (CA-ON-S…)
+dodging the CA=California collision + free dropdown grouping, tests
+pin the silent-INTL-fallback class. PLAN: cherry-pick ONLY commit
+6861d07 (branch is stacked: carries PR #2's commits + an ACCIDENTAL
+white-label brand commit da39632 whose own message says 'NOT sent
+upstream' — drop both), rebase onto current data schema (their base
+is 2026-08-16, suite 444 vs our 1783; jurisdiction data grew), then
+a full verify round attacking: NBC citation completeness per row,
+conversion arithmetic, ircBase:null honesty (NO IRC-section label
+may fire on CA rows — sweep paper+panel; NBC 9.23.13 bracing differs
+by design), CA/California collision pins, tz guesses (Montreal folds
+into America/Toronto — their stated caveat), permafrost note reaches
+the panel. Credit JonathanNus in the merge.
+
+TODO-2 (ADOPT idea, fresh impl): PR #2's headless engine surface —
+export computeLevel/computeLevelUncached/computeTakeoff/cutList/
+extractLevels/extractRoofs + row/member types from index.ts so host
+estimators compute panel-identical quantities without mounting
+(computeLevelUncached exists for rollup loops vs the 1-deep memo).
+Gate: exports stay pure (no viewer import — a grep gate). Small.
+
+CLOSED-AS-SUPERSEDED (respond when Julien says how): PR #2's wall-
+mode takeover — the bug was real at their base but master's
+activation-scoped imposeLowWalls/releaseLowWalls (with the W1
+multi-X-ray invariant they lack, + user-action-scoped imposition
+fixing their scene-load-blanking edge) supersedes the panel-scoped
+design; panel-scoped restore would bury a still-live X-ray on tab
+switch. Their found-bug (insulationByClimateZone dead keys) was
+independently found+fixed (climateZoneOf, B4 rider) — acknowledge
+their find. Their long-term idea (owner-tokened push/pop
+presentation override on useViewer) folds into the queued host
+WallCutout self-heal follow-up as the API shape.
+
 # CMU × PAINT Z-FIGHT — ROOT-CAUSED, FIX PILOT LIVE (2026-08-23)
 
 ## Julien's report: painted CMU wall flickers ("both textures at once"),
