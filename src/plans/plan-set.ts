@@ -2965,12 +2965,17 @@ function openingRowInfo(
       Number.POSITIVE_INFINITY,
       ...(rec?.bondBeams.map((b) => b.position[1] - b.dims[1] / 2) ?? []),
     )
+    // A header member with no LumberSize is not headerless: LGS box
+    // headers carry their AISI designator in `profile` (round-1 P6 — the
+    // cell printed the banned dishonest '—' while the framed 2-C header's
+    // own R603.6 flag printed on the row below it; the CMU bond-beam
+    // precedent's exact class). '2×' states the box assembly.
     const headerText = head
       ? head.material === 'engineered'
         ? 'ENGINEERED (by supplier)'
         : head.role === 'lintel'
           ? 'precast lintel'
-          : (head.size ?? '—')
+          : (head.size ?? (head.profile ? `2× ${head.profile} box` : '—'))
       : bbBottom - roTop < BB_AS_LINTEL_TOL
         ? 'bond beam as lintel'
         : '—'

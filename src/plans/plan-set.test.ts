@@ -8,6 +8,7 @@ import { applyJurisdiction, profileFor } from '../jurisdiction/profiles'
 import { layoutHvac } from '../engines/hvac'
 import { layoutPlumbing } from '../engines/plumbing'
 import { frameWalls } from '../engines/wall-framing'
+import { lgsFrameWalls } from '../engines/lgs-wall-framing'
 import { assignOpeningMarks, buildPlanSet, planSetHtml, relativeLevelBaseY } from './plan-set'
 
 const member = (over: Partial<Member>): Member => ({
@@ -4116,3 +4117,56 @@ function unesc2(s: string): string {
     .replaceAll('&gt;', '>')
     .replaceAll('&amp;', '&')
 }
+
+describe('LGS steel walls on paper (Phase 1 round-1 P6)', () => {
+  const lgsSpec400 = { ...DEFAULT_SPEC, detail: '400' as const }
+  const lgsWall = (openings: OpeningSlice[]): WallSlice => ({
+    id: 'w_lgs_paper',
+    start: [0, 0],
+    end: [8, 0],
+    length: 8,
+    dir: [1, 0],
+    thickness: 0.114,
+    height: 2.5,
+    exterior: true,
+    openings,
+    curved: false,
+  })
+  const lgsOpenings: OpeningSlice[] = [
+    { id: 'd1', kind: 'door', u: 2, width: 0.9, height: 2.1, sillHeight: 0, roughWidth: 0.95, roughHeight: 2.15 },
+    { id: 'n1', kind: 'window', u: 6, width: 1.2, height: 1.2, sillHeight: 0.9, roughWidth: 1.25, roughHeight: 1.25 },
+  ]
+
+  for (const detail of ['400', '200'] as const) {
+    test(`schedule HEADER cell prints the steel box assembly at LOD ${detail} — never the dishonest '—'`, () => {
+      // Round-1 examiner P6: steel headers EXIST (the R603.6 verify flag
+      // from that very member printed on the row below) while the cell
+      // fell through (head.size ?? '—') — steel members carry no
+      // LumberSize; `profile` is the identity (the CMU bond-beam-as-lintel
+      // precedent's exact banned class).
+      const spec = { ...lgsSpec400, detail }
+      const wall = lgsWall(lgsOpenings)
+      const { members } = lgsFrameWalls([wall], spec)
+      const headers = members.filter((m) => m.role === 'header')
+      expect(headers.length).toBe(2)
+      const sheets = buildPlanSet(members, [], { walls: [wall] })
+      const tableSvg = sheets.find((s) => s.svg.includes('>MARK</text>'))?.svg ?? ''
+      expect(tableSvg.length).toBeGreaterThan(0)
+      const text = [...tableSvg.matchAll(/>([^<>]+)<\/text>/g)]
+        .map((m) => (m[1] as string).replaceAll('&quot;', '"').replaceAll('&amp;', '&'))
+        .join(' ')
+      for (const h of headers) {
+        expect(text).toContain(`2× ${h.profile} box`)
+      }
+      // no header cell prints '—' on this all-steel scene (the only '—'
+      // cells allowed are the door SILL dashes)
+      const headerCol = [...tableSvg.matchAll(/<text x="522" y="\d+"[^>]*>([^<]*)<\/text>/g)].map(
+        (m) => m[1],
+      )
+      // non-vacuous: the column parse found the two data rows (+ the
+      // 'HEADER' column heading prints bold at a different pattern)
+      expect(headerCol.length).toBeGreaterThanOrEqual(2)
+      expect(headerCol.filter((c) => c === '—').length).toBe(0)
+    })
+  }
+})
