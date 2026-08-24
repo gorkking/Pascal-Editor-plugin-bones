@@ -395,6 +395,37 @@ describe('climate-zone labels live (LOD-400 B4 rider: the raw-value zone lookup 
     expect(layers.some((m) => m.label?.includes('cavity'))).toBe(false)
     expect(layers.some((m) => m.label?.includes('vapor retarder'))).toBe(false)
   })
+
+  // CANADA (2026-08-24, PR #1 adoption): the contributor's found-bug note
+  // was exactly this dead-key class — the CA-* rows must never re-open it.
+  test('every stateClimateZone entry (67 rows incl. CA-*) parses AND resolves a live insulation row', () => {
+    const data = require('../../data/wall-assemblies.json') as {
+      exterior: {
+        stateClimateZone: Record<string, string>
+        insulationByClimateZone: Record<string, { value?: string }>
+      }
+    }
+    const insul = data.exterior.insulationByClimateZone
+    for (const [code, raw] of Object.entries(data.exterior.stateClimateZone)) {
+      const m = /^(\d)([ABC])?/.exec(raw.trim())
+      expect(m, `${code}: '${raw}' must parse`).not.toBeNull()
+      const key = m?.[1] === '4' && m?.[2] === 'C' ? '4M' : (m?.[1] as string)
+      expect(insul[key]?.value, `${code}: zone key '${key}' must be live`).toBeDefined()
+    }
+  })
+
+  test('CA-SK (zone 7) and CA-BC (4C → the 4M marine row) label live through the layer engine', () => {
+    const sk = layoutWallLayers([wall()], [roomAbove], spec400, 'CA-SK')
+    expect(sk.find((m) => m.role === 'sheathing')?.label).toContain('cavity R30 (zone 7)')
+    const bc = layoutWallLayers([wall()], [roomAbove], spec400, 'CA-BC')
+    expect(bc.find((m) => m.role === 'sheathing')?.label).toContain('cavity R30 (zone 4C)')
+    // NBC 9.25 requires a warm-side vapour barrier throughout Canada —
+    // stricter than the IECC-equivalent class these approximate zones imply
+    // (documented in wall-assemblies.json stateClimateZoneCitation); the
+    // IRC-cited label below is generic practice, confessed by the compute
+    // -level non-IRC warning (canada.test.ts).
+    expect(sk.find((m) => m.role === 'drywall')?.label).toContain('vapor retarder Class I or II')
+  })
 })
 
 describe('brick veneer air gap occupies space (verify S9: collapsed airspace)', () => {
