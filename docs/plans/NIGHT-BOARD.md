@@ -1,3 +1,29 @@
+# CMU × PAINT Z-FIGHT — ROOT-CAUSED, FIX PILOT LIVE (2026-08-23)
+
+## Julien's report: painted CMU wall flickers ("both textures at once"),
+## ANY color incl. flat white. ROOT CAUSE (verified file:line):
+CMU block outer faces are EXACTLY coplanar with the host wall face
+planes (cmu.ts:321 depth=min(t, BLOCK_DEPTH_ACTUAL), mortar shrink
+never applies to depth, block centered on centerline; default t=0.1 <
+0.19368 → faces at ±t/2). Unpainted looks clean ONLY because
+activation's wallMode 'down' stipple is transparent+depthWrite:false
+(depth-silent). Painting swaps an OPAQUE material back onto the host
+face via two suppression-unaware writers — React prop re-application
+on material-identity change (nodes wall/renderer.tsx:127-156) and
+paint-preview snapshot/restore (wall/paint.ts:161-188 +
+selection-manager stale restore) — and host WallCutout re-stomps only
+on its throttled camera trigger (>0.5m/0.3rad) → camera-dependent
+blinking. FIX PILOT: fix/cmu-face-bury (worktree
+/private/tmp/pilot-cmubury) — CMU_FACE_BURY=0.005 per the duct
+precedent + coplanarity gate + E5/manifest; assesses the framed-wall
+latent pair (gypsum/cladding outer faces flush by design,
+wall-layers.ts:285-291) as contained-fix-or-queued.
+HOST FOLLOW-UP QUEUED: WallCutout self-healing suppression (treat
+unexpected mesh.material as a trigger; paint-preview restore should
+re-resolve the current variant, not restore a stale snapshot) — fixes
+the resurrection class for ALL plugins/modes; also benefits 'up'/
+'cutaway' modes where the stipple never applies.
+
 # HP POLISH — feat/hp-polish DELIVERED, VERIFY ROUND RUNNING (2026-08-23)
 
 ## Julien's 4-part feedback (red / tilted / off-grid / no-R) — pilot done
