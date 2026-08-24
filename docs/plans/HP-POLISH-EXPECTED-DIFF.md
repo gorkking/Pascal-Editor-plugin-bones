@@ -37,19 +37,36 @@ be." Base `1a5e627`. Anything outside the classes below is a defect.
    wall-square bearing; line-set/whip attach points recompute from the new
    anchor/orientation (E2 gates re-ran green).
 
-3. **GRID SNAP** — AUTO anchors only (`condenserRow`, non-verbatim path):
-   host grid convention (read-only investigation) = `snapToHalf(v) =
-   round(v/step)·step` with `gridSnapStep` default **0.5 m**, options
-   [0.5, 0.25, 0.1, 0.05] (private-editor `store/use-editor.tsx`,
-   `placement-math.ts`). The engine snaps to the COARSEST step
-   (`EDITOR_GRID_STEP_M = 0.5` — every finer host option divides it) in the
-   WALL frame: ALONG = nearest multiple that stays on the wall span and
-   clear of RO keepouts (no candidate → the slid spot stays, honest
-   off-grid); OUTWARD = **ceil only** (away from the wall), so the 24" face
-   clearance (`condenserStandoff`) is a FLOOR the snap can only raise. Pad
-   label restates the basis: `≥ 24" face clearance basis`. Verbatim drags
-   never snap (A4 — the host move tool already applied the user's grid
-   mode).
+3. **GRID SNAP** — AUTO anchors only (`condenserRow`, non-verbatim path).
+   AMENDED in the verify fix round (**F1** — the wall-frame convention was
+   wrong on oblique walls: exact wall-frame multiples, world residuals
+   0.153/0.496 against the lattice the editor renders): the host
+   convention for item floor placement is the **WORLD XZ grid** —
+   `floorStrategy` snaps world components through
+   `snapWorldXZForActiveBuilding` "so item edges land on the visible grid
+   even when the active building is rotated" (private-editor
+   `placement-strategies.ts` + `lib/world-grid-snap.ts`). The engine runs
+   a deterministic lattice-candidate search within ±3 steps of the honest
+   (RO-slid) spot: VALID = on the wall span, RO-keepout-clear, stand-off ≥
+   the honest stand-off (away-only — the 24" face clearance is a FLOOR the
+   snap can only raise); PICK = nearest, ties by least extra stand-off
+   then smaller along-coordinate. The chosen lattice point is taken
+   VERBATIM (exact world multiples) and u/out/stand-off re-derive with the
+   exact verbatim-path expressions — post-seed == auto stays BYTE-equal by
+   construction, obliques included. Window exhausted (clearance/openings/
+   span) ⇒ the fully honest un-snapped spot + the off-grid flag (**F3**,
+   '⚠ off-grid — clearance/openings leave no 0.5 m grid position on this
+   wall' composed onto pad + cabinet, B1 ' | ' convention). Pad label
+   restates the basis: `≥ 24" face clearance basis`. Verbatim drags never
+   snap (A4 — the host move tool already applied the user's grid mode).
+   STEP BASIS (skeptic F4, informational): `gridSnapStep` defaults to
+   0.5 m ([0.5, 0.25, 0.1, 0.05]), but the host's DEFAULT item snapping
+   mode is 'lines' — `getGridSnapStep()` returns 0 unless the mode is
+   'grid' — i.e. interactive placement is free + line-snap until the user
+   opts in. AUTO placement has no gesture to align to, so the machine
+   picks the tidy default a user would: the 0.5 m world grid, the
+   coarsest host step (every finer option divides it, so the spot sits on
+   a grid line at every setting).
 
 4. **ROTATION** — additive nullable `yawOverride` on the `bones:service`
    schema, threaded `node.yawOverride → ServicePointOverride.yaw →
@@ -73,6 +90,10 @@ be." Base `1a5e627`. Anything outside the classes below is a defect.
    `rotation` on every node in the group (no registry seam) — a heat pump
    inside a MULTI-select rotate keeps its assembly orientation; host
    follow-up only if group-rotate parity is ever wanted.
+   NOTED (verify round): `yawOverride` accumulates past 2π after full
+   circles — exact host-item parity (the host's own rotation[1] does the
+   same), no geometric effect (three.js wraps the euler); R/T step 45° =
+   the host `ROTATION_QUANTUM` π/4, round-to-nearest-then-step semantics.
 
 ## Enumerated baseline classes (E5 recapture — the ONLY diffs)
 
@@ -97,8 +118,39 @@ the hvac condenser family, verified by field-level diff old→new):
 - **F2 disconnect fixture** — position (along-wall foot of the snapped
   anchor); rotationY unchanged (already wall-square).
 
-Everything else — every other engine, takeoff counts, warnings, labels —
-byte-equal (the compute.devices byte gate re-pins it live).
+- **T1 takeoff lf cells** (REC-1 — the honest S4 mirror of M3/M4/M5,
+  both corpora/jurisdictions): line-set ×3 rows (suction lf, liquid lf,
+  insulation-sleeve lf) 12.1 → 14.8 lf; `NM-B 10/2 w/G` 13.2 → 11.6 lf;
+  aggregate demo lines 58 → 58.4 and 33 → 32.4. **pcs counts unchanged**
+  (condensers/pads/disconnects/whips) — only printed LENGTH cells move
+  with the re-anchored runs. The pad row DETAIL also gains its size/basis
+  (REC-2): `1 × 1 m × 4" concrete equipment pad (40"-class stock; IRC
+  M1403)`, mirrored from the rendered member.
+- **P1 paper elevations** — E/W elevation sheets recenter by a uniform
+  −4.9 px transform (the moved condenser widens the projected extent;
+  every mark shifts together — a recenter class, not a geometry class).
+
+Everything else — every other engine, takeoff pcs counts, warnings,
+labels — byte-equal (the compute.devices byte gate re-pins it live).
+
+## Verify fix round (tip after 308ee22)
+
+- **F1** world-XZ grid rework above; axis-aligned scenes reproduce the
+  prior results exactly — the E5 recapture after the rework is
+  BYTE-IDENTICAL to the wall-frame capture, so M1–F2/T1/P1 above stay the
+  complete class list.
+- **F2** CHECKLIST M2 disconnect row amended (the ≤ 1 m/≤ 1.5 m figures
+  went stale at the unwarp round; the batch's silent 1.7 test allowance is
+  gone): 3D box↔unit-center ≤ **1.73 m** unobstructed — basis
+  √((S − t/2 − 0.02)² + 0.725²), S < condenserStandoff(t) + 0.5 (plan ≤
+  1.57; corpus-measured max 1.71/1.55) — + the ±1.2 m RO slide budget ⇒
+  plan ≤ 1.98. Row and test allowances agree to the digit. Geometry
+  option (a) was vacuous: the box already mounts at the unit's along-wall
+  projection (lateral = 0), so the reach IS the clearance-floored
+  stand-off.
+- **F3** off-grid honesty flag implemented + mutation-gated (above).
+- **F5** (pre-unwarp seed → disconnect 'w_fence' orphan) is pre-existing
+  at base — queued on the board by the coordinator, not this branch.
 
 ## Blast-radius re-oracles (updated as INTENDED)
 
@@ -107,9 +159,10 @@ byte-equal (the compute.devices byte gate re-pins it live).
   the keepout-aware multiple pick); seed-parity BYTE gates re-pin on the
   new geometry (post-seed == auto held without change — the seed spot
   snaps identically by construction).
-- Starter template — disconnect proximity pin restated (plan reach ≤ 1.5
-  with the snapped stand-off); template composes on the same machinery, no
-  data-file pins existed.
+- Starter template — disconnect proximity pin restated (scene-true plan
+  reach ≤ 1.5 with the snapped stand-off; the class bound lives in the
+  amended M2 row); template composes on the same machinery, no data-file
+  pins existed.
 - `service/place.test.ts`, `service-overrides.test.ts`,
   `compute.mep-honesty.test.ts` — seed/auto consumers now compare against
   `placeCondenserSeedSpot` (the composed anchor: slide + snap);
@@ -126,11 +179,16 @@ byte-equal (the compute.devices byte gate re-pins it live).
 - `src/engines/hvac.polish.test.ts` (18) — wall-square pinned on 3
   azimuths (0/90°/33.7° off-axis) incl. absolute π pin; row-of-two both
   square; verbatim-drag rule; 24-case thickness×offset snap sweep
-  (on-grid both axes + clearance ≥ 24" always); wall-frame snap on oblique
-  walls; ceil-only outward; physics-beats-grid RO bail (both multiples
-  blanketed → honest off-grid); verbatim never snapped; byte seed parity
-  on snapped geometry; SLID legacy pre-snap seed recognition (the
-  `unit1Presnap` bite); yawOverride verbatim/auto-anchor(rotate without
+  (on-grid both axes + clearance ≥ 24" always); WORLD-XZ snap on oblique
+  walls (verify F1 — both world components exact multiples, yaw stays
+  wall-square, floor holds, silent healthy path); away-only stand-off;
+  physics-beats-grid window exhaustion → HONEST un-snapped spot + the
+  off-grid flag on pad + cabinet (verify F3), verbatim scenes never carry
+  the class; verbatim never snapped; byte seed parity on snapped geometry
+  across 3 azimuths (oblique byte parity by construction — the lattice
+  point is taken verbatim and re-derived with verbatim-path expressions);
+  SLID legacy pre-snap seed recognition (the `unit1Presnap` bite);
+  yawOverride verbatim/auto-anchor(rotate without
   moving)/absent==wall-square/oblique-pad honesty.
 - `src/service/rotate.test.ts` (7) — R/T appliesTo gate; first press steps
   from the DERIVED yaw (host `steppedRotation` semantics) through the real
@@ -147,4 +205,7 @@ byte-equal (the compute.devices byte gate re-pins it live).
 
 Mutation probes (all verified to fail the suite): retint disabled; legacy
 bearing restored; grid snap disabled; hpYaw ignored; extraction dropped;
-`unit1Presnap` recognition dropped; outward round-instead-of-ceil.
+`unit1Presnap` recognition dropped. Verify fix round re-probes: off-grid
+flag suppressed (1 fail); world snap disabled (5); away-only floor
+dropped (4); world-z regressed to the honest stand-off, i.e. a partial
+wall-frame regression (4) — all from /tmp backups, restore green.

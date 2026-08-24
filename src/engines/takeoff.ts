@@ -509,6 +509,9 @@ export function computeTakeoff(
   // equipment pad is placed/precast, not a formed pour (S4: the row mirrors
   // the rendered pad members, never a phantom 'lintels/beams' volume).
   let condenserPads = 0
+  // Pad plan size, mirrored from the RENDERED pad member (S4 — never a
+  // constant that could drift from the engine): square pads, dims[0].
+  let condenserPadSide = 0
   for (const m of members) {
     if (m.material !== 'concrete') continue
     if (m.role === 'block') {
@@ -518,6 +521,7 @@ export function computeTakeoff(
     }
     if (m.system === 'hvac' && m.role === 'equipment') {
       condenserPads += 1
+      condenserPadSide = Math.max(condenserPadSide, m.dims[0])
       continue
     }
     const section = SECTION_OF[m.system]
@@ -575,7 +579,15 @@ export function computeTakeoff(
     )
   }
   if (condenserPads > 0) {
-    push('HVAC', 'Condenser pads', '4" concrete equipment pad (IRC M1403)', condenserPads, 'pcs')
+    // Size + basis on the buy line (verify-round REC-2): the rendered pad
+    // side (1.0 m = 40"-class stock, mep-rules padSideM) × the 4" thickness.
+    push(
+      'HVAC',
+      'Condenser pads',
+      `${round1(condenserPadSide)} × ${round1(condenserPadSide)} m × 4" concrete equipment pad (40"-class stock; IRC M1403)`,
+      condenserPads,
+      'pcs',
+    )
   }
   if (blockCount > 0) {
     push('Wall framing', 'CMU block', '8x8x16 running bond', blockCount, 'pcs')

@@ -589,6 +589,10 @@ describe('takeoff — condenser rows mirror the rendered members/fixtures (S4)',
     // this no-stateCode scene sized by the FALLBACK rule — the row says so
     expect(find('AC condensers')?.detail).toContain('assumed sizing')
     expect(find('Condenser pads')?.quantity).toBe(padsOf(members).length)
+    // size + basis on the pad buy line (verify-round REC-2), mirrored from
+    // the rendered pad member (1.0 m square, 40"-class stock)
+    expect(find('Condenser pads')?.detail).toContain('1 × 1 m × 4"')
+    expect(find('Condenser pads')?.detail).toContain('40"-class stock')
     expect(find('AC disconnects')?.quantity).toBe(n)
     expect(find('Condenser whips')?.quantity).toBe(n)
   })
