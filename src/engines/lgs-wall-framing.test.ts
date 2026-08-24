@@ -968,18 +968,38 @@ describe("MACHINE CONSTRAINTS — the Phase-2 can't-roll warning channel", () =>
   })
 
   test('LOD ladder: machine warnings at 300+, NONE at 200 (labels keep the honest fallback status there)', () => {
-    const spec200: FramingSpec = {
+    // A tee so the BACKING site composes too — all three emission sites
+    // (studs, tracks, backing) must hold the 200 gate. Pinnacle/unknown
+    // fall back on EVERY resolution (tf550h alone can't probe the stud or
+    // backing site at 200: it rolls the 33-mil floor picks — a
+    // codeClaims-drop mutant there would survive the track-only probe).
+    const teeWalls = [
+      wall({ id: 'through', start: [0, 0], end: [6, 0], thickness: 0.15, exterior: true }),
+      wall({ id: 'stem', start: [3, 0], end: [3, 3], thickness: 0.114 }),
+    ]
+    for (const key of ['framecad/tf550h', 'pinnacle/x1', 'acme/rocket']) {
+      const lod200 = lgsFrameWalls(teeWalls, {
+        ...DEFAULT_SPEC,
+        detail: '200',
+        lgsMachine: key,
+      } as FramingSpec)
+      expect(lod200.members.some((m) => m.role === 'backing')).toBe(true) // non-vacuous
+      expect(machineLines(lod200.warnings)).toEqual([])
+      const lod300 = lgsFrameWalls(teeWalls, {
+        ...DEFAULT_SPEC,
+        detail: '300',
+        lgsMachine: key,
+      } as FramingSpec)
+      expect(machineLines(lod300.warnings).length).toBeGreaterThan(0)
+    }
+    // the label channel is not LOD-gated — the track still says the truth
+    const lod200 = lgsFrameWalls(walls, {
       ...DEFAULT_SPEC,
       detail: '200',
       lgsMachine: 'framecad/tf550h',
-    }
-    const lod200 = lgsFrameWalls(walls, spec200)
-    expect(machineLines(lod200.warnings)).toEqual([])
-    // the label channel is not LOD-gated — the track still says the truth
+    } as FramingSpec)
     const track200 = lod200.members.find((m) => m.role === 'bottom-plate')
     expect(track200?.label).toContain(LGS.fallbackStatus)
-    const lod300 = lgsFrameWalls(walls, { ...DEFAULT_SPEC, detail: '300', lgsMachine: 'framecad/tf550h' } as FramingSpec)
-    expect(machineLines(lod300.warnings).length).toBeGreaterThan(0)
   })
 
   test('end-to-end: the warning reaches computeLevel and prints on paper (P4)', () => {
