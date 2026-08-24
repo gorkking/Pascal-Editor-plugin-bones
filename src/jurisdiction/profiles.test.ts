@@ -207,8 +207,43 @@ describe('applyJurisdiction', () => {
     // these states' header rules move off the shipped default — everything
     // else is required byte-equal. Researched ground snow: 35–40 psf +
     // AK/MN at 50 → 50-psf column; ME/NH/VT at 60 → 70-psf column.
-    const DEEPENED_50 = ['AK', 'ID', 'MA', 'MN', 'MT', 'ND', 'NY', 'SD', 'UT', 'WI', 'WY']
-    const DEEPENED_70 = ['ME', 'NH', 'VT']
+    // CANADA (docs/plans/CANADA-EXPECTED-DIFF.md): the CA-* rows carry NBC
+    // Ss-derived ground snow (kPa → psf) and join the bands the same
+    // data-driven way — BC/GEN/MB/SK/YT land in 30–50; the snowier
+    // provinces land past 50 (CA-NL at 73 psf rides the 70-psf column with
+    // the 'exceeds the table — engineered design required' assumption).
+    const DEEPENED_50 = [
+      'AK',
+      'CA-BC',
+      'CA-GEN',
+      'CA-MB',
+      'CA-SK',
+      'CA-YT',
+      'ID',
+      'MA',
+      'MN',
+      'MT',
+      'ND',
+      'NY',
+      'SD',
+      'UT',
+      'WI',
+      'WY',
+    ]
+    const DEEPENED_70 = [
+      'CA-NB',
+      'CA-NL',
+      'CA-NS',
+      'CA-NT',
+      'CA-NU',
+      'CA-ON-E',
+      'CA-ON-N',
+      'CA-PE',
+      'CA-QC',
+      'ME',
+      'NH',
+      'VT',
+    ]
     const band50: string[] = []
     const band70: string[] = []
     for (const { code } of jurisdictionOptions()) {

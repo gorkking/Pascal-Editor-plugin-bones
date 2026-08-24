@@ -1604,7 +1604,10 @@ describe('NIGHT-10: sub-130 mph roof ties state their wall-path scope (B10 skept
       else belt.push(code)
     }
     expect(belt.sort()).toEqual(['AL', 'CT', 'DE', 'GA', 'MA', 'MS', 'NC', 'NJ', 'NY', 'RI', 'SC', 'TX'])
-    expect(full.sort()).toEqual(['FL', 'HI', 'LA'])
+    // Atlantic Canada (CA-NL 140 / CA-NS 130 / CA-PE 130 mph, hurricaneTies)
+    // joined the ≥130 FULL-path set 2026-08 — the belt is unchanged
+    // (docs/plans/CANADA-EXPECTED-DIFF.md).
+    expect(full.sort()).toEqual(['CA-NL', 'CA-NS', 'CA-PE', 'FL', 'HI', 'LA'])
     for (const code of belt) {
       const sp = applyJurisdiction({ ...DEFAULT_SPEC, detail: '400' }, profileFor(code))
       expect({ code, ties: sp.hurricaneTies, uplift: sp.highWindUplift }).toEqual({

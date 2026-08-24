@@ -454,9 +454,11 @@ describe('jurisdiction sweep — the 16-ft garage door answered in every state',
         ).toHaveLength(2)
       }
     }
-    // the SDC-D set is exactly the seismicHoldDowns profiles (7 states today)
-    expect(seismicStates.sort()).toEqual(['AK', 'CA', 'HI', 'NV', 'OR', 'UT', 'WA'])
-    expect(flagOnlyStates.length).toBeGreaterThanOrEqual(43) // framed non-SDC-D states + DC + INTL (FL is CMU)
+    // the SDC-D set is exactly the seismicHoldDowns profiles (7 US states +
+    // coastal British Columbia since the CA-* rows landed 2026-08 —
+    // docs/plans/CANADA-EXPECTED-DIFF.md)
+    expect(seismicStates.sort()).toEqual(['AK', 'CA', 'CA-BC', 'HI', 'NV', 'OR', 'UT', 'WA'])
+    expect(flagOnlyStates.length).toBeGreaterThanOrEqual(43) // framed non-SDC-D states + DC + INTL + 15 CA-* (FL is CMU)
   })
 })
 
