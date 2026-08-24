@@ -230,6 +230,17 @@ export function computeCharacteristics(
         ? fallbackEntry
         : { value: 'R13', citation: '2021 IECC Table R402.1.3 / IRC N1102.1.3' }
   const wallR = Number.parseInt(picked.value.replace(/^R/i, ''), 10) || 13
+  // Steel-frame qualifier rides the CITATION STRING ITSELF (round-2 D):
+  // the R402 energy cite prints at EVERY LOD (paper's characteristics
+  // block, the notes line, the CSV) while the warning channel is 300+-
+  // gated — a steel set at 200 printed 'Wall cavity R-30 … Table
+  // R402.1.3' with zero qualifier. Qualifying the one source string
+  // means no surface can print the cite without the caveat. (The
+  // zero-R603-at-200 ladder rule is about STRUCTURAL claims; this cite
+  // already prints at 200, so honesty must accompany it there too.)
+  const citation = opts?.steelWalls
+    ? `${picked.citation} — wood-frame prescriptive; steel-frame walls take R402.2.6/N1102.2.6, not evaluated`
+    : picked.citation
   const climateZone = zone?.label ?? '4 (assumed)'
   if (!zone) {
     notes.push(
@@ -241,7 +252,7 @@ export function computeCharacteristics(
         (/[(/-]/.test(zoneRaw ?? '') ? ' (zone varies within the state — confirm with AHJ)' : ''),
     )
   }
-  notes.push(`Wall cavity ${picked.value} — ${picked.citation}`)
+  notes.push(`Wall cavity ${picked.value} — ${citation}`)
   if (opts?.steelWalls) {
     // Steel-frame honesty (LGS Phase 1): the cavity R above is the
     // WOOD-frame prescriptive cell, and every UA/Manual-J figure below
@@ -322,7 +333,7 @@ export function computeCharacteristics(
     windowCount,
     windowAreaM2,
     doorCount,
-    insulation: { climateZone, wallR, citation: picked.citation },
+    insulation: { climateZone, wallR, citation },
     uaWPerK,
     designHeatLossW,
     coolingTonsEstimate,

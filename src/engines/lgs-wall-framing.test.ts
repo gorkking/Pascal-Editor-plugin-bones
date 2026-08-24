@@ -4,6 +4,7 @@ import type { Member, WallSlice } from '../core/types'
 import { inches } from '../core/units'
 import { baselineConfig, baselineScene } from '../framing/baseline-scene'
 import { computeLevel } from '../framing/compute'
+import { buildPlanSet } from '../plans/plan-set'
 import { computeTakeoff, screwsPerSheet } from './takeoff'
 import {
   DEFAULT_STRUCTURAL_MILS,
@@ -598,6 +599,37 @@ describe('END-TO-END: computeLevel with framingSystem lgs (the level default)', 
     // just as dishonest, so the note holds.
     const r = computeLevel(baselineScene(), { ...lgsConfig(), showWalls: false })
     expect(r.characteristics?.notes.some((n) => n.includes('R402.2.6'))).toBe(true)
+  })
+
+  test('round-2 D: the energy qualifier rides the CITATION at LOD 200 — the cite already prints there', () => {
+    // The warning channel is 300+-gated (no structural code claims at
+    // 200), but the R402 cavity-R + IECC cite print at EVERY LOD — a
+    // steel 200 set carried 'Wall cavity R-30 … Table R402.1.3' with zero
+    // qualifier. The qualifier now rides insulation.citation itself (one
+    // source: paper block, notes line, CSV all inherit it).
+    const steel200 = computeLevel(baselineScene(), { ...lgsConfig(), detail: '200' as const })
+    expect(steel200.characteristics?.insulation.citation).toContain('wood-frame prescriptive')
+    expect(steel200.characteristics?.insulation.citation).toContain('R402.2.6')
+    expect(steel200.characteristics?.insulation.citation).toContain('not evaluated')
+    expect(
+      steel200.characteristics?.notes.some(
+        (n) => n.startsWith('Wall cavity') && n.includes('R402.2.6'),
+      ),
+    ).toBe(true)
+    // …and the paper's schedules block prints the qualified cite at 200
+    const sheets = buildPlanSet(steel200.members, steel200.fixtures, {
+      jurisdiction: steel200.jurisdiction,
+      warnings: steel200.warnings,
+      areas: steel200.areas,
+      walls: steel200.walls,
+      characteristics: steel200.characteristics ?? undefined,
+    })
+    const paper = sheets.map((sh) => sh.svg).join(' ')
+    expect(paper).toContain('R402.2.6')
+    // lumber 200 stays byte-clean — no qualifier anywhere
+    const lumber200 = computeLevel(baselineScene(), { ...baselineConfig('INTL'), detail: '200' as const })
+    expect(lumber200.characteristics?.insulation.citation).not.toContain('R402.2.6')
+    expect(lumber200.characteristics?.notes.some((n) => n.includes('R402.2.6'))).toBe(false)
   })
 
   test('LIFTED window end-to-end: the R603.8 sill track composes through computeLevel (round-1 visual advisory)', () => {

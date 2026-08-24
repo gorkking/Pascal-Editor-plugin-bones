@@ -104,7 +104,15 @@ Warnings channel (per level with steel walls, 300+):
   CONSTRUCTION resolution, so it holds with walls toggled off), and the
   card's insulation line qualifier. The old Phase-0-derived
   insulation-equality pin was rewritten into a truth pin (content equal
-  PLUS the steel qualifier present).
+  PLUS the steel qualifier present). LOD-LADDER CHOICE (round-2 D): the
+  qualifier ALSO rides `insulation.citation` itself — the R402 cavity-R +
+  IECC cite print at EVERY LOD (paper block, notes, CSV) while the
+  warning channel is 300+-gated, so a steel 200 set printed the wood
+  cite unqualified. Qualifying the ONE source string means no surface
+  can print the cite without the caveat; the zero-cites-at-200 ladder
+  rule covers R603 STRUCTURAL claims — an energy cite that already
+  prints at 200 must carry its honesty there too. Lumber 200 byte-clean
+  (leak-gated).
 
 Takeoff (new rows only when steel members exist):
 
