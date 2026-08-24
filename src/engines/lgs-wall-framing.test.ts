@@ -312,6 +312,9 @@ describe('LABEL TRUTH — every designator exists in the catalog, none invented'
     ['machine TF550H', { ...spec400, lgsMachine: 'framecad/tf550h' }],
     ['machine F325iT (cannot roll 68)', { ...spec400, lgsMachine: 'framecad/f325it' }],
     ['unknown machine', { ...spec400, lgsMachine: 'acme/rocket' }],
+    // vendor-designator path (Howick's own geometry, LOD 200 — the 33/43
+    // mil vendor row only reaches minMils at the generic floor)
+    ['machine FRAMA 3200 @ 200', { ...DEFAULT_SPEC, detail: '200', lgsMachine: 'howick/frama3200' } as FramingSpec],
   ]
   const walls = [
     wall({ id: 'a', thickness: 0.15, exterior: true }),
@@ -342,7 +345,10 @@ describe('LABEL TRUTH — every designator exists in the catalog, none invented'
         // ON the label must be a real catalog/vendor row, suffixes
         // included; and no label carries invented weight figures.
         const tokens = (m.label ?? '').toUpperCase().match(/\b\d{3,4}[STUFL]\d{3}-\d{2,3}(?:-[A-Z0-9]+)*\b/g) ?? []
-        expect(tokens.length).toBeGreaterThan(0)
+        // a GENERIC profile must print its own token; vendor designators
+        // (HOWICK-89C41…) are not designator-shaped — any generic tokens
+        // their labels DO mention still have to be real rows
+        if (LGS.genericFamilies[d]) expect(tokens.length).toBeGreaterThan(0)
         for (const tok of tokens) {
           expect(LGS.genericFamilies[tok] !== undefined || vendorDesignators.has(tok)).toBe(true)
         }
@@ -431,15 +437,46 @@ describe('SELECTION HONESTY — conservative pick + applicability limits', () =>
     }
   })
 
-  test('LOD 200 makes NO code claims: generic 33-mil members, no straps, no punchouts, no warnings', () => {
-    const { members, warnings } = lgsFrameWalls([wall()], { ...DEFAULT_SPEC, detail: '200' })
+  test('LOD 200 makes NO code claims: generic 33-mil members, no straps/punchouts/warnings, ZERO cites', () => {
+    const opened = wall({
+      openings: [
+        { id: 'd', kind: 'door', u: 2, width: 0.9, height: 2.1, sillHeight: 0, roughWidth: 0.9381, roughHeight: 2.1381 },
+        { id: 'w', kind: 'window', u: 4.5, width: 1.2, height: 1.2, sillHeight: 0.9, roughWidth: 1.2381, roughHeight: 1.2381 },
+      ],
+    })
+    const { members, warnings } = lgsFrameWalls([opened], { ...DEFAULT_SPEC, detail: '200' })
     expect(members.filter((m) => m.role === 'strap-bracing').length).toBe(0)
+    expect(members.some((m) => m.role === 'header')).toBe(true)
     for (const m of steelOf(members)) {
       expect(m.profile?.endsWith('-33') || m.profile === '150U050-54').toBe(true)
       expect(m.punchouts).toBeUndefined()
-      expect(m.label ?? '').not.toContain('R603.3.2 (')
+      // NO code cite anywhere at 200 (round-1 F5a: the header label leaked
+      // '(R603.6)' while every other cite was codeClaims-gated)
+      expect(m.label ?? '').not.toMatch(/R603/)
     }
     expect(warnings.length).toBe(0)
+  })
+
+  test('F5b: vendor-profile labels never inherit the generic grade — vendor spec + dims delta stated', () => {
+    const { members } = lgsFrameWalls(
+      [wall({ thickness: 0.114 })],
+      { ...DEFAULT_SPEC, detail: '200', lgsMachine: 'howick/frama3200' } as FramingSpec,
+    )
+    const studs = members.filter((m) => m.role === 'stud')
+    expect(studs.length).toBeGreaterThan(0)
+    for (const m of studs) {
+      expect(m.profile).toBe('HOWICK-89C41 (FRAMA 3200)')
+      // grade is the VENDOR's, never the nearest-generic family's Gr 33
+      expect(m.label).toContain('grade per vendor spec')
+      expect(m.label).not.toContain('(Gr ')
+      // mils stated honestly (the vendor row's rollable set)
+      expect(m.label).toContain('33/43 mil')
+      // the dims-delta note surfaces verbatim (Howick lip vs AISI)
+      expect(m.label).toContain('lip 10mm vs AISI S162 12.7mm')
+      // and the envelope IS the vendor geometry (41 mm flange, 89 mm web)
+      expect(m.dims[0]).toBeCloseTo(0.041, 3)
+      expect(m.dims[2]).toBeCloseTo(0.089, 3)
+    }
   })
 })
 

@@ -32,6 +32,13 @@ export type WallConstruction = z.infer<typeof WallConstruction>
  * engineering block — consume `framedAssembly` instead, so the F1
  * no-half-routing contract holds for both values: an 'lgs' wall books the
  * exact areas its 'framed' twin would, on steel bones.
+ *
+ * KEPT with zero production call sites today (round-1 F5c, deliberate):
+ * this predicate IS the F1 contract's other half — its truth table is
+ * pinned by the gates as the definition of "what frameWalls builds", and
+ * the Phase-2 floor/roof routing (R505/R804 split the same way walls did)
+ * will consume it the day a second lumber-vs-steel fork exists. Deleting
+ * it would re-mint the same function under the same name one phase later.
  */
 export function framesAsLumber(construction: WallConstruction): boolean {
   return construction === 'framed'

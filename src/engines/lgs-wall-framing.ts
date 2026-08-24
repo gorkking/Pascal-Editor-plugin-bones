@@ -248,8 +248,21 @@ function gradeOf(res: LgsResolvedProfile): string {
 
 /** Designator + grade + machine/fallback status — the label head every
  * steel member starts with ('350S162-68 (Gr 50)', '…— unverified — generic
- * AISI fallback'). */
+ * AISI fallback'). VENDOR profile picks (machineProfile set) are the
+ * machine's OWN geometry: the row carries no grade — the nearest-generic
+ * family's yieldKsi is NOT inherited onto it (round-1 F5b) — so the head
+ * states 'grade per vendor spec', the vendor row's rollable mils, and the
+ * dims-delta note (Howick 10 mm lip vs AISI 12.7 mm) verbatim. */
 export function lgsLabelHead(res: LgsResolvedProfile): string {
+  if (res.machineProfile) {
+    const mils = res.machineProfile.rollableMils?.join('/')
+    const delta = res.machineProfile.note ?? res.note
+    return (
+      `${res.designator} (${mils ? `${mils} mil, ` : ''}grade per vendor spec)` +
+      (res.machine ? ` (${res.machine})` : '') +
+      (delta ? ` — ${delta}` : '')
+    )
+  }
   const head = `${res.designator} (${gradeOf(res)})`
   if (res.machine && res.status === 'verified') return `${head} (${res.machine})`
   if (res.status !== 'verified') return `${head} — ${res.status}`
@@ -534,7 +547,7 @@ function frameLgsWall(
       u,
       roTop + headerDepth / 2,
       headerLength,
-      `Header 2× ${studHead} box (R603.6) over ${opening.kind}${basisSuffix}`,
+      `Header 2× ${studHead} box${codeClaims ? ' (R603.6)' : ''} over ${opening.kind}${basisSuffix}`,
       headerFlagParts.length > 0 ? headerFlagParts.join(' | ') : undefined,
     )
 
