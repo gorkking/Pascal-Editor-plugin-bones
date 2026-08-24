@@ -86,7 +86,7 @@ export function isMovedPosition(
 /** The node fields placement resolution reads (parentId scopes wall lookups). */
 export type ServicePlacementNode = Pick<
   ServiceNode,
-  'serviceType' | 'wallId' | 'wallT' | 'heightAff' | 'position' | 'rotation'
+  'serviceType' | 'wallId' | 'wallT' | 'heightAff' | 'position' | 'rotation' | 'yawOverride'
 > & { parentId?: string | null }
 
 export type WallGeom = {
@@ -228,7 +228,13 @@ export function resolveServicePlacement(
     }
     return {
       position: [px, y, pz],
-      rotationY: num(node.rotation?.[1], 0),
+      // Floor types: a finite `yawOverride` (the heat-pump rotate gestures,
+      // HP polish item 4) wins so the basement/toggle-off placeholder body
+      // shows the SAME orientation the engine composes in X-ray; else the
+      // legacy rotation[1] (inspector writes), else 0. (The X-ray pick
+      // proxy stays consistent by construction: the renderer applies
+      // `proxy.rotationY − placement.rotationY` on top of the group.)
+      rotationY: num(node.yawOverride, num(node.rotation?.[1], 0)),
       wallThickness: 0,
       wallMounted: false,
     }

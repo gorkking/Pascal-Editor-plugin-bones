@@ -3,6 +3,7 @@ import { useScene } from '@pascal-app/core'
 import { computeLevel } from '../framing/compute'
 import { FramingNode } from '../framing/schema'
 import { serviceDefinition } from './definition'
+import { resolveServicePlacement } from './placement'
 import { resolveHeatPumpAssemblyYaw, resolveHeatPumpProxy } from './proxy'
 import { ServiceNode } from './schema'
 
@@ -194,5 +195,18 @@ describe('the override reaches the assembly + pick proxy (absent == wall-square)
     )
     expect(clearedUnit?.rotationY).toBeCloseTo(Math.PI, 12)
     expect(resolveHeatPumpProxy(cleared, ref)?.rotationY).toBeCloseTo(Math.PI, 12)
+  })
+
+  test('the basement/off placeholder body turns with the override too (one orientation in every mode)', () => {
+    const hp = loadScene({ yawOverride: 1.2 })
+    const nodes = useScene.getState().nodes as unknown as LooseNodes
+    const placement = resolveServicePlacement(nodes, nodes[hp.id] as never)
+    expect(placement?.rotationY).toBe(1.2)
+    // null/absent keeps the legacy rotation[1] fallback (0 here)
+    const cleared = resolveServicePlacement(
+      nodes,
+      { ...(nodes[hp.id] as object), yawOverride: null } as never,
+    )
+    expect(cleared?.rotationY).toBe(0)
   })
 })
