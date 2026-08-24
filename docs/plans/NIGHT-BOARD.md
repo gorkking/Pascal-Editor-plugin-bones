@@ -167,7 +167,16 @@ VERIFIED WORKING (unit at exact 0.5m world multiples, residuals
 row becomes a class theorem via min-extra-first tie-break or honest
 split + class-sweep gate; one-string wording fix). LOOP LESSON
 boarded: numeric class bounds for a search need a CLASS-SWEEP gate,
-not a scene gate. Round 3 after tip.
+not a scene gate.
+ROUND 3 (tip b5bb120, wf_96a71745): skeptic APPROVE (closing-grade:
+1.75 supremum re-derived from COND_GRID_WINDOW_STEPS + center-
+rounding — a genuine theorem; 432-compose adversarial off-sweep-grid
+attack held, worst 3D 3.5307 ≤ 3.62; tie-break totality proven;
+mutants A-F bite exactly incl. the round-2 bug reintroduced → caught
+by 1 gate), examiner APPROVE (86/86 corpus files byte-identical;
+round-2 laundering REPRODUCED on paper at the old pin; independent
+600-scene sweep zero violations). Visual died on SSO before the
+acid test — RESUMED (cached verdicts replay). Merge on visual PASS.
 
 # LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
 
@@ -275,10 +284,12 @@ F1 BLOCKER sub-6" remnant drop silently deletes R603.3.3 bracing
 unpinned — S13 doctrine); F2 BLOCKER oblique CMU stem still bores
 32mm at the strap plane (band misses ±zOffset·cotθ shift); F3
 takeoff grade re-derivation unpinned (hardcoded Gr-50 survives).
-ROUND-4 FIXES DISPATCHED (per-wall drop warning on P4 channel,
-band widened by |zOffset·cotθ| + oblique SAT scenario, one -33
-grade pin; F2-before-F1 ordering noted). Examiner APPROVE carries
-if paper only gains the new warnings on gate scenes.
+ROUND-4 FIXES (tip 36859f1, F2→F1→F3 order): band widened
+|z|·cotθ + skeptic's 45° SAT scenario, per-wall bracing warnings
+(interrupted w/ exact extent + omitted variants, CMU-conditioned,
+pure-steel byte parity by engine swap-in), -33/(Gr 33) pin. ROUND 4
+closing skeptic died on SSO — RESUMED (wf_229e6b29). Examiner
+APPROVE carries (paper gains only the gate-scene warnings).
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
