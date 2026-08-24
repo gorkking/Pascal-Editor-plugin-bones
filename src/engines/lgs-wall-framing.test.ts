@@ -109,11 +109,51 @@ describe('LGS member census — one wall, no openings', () => {
     }
   })
 
-  test('conservative basis is STATED on stud labels + warned once (unverified-cell honesty)', () => {
-    const studs = members.filter((m) => m.role === 'stud')
-    for (const s of studs) expect(s.label).toContain(LGS_CONSERVATIVE_BASIS)
+  test('conservative basis is STATED on EVERY conservatively-picked member + warned once (round-1 F1)', () => {
+    // The 68-mil pick is the unverified-cell conservative choice for the
+    // WHOLE wall family — kings, jacks, cripples, headers, tracks and
+    // corner backing included, not just the o.c. studs (round-1 skeptic:
+    // 31/65 members carried no basis, and basisSuffix was computed but
+    // never wired). Backing (150U050-54 bridging) states its OWN basis —
+    // it is the catalog's only variant, not a stud-table pick.
+    for (const m of steelOf(members)) {
+      if (m.role === 'backing') {
+        expect(m.label).toContain('only catalog variant')
+        expect(m.label).not.toContain(LGS_CONSERVATIVE_BASIS)
+        continue
+      }
+      expect(m.label).toContain(LGS_CONSERVATIVE_BASIS)
+    }
+    // …and the tracks keep the verbatim-verified thickness-matches cite
+    // ALONGSIDE the caveat (never instead of it)
+    const track = members.find((m) => m.role === 'bottom-plate')
+    expect(track?.label).toContain('track thickness matches studs (R603.3.2)')
+    expect(track?.label).toContain(LGS_CONSERVATIVE_BASIS)
     expect(warnings.some((w) => w.includes('R603.3.2 table cells not encoded'))).toBe(true)
     expect(warnings.some((w) => w.includes('R603.9'))).toBe(true)
+  })
+
+  test('F1 breadth on an opening wall: kings/jacks/cripples/header/sill/tracks all carry the basis', () => {
+    const opened = wall({
+      id: 'w_f1',
+      end: [8, 0],
+      openings: [
+        { id: 'd', kind: 'door', u: 2, width: 0.9, height: 2.1, sillHeight: 0, roughWidth: 0.9381, roughHeight: 2.1381 },
+        { id: 'w', kind: 'window', u: 6, width: 1.2, height: 1.2, sillHeight: 0.9, roughWidth: 1.2381, roughHeight: 1.2381 },
+      ],
+    })
+    const r = lgsFrameWalls([wall({ id: 'w_thru', start: [8, 0], end: [8, 4] }), opened], spec400)
+    for (const role of ['king-stud', 'trimmer', 'cripple', 'header', 'sill', 'top-plate'] as const) {
+      const of = r.members.filter((m) => m.role === role && m.sourceId === 'w_f1')
+      expect(of.length).toBeGreaterThan(0)
+      for (const m of of) expect(m.label).toContain(LGS_CONSERVATIVE_BASIS)
+    }
+    // corner-backing extra stud carries it too
+    const backing = r.members.filter(
+      (m) => m.role === 'stud' && (m.label ?? '').includes('California corner backing'),
+    )
+    expect(backing.length).toBeGreaterThan(0)
+    for (const m of backing) expect(m.label).toContain(LGS_CONSERVATIVE_BASIS)
   })
 
   test('grade rule rides the labels: 68 mil → Gr 50 (33/43 would be Gr 33)', () => {

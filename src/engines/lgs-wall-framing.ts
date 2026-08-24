@@ -378,6 +378,11 @@ function frameLgsWall(
   ].filter((f): f is string => f !== undefined)
   const wallFlag = wallFlagParts.length > 0 ? wallFlagParts.join(' | ') : undefined
 
+  // F1 (round 1 skeptic): the conservative-mils caveat rides EVERY member
+  // whose thickness came from the unverified-cell pick — kings, jacks,
+  // cripples, headers, tracks and corner-backing studs included, not just
+  // the o.c. studs. The tracks' '(R603.3.2)' thickness-matches-studs cite
+  // stays (that rule IS verbatim-verified); the caveat rides alongside.
   const basisSuffix = profiles.basis ? ` — ${profiles.basis}` : ''
   const studHead = lgsLabelHead(studRes)
   const trackHead = lgsLabelHead(trackRes)
@@ -428,7 +433,7 @@ function frameLgsWall(
     runMid,
     trackFlange / 2,
     runLen,
-    `Bottom track ${trackHead}${trackNote}${slabNote}`,
+    `Bottom track ${trackHead}${trackNote}${basisSuffix}${slabNote}`,
   )
   emit(
     'top-plate',
@@ -437,7 +442,7 @@ function frameLgsWall(
     runMid,
     H - trackFlange / 2,
     runLen,
-    `Top track ${trackHead}${trackNote}`,
+    `Top track ${trackHead}${trackNote}${basisSuffix}`,
   )
 
   // Studs seat INSIDE the tracks: ends against the track webs. The box
@@ -458,8 +463,10 @@ function frameLgsWall(
     return p && p.count > 0 ? { punchouts: p } : {}
   }
 
-  const studLabel = codeClaims
-    ? `Stud ${studHead} @ ${spacingIn}" o.c. — IRC R603.3.2 (${LGS_CONSERVATIVE_BASIS})`
+  // Derived from profiles.basis (never a parallel hardcoded clause) so a
+  // basis mutation kills every consumer at once.
+  const studLabel = profiles.basis
+    ? `Stud ${studHead} @ ${spacingIn}" o.c. — IRC R603.3.2 (${profiles.basis})`
     : `Stud ${studHead} @ ${spacingIn}" o.c.`
 
   // ---- opening frames (R603.6/R603.7/R603.8 STRUCTURE) ----
@@ -509,7 +516,7 @@ function frameLgsWall(
       u,
       roTop + headerDepth / 2,
       headerLength,
-      `Header 2× ${studHead} box (R603.6) over ${opening.kind}`,
+      `Header 2× ${studHead} box (R603.6) over ${opening.kind}${basisSuffix}`,
       headerFlagParts.length > 0 ? headerFlagParts.join(' | ') : undefined,
     )
 
@@ -524,7 +531,7 @@ function frameLgsWall(
           u + side * (ro / 2 + halfT + k * tS),
           studBottom + jackHeight / 2,
           jackHeight,
-          `Jack stud ${studHead}${r603_7Note}`,
+          `Jack stud ${studHead}${r603_7Note}${basisSuffix}`,
           undefined,
           punch(jackHeight),
         )
@@ -536,7 +543,7 @@ function frameLgsWall(
         u + side * (ro / 2 + frameSide + halfT),
         studBottom + studHeight / 2,
         studHeight,
-        `King stud ${studHead}${r603_7Note}`,
+        `King stud ${studHead}${r603_7Note}${basisSuffix}`,
         undefined,
         punch(studHeight),
       )
@@ -555,7 +562,7 @@ function frameLgsWall(
             cu,
             roTop + headerDepth + crippleTopHeight / 2,
             crippleTopHeight,
-            `Cripple ${studHead}`,
+            `Cripple ${studHead}${basisSuffix}`,
           )
         }
       }
@@ -570,7 +577,7 @@ function frameLgsWall(
         u,
         roBottom - trackFlange / 2,
         ro,
-        `Sill track ${trackHead}${codeClaims ? ' — R603.8' : ''}`,
+        `Sill track ${trackHead}${codeClaims ? ' — R603.8' : ''}${basisSuffix}`,
       )
       const crippleBottomHeight = roBottom - trackFlange - studBottom
       if (crippleBottomHeight > tS) {
@@ -588,7 +595,7 @@ function frameLgsWall(
             cu,
             studBottom + crippleBottomHeight / 2,
             crippleBottomHeight,
-            `Cripple ${studHead}`,
+            `Cripple ${studHead}${basisSuffix}`,
           )
         }
       }
@@ -627,7 +634,7 @@ function frameLgsWall(
       eu,
       studBottom + studHeight / 2,
       studHeight,
-      `${extra.label} — ${studHead}`,
+      `${extra.label} — ${studHead}${basisSuffix}`,
       undefined,
       punch(studHeight),
     )
@@ -655,7 +662,7 @@ function frameLgsWall(
           bu,
           y,
           blockLen,
-          `Partition backing ${lgsLabelHead(backingRes)} — CFS blocking`,
+          `Partition backing ${lgsLabelHead(backingRes)} — CFS blocking${codeClaims ? ' (bridging channel: only catalog variant — not an R603.3.2 stud-table selection)' : ''}`,
         )
       }
     }
