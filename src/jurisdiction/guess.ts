@@ -78,19 +78,28 @@ const TZ_STATE: Record<string, string> = {
   'America/Resolute': 'CA-NU',
 }
 
+/** Read-only view of the zone→jurisdiction table for the data-shape gate
+ * (every mapped code must resolve to a real profile row). */
+export const TZ_GUESS_TABLE: Readonly<Record<string, string>> = TZ_STATE
+
 export type JurisdictionGuess = {
   code: string
   /** Why we guessed it — shown next to the dropdown. */
   reason: string
 }
 
-export function guessJurisdiction(): JurisdictionGuess {
+export function guessJurisdiction(
+  /** Test seam: inject the browser signals instead of reading them (gates
+   * the zone→code table + locale fallbacks without faking `Intl`). */
+  signals?: { tz?: string; lang?: string },
+): JurisdictionGuess {
   try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? ''
+    const tz = signals?.tz ?? Intl.DateTimeFormat().resolvedOptions().timeZone ?? ''
     const byTz = TZ_STATE[tz]
     if (byTz) return { code: byTz, reason: `guessed from timezone ${tz}` }
     const lang =
-      typeof navigator !== 'undefined' ? (navigator.language ?? navigator.languages?.[0]) : ''
+      signals?.lang ??
+      (typeof navigator !== 'undefined' ? (navigator.language ?? navigator.languages?.[0]) : '')
     const region = lang?.split('-')[1]?.toUpperCase()
     if (region === 'US') return { code: 'TX', reason: `US locale (${lang}), unknown state` }
     if (region === 'CA') {

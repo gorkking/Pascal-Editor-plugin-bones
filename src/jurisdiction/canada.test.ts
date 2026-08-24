@@ -5,6 +5,7 @@ import { DEFAULT_SPEC, HEADER_RULES_SNOW70 } from '../core/spec'
 import { INCH } from '../core/units'
 import { baselineConfig, baselineScene } from '../framing/baseline-scene'
 import { computeLevel } from '../framing/compute'
+import { guessJurisdiction, TZ_GUESS_TABLE } from './guess'
 import { applyJurisdiction, jurisdictionOptions, nonIrcCodeWarning, profileFor } from './profiles'
 
 /**
@@ -341,6 +342,28 @@ describe('Canadian compose — frost, snow and seismic reach the composed level'
     // 52 psf snaps UP to the 70-psf header column, assumption stated
     expect(result.spec.headerRules).toBe(HEADER_RULES_SNOW70)
     expect(result.spec.headerAssumption).toContain('70 psf ground snow')
+  })
+
+  it('tz + locale guessing: Canadian zones land on provinces, en-CA on CA-GEN, and every mapped code is real', () => {
+    // Every zone→code mapping must resolve to a researched data row — a
+    // typo'd 'CA-XX' would silently fall to the INTL-clone fallback.
+    for (const [tz, code] of Object.entries(TZ_GUESS_TABLE)) {
+      expect(profileFor(code).name, `${tz} → ${code}`).not.toBe(code)
+      expect(guessJurisdiction({ tz }).code, tz).toBe(code)
+    }
+    // provincial spot pins (the split-Ontario mapping included)
+    expect(guessJurisdiction({ tz: 'America/Winnipeg' }).code).toBe('CA-MB')
+    expect(guessJurisdiction({ tz: 'America/Vancouver' }).code).toBe('CA-BC')
+    expect(guessJurisdiction({ tz: 'America/Thunder_Bay' }).code).toBe('CA-ON-N')
+    // the DOCUMENTED caveat: tzdata folds Montreal into America/Toronto, so
+    // Quebec browsers guess southern Ontario — the dropdown always wins.
+    expect(guessJurisdiction({ tz: 'America/Toronto' }).code).toBe('CA-ON-S')
+    // locale fallbacks: an unknown-province Canadian locale reaches the
+    // NBC-2020 generic row, never INTL; the US/other paths are untouched
+    expect(guessJurisdiction({ tz: 'Europe/Paris', lang: 'en-CA' }).code).toBe('CA-GEN')
+    expect(guessJurisdiction({ tz: 'Europe/Paris', lang: 'fr-CA' }).code).toBe('CA-GEN')
+    expect(guessJurisdiction({ tz: 'Europe/Berlin', lang: 'en-US' }).code).toBe('TX')
+    expect(guessJurisdiction({ tz: 'Europe/Paris', lang: 'fr-FR' }).code).toBe('INTL')
   })
 
   it('the seismic field is live on the Ontario split: ON-E carries SDC C — noted, below the hold-down line', () => {
