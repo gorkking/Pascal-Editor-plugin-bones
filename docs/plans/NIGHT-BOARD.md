@@ -4,6 +4,22 @@
 ## Framing / Beta") in a "PreSell" deployment (terramodular.com —
 ## modular construction; LGS-relevant audience). Quality is high.
 
+TODO-1 DELIVERED: feat/canada-jurisdictions tip 2970acb (7 commits,
+suite 1912, E5 cmp-identical; cherry-pick aa2a2b6 authorship
+Jonathan Nusbaum preserved, stacked commits NOT taken). BIG ENGINE
+FINDING from the adoption: ircBase had ZERO consumers — IRC labels
+always printed unconditionally (WI incl., always had); fixed via
+gated nonIrcCode confession warning at 300+ (panel + P4 paper; WI
+now fires it too — enumerated warnings-only deviation; per-label
+suppression queued, blast radius = every engine). Also:
+profile.notes (incl. PERMAFROST) was built but never rendered — now
+prints in JurisdictionPicker source-gated. CA compose gates: CA-SK
+84in footings reach GEOMETRY, ON-E kPa-converted snow drives header
+columns, BC trips SDC-D. 9 mutants die. VERIFY: wf_505d3b82
+(skeptic: cherry-pick purity + conversion arithmetic ×16 + the
+confession wording; examiner: honest-pair rule — IRC cites print
+WITH the confession; visual: dropdown + permafrost note + footing
+depth side-by-side). Original brief follows:
 TODO-1 (ADOPT, reworked): PR #1 Canadian jurisdictions — 16 rows
 (10 provinces, 3 territories, Ontario split S/E/N on frost/seismic
 spread, NBC-2020 generic fallback). Discipline matches house
