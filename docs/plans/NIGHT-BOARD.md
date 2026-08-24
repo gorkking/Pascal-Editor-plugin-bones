@@ -38,7 +38,22 @@ AISI S240 (designation system, e.g. 350S162-33). Per-wall material
 override channel exists (the CMU precedent). MEP marquee integration:
 punch-aligned routing (steel studs' pre-punched service holes replace
 drilled bores).
-PHASES: 0 data model + catalog (PILOT LIVE, feat/lgs-phase0 — both
+PHASE 0 DELIVERED 2026-08-23: feat/lgs-phase0 tip 4e29f06 (base
+f150fdd, 3 commits, 6 files, suite 1743 → 1768, tsc clean, E5 byte
+pin passing). data/lgs-profiles.json: 41 cited AISI families (IRC
+R603 stud set + S230 joists + tracks + bridging), 19 machines
+(FRAMECAD 7 / Howick 7 / Scottsdale 3 / Pinnacle 2 — Pinnacle ships
+on the unverified path as the live fallback example), 3 punch
+regimes kept distinct, 28-entry citations block. Pure
+src/engines/lgs-profiles.ts (consumed by NOTHING yet): designator
+parse, profileFor 5-branch honest chain ending 'engineered design
+required' — dims never invented. Spec: framingSystem/lgsMachine
+optional, absent round-trips absent. Vendor contradictions recorded
+both-ways verbatim; phantoms dropped. VERIFY ROUND: wf_9b07c78d-4b0
+(skeptic: citation-gate mutation, 92mm→362S162-not-in-catalog
+derivation trap, invented-number hunt, fallback-branch mutations).
+Merge only after APPROVE.
+PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
 with dates; phantom machines FRAMA 900/X-CALIBUR/Vertek killed] and
