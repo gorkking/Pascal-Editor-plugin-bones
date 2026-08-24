@@ -10,26 +10,43 @@ import { z } from 'zod'
 
 /**
  * Per-wall construction system. 'lgs' (light-gauge / cold-formed steel, IRC
- * R603) is Phase 0 of the LGS track (docs/plans/LGS-PLAN.md): the value is
- * accepted and persists, and until the Phase-1 steel engine lands an 'lgs'
- * wall frames AS LUMBER everywhere — members, sheet-goods areas and the
- * selection card all route through `framesAsLumber` below, and the card
- * says so honestly. Nothing writes it today (the inspector's segmented
- * control still offers framed/CMU/skip only), so stored scenes are
- * byte-untouched.
+ * R603) has its own wall engine since Phase 1 of the LGS track
+ * (docs/plans/LGS-PLAN.md): an 'lgs' wall frames in STEEL —
+ * C-stud/track assemblies from the cited catalog
+ * (data/lgs-profiles.json via src/engines/lgs-wall-framing.ts) — while its
+ * sheet-goods (sheathing/drywall/WRB/cladding/batts) book and render
+ * exactly like a framed wall's (`framedAssembly` below; the F1 no-half-
+ * routing contract). Nothing writes the value from the inspector yet
+ * (the segmented control still offers framed/CMU/skip — Phase 2), so
+ * stored scenes are byte-untouched.
  */
 export const WallConstruction = z.enum(['framed', 'cmu', 'lgs', 'skip'])
 export type WallConstruction = z.infer<typeof WallConstruction>
 
 /**
- * Constructions the LUMBER framing path builds today. 'lgs' frames as
- * lumber — members, sheet-goods areas AND the selection card consume THIS
- * predicate so the value can never half-route (skeptic F1: the card said
- * "Skipped" and the takeoff dropped sheathing/drywall areas while the
- * lumber members rendered). When the Phase-1 steel engine lands, 'lgs'
- * leaves this set in the SAME commit that gives it its own engine.
+ * Constructions the LUMBER framing path builds. Since LGS Phase 1 this is
+ * 'framed' ONLY — 'lgs' left this set in the same commit that gave it the
+ * steel engine (the Phase-0 comment's promise). Consumers that mean "wall
+ * with a framed ASSEMBLY (stud cavity + sheet-goods layers)" — the
+ * sheathing/drywall area sites, the layer engine routing, the card's
+ * engineering block — consume `framedAssembly` instead, so the F1
+ * no-half-routing contract holds for both values: an 'lgs' wall books the
+ * exact areas its 'framed' twin would, on steel bones.
  */
 export function framesAsLumber(construction: WallConstruction): boolean {
+  return construction === 'framed'
+}
+
+/**
+ * Constructions that build a FRAMED ASSEMBLY — a stud cavity wrapped in the
+ * sheet-goods layer stack (sheathing/WRB/cladding outside, gypsum inside,
+ * optional batts). Both lumber ('framed') and cold-formed steel ('lgs')
+ * walls carry the identical assembly (the fastening differs — screws per
+ * IRC R603.2.5 on steel — never the sheet areas), so the takeoff area
+ * sites, the layer engine and the selection card's engineering block all
+ * route through THIS predicate. CMU and skipped walls stay out.
+ */
+export function framedAssembly(construction: WallConstruction): boolean {
   return construction === 'framed' || construction === 'lgs'
 }
 
@@ -176,12 +193,15 @@ export const FramingNode = BaseNode.extend({
   /** Per-wall construction overrides, keyed by wall id. */
   wallOverrides: z.record(z.string(), WallOverride).default({}),
   /**
-   * Framing system for the level (LGS Phase 0): 'lumber' (default) or 'lgs'
-   * (cold-formed steel, IRC R603/R505/R804). OPTIONAL with NO zod default —
-   * absent means 'lumber' and, critically, an absent field round-trips
-   * ABSENT (byte-parity for every stored scene; a `.default('lumber')`
-   * would inject the key on parse). No engine consumes it yet — Phase 1
-   * (docs/plans/LGS-PLAN.md).
+   * Framing system for the level: 'lumber' (default) or 'lgs' (cold-formed
+   * steel, IRC R603 walls — Phase 1; floors/roofs follow in Phase 2).
+   * OPTIONAL with NO zod default — absent means 'lumber' and, critically,
+   * an absent field round-trips ABSENT (byte-parity for every stored
+   * scene; a `.default('lumber')` would inject the key on parse). 'lgs'
+   * makes it the DEFAULT construction for otherwise-framed walls
+   * (`resolveWallConstruction`); explicit per-wall overrides — 'framed',
+   * 'cmu', 'skip' — still win, as does a jurisdiction CMU exterior default
+   * (FL).
    */
   framingSystem: z.enum(['lumber', 'lgs']).optional(),
   /**
@@ -198,8 +218,8 @@ export const FramingNode = BaseNode.extend({
   - studSpacingIn: stud spacing on-center in inches (16 or 24)
   - show*: per-system visibility (walls, floor, roof, foundation, electrical, plumbing, hvac — all default on)
   - viewMode: 'off' (finished house — walls closed, only surface fixtures show) | 'xray' (engineering X-ray, default) | 'basement' (under-the-house view: foundation/buried pipes read through a faint house shell)
-  - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'lgs' (light-gauge steel — frames as lumber until the Phase-1 steel engine lands: members, sheet-goods areas and the wall card all follow the framed path and the card says so), 'skip', or the object form { construction, cmuHeightM?, studSize?, spacingIn?, insulation?, insulationR?, cladding? }: cmuHeightM makes a mixed wall (CMU up to a course-snapped height, framed above); studSize ('2x4'|'2x6') + spacingIn (16|24) re-size the framing; insulation ('none'|'batt'|'blown'|'spray-foam') + insulationR fill the stud bays with labeled batts; cladding picks the exterior finish (vinyl|fiberCement|stucco|brickVeneer|wood|eifs)
-  - framingSystem: 'lumber' (default when absent) | 'lgs' (cold-formed steel, IRC R603 — data model only today, no members change yet); lgsMachine: roll-forming machine key from data/lgs-profiles.json (e.g. 'framecad/f325it')
+  - wallOverrides: per-wall construction override — 'framed' (lumber), 'cmu' (concrete block), 'lgs' (light-gauge steel: C-stud/track members per IRC R603, sheet-goods layers book exactly like a framed wall), 'skip', or the object form { construction, cmuHeightM?, studSize?, spacingIn?, insulation?, insulationR?, cladding? }: cmuHeightM makes a mixed wall (CMU up to a course-snapped height, framed above); studSize ('2x4'|'2x6') + spacingIn (16|24) re-size the framing (on 'lgs' they pick the depth-matched steel web: 2x4→350, 2x6→550); insulation ('none'|'batt'|'blown'|'spray-foam') + insulationR fill the stud bays with labeled batts; cladding picks the exterior finish (vinyl|fiberCement|stucco|brickVeneer|wood|eifs)
+  - framingSystem: 'lumber' (default when absent) | 'lgs' (cold-formed steel, IRC R603 — otherwise-framed walls frame as steel C-stud/track assemblies; explicit per-wall overrides and the FL CMU exterior default still win); lgsMachine: roll-forming machine key from data/lgs-profiles.json (e.g. 'framecad/f325it') — Phase 1 resolves profiles through it and labels the honest fallback status; can't-roll warnings land with the machine UX in Phase 2
   All framing members are derived live from the level's walls/openings/slabs/roofs; deleting this node removes the X-ray without touching the model.`,
 )
 

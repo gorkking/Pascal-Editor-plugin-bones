@@ -67,14 +67,17 @@ const FOUNDATION_STRAP_HEIGHT = inches(6)
  * spot would double-buy the anchor (B18/B9 cross-ref precedent). */
 export const UPLIFT_ANCHOR_DEDUPE_TOL = 0.3
 
-type WallFrame = {
+export type WallFrame = {
   wall: WallSlice
   yaw: number
   /** Map wall-local (u, y, v) → level-local position. */
   place: (u: number, y: number, v?: number) => [number, number, number]
 }
 
-function frameOf(wall: WallSlice): WallFrame {
+/** Wall-local frame (u along the wall, y up, v across) → level space.
+ * Exported so the LGS steel engine places its members in the EXACT same
+ * frame the lumber engine uses (one geometry truth per wall). */
+export function frameOf(wall: WallSlice): WallFrame {
   const [dx, dz] = wall.dir
   const [sx, sz] = wall.start
   // Rotating a +X-aligned box by yaw about Y maps +X → [cos, 0, -sin];
@@ -112,7 +115,17 @@ export function fitAcross(nominalDepth: number, wall: WallSlice): number {
  * spec sizes so the thickness heuristic can't argue, spacing replaces the
  * config's o.c. rhythm. Absent fields keep the spec untouched.
  */
-export type WallFramingOverride = { studSize?: '2x4' | '2x6'; spacingIn?: 16 | 24 }
+export type WallFramingOverride = {
+  studSize?: '2x4' | '2x6'
+  spacingIn?: 16 | 24
+  /** Wall construction when the caller knows it (compute passes its
+   * resolved engineering map verbatim). frameHints uses it for exactly ONE
+   * thing: cap-plate laps never cross a lumber↔steel ('lgs') corner — a
+   * wood cap doesn't lap onto a steel top track, and a steel wall has no
+   * cap to lap (LGS Phase 1). Absent = lumber assumed (byte-equal
+   * default). */
+  construction?: 'framed' | 'cmu' | 'lgs' | 'skip'
+}
 
 /**
  * The spec one wall frames with: the shared spec, unless the wall carries a
@@ -1026,11 +1039,23 @@ export function frameHints(
     // the cap only needs the EXCESS when the through cap is wider than the
     // through wall itself (thin drawn walls — round-2 advisory).
     const shorten = -Math.max(0, (k * (throughCapW - through.thickness)) / 2)
-    if (throughEnd === 'start') throughHints.capStartDelta = (throughHints.capStartDelta ?? 0) + extend
-    else throughHints.capEndDelta = (throughHints.capEndDelta ?? 0) + extend
+    // Cap laps are a LUMBER-to-lumber corner detail: a steel (LGS) wall
+    // has no cap plate to extend, and a wood cap extended OVER a steel
+    // wall would run through its full-height C-studs (steel studs seat in
+    // the top track at ~H, not under a double plate). Mixed-material
+    // corners keep the run insets + California backing; the caps stay
+    // home (LGS Phase 1). All-lumber corners are byte-untouched.
+    const steelCorner =
+      overrides?.get(through.id)?.construction === 'lgs' ||
+      overrides?.get(butting.id)?.construction === 'lgs'
+    if (!steelCorner) {
+      if (throughEnd === 'start') throughHints.capStartDelta = (throughHints.capStartDelta ?? 0) + extend
+      else throughHints.capEndDelta = (throughHints.capEndDelta ?? 0) + extend
+      const buttingHints = hintFor(butting)
+      if (buttingEnd === 'start') buttingHints.capStartDelta = (buttingHints.capStartDelta ?? 0) + shorten
+      else buttingHints.capEndDelta = (buttingHints.capEndDelta ?? 0) + shorten
+    }
     const buttingHints = hintFor(butting)
-    if (buttingEnd === 'start') buttingHints.capStartDelta = (buttingHints.capStartDelta ?? 0) + shorten
-    else buttingHints.capEndDelta = (buttingHints.capEndDelta ?? 0) + shorten
     // The butting wall's PLATES and end stud stop at the through wall's
     // near face — k half-thicknesses back from the centerline corner
     // (round-10 gate; round-14 obliques).
@@ -1078,6 +1103,12 @@ export type FrameWallsOptions = {
    * (CS-PF 24" first-of-two-storeys minimum, Figure R602.10.6.4). Leave
    * undefined when unknown: single-storey is then ASSUMED and stated. */
   storeyAbove?: boolean
+  /** Walls the corner/tee HINT graph is computed over when it is a
+   * SUPERSET of the walls being framed — compute passes the combined
+   * lumber + steel (LGS) list so junctions compose across materials while
+   * each engine frames only its own walls. Absent = the framed walls
+   * themselves (byte-equal default). */
+  hintWalls?: WallSlice[]
 }
 
 /**
@@ -1167,7 +1198,7 @@ export function frameWalls(
   overrides?: ReadonlyMap<string, WallFramingOverride>,
   opts?: FrameWallsOptions,
 ): Member[] {
-  const hints = frameHints(walls, spec, overrides)
+  const hints = frameHints(opts?.hintWalls ?? walls, spec, overrides)
   // Level context folds into every wall's hints; nothing set = hints pass
   // through untouched (byte-equal default path).
   const level: Partial<FrameHints> = {}

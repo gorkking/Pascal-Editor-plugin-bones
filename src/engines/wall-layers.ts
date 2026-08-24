@@ -39,6 +39,11 @@ import {
   studSizeFor,
   type WallFramingOverride,
 } from './wall-framing'
+import {
+  LGS_JACKS_PER_SIDE,
+  LGS_STUD_THICKNESS,
+  LGS_TRACK_FLANGE,
+} from './lgs-wall-framing'
 
 type Pt = readonly [number, number]
 
@@ -428,14 +433,24 @@ function insulationBatts(
 ): Member[] {
   const members: Member[] = []
   const studSize = studSizeFor(wall, wallSpec)
-  const [t, w] = LUMBER_CROSS_SECTIONS[studSize]
+  const [tLumber, w] = LUMBER_CROSS_SECTIONS[studSize]
+  // Steel (LGS) walls carry the same batts in the same bays, but the bay
+  // arithmetic mirrors the STEEL engine's members: C-stud flanges are
+  // 1-5/8" (vs 1.5" lumber), the cavity runs track-flange to track-flange
+  // (one top track, no double plate), openings frame ONE jack per side
+  // (LGS_JACKS_PER_SIDE — R603.7 minimum), and there are no lumber fire
+  // rows to split around. Lumber walls are byte-untouched.
+  const steel = override.construction === 'lgs'
+  const t = steel ? LGS_STUD_THICKNESS : tLumber
   const halfT = t / 2
   const len = wall.length
   const u0 = Math.max(0, hints.startInset ?? 0)
   const u1 = Math.max(u0 + 4 * t, len - Math.max(0, hints.endInset ?? 0))
   const runLen = u1 - u0
-  const studBottom = t
-  const studTop = wall.height - (wallSpec.topPlateCount === 2 ? 2 * t : t)
+  const studBottom = steel ? LGS_TRACK_FLANGE : tLumber
+  const studTop = steel
+    ? wall.height - LGS_TRACK_FLANGE
+    : wall.height - (wallSpec.topPlateCount === 2 ? 2 * tLumber : tLumber)
   if (studTop - studBottom <= t) return members // pony wall — plates only
 
   // The stud rhythm the framing actually emits: o.c. grid on the trimmed
@@ -454,7 +469,7 @@ function insulationBatts(
   for (const opening of wall.openings) {
     const ro = Math.min(opening.roughWidth, runLen - 4 * t)
     if (ro <= 0) continue
-    const frameSide = (ro > DOUBLE_TRIMMER_SPAN ? 2 : 1) * t
+    const frameSide = steel ? LGS_JACKS_PER_SIDE * t : (ro > DOUBLE_TRIMMER_SPAN ? 2 : 1) * t
     const u = Math.min(
       Math.max(opening.u, u0 + ro / 2 + frameSide + t),
       u1 - ro / 2 - frameSide - t,
@@ -468,10 +483,12 @@ function insulationBatts(
     keepOuts.push({ min: left, max: right })
   }
 
-  // Vertical segments: the full cavity, split around LOD-400 fire rows.
+  // Vertical segments: the full cavity, split around LOD-400 fire rows —
+  // lumber only (the steel engine emits no fire-blocking members; a split
+  // there would leave a gap around nothing).
   const ySegments: [number, number][] = []
   let yCursor = studBottom
-  if (wallSpec.detail === '400') {
+  if (wallSpec.detail === '400' && !steel) {
     for (let rowY = FIRE_BLOCK_HEIGHT; rowY < studTop - t; rowY += FIRE_BLOCK_HEIGHT) {
       ySegments.push([yCursor, rowY - halfT])
       yCursor = rowY + halfT
