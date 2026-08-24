@@ -499,11 +499,13 @@ describe('line-set — one RO-clear wall penetration, wall-following pair to the
         disc.position[2] - unit.position[2],
       )
       // "Within sight" (NEC 440.14) is a visibility rule (≤ 50 ft), not a
-      // 1 m one — this pin guards proximity sanity: wall box ↔ unit center
-      // across the ≥ 24" face clearance (grid-snapped outward by < one
-      // 0.5 m step — HP polish) + half the 0.95 m cabinet depth + the
-      // height difference ≈ 1.56 m here (snapped stand-off 1.5).
-      expect(dist).toBeLessThanOrEqual(1.7)
+      // 1 m one — this pin guards proximity sanity at the CHECKLIST M2
+      // class bound (amended, verify F2 — the row and this allowance
+      // agree to the digit): 3D box↔unit-center ≤ 1.73 m unobstructed,
+      // basis √((S − t/2 − 0.02)² + 0.725²) with the world-grid-snapped
+      // stand-off S < condenserStandoff(t) + 0.5. This scene: 1.5589
+      // (t = 0.2, S = 1.5).
+      expect(dist).toBeLessThanOrEqual(1.73)
       expect(disc.label).toContain('2-pole') // AC-n circuit label (wired by compute)
     }
     // + a whip per unit (liquid-tight conduit, never NM-B)
