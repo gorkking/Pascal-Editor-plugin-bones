@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { extractRooms, extractSlabs, extractWalls } from '../core/wall-model'
 import { probeSlabsFor } from '../framing/compute'
 import { placeElectricMeterSpot, placePanelSpot } from '../engines/electrical'
-import { placeHeatPumpSpot, placeThermostatSpot } from '../engines/hvac'
+import { placeCondenserSeedSpot, placeThermostatSpot } from '../engines/hvac'
 import { placeMeterSpot, placeWhSpot } from '../engines/plumbing'
 import { buildServicePointNodes, placedServiceTypes, planServiceSeeding } from './place'
 import {
@@ -120,7 +120,10 @@ describe('buildServicePointNodes', () => {
     expect(sewer?.position).not.toEqual([0, 0, 0])
 
     const hp = created.find((n) => n.serviceType === 'heat-pump')
-    const hpSpot = placeHeatPumpSpot(walls, rooms)
+    // the seed = the engine's composed unit-#1 anchor (RO slide + grid
+    // snap, HP polish item 3) — placeCondenserSeedSpot, not the raw
+    // pre-snap election point
+    const hpSpot = placeCondenserSeedSpot(walls, rooms)
     expect(hp?.wallId).toBeUndefined()
     expect(hpSpot).not.toBeNull()
     expect(hp?.position[0]).toBeCloseTo(hpSpot?.[0] ?? 0, 6)
@@ -581,10 +584,11 @@ describe('heat-pump seed election validation (Julien scene, 2026-08-22)', () => 
     const hp = created.find((n) => n.serviceType === 'heat-pump')
     expect(hp).toBeDefined()
     // the honest spot: condenserStandoff (t/2 + 24" face clearance +
-    // cabinet depth/2 = 1.1846) SOUTH of the true south wall — outside the
-    // Bathroom (pre-fix class: inside it) and outside the covered void
+    // cabinet depth/2 = 1.1846) SOUTH of the true south wall, grid-snapped
+    // outward to the 0.5 host step (HP polish) — outside the Bathroom
+    // (pre-fix class: inside it) and outside the covered void
     // (coverage-blind: 5, 1.3154)
     expect(hp?.position?.[0]).toBeCloseTo(5, 6)
-    expect(hp?.position?.[2]).toBeCloseTo(-1.1846, 6)
+    expect(hp?.position?.[2]).toBeCloseTo(-1.5, 6)
   })
 })

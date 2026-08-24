@@ -234,12 +234,15 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
     }
   })
 
-  test('AUTO anchors: 24" face clearance by construction — pad centered under the cabinet, no slide', () => {
-    // Unwarp round 2026-08-23: the auto stand-off is condenserStandoff =
-    // t/2 + 0.6096 + depth/2 = 0.1 + 0.6096 + 0.475 = 1.1846 from the
-    // centerline — the pad inner edge (−0.5) clears the worst-case
-    // R703.8 exterior assembly (face 0.1 + 0.13) with ~0.45 m to spare,
-    // so the S1 slide never fires and the slab stays centered.
+  test('AUTO anchors: ≥ 24" face clearance by construction — pad centered under the cabinet, no slide', () => {
+    // Unwarp round 2026-08-23 + HP-polish grid snap: the auto stand-off is
+    // condenserStandoff = t/2 + 0.6096 + depth/2 = 0.1 + 0.6096 + 0.475 =
+    // 1.1846 from the centerline, grid-snapped AWAY from the wall to the
+    // next 0.5 m host-grid multiple → 1.5 (the 24" figure is a FLOOR the
+    // snap can only raise — hence the label's '≥ 24"'). The pad inner edge
+    // clears the worst-case R703.8 exterior assembly (face 0.1 + 0.13)
+    // with room to spare, so the S1 slide never fires and the slab stays
+    // centered.
     const { walls, rooms } = shell(26, 10)
     const { members } = layoutHvac(walls, rooms, LOD400)
     const pads = padsOf(members)
@@ -258,16 +261,19 @@ describe('condenser row placement — outside, clear, spaced (IRC M1403 + mfr cl
       expect(Math.abs(cab.position[0] - pad.position[0])).toBeLessThanOrEqual(
         1.0 / 2 - 0.95 / 2 + 1e-9,
       )
-      // cabinet anchor at the stated stand-off basis: t/2 + 24" + depth/2
-      expect(cab.position[2]).toBeCloseTo(-(0.1 + 0.6096 + 0.95 / 2), 6)
-      // face clearance restated: wall face (−0.1) → cabinet near face
-      expect(-(cab.position[2] + 0.95 / 2) - 0.1).toBeCloseTo(0.6096, 6)
+      // cabinet anchor: the stand-off basis t/2 + 24" + depth/2 = 1.1846,
+      // ceil-snapped outward to the 0.5 host grid → 1.5 (world z = −1.5,
+      // a grid line at every host step option)
+      expect(cab.position[2]).toBeCloseTo(-1.5, 6)
+      // face clearance ≥ the 24" floor: wall face (−0.1) → cabinet face
+      expect(-(cab.position[2] + 0.95 / 2) - 0.1).toBeGreaterThanOrEqual(0.6096 - 1e-9)
       // …and the honest-anchor row carries no overhang flag
       expect(pad.flag ?? '').not.toContain('overhangs its pad')
       expect(cab.flag ?? '').not.toContain('overhangs its pad')
     }
-    // the pad label states the clearance basis (restated, unwarp round)
-    expect(pads[0]?.label).toContain('24" face clearance basis')
+    // the pad label states the clearance basis as a FLOOR (HP polish: the
+    // outward snap makes 24" a minimum, not the figure)
+    expect(pads[0]?.label).toContain('≥ 24" face clearance basis')
   })
 
   test('VERBATIM anchor tucked against the wall: the slab slides clear (S1) and the overhang is flagged', () => {
@@ -493,10 +499,13 @@ describe('line-set — one RO-clear wall penetration, wall-following pair to the
         disc.position[2] - unit.position[2],
       )
       // "Within sight" (NEC 440.14) is a visibility rule (≤ 50 ft), not a
-      // 1 m one — this pin guards proximity sanity: wall box ↔ unit center
-      // across the 24" face clearance + half the 0.95 m cabinet depth +
-      // the height difference ≈ 1.29 m (unwarp round 2026-08-23).
-      expect(dist).toBeLessThanOrEqual(1.35)
+      // 1 m one — this pin guards proximity sanity at the CHECKLIST M2
+      // class bound (amended, verify F2 — the row and this allowance
+      // agree to the digit): 3D box↔unit-center ≤ 1.73 m unobstructed,
+      // basis √((S − t/2 − 0.02)² + 0.725²) with the world-grid-snapped
+      // stand-off S < condenserStandoff(t) + 0.5. This scene: 1.5589
+      // (t = 0.2, S = 1.5).
+      expect(dist).toBeLessThanOrEqual(1.73)
       expect(disc.label).toContain('2-pole') // AC-n circuit label (wired by compute)
     }
     // + a whip per unit (liquid-tight conduit, never NM-B)
@@ -532,14 +541,22 @@ describe('heat-pump override moves unit #1 and the row follows (A4)', () => {
     expect(reaches).toBe(true)
   })
 
-  test('no override, small scene → single unit at the legacy auto anchor', () => {
+  test('no override, small scene → single unit at the auto anchor (seed spot; grid-aligned)', () => {
     const { walls, rooms } = shell(10, 8)
-    const spot = placeHeatPumpSpot(walls, rooms)
+    // The composed anchor IS the seed spot (RO slide + grid snap included —
+    // HP polish); the raw election spot (placeHeatPumpSpot) is upstream of
+    // the snap and only equals it when it already sat on the grid.
+    const spot = placeCondenserSeedSpot(walls, rooms)
     const { fixtures } = layoutHvac(walls, rooms, LOD400)
     const units = condensersOf(fixtures)
     expect(units.length).toBe(1)
     expect(units[0]?.position[0]).toBeCloseTo(spot?.[0] ?? Number.NaN, 12)
     expect(units[0]?.position[2]).toBeCloseTo(spot?.[1] ?? Number.NaN, 12)
+    // grid alignment (Julien: "by default it's not aligned to the grid"):
+    // both plan coordinates land on the 0.5 m host grid
+    for (const c of [units[0]?.position[0] ?? Number.NaN, units[0]?.position[2] ?? Number.NaN]) {
+      expect(Math.abs(c / 0.5 - Math.round(c / 0.5))).toBeLessThan(1e-9)
+    }
     // condenser-always: LOD 300 without an override ships the SAME single
     // unit at the same auto anchor (the old LOD-400 gate silently dropped
     // the whole outdoor block while the AH + ducts emitted — user report)
@@ -572,6 +589,10 @@ describe('takeoff — condenser rows mirror the rendered members/fixtures (S4)',
     // this no-stateCode scene sized by the FALLBACK rule — the row says so
     expect(find('AC condensers')?.detail).toContain('assumed sizing')
     expect(find('Condenser pads')?.quantity).toBe(padsOf(members).length)
+    // size + basis on the pad buy line (verify-round REC-2), mirrored from
+    // the rendered pad member (1.0 m square, 40"-class stock)
+    expect(find('Condenser pads')?.detail).toContain('1 × 1 m × 4"')
+    expect(find('Condenser pads')?.detail).toContain('40"-class stock')
     expect(find('AC disconnects')?.quantity).toBe(n)
     expect(find('Condenser whips')?.quantity).toBe(n)
   })
@@ -826,7 +847,8 @@ describe('condenser-always — AH present ⇒ outdoor unit present (never silent
     })
     const units = condensersOf(out.fixtures)
     expect(units.length).toBeGreaterThanOrEqual(1)
-    const auto = placeHeatPumpSpot(walls, rooms)
+    // the AUTO row = the seed spot (slide + grid snap included, HP polish)
+    const auto = placeCondenserSeedSpot(walls, rooms)
     expect(units[0]?.position[0]).toBeCloseTo(auto?.[0] ?? Number.NaN, 12)
     expect(units[0]?.position[2]).toBeCloseTo(auto?.[1] ?? Number.NaN, 12)
   })
@@ -1025,9 +1047,10 @@ describe('condenser election validation — false-exterior walls never place the
     for (const r of rooms) expect(inPoly(plan, r.polygon)).toBe(false)
     for (const c of coverage) expect(inPoly(plan, c.polygon)).toBe(false)
     // the nearest wall that validates is the true SOUTH wall — pad at the
-    // 24" face-clearance stand-off (1.1846 from the centerline, t = 0.2)
+    // 24" face-clearance stand-off (1.1846 from the centerline, t = 0.2),
+    // grid-snapped outward to the 0.5 host step → z = −1.5 (HP polish)
     expect(plan[0]).toBeCloseTo(5, 6)
-    expect(plan[1]).toBeCloseTo(-1.1846, 6)
+    expect(plan[1]).toBeCloseTo(-1.5, 6)
     // clean election: no ⚠ flags, no election warning — this is the healthy path
     for (const m of [...padsOf(out.members), ...cabinetsOf(out.members)]) {
       expect(m.flag).toBeUndefined()
@@ -1100,8 +1123,9 @@ describe('condenser election validation — false-exterior walls never place the
     const units = condensersOf(out.fixtures)
     expect(units.length).toBe(1)
     // least-bad = the nearest election (the pre-fix spot class), kept —
-    // not dropped (bathLaundry wall x = 4 minus the 1.1846 stand-off)
-    expect(units[0]?.position[0]).toBeCloseTo(4 - 1.1846, 6)
+    // not dropped (bathLaundry wall x = 4 minus the 1.1846 stand-off,
+    // grid-snapped outward to 1.5 → x = 2.5; z = 3.5 already on-grid)
+    expect(units[0]?.position[0]).toBeCloseTo(2.5, 6)
     expect(units[0]?.position[2]).toBeCloseTo(3.5, 6)
     // NEVER silent: every pad + cabinet carries the unvalidated ⚠ class …
     const boxes = [...padsOf(out.members), ...cabinetsOf(out.members)]
@@ -1131,7 +1155,7 @@ describe('condenser election validation — false-exterior walls never place the
     const out = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const unit = condensersOf(out.fixtures)[0] as Fixture
     expect(unit.position[0]).toBeCloseTo(5, 6)
-    expect(unit.position[2]).toBeCloseTo(-1.1846, 6)
+    expect(unit.position[2]).toBeCloseTo(-1.5, 6) // 1.1846 stand-off, snapped out to the grid
     const disc = out.fixtures.find((f) => f.kind === 'disconnect') as Fixture
     expect(disc.sourceId).toBe('w_south')
   })
@@ -1151,8 +1175,12 @@ describe('condenser election validation — false-exterior walls never place the
     const auto = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const unit = condensersOf(auto.fixtures)[0] as Fixture
     // the engine slid clear of the RO span [4.4, 5.6] (+ half-pad + slack)
-    expect(unit.position[0]).toBeCloseTo(6.15, 6)
-    expect(unit.position[2]).toBeCloseTo(-1.1846, 6)
+    // to 6.15, then grid-snapped ALONG the wall: the nearer multiple 6.0
+    // sits inside the keepout, so the snap takes 6.5 — grid-aligned AND
+    // still clear of the window (physics beats the grid, then the grid
+    // picks the clear multiple). Outward: 1.1846 → 1.5.
+    expect(unit.position[0]).toBeCloseTo(6.5, 6)
+    expect(unit.position[2]).toBeCloseTo(-1.5, 6)
     expect((auto.fixtures.find((f) => f.kind === 'disconnect') as Fixture).sourceId).toBe(
       'w_south',
     )
@@ -1176,14 +1204,15 @@ describe('condenser election validation — false-exterior walls never place the
   })
 
   test('fence-only: seeding must not flip the disconnect w_south → w_fence', () => {
-    // No RO — the seed equals the raw election spot; the post-seed compose
-    // must still anchor the row to the ELECTED wall, not race the fence.
+    // No RO — the seed equals the election spot grid-snapped outward; the
+    // post-seed compose must still anchor the row to the ELECTED wall, not
+    // race the fence.
     const { walls, rooms, coverage } = misclassifiedScene()
     walls.push(wall('w_fence', [2, -1], [8, -1], true))
     const auto = layoutHvac(walls, rooms, LOD400, undefined, { coverage })
     const seed = placeCondenserSeedSpot(walls, rooms, coverage)
     expect(seed?.[0]).toBeCloseTo(5, 6)
-    expect(seed?.[1]).toBeCloseTo(-1.1846, 6)
+    expect(seed?.[1]).toBeCloseTo(-1.5, 6)
     const post = layoutHvac(
       walls,
       rooms,
@@ -1268,7 +1297,8 @@ describe('condenser election validation — false-exterior walls never place the
       coverage: withZone.coverage,
     })
     const unitA = condensersOf(a.fixtures)[0] as Fixture
-    expect(unitA.position[0]).toBeCloseTo(6 - 1.1846, 6)
+    // 6 − 1.1846, grid-snapped away from the court wall → 4.5
+    expect(unitA.position[0]).toBeCloseTo(4.5, 6)
     expect(unitA.position[2]).toBeCloseTo(4, 6)
     expect(a.warnings.some((w) => w.includes('could not be validated'))).toBe(false)
     for (const m of [...padsOf(a.members), ...cabinetsOf(a.members)]) {
@@ -1281,7 +1311,8 @@ describe('condenser election validation — false-exterior walls never place the
       coverage: noZone.coverage,
     })
     const unitB = condensersOf(b.fixtures)[0] as Fixture
-    expect(unitB.position[0]).toBeCloseTo(10 + 1.1846, 6)
+    // 10 + 1.1846, grid-snapped outward → 11.5
+    expect(unitB.position[0]).toBeCloseTo(11.5, 6)
     expect(unitB.position[2]).toBeCloseTo(4, 6)
     // (3) a slab HOLE under the court is a courtyard too — uncovered, valid
     const holed = courtScene(false, true)
@@ -1289,7 +1320,7 @@ describe('condenser election validation — false-exterior walls never place the
       coverage: holed.coverage,
     })
     const unitC = condensersOf(c.fixtures)[0] as Fixture
-    expect(unitC.position[0]).toBeCloseTo(6 - 1.1846, 6)
+    expect(unitC.position[0]).toBeCloseTo(4.5, 6)
     expect(unitC.position[2]).toBeCloseTo(4, 6)
   })
 })

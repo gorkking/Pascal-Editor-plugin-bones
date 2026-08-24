@@ -444,18 +444,18 @@ describe('starter template (garden-house shape) — the heat pump stands outside
     }
   })
 
-  test('NEC 440.14: disconnect within sight (≤ 1.2 m plan) + whip present', () => {
-    // Plan reach = condenserStandoff (t/2 + 24" face clearance + 0.95/2)
-    // minus the box's wall-face offset ≈ 1.06 m on the 0.15 m template
-    // walls ("within sight" is a visibility rule, ≤ 50 ft — the pin guards
-    // proximity sanity; unwarp round 2026-08-23).
+  test('NEC 440.14: disconnect within sight (≤ 1.5 m plan) + whip present', () => {
+    // Plan reach = the grid-snapped stand-off (condenserStandoff 1.1596 on
+    // the 0.15 m template walls, ceil-snapped outward to 1.5 — HP polish)
+    // minus the box's wall-face offset ≈ 1.4 m ("within sight" is a
+    // visibility rule, ≤ 50 ft — the pin guards proximity sanity).
     const unit = condensersOf(result.fixtures)[0] as Fixture
     const disconnects = result.fixtures.filter((f) => f.kind === 'disconnect')
     expect(disconnects.length).toBe(1)
     const d = disconnects[0] as Fixture
     expect(
       Math.hypot(d.position[0] - unit.position[0], d.position[2] - unit.position[2]),
-    ).toBeLessThanOrEqual(1.2)
+    ).toBeLessThanOrEqual(1.5)
     expect(result.members.some((m) => m.sourceId.startsWith('ac-whip-'))).toBe(true)
   })
 

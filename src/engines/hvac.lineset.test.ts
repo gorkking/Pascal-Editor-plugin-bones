@@ -609,15 +609,17 @@ describe('whip — disconnect → unit, endpoint-adjacent', () => {
         ),
       ).toBe(true)
       // within sight — the NEC 440.14 proximity pin ("within sight" is a
-      // visibility rule, <= 50 ft; the pin guards sanity). Wall box <-> unit
-      // center across the 24" face clearance + half the 0.95 m cabinet
-      // depth + the height difference ~= 1.29 m (unwarp round 2026-08-23).
+      // visibility rule, <= 50 ft; the pin guards sanity) at the CHECKLIST
+      // M2 class bound (amended, verify F2 — row and allowance agree to
+      // the digit): 3D box<->unit-center <= 1.73 m unobstructed, basis
+      // sqrt((S - t/2 - 0.02)^2 + 0.725^2) with the world-grid-snapped
+      // stand-off S < condenserStandoff(t) + 0.5. This scene: 1.5589.
       const dist = Math.hypot(
         disc.position[0] - unit.position[0],
         disc.position[1] - unit.position[1],
         disc.position[2] - unit.position[2],
       )
-      expect(dist).toBeLessThanOrEqual(1.35)
+      expect(dist).toBeLessThanOrEqual(1.73)
     }
   })
 })

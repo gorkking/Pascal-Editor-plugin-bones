@@ -235,6 +235,11 @@ export type ServicePointOverride = {
   /** Mount height (device center, m AFF). */
   heightAff?: number
   position?: readonly [number, number, number]
+  /** Assembly yaw override (radians, world +Y — the node's `yawOverride`
+   * field, written by the host rotate gestures). Heat-pump only today: it
+   * beats the derived wall-square orientation for unit #1's cabinet + pad;
+   * absent ⇒ the engine derives (never a stored copy of the derivation). */
+  yaw?: number
 }
 
 /**

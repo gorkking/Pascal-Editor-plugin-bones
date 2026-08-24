@@ -82,3 +82,33 @@ export function resolveHeatPumpProxy(
     rotationY: unit1.rotationY,
   }
 }
+
+/**
+ * The heat-pump assembly's CURRENT world yaw — the base the host rotate
+ * gestures step from (R/T + the ⌘-drag rotate arc write `yawOverride`
+ * RELATIVE to what the user sees; stepping from 0 would make the first
+ * keypress jump a wall-square unit to 45° absolute):
+ *   1. an explicit finite `yawOverride` — the stored user rotation;
+ *   2. else the ENGINE's unit-#1 fixture rotationY (the derived wall-square
+ *      orientation), read from the memoized computeLevel exactly like the
+ *      pick proxy (same store snapshot ⇒ cache hit);
+ *   3. else 0 (no framing node / no unit — the gesture still works on the
+ *      placeholder body, which renders unrotated).
+ */
+export function resolveHeatPumpAssemblyYaw(
+  nodes: LooseNodes,
+  node: Pick<ServicePlacementNode, 'serviceType' | 'parentId'> & { yawOverride?: unknown },
+): number {
+  if (typeof node.yawOverride === 'number' && Number.isFinite(node.yawOverride)) {
+    return node.yawOverride
+  }
+  const config = levelFramingNode(nodes, node.parentId)
+  if (config) {
+    const result = computeLevel(nodes, config as unknown as FramingNode)
+    const unit1 = result.fixtures.find(
+      (f) => f.meta?.equipment === 'condenser' && f.meta?.unit === 1,
+    )
+    if (unit1) return unit1.rotationY
+  }
+  return 0
+}
