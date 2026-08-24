@@ -2018,6 +2018,40 @@ describe('LGS steel walls compose SAT-clean (Phase 1 / S1)', () => {
     expect(violations([...steel.members, ...layers])).toEqual([])
   })
 
+  test('steel partition between CMU walls (the FL default composition): straps trim clear of the blocks (round-1 F4d)', () => {
+    // FL's jurisdiction default composes EXACTLY this: CMU shell + steel
+    // interior partitions under framingSystem 'lgs'. The shared hint graph
+    // is masonry-blind (the documented S1 'partition tees into full-CMU'
+    // class — the steel stud/track run keeps lumber-twin symmetry with
+    // it), but the NEW strap-bracing role must not join the class: strap
+    // runs trim clear of the CMU through-wall bodies via mixedWallInsets.
+    const cmuS = wall({ id: 'w_cmu_s', start: [0, 0], end: [6, 0], thickness: 0.15 })
+    const cmuN = wall({ id: 'w_cmu_n', start: [0, 4], end: [6, 4], thickness: 0.15 })
+    const stem = wall({ id: 'w_stem', start: [3, 0], end: [3, 4], thickness: 0.114 })
+    const eng = lgsMap(['w_stem'])
+    const steel = lgsFrameWalls([stem], spec400, eng, { cmuNeighbors: [cmuS, cmuN] })
+    const straps = steel.members.filter((m) => m.role === 'strap-bracing')
+    expect(straps.length).toBeGreaterThan(0)
+    for (const st of straps) {
+      expect(st.advisory).toContain('run stopped clear of a CMU through wall')
+    }
+    const masonry = cmuWalls([cmuS, cmuN], spec400)
+    // ZERO strap × masonry contact — proven on the ISOLATED pair set (the
+    // full compose's violation list caps at 12 diagnostics, so a
+    // straps-only scan is the non-maskable form)
+    expect(violations([...straps, ...masonry])).toEqual([])
+    // …and everything the full compose reports is the DOCUMENTED
+    // masonry-blind tee class (steel stud/track tips inside the masonry
+    // bodies — blocks and the bond-beam course; the lumber-twin residual)
+    const v = violations([...steel.members, ...masonry])
+    expect(v.length).toBeGreaterThan(0) // the documented class is real
+    expect(v.every((s) => s.includes('block') || s.includes('bond-beam'))).toBe(true)
+    // guard for the fix itself: WITHOUT the trim the straps bore the blocks
+    const untrimmed = lgsFrameWalls([stem], spec400, eng)
+    const rawStraps = untrimmed.members.filter((m) => m.role === 'strap-bracing')
+    expect(violations([...rawStraps, ...masonry]).length).toBeGreaterThan(0)
+  })
+
   test('taller strap wall (third points) with 24" spacing: clean', () => {
     const spec24 = { ...spec400, studSpacing: inches(24) }
     const w = wall({ id: 'w_tall', start: [0, 0], end: [6, 0], height: 2.9, openings: [door(3)] })

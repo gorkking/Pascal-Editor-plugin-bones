@@ -65,6 +65,7 @@ import {
   parseDesignator,
   profileFor,
 } from './lgs-profiles'
+import { mixedWallInsets } from './cmu'
 import {
   fitAcross,
   frameHints,
@@ -184,6 +185,12 @@ export type LgsFrameWallsOptions = {
   groundSnowLoadPsf?: number
   ultimateWindMph?: number
   storeys?: number
+  /** CMU walls on the level (full-CMU + mixed) — the shared lumber+steel
+   * hint graph is blind to masonry (the documented S1 tee class), and the
+   * NEW strap-bracing role must not join it: strap runs TRIM clear of CMU
+   * through-wall bodies (round-1 F4d). The stud/track run keeps lumber-
+   * twin symmetry with the documented class. */
+  cmuNeighbors?: WallSlice[]
 }
 
 export type LgsFrameResult = { members: Member[]; warnings: string[] }
@@ -318,6 +325,7 @@ export function lgsFrameWalls(
       codeClaims,
       specLimitFlag,
       slabBearing: opts?.slabBearing === true,
+      cmuNeighbors: opts?.cmuNeighbors ?? [],
     })
   }
   return { members, warnings: [...warnings] }
@@ -329,6 +337,7 @@ type EmitContext = {
   codeClaims: boolean
   specLimitFlag: string | undefined
   slabBearing: boolean
+  cmuNeighbors: WallSlice[]
 }
 
 function frameLgsWall(
@@ -685,25 +694,43 @@ function frameLgsWall(
   // R603.3.3 is not modeled — the advisory says so. Walls past the 10 ft
   // R603.1.1 limit carry the engineered flag instead of extrapolated rows.
   if (codeClaims && !tooTall) {
+    // Strap runs TRIM clear of CMU through-wall bodies (round-1 F4d): the
+    // shared lumber+steel hint graph never sees masonry (the documented S1
+    // 'partition tees into full-CMU' class — the stud/track run keeps
+    // lumber-twin symmetry with it), but the NEW role must not extend the
+    // class — a flat steel strap boring into block cells is neither the
+    // documented residual nor buildable. mixedWallInsets is the one
+    // corner/tee butt-inset truth for masonry neighbors.
+    const cmuIns =
+      ctx.cmuNeighbors.length > 0
+        ? mixedWallInsets(wall, ctx.cmuNeighbors)
+        : { startInset: 0, endInset: 0 }
+    const strapU0 = Math.max(u0, cmuIns.startInset)
+    const strapU1 = Math.min(u1, len - cmuIns.endInset)
+    const strapLen = strapU1 - strapU0
+    const trimmed = strapLen < runLen - EPS
     const rows = H <= LGS_MID_HEIGHT_MAX ? [H / 2] : [H / 3, (2 * H) / 3]
     const rowNote = rows.length === 1 ? 'mid-height' : 'third points'
-    for (const y of rows) {
-      for (const side of [-1, 1] as const) {
-        members.push({
-          system: 'wall-framing',
-          role: 'strap-bracing',
-          dims: [runLen, LGS_STRAP_WIDTH, LGS_STRAP_THICKNESS],
-          length: runLen,
-          position: place(runMid, y, side * (wFit / 2 + LGS_STRAP_THICKNESS / 2)),
-          rotation: [0, yaw, 0],
-          material: 'steel',
-          sourceId: wall.id,
-          label: `Strap bracing 1-1/2" × 33 mil (R603.3.3) — ${rowNote}`,
-          advisory:
-            'R603.3.3 stud bracing v1 — flat strap on both flange faces (layout assumption); ' +
-            'end anchorage + periodic blocking per R603.3.3 not modeled; verify detail',
-          flag: wallFlag,
-        })
+    if (strapLen > inches(6)) {
+      for (const y of rows) {
+        for (const side of [-1, 1] as const) {
+          members.push({
+            system: 'wall-framing',
+            role: 'strap-bracing',
+            dims: [strapLen, LGS_STRAP_WIDTH, LGS_STRAP_THICKNESS],
+            length: strapLen,
+            position: place((strapU0 + strapU1) / 2, y, side * (wFit / 2 + LGS_STRAP_THICKNESS / 2)),
+            rotation: [0, yaw, 0],
+            material: 'steel',
+            sourceId: wall.id,
+            label: `Strap bracing 1-1/2" × 33 mil (R603.3.3) — ${rowNote}`,
+            advisory:
+              'R603.3.3 stud bracing v1 — flat strap on both flange faces (layout assumption); ' +
+              'end anchorage + periodic blocking per R603.3.3 not modeled; verify detail' +
+              (trimmed ? '; run stopped clear of a CMU through wall — verify strap anchorage at the junction' : ''),
+            flag: wallFlag,
+          })
+        }
       }
     }
   }

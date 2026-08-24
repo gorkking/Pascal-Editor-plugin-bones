@@ -337,6 +337,16 @@ describe('LABEL TRUTH — every designator exists in the catalog, none invented'
         expect(inCatalog).toBe(true)
         // and the label repeats the designator verbatim (profile truth)
         expect(m.label).toContain(m.profile ?? '<none>')
+        // EXACT-TOKEN truth (round-1 F4b — the substring check let a
+        // fabricated '350S162-68-HD' ride): every designator-shaped token
+        // ON the label must be a real catalog/vendor row, suffixes
+        // included; and no label carries invented weight figures.
+        const tokens = (m.label ?? '').toUpperCase().match(/\b\d{3,4}[STUFL]\d{3}-\d{2,3}(?:-[A-Z0-9]+)*\b/g) ?? []
+        expect(tokens.length).toBeGreaterThan(0)
+        for (const tok of tokens) {
+          expect(LGS.genericFamilies[tok] !== undefined || vendorDesignators.has(tok)).toBe(true)
+        }
+        expect(m.label ?? '').not.toMatch(/\d+(\.\d+)?\s*(lb|kg)\b/i)
       }
     })
   }
@@ -430,6 +440,40 @@ describe('SELECTION HONESTY — conservative pick + applicability limits', () =>
       expect(m.label ?? '').not.toContain('R603.3.2 (')
     }
     expect(warnings.length).toBe(0)
+  })
+})
+
+describe('GRADE RULE — full catalog sweep (round-1 F4c)', () => {
+  test('every catalog row encodes the VERIFIED grade rule: 33/43 mil → Gr 33, ≥54 mil → Gr 50 (S230 A4.4)', () => {
+    // The spot checks let a flipped yieldKsi on 550T125-68 / 350S162-54 /
+    // 150U050-54 survive — the sweep pins every row against the rule.
+    const rows = Object.entries(LGS.genericFamilies)
+    expect(rows.length).toBeGreaterThan(30)
+    for (const [designator, fam] of rows) {
+      expect(`${designator}: Gr ${fam.yieldKsi}`).toBe(
+        `${designator}: Gr ${fam.mils >= 54 ? 50 : 33}`,
+      )
+    }
+  })
+
+  test('every steel member PRINTS the grade its catalog row carries — label == data, whole scene', () => {
+    const walls = [
+      wall({ id: 'g1', thickness: 0.15, exterior: true, openings: [
+        { id: 'd', kind: 'door', u: 2, width: 0.9, height: 2.1, sillHeight: 0, roughWidth: 0.9381, roughHeight: 2.1381 },
+      ] }),
+      wall({ id: 'g2', start: [0, 0], end: [0, 5], thickness: 0.114 }),
+    ]
+    const { members } = lgsFrameWalls(walls, spec400)
+    let checked = 0
+    for (const m of steelOf(members)) {
+      const fam = LGS.genericFamilies[(m.profile ?? '').toUpperCase()]
+      if (!fam) continue
+      const printed = /\(Gr (\d+)\)/.exec(m.label ?? '')
+      expect(printed).not.toBeNull()
+      expect(printed?.[1]).toBe(String(fam.yieldKsi))
+      checked += 1
+    }
+    expect(checked).toBeGreaterThan(20)
   })
 })
 
@@ -627,6 +671,18 @@ describe('TAKEOFF gates — steel rows, screw schedule, no invented weights', ()
     const dw = (rs: { item: string; quantity: number }[]) =>
       rs.find((r) => r.item === 'Drywall 1/2"')
     expect(dw(rowsOne)?.quantity).toBe(dw(rows(base))?.quantity)
+  })
+
+  test('F4a: an all-steel level books ZERO framing-nail rows — the wood-material filter is pinned', () => {
+    // Steel verticals share the lumber roles (stud/king/…): without the
+    // WOOD_MATERIALS gate on ROLE_CONNECTIONS the takeoff would book
+    // phantom '16d/10d lbs' from steel members (surviving mutant,
+    // round-1 F4a). The baseline scene has no roof/floor lumber, so the
+    // all-steel level's nail section must be EMPTY.
+    const nailRows = rows(lgsAll).filter((r) => r.item.startsWith('Nails '))
+    expect(nailRows).toEqual([])
+    // …while the lumber twin books them (non-vacuous)
+    expect(rows(base).some((r) => r.item === 'Nails 16d common')).toBe(true)
   })
 
   test('flags reach the takeoff Flags rows (header capacity + compression classes)', () => {

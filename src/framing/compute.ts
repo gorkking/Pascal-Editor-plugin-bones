@@ -705,6 +705,9 @@ function computeLevelUncached(
         groundSnowLoadPsf: profile.groundSnowLoadPsf,
         ultimateWindMph: profile.ultimateWindMph,
         storeys,
+        // masonry neighbors (full-CMU + mixed) — strap runs trim clear of
+        // their bodies (round-1 F4d; the hint graph is masonry-blind)
+        cmuNeighbors: [...masonry, ...mixed.map((mx) => mx.wall)],
       })
       members.push(...lgs.members)
       warnings.push(...lgs.warnings)
