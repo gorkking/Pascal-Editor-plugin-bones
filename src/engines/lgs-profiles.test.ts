@@ -72,7 +72,14 @@ describe('generic family lookup (the always-verified base)', () => {
   })
 
   test('familyVariants: R603 stud sets, thinnest first', () => {
-    expect(familyVariants('350S162')).toEqual(['350S162-33', '350S162-43', '350S162-54'])
+    // 350S162-68: SFIA product row + S230 stud tables select it within IRC
+    // applicability (skeptic F2) — same 33-68 set as the 550 twin.
+    expect(familyVariants('350S162')).toEqual([
+      '350S162-33',
+      '350S162-43',
+      '350S162-54',
+      '350S162-68',
+    ])
     expect(familyVariants('550S162')).toEqual([
       '550S162-33',
       '550S162-43',
