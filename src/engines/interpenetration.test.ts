@@ -10,6 +10,7 @@ import { buildFoundation } from './foundation'
 import { layoutPlumbing } from './plumbing'
 import { frameRoofs, type RoofSegmentSlice } from './roof-framing'
 import { dedupeFoundationStraps, frameWall, frameWalls } from './wall-framing'
+import { lgsFrameWalls } from './lgs-wall-framing'
 import { layoutWallLayers } from './wall-layers'
 import type { PlacedFixtureSlice } from '../core/wall-model'
 import type { RoomSlice } from '../core/types'
@@ -174,6 +175,41 @@ function pairKey(a: string, b: string): string {
   return a < b ? `${a}|${b}` : `${b}|${a}`
 }
 
+/**
+ * LGS design-intent nesting (Phase 1, box-envelope geometry): C-studs SEAT
+ * INSIDE their tracks — member ends bear on the track WEB, between its
+ * flanges — so the stud box overlaps the track's flange band by design
+ * (exactly like an anchor bolt threads its plate). MATERIAL- and
+ * WALL-SCOPED, never a blanket role pair: both members must be steel
+ * catalog profiles of the SAME wall, so a lumber stud overlapping a lumber
+ * plate (a real defect) still trips the gate.
+ */
+const STEEL_NEST: ReadonlySet<string> = new Set(
+  [
+    ['stud', 'bottom-plate'],
+    ['stud', 'top-plate'],
+    ['king-stud', 'bottom-plate'],
+    ['king-stud', 'top-plate'],
+    ['trimmer', 'bottom-plate'],
+    ['cripple', 'bottom-plate'],
+    ['cripple', 'top-plate'],
+    ['cripple', 'sill'],
+  ].map(([x, y]) => pairKey(x as string, y as string)),
+)
+
+function steelNestContact(a: Member, b: Member): boolean {
+  return (
+    a.material === 'steel' &&
+    b.material === 'steel' &&
+    a.system === 'wall-framing' &&
+    b.system === 'wall-framing' &&
+    a.profile !== undefined &&
+    b.profile !== undefined &&
+    a.sourceId === b.sourceId &&
+    STEEL_NEST.has(pairKey(a.role, b.role))
+  )
+}
+
 function violations(members: Member[]): string[] {
   // A member with non-finite geometry would make every AABB/SAT comparison
   // false and let broken scenarios pass VACUOUSLY (round-11 blocker: a bad
@@ -194,6 +230,7 @@ function violations(members: Member[]): string[] {
       const b = obbs[j] as Obb
       if (!aabbTouch(a, b)) continue
       if (ALLOWED.has(pairKey(a.member.role, b.member.role))) continue
+      if (steelNestContact(a.member, b.member)) continue
       if (!obbOverlap(a, b)) continue
       bad.push(
         `${a.member.role}(${a.member.label ?? ''}) @${a.member.position.map((v) => v.toFixed(2)).join(',')}` +
@@ -1837,5 +1874,156 @@ describe('high-wind uplift hardware composes SAT-clean (LOD-400 B10 / S1)', () =
       s.includes('stud') && (s.includes('anchor-bolt') || s.includes('plate-washer'))
     const cornerLayer = (s: string) => s.includes('drywall') && s.includes('hold-down')
     expect(v.filter((s) => !boltKit(s) && !cornerLayer(s))).toEqual([])
+  })
+})
+
+describe('LGS steel walls compose SAT-clean (Phase 1 / S1)', () => {
+  // The compute wiring, mirrored: ONE hint graph over lumber + steel
+  // (hintWalls), each engine framing only its own walls, layers over the
+  // combined list with the engineering map carrying construction.
+  const lgsMap = (ids: string[], extra: Record<string, unknown> = {}) =>
+    new Map(ids.map((id) => [id, { construction: 'lgs' as const, ...extra }]))
+
+  test('single steel wall + door + window (+ layers): tracks/studs/kings/jacks/header/sill/straps clean', () => {
+    const w = wall({ id: 'w_lgs', start: [0, 0], end: [8, 0], openings: [door(2), window_(6)] })
+    const eng = lgsMap(['w_lgs'])
+    const { members } = lgsFrameWalls([w], spec400, eng)
+    // non-vacuous: the full member family is present
+    for (const role of ['bottom-plate', 'top-plate', 'stud', 'king-stud', 'trimmer', 'header', 'sill', 'cripple', 'strap-bracing']) {
+      expect(members.some((m) => m.role === role)).toBe(true)
+    }
+    const composed = [
+      ...members,
+      ...layoutWallLayers([w], [], spec400, 'TX', [], eng),
+    ]
+    expect(violations(composed)).toEqual([])
+  })
+
+  test('the steel-nest allowance is SCOPED: a lumber stud parked inside a lumber plate still trips', () => {
+    // Mutation guard for the allowance itself — dropping the material/
+    // profile/sourceId scoping would blind the gate to real lumber
+    // defects. Two synthetic lumber members in the exact nest pose:
+    const nest: Member[] = [
+      {
+        system: 'wall-framing', role: 'bottom-plate', dims: [2, 0.038, 0.089],
+        length: 2, position: [1, 0.019, 0], rotation: [0, 0, 0],
+        material: 'lumber', sourceId: 'w_x',
+      },
+      {
+        system: 'wall-framing', role: 'stud', dims: [0.038, 2.3, 0.089],
+        length: 2.3, position: [1, 1.15 + 0.002, 0], rotation: [0, 0, 0],
+        material: 'lumber', sourceId: 'w_x',
+      },
+    ]
+    expect(violations(nest).length).toBeGreaterThan(0)
+    // …and the same pose in catalog steel on one wall is the design intent
+    const steelNest = nest.map((m) => ({
+      ...m,
+      material: 'steel' as const,
+      profile: m.role === 'stud' ? '350S162-68' : '350T125-68',
+    }))
+    expect(violations(steelNest)).toEqual([])
+    // …but steel across TWO walls is NOT nesting — still a violation
+    const crossWall = steelNest.map((m, i) => ({ ...m, sourceId: i === 0 ? 'w_a' : 'w_b' }))
+    expect(violations(crossWall).length).toBeGreaterThan(0)
+  })
+
+  test('L-corner steel × lumber: shared hint graph, butt insets, suppressed cap lap — clean', () => {
+    const lumberW = wall({ id: 'w_wood', start: [0, 0], end: [6, 0], openings: [door(3)] })
+    const steelW = wall({ id: 'w_steel', start: [0, 0], end: [0, 4] })
+    const all = [lumberW, steelW]
+    const eng = new Map<string, { construction: 'framed' | 'lgs' }>([
+      ['w_wood', { construction: 'framed' }],
+      ['w_steel', { construction: 'lgs' }],
+    ])
+    const composed = [
+      ...frameWalls([lumberW], spec400, eng, { hintWalls: all }),
+      ...lgsFrameWalls([steelW], spec400, eng, { hintWalls: all }).members,
+      ...layoutWallLayers(all, [], spec400, 'TX', [], eng),
+    ]
+    expect(composed.some((m) => m.profile !== undefined)).toBe(true)
+    expect(composed.some((m) => m.material === 'lumber' && m.role === 'stud')).toBe(true)
+    // LABEL TRUTH at the mixed corner: the lumber through wall's cap must
+    // NOT claim to lap onto the steel wall (a wood cap lap splice onto a
+    // steel top track is not a thing — frameHints suppresses the deltas at
+    // mixed-material corners). The corner geometry itself is inset-clean
+    // either way; the claim is what the suppression guards.
+    expect(
+      composed.some((m) => m.role === 'cap-plate' && (m.label ?? '').includes('laps corner')),
+    ).toBe(false)
+    expect(violations(composed)).toEqual([])
+  })
+
+  test('INVERSE corner — steel THROUGH, lumber butting: composes clean, no cap-lap claims', () => {
+    // The steel through wall has no cap plate for the hint's extend to
+    // land on, and the lumber butting wall only ever pulls SHORT — the
+    // suppression keeps both directions claim-free; the SAT run proves
+    // the inset/track geometry composes.
+    const steelW = wall({ id: 'w_steel', start: [0, 0], end: [6, 0] })
+    const lumberW = wall({ id: 'w_wood', start: [0, 0], end: [0, 4] })
+    const all = [steelW, lumberW]
+    const eng = new Map<string, { construction: 'framed' | 'lgs' }>([
+      ['w_steel', { construction: 'lgs' }],
+      ['w_wood', { construction: 'framed' }],
+    ])
+    const composed = [
+      ...frameWalls([lumberW], spec400, eng, { hintWalls: all }),
+      ...lgsFrameWalls([steelW], spec400, eng, { hintWalls: all }).members,
+      ...layoutWallLayers(all, [], spec400, 'TX', [], eng),
+    ]
+    // the lumber cap stays home (no 'laps corner' label on this pair)
+    expect(
+      composed.some((m) => m.role === 'cap-plate' && (m.label ?? '').includes('laps corner')),
+    ).toBe(false)
+    expect(violations(composed)).toEqual([])
+  })
+
+  test('steel × steel corner + lumber tee into a steel through wall: clean, backing present', () => {
+    const s1 = wall({ id: 'w_s1', start: [0, 0], end: [6, 0], openings: [window_(3)] })
+    const s2 = wall({ id: 'w_s2', start: [0, 0], end: [0, 4] })
+    const stem = wall({ id: 'w_stem', start: [3, 0], end: [3, 2.5] })
+    const all = [s1, s2, stem]
+    const eng = new Map<string, { construction: 'framed' | 'lgs' }>([
+      ['w_s1', { construction: 'lgs' }],
+      ['w_s2', { construction: 'lgs' }],
+      ['w_stem', { construction: 'framed' }],
+    ])
+    const steel = lgsFrameWalls([s1, s2], spec400, eng, { hintWalls: all })
+    // the tee books CFS backing (150U050 bridging channel) on the through wall
+    expect(steel.members.some((m) => m.role === 'backing' && m.profile === '150U050-54')).toBe(true)
+    const composed = [
+      ...steel.members,
+      ...frameWalls([stem], spec400, eng, { hintWalls: all }),
+      ...layoutWallLayers(all, [], spec400, 'TX', [], eng),
+    ]
+    expect(violations(composed)).toEqual([])
+  })
+
+  test('insulated steel wall with openings: batts hug the steel members (steel-aware bays) — clean', () => {
+    const w = wall({
+      id: 'w_ins',
+      start: [0, 0],
+      end: [8, 0],
+      thickness: 0.15,
+      exterior: true,
+      openings: [door(2), window_(6)],
+    })
+    const eng = new Map([[
+      'w_ins',
+      { construction: 'lgs' as const, insulation: 'batt' as const, insulationR: 13 },
+    ]])
+    const steel = lgsFrameWalls([w], spec400, eng)
+    const layers = layoutWallLayers([w], [], spec400, 'TX', [], eng)
+    expect(layers.some((m) => m.role === 'insulation')).toBe(true)
+    expect(violations([...steel.members, ...layers])).toEqual([])
+  })
+
+  test('taller strap wall (third points) with 24" spacing: clean', () => {
+    const spec24 = { ...spec400, studSpacing: inches(24) }
+    const w = wall({ id: 'w_tall', start: [0, 0], end: [6, 0], height: 2.9, openings: [door(3)] })
+    const eng = lgsMap(['w_tall'])
+    const { members } = lgsFrameWalls([w], spec24, eng)
+    expect(members.filter((m) => m.role === 'strap-bracing').length).toBe(4)
+    expect(violations([...members, ...layoutWallLayers([w], [], spec24, 'TX', [], eng)])).toEqual([])
   })
 })
