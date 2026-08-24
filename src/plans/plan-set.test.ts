@@ -4222,6 +4222,48 @@ describe('LGS paper identity (Phase 1 round-1 F3)', () => {
     expect(svg).toMatch(/>stud — 2x4</)
   })
 
+  test('round-2 C: the legend NEVER silently drops a drawn family — the 16-row mixed exhibit keys everything', () => {
+    // The slice(0,13) cap re-manifested the F3 failure one round later:
+    // 9 lumber + 7 steel rows composed 16, so 'stud (LGS)' / 'king-stud
+    // (LGS)' / 'cripple (LGS)' silently dropped and 23/28 drawn steel
+    // members were unkeyed beside 'stud — 2x6'. Cap removed — this gate
+    // pins every drawn family to a row (a restored cap dies here).
+    const openings: OpeningSlice[] = [
+      { id: 'd', kind: 'door', u: 2, width: 0.9, height: 2.1, sillHeight: 0, roughWidth: 0.9381, roughHeight: 2.1381 },
+      { id: 'w', kind: 'window', u: 5.5, width: 1.2, height: 1.2, sillHeight: 0.9, roughWidth: 1.2381, roughHeight: 1.2381 },
+    ]
+    const lumberW = { ...mkWall('w_wood', [0, 0], [8, 0]), openings }
+    const steelW = { ...mkWall('w_steel', [0, 4], [8, 4]), openings }
+    const eng = new Map<string, { construction: 'framed' | 'lgs' }>([
+      ['w_wood', { construction: 'framed' }],
+      ['w_steel', { construction: 'lgs' }],
+    ])
+    const members = [
+      ...frameWalls([lumberW], spec400f3, eng),
+      ...lgsFrameWalls([steelW], spec400f3, eng).members,
+    ]
+    const svg = wallSheetOf(buildPlanSet(members, [], { walls: [lumberW, steelW] }))
+    // every DRAWN family keys a legend row — derived from the members, so
+    // the gate can never under-ask (P2)
+    const steelRoles = new Set(
+      members.filter((m) => m.profile !== undefined).map((m) => m.role as string),
+    )
+    const lumberRoles = new Set(
+      members.filter((m) => m.size !== undefined && m.material !== 'steel').map((m) => m.role as string),
+    )
+    expect(steelRoles.size + lumberRoles.size).toBeGreaterThan(13) // the cap class is non-vacuous
+    for (const role of steelRoles) {
+      expect(svg).toMatch(new RegExp(`>${role} \\(LGS\\) — `))
+    }
+    for (const role of lumberRoles) {
+      expect(svg).toMatch(new RegExp(`>${role} — \\dx`)) // 2x4 studs, 4x8 header…
+    }
+    // the three rows the 13-cap dropped, by name
+    expect(svg).toContain('stud (LGS) — ')
+    expect(svg).toContain('king-stud (LGS) — ')
+    expect(svg).toContain('cripple (LGS) — ')
+  })
+
   test('strap-bracing joined the hardware-glyph grammar: keyed glyphs + derived legend row, no flecks', () => {
     const walls = [mkWall('a', [0, 0], [6, 0])]
     const { members } = lgsFrameWalls(walls, spec400f3)

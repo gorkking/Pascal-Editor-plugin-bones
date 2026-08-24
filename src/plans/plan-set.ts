@@ -1443,16 +1443,20 @@ function planSheet(
   for (const [role, desc] of Object.entries(SIZELESS_LEGEND)) {
     if (!roleSizes.has(role) && mine.some((m) => m.role === role)) roleSizes.set(role, desc)
   }
-  // Cap 13 (was 10, was 8): the size-less rows append LAST — the compose
-  // roof sheet already carries 9 SIZED roles, so a 10-cap re-dropped the
-  // B6 deck/underlayment/drip rows it just gained (the same failure mode
-  // as the 8-cap, one batch later).
-  const legendLines: string[] = [...roleSizes.entries()]
-    .slice(0, 13)
-    .map(
-      ([role, size], i) =>
-        `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
-    )
+  // NO CAP (round-2 examiner C — was 13, was 10, was 8): every fixed cap
+  // re-manifested the same silent-drop failure one batch later — the
+  // 10-cap dropped the B6 deck rows the batch just gained, and the 13-cap
+  // dropped 'stud (LGS)'/'king-stud (LGS)'/'cripple (LGS)' on the F3
+  // mixed exhibit (9 lumber + 7 steel rows), leaving 23/28 drawn steel
+  // members unkeyed beside a legend reading 'stud — 2x6'. A legend that
+  // drops a DRAWN family is a lie of omission (P2); the box height
+  // already derives from legendLines.length, so tall scenes buy legend
+  // height, never silence. roleSizes is one row per family (most-common
+  // size within it), so this is bounded by the role vocabulary.
+  const legendLines: string[] = [...roleSizes.entries()].map(
+    ([role, size], i) =>
+      `<text x="${MARGIN + 4}" y="${MARGIN + 14 + i * 14}" font-size="10" font-family="Helvetica, Arial, sans-serif" fill="#333">${esc(role)} — ${esc(size)}</text>`,
+  )
   // Legend BOX geometry: circuit rows may flow into a second column — the
   // backing rect must widen to cover it (examiner round-5: column 2 printed
   // on bare linework) and must not count wrapped rows twice in its height.
