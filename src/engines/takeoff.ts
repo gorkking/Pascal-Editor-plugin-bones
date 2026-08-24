@@ -205,6 +205,26 @@ const round1 = (n: number): number => Math.round(n * 10) / 10
 type NailType = keyof typeof fastening.nails
 
 /**
+ * Screws per 4x8 sheet on steel studs (LGS Phase 1) — DERIVED from the
+ * verified IRC R603.2.5 / Table R603.3.2(1) spacings so the printed count
+ * can never drift from the schedule: a 4x8 sheet stood VERTICAL on 16"
+ * o.c. supports (the stated layout assumption) has two 8-ft edge studs
+ * screwed at the edge spacing, two interior field studs at the field
+ * spacing, and its top/bottom edges at the edge spacing (corners counted
+ * once). Sheathing (6/12) ≈ 66/sheet; gypsum (12/12) ≈ 42.
+ */
+export function screwsPerSheet(edgeIn: number, fieldIn: number): number {
+  const heightIn = 96
+  const widthIn = 48
+  const supportIn = 16
+  const edgeStuds = 2 * (Math.floor(heightIn / edgeIn) + 1)
+  const fieldStuds = Math.max(0, Math.round(widthIn / supportIn) - 1)
+  const field = fieldStuds * (Math.floor(heightIn / fieldIn) + 1)
+  const horizontalEdges = 2 * (Math.floor(widthIn / edgeIn) + 1 - 2) // corners shared
+  return edgeStuds + field + horizontalEdges
+}
+
+/**
  * Fastening connections per member role, straight from the R602.3(1) data.
  * Roles with several real connections carry several entries — a joist is
  * end-nailed at the rim (16d) AND toe-nailed at its bearing (10d), a rafter
@@ -597,6 +617,82 @@ export function computeTakeoff(
     }
   }
 
+  // ---- LGS steel framing (Phase 1): by DESIGNATOR + length, never weight --
+  // Steel wall members carry their AISI designator in the dedicated
+  // `profile` field (the role/field doctrine — no label parsing). Each
+  // designator books ONE row: pieces in the detail, LINEAR FEET as the
+  // quantity. WEIGHT IS NOT BOOKED: the catalog carries no verified lb/ft
+  // (data/lgs-profiles.json ships dims only), and inventing pounds from a
+  // section model would break the never-invent-dims rule — the row says so
+  // ('weight requires vendor data').
+  const steelWallIds = new Set<string>()
+  {
+    const byProfile = new Map<string, { pcs: number; lf: number }>()
+    for (const m of members) {
+      if (m.system !== 'wall-framing' || m.profile === undefined) continue
+      steelWallIds.add(m.sourceId)
+      const tally = byProfile.get(m.profile) ?? { pcs: 0, lf: 0 }
+      tally.pcs += 1
+      tally.lf += toFeet(m.length)
+      byProfile.set(m.profile, tally)
+    }
+    for (const profile of [...byProfile.keys()].sort()) {
+      const tally = byProfile.get(profile) as { pcs: number; lf: number }
+      push(
+        'Wall framing',
+        `LGS ${profile}`,
+        `${tally.pcs} pcs, cut to length (roll-formed) — weight requires vendor data (no verified lb/ft in the catalog)`,
+        round1(tally.lf),
+        'lf',
+      )
+    }
+    // R603.3.3 strap bracing books by LENGTH on its own role — B9's portal
+    // 'strap' census is untouched.
+    const lgsStraps = members.filter((m) => m.role === 'strap-bracing')
+    if (lgsStraps.length > 0) {
+      push(
+        'Wall framing',
+        'LGS strap bracing 1-1/2" × 33 mil',
+        `horizontal stud bracing rows (R603.3.3), both faces — ${lgsStraps.length} runs; end anchorage per detail`,
+        round1(lgsStraps.reduce((sum, m) => sum + toFeet(m.length), 0)),
+        'lf',
+      )
+    }
+    // Steel-to-steel screws (ASTM C1513, the VERIFIED Table R603.3.2(1)
+    // line): 2 × No. 8 per stud-to-track joint — one through each flange —
+    // and every vertical meets track at BOTH ends. Exact member-derived
+    // count, the nails-from-members convention.
+    const verticals = members.filter(
+      (m) =>
+        m.system === 'wall-framing' &&
+        m.profile !== undefined &&
+        (m.role === 'stud' || m.role === 'king-stud' || m.role === 'trimmer' || m.role === 'cripple'),
+    ).length
+    if (verticals > 0) {
+      push(
+        'Fasteners',
+        'Screws No. 8 self-drilling (stud-to-track)',
+        `ASTM C1513 — 2 per flange pair, both member ends (Table R603.3.2(1)); ${verticals} verticals × 4`,
+        verticals * 4,
+        'pcs',
+      )
+    }
+  }
+  // Steel-wall SHEET GOODS fasten with SCREWS, not nails (IRC R603.2.5 /
+  // Table R603.3.2(1) — the verified schedule): the member-derived layer
+  // tally below subtracts the steel walls' sheathing sheets from the 8d
+  // nail basis and books No. 8 / No. 6 screw rows instead. Zero steel
+  // walls = arithmetic identical to master (byte-parity). The LOD-200
+  // gross fallback stays whole (its single area sum carries no per-wall
+  // split and makes no code claims — stated in the Phase-1 manifest).
+  let steelSheathingSqft = 0
+  let steelDrywallSqft = 0
+  for (const m of members) {
+    if (m.system !== 'wall-framing' || !steelWallIds.has(m.sourceId)) continue
+    if (m.role === 'sheathing') steelSheathingSqft += m.dims[0] * m.dims[1] * SQFT
+    if (m.role === 'drywall') steelDrywallSqft += m.dims[0] * m.dims[1] * SQFT
+  }
+
   // ---- wall assembly layers (round 14): sheet goods by AREA ----
   // Drywall/sheathing/WRB/cladding members carry [len, height, t] dims —
   // area = len × height. 4×8 sheets for board goods; sqft for membranes.
@@ -645,10 +741,44 @@ export function computeTakeoff(
     push('Wall framing', tally.item, `${tally.detail}${sheets}`, round1(tally.sqft), 'sqft')
     // Fastener basis == the booked row (B4): when the member tally is the
     // surviving sheathing row, the 8d WSP nail poundage keys off ITS sheet
-    // count — never off the suppressed gross row a purchaser no longer sees.
+    // count — never off the suppressed gross row a purchaser no longer
+    // sees. STEEL walls' sheets leave the nail basis (they screw per
+    // R603.2.5 — the screw rows below carry them); zero steel = the
+    // identical sheetCount arithmetic.
     if (tally.item.startsWith('Sheathing')) {
-      addNails('8d-common', sheetCount * fastening.connections['wallSheathing-sheet'].count)
+      const nailSheets =
+        steelSheathingSqft > 0
+          ? Math.ceil(Math.max(0, tally.sqft - steelSheathingSqft) / 32)
+          : sheetCount
+      addNails('8d-common', nailSheets * fastening.connections['wallSheathing-sheet'].count)
     }
+  }
+  // Screw rows for the steel walls' sheet goods — counts DERIVED from the
+  // verified spacings (R603.2.5: No. 8 @ 6" panel edges / 12" field for
+  // structural sheathing; No. 6 @ 12" for gypsum) on a stated layout
+  // assumption (4x8 sheet stood vertical on 16" o.c. supports), so the
+  // printed figures can never drift from the schedule constants.
+  if (steelSheathingSqft > 0) {
+    const sheets = Math.ceil(steelSheathingSqft / 32)
+    const perSheet = screwsPerSheet(6, 12)
+    push(
+      'Fasteners',
+      'Screws No. 8 (sheathing to steel)',
+      `@ 6" edges / 12" field (R603.2.5) — ${sheets} steel-wall sheets × ${perSheet} (4x8 vertical, 16" o.c. assumed)`,
+      sheets * perSheet,
+      'pcs',
+    )
+  }
+  if (steelDrywallSqft > 0) {
+    const sheets = Math.ceil(steelDrywallSqft / 32)
+    const perSheet = screwsPerSheet(12, 12)
+    push(
+      'Fasteners',
+      'Screws No. 6 bugle-head (gypsum to steel)',
+      `@ 12" (R603.2.5) — ${sheets} steel-wall sheets × ${perSheet} (4x8 vertical, 16" o.c. assumed)`,
+      sheets * perSheet,
+      'pcs',
+    )
   }
 
   // ---- roof deck + underlayment + drip edge (LOD-400 B6) ----
