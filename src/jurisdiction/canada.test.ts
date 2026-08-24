@@ -267,7 +267,8 @@ describe('citation completeness — the CA data gate', () => {
 // zero src/ consumers existed): member labels, flags and prescriptive checks
 // cite IRC/IECC/NEC sections unconditionally. On a jurisdiction whose
 // researched code is NOT an IRC adoption (WI's UDC — the precedent row —
-// and all 16 CA-* rows) that silence implied local law. The honest, gated
+// VT's no-statewide-code row, and all 16 CA-* rows) that silence implied
+// local law. The honest, gated
 // answer is the compute-level confession below; the panel warnings drawer
 // and the paper P4 flag block both print level warnings, so one channel
 // serves all three surfaces. Per-label suppression/re-citation is the real
@@ -291,6 +292,33 @@ describe('ircBase:null honesty — non-IRC jurisdictions confess their generic-I
   it('Wisconsin (the UDC precedent row) carries the same confession — the gap was never CA-only', () => {
     const result = computeLevel(baselineScene(), baselineConfig('WI'))
     expect(result.warnings.filter((w) => NON_IRC.test(w))).toHaveLength(1)
+  })
+
+  it("Vermont (ircBase:null since its row landed — 'No statewide residential building code') confesses with the local-requirements tail", () => {
+    // Round-1 skeptic F2: VT was the unenumerated 18th member — its row
+    // DESCRIBES the absence of a statewide code, so 'verify against the
+    // governing code: No statewide…' read incoherently. Absence-rows point
+    // at local/municipal requirements instead.
+    const result = computeLevel(baselineScene(), baselineConfig('VT'))
+    const hits = result.warnings.filter((w) => NON_IRC.test(w))
+    expect(hits).toHaveLength(1)
+    expect(hits[0]).toContain(
+      'verify against local/municipal requirements: No statewide residential building code',
+    )
+    expect(hits[0]).not.toContain('governing code: No')
+    // the special tail is the ABSENCE class only — WI and the CA rows keep
+    // the governing-code tail (their strings are examiner-verified on paper)
+    expect(nonIrcCodeWarning(profileFor('WI'))).toContain('verify against the governing code:')
+    expect(nonIrcCodeWarning(profileFor('CA-GEN'))).toContain(
+      'verify against the governing code:',
+    )
+  })
+
+  it('the confession set is EXACTLY the ircBase:null rows: 16 CA + WI + VT — enumerated', () => {
+    const confessing = jurisdictionOptions()
+      .map((o) => o.code)
+      .filter((code) => nonIrcCodeWarning(profileFor(code)) !== null)
+    expect(confessing.sort()).toEqual([...CANADA, 'VT', 'WI'].sort())
   })
 
   it('IRC adopters and INTL never confess: no warning on TX, CA (California), INTL', () => {

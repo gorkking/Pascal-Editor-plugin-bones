@@ -78,13 +78,22 @@ derived sets. One follow-up commit per concern, my authorship:
    (INTL + TX) recaptured via `bun scripts/capture-master-baseline.ts` —
    `git diff` empty (cmp-byte-identical) after every slice. The four sweep
    pins above are TEST-side enumerations, not output changes.
-3. ONE HONEST DEVIATION — WI warning-only delta: the ircBase:null honesty
-   line (below) fires on Wisconsin too, because WI's UDC row IS the same
-   class (`ircBase: null`) and scoping the confession to CA-only would
-   encode a lie. Exactly one string appended to `result.warnings` (and
-   therefore the paper flag block) on WI computes at 300+; WI members/
-   fixtures/takeoff/areas byte-equal; no WI byte-pinned corpus exists (E5
-   is INTL+TX), so no recapture moves.
+3. TWO HONEST DEVIATIONS — WI + VT warning-only deltas (round-1 skeptic
+   F2: VT was the unenumerated 18th member): the ircBase:null honesty
+   line (below) fires on every `ircBase: null` row, and Wisconsin (UDC)
+   AND Vermont ('No statewide residential building code…') are that same
+   class at base and tip — scoping the confession to CA-only would
+   encode a lie. The full confession set is EXACTLY 18 = 16 CA-* + WI +
+   VT, enumerated and pinned in the gate. Each gains exactly one string
+   appended to `result.warnings` (and therefore the paper flag block) at
+   300+; members/fixtures/takeoff/areas byte-equal on both (skeptic-
+   verified on VT); no WI/VT byte-pinned corpus exists (E5 is INTL+TX),
+   so no recapture moves. TAIL VARIANT: rows whose residentialCode
+   describes the ABSENCE of a code (/^No\b/ — today exactly VT) read
+   '…verify against local/municipal requirements: …' instead of the
+   incoherent '…verify against the governing code: No statewide…'; WI
+   and the CA rows keep the governing-code tail byte-for-byte (their
+   strings are examiner-verified on paper).
 4. PANEL RENDER-ONLY: the JurisdictionPicker now renders `profile.notes`
    (all jurisdictions — US rows gain their researched amendment/frost/snow
    notes line too). UI-only; zero compute bytes.
@@ -98,8 +107,9 @@ derived sets. One follow-up commit per concern, my authorship:
 engines' member labels, flags and prescriptive checks cite IRC/IECC/NEC
 sections UNCONDITIONALLY; nothing keys on the adoption row. With a
 Canadian jurisdiction selected, IRC-section labels DID print on members
-and paper — a pre-existing gap (Wisconsin had it since its row landed)
-that the 16 CA rows turn from an edge case into a storefront.
+and paper — a pre-existing gap (Wisconsin and
+Vermont had it since their rows landed) that the 16 CA rows turn from an
+edge case into a storefront.
 
 RESOLUTION (flag-honestly-gated; the full fix is board-queued): compute
 pushes ONE level warning at 300+ on any `nonIrcCode` profile —
@@ -124,8 +134,9 @@ engine; queued on the board, not smuggled into a cherry-pick adoption.
   NBC residentialCode, verbatim 9.23.13 note, Quebec NBC-2015 flag,
   caveat + per-row kPa→psf / mm→in arithmetic re-derivation at the stated
   factors, PERMAFROST escape pinned to exactly YT/NT/NU); non-IRC
-  confession presence (CA-GEN/CA-SK/CA-QC + WI) and absence
-  (TX/California/INTL/LOD-200); Canadian compose gate (84-in footings in
+  confession presence (CA-GEN/CA-SK/CA-QC + WI + VT with the
+  local-requirements tail), absence (TX/California/INTL/LOD-200), and the
+  exact-18 confession-set enumeration; Canadian compose gate (84-in footings in
   real members + deeper-than-every-US sweep, kPa→psf snow into rafter/
   header machinery, live seismic field on the Ontario split); tz-guess
   gates (every mapped zone code resolves to a real row, split-Ontario

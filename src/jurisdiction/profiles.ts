@@ -123,10 +123,16 @@ export function profileFor(code: string): JurisdictionProfile {
  */
 export function nonIrcCodeWarning(profile: JurisdictionProfile): string | null {
   if (!profile.nonIrcCode) return null
+  // Rows whose residentialCode DESCRIBES the absence of a statewide code
+  // (VT: 'No statewide residential building code…') cannot be 'verified
+  // against the governing code' — there isn't one; point at local/municipal
+  // requirements instead (CANADA round-1 skeptic F2c).
+  const tail = /^No\b/.test(profile.residentialCode)
+    ? `verify against local/municipal requirements: ${profile.residentialCode}`
+    : `verify against the governing code: ${profile.residentialCode}`
   return (
     `non-IRC jurisdiction (${profile.name}): members and checks cite IRC/IECC/NEC ` +
-    `sections from the generic engine — treat as generic practice and verify against ` +
-    `the governing code: ${profile.residentialCode}`
+    `sections from the generic engine — treat as generic practice and ${tail}`
   )
 }
 
