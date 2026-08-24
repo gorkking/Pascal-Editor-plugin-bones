@@ -150,6 +150,26 @@ row at Phase-1 verify; no generator exists for the data file
 mils (10-17/119-999) fall through the honest chain (not an alias
 class). Phase-2 note: inspector SegmentedControl highlight for
 MCP-set 'lgs' walls (documented).
+PHASE 1 DELIVERED: feat/lgs-phase1 tip 2df1b03 (5 commits, suite
+1775 → 1820, tsc clean, E5 recapture cmp-byte-identical).
+src/engines/lgs-wall-framing.ts: T125 tracks (mil==studs verbatim
+rule), S162 studs seated in tracks, R603.7 king+1-jack, R603.6 2-C
+box headers w/ verify flags, R603.8 sill track, R603.3.3 straps at
+300+, S240 A5.9 punchout METADATA at 400 (MEP hooks). framedAssembly
+(framed|lgs) drives areas/layers/card; framesAsLumber shrank to
+'framed' only; steel sheathing/drywall/areas byte-equal to framed
+twin. Takeoff: LGS rows by length + 'weight requires vendor data'
+(no invented lb/ft), exact screw schedule, straps lf. Conservative
+points labeled (68-mil Gr50 thickest-domain pick w/ stated basis —
+NO R603.3.2 cells encoded). REAL VENDOR FINDING: TF550H rolls
+68-mil S162 studs but 34-63mm flange range can't roll T125 track →
+generic fallback, labeled. Deviations (a)-(e) in manifest incl.
+steel exits R602.10 braced lines (warnings only) + S240 anchorage
+residual (bolt kit clamps track — queued). 11 mutants die.
+VERIFY: wf_2b2bb186-c14 (skeptic: mil-selection honesty + routing
+half-route hunt + deviations adjudication; examiner: designators/
+citations/weight-honesty on paper + lumber corpora byte-equal;
+visual: steel assembly at 400 + mixed corners + lumber pixel-parity).
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
