@@ -587,6 +587,44 @@ describe('computeLevel — thermostat / heat-pump / electric-meter nodes', () =>
     ).toBe(true)
   })
 
+  test('heat-pump yawOverride threads node → extraction → assembly yaw (HP polish item 4)', () => {
+    const cabinet = (r: ReturnType<typeof computeLevel>) =>
+      r.members.find(
+        (m) => m.system === 'hvac' && m.role === 'equipment' && m.material === 'steel',
+      )
+    // set: the cabinet + pad turn to the override, VERBATIM
+    const spun = computeLevel(
+      hvacScene({
+        svc_hp: svc('svc_hp', 'heat-pump', { position: [10, 0, 3], yawOverride: 0.9 }),
+      }),
+      makeConfig({ showHvac: true }),
+    )
+    expect(cabinet(spun)?.rotation[1]).toBe(0.9)
+    const pad = spun.members.find(
+      (m) => m.system === 'hvac' && m.role === 'equipment' && m.material === 'concrete',
+    )
+    expect(pad?.rotation[1]).toBe(0.9)
+    // null == absent == wall-square: the extraction drops the tombstone and
+    // the engine derives (verbatim drag → nearest exterior exit w_e, yaw π/2)
+    for (const extra of [{}, { yawOverride: null }] as const) {
+      const derived = computeLevel(
+        hvacScene({
+          svc_hp: svc('svc_hp', 'heat-pump', { position: [10, 0, 3], ...extra }),
+        }),
+        makeConfig({ showHvac: true }),
+      )
+      expect(cabinet(derived)?.rotation[1]).toBeCloseTo(Math.PI / 2, 9)
+    }
+    // non-finite junk is ignored, never NaN geometry
+    const junk = computeLevel(
+      hvacScene({
+        svc_hp: svc('svc_hp', 'heat-pump', { position: [10, 0, 3], yawOverride: Number.NaN }),
+      }),
+      makeConfig({ showHvac: true }),
+    )
+    expect(cabinet(junk)?.rotation[1]).toBeCloseTo(Math.PI / 2, 9)
+  })
+
   test('electric-meter node re-mounts the meter (electrical engine consumer)', () => {
     const result = computeLevel(
       hvacScene({ svc_em: svc('svc_em', 'electric-meter', { wallId: 'w_n', wallT: 0.25, heightAff: 1.4 }) }),

@@ -34,6 +34,30 @@ describe('ServiceNode schema', () => {
       expect(SERVICE_BODY[t].sign.length).toBeGreaterThan(0)
     }
   })
+
+  test('yawOverride (HP polish item 4): additive + nullable — number, null, absent all parse; junk rejected', () => {
+    // absent: legacy nodes never re-parse — the field must be optional
+    const absent = ServiceNode.parse({ serviceType: 'heat-pump', position: [3, 0, -2] })
+    expect(absent.yawOverride).toBeUndefined()
+    // set: the host rotate gestures write a plain radians number
+    const spun = ServiceNode.parse({
+      serviceType: 'heat-pump',
+      position: [3, 0, -2],
+      yawOverride: -1.25,
+    })
+    expect(spun.yawOverride).toBe(-1.25)
+    // null: an explicit clear (back to wall-square) without deleting the node
+    const cleared = ServiceNode.parse({
+      serviceType: 'heat-pump',
+      position: [3, 0, -2],
+      yawOverride: null,
+    })
+    expect(cleared.yawOverride).toBeNull()
+    // junk stays out
+    expect(() =>
+      ServiceNode.parse({ serviceType: 'heat-pump', yawOverride: 'east' }),
+    ).toThrow()
+  })
 })
 
 describe('resolveServicePlacement', () => {
