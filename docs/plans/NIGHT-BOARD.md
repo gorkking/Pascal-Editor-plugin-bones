@@ -257,7 +257,19 @@ ungated, vendor-label inherited grade), examiner REVISE (P6 FAIL:
 door/window schedule prints dishonest '—' for existing steel
 headers — plan-set.ts:2968 size??'—'; FLAGS: gradeless takeoff,
 strap unkeyed-fleck B9 class; sill track needs lifted-window gate).
-FIX ROUND DISPATCHED. Re-verify before merge.
+FIX ROUND (tip a1b5ebd, 7 commits, suite 1834, 25 new mutants die).
+ROUND 2 (wf_8e1be5e6): all round-1 fixes HOLD (P6 CLOSED on paper,
+basis across roles, F2 three channels + both leak directions, byte
+census zero-diff); skeptic REVISE on 2 narrow strap-trim findings
+(CMU-stem-into-steel-THROUGH dodges the trim → straps bore grouted
+cells; 'trimmed' advisory misattributes the length clamp to CMU in
+masonry-free scenes); examiner REVISE (FAIL: legend slice(0,13) cap
+silently drops steel rows on mixed levels — F3 re-manifest through
+the cap; FLAG: LOD-200 steel paper prints cavity-R + IECC cite
+unqualified — F2 rides 200-suppressed channels). ROUND-3 FIXES
+DISPATCHED (A trim masonry tee-stems, B truthful clamp attribution,
+C cap never drops a drawn family, D qualifier rides the cite at
+200). Closing round after tip.
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
