@@ -61,8 +61,19 @@ a silently-raised 1.7 test allowance (constrain-or-amend, no orphan
 allowance), F3 the promised off-grid honesty flag was never emitted
 (physics-beats-grid scene lands x=1.63 silent). QUEUED from round:
 pre-unwarp seeds elect disconnect sourceId 'w_fence' orphan
-(pre-existing at base, unwarp-era, fence scene). Merge only after
-re-verify APPROVE.
+(pre-existing at base, unwarp-era, fence scene). FIX TIP c4ffc93
+(61866a8 F1+F3: deterministic world-lattice candidate search ±3
+steps, away-only ≥ honest standoff, verbatim lattice coords so
+post-seed==auto byte-equal on obliques, E5 recapture byte-identical;
+COND_OFF_GRID_FLAG on exhaustion, fully honest un-snapped fallback;
+99b785d F2: M2 row amended with derived class bound ≤1.73m
+unobstructed — NOTE the old ≤1m figure died at unwarp and rode
+stale through two rounds, loop lesson; c4ffc93 REC-1/2: manifest
+enumerates takeoff lf + elevation recenter classes, pad buy line
+states size/basis). RE-VERIFY: wf_78bf0f80-cfb (skeptic: ±3-window
+sufficiency + tie-break totality + M2 arithmetic re-derivation;
+examiner re-runs — paper moved via pad buy line; visual: oblique
+now ON the world lattice). Merge only after APPROVE.
 
 # LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
 
