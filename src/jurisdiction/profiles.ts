@@ -163,6 +163,15 @@ export function applyJurisdiction(
   // hurricaneTies set (sub-130 coastal states: TX/AL/GA/NY…) keeps its
   // belt-and-braces roof ties with no wall-side claim, byte-equal walls.
   next.highWindUplift = profile.hurricaneTies && profile.ultimateWindMph >= 130
+  // ≥ 130 mph WITHOUT the researched flag (today exactly CA-NU — extreme
+  // Arctic wind, flags per the row's NBC research): the wind leg above
+  // still mints roof ties, but neither shipped tie label is true for this
+  // class — the belt clause claims 'below 130 mph' and the plain label
+  // implies the B10 wall continuation. Fold the third-class signal ONLY
+  // when it applies (absent field == byte-identical spec, E5).
+  if (!profile.hurricaneTies && profile.ultimateWindMph >= 130) {
+    next.highWindTiesOnly = true
+  }
   // Heavy snow bumps the default rafter one size (span tables shrink fast).
   if (profile.groundSnowLoadPsf >= 50) next.rafterSize = '2x8'
   if (profile.groundSnowLoadPsf >= 70) next.rafterSize = '2x10'

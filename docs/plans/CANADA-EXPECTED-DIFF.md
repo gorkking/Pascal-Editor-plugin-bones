@@ -57,6 +57,22 @@ derived sets. One follow-up commit per concern, my authorship:
      stated assumption;
    - seismic: CA-BC (D) builds the hold-down kit @ 4-ft bolts; CA-ON-E
      (C — the Ottawa Valley row) is pinned BELOW the hold-down line;
+   - wind THIRD class (round-1 skeptic F1): CA-NU (140 mph,
+     flags.hurricaneTies:false — the row's NBC research carries no
+     prescriptive uplift-continuation claim, and the researched value is
+     KEPT) is the first-ever profile on applyJurisdiction's '|| ≥130'
+     wind leg alone: it mints roof ties but neither shipped label was
+     true — the belt clause claims 'below 130 mph' (false at 140) and
+     the plain label implies B10's wall continuation (never built here).
+     The optional spec field `highWindTiesOnly` (folded ONLY when the
+     class applies — absent keeps the E5 spec bytes) routes `tieAt` to
+     the true label ('… high-wind wall/foundation uplift continuation
+     not modeled for this jurisdiction (no prescriptive-uplift flag in
+     its researched data); verify against the governing code'). A THIRD
+     enumeration arm pins the class (today exactly {CA-NU}) so boundary
+     drift shows up in the pins, bans BOTH false labels on it, proves
+     label-only strip-equality vs the ≥130 bytes across all 7 tying
+     shapes, and pins the field ABSENT on belt/full/INTL specs;
    - every CA compose carries the non-IRC confession warning (below).
 2. EXISTING US/INTL CORPORA: byte-identical. E5 `master-baseline.json`
    (INTL + TX) recaptured via `bun scripts/capture-master-baseline.ts` —
