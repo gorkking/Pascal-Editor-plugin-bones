@@ -292,11 +292,54 @@ describe('grid-snapped auto anchor — aligned normally, clearance never violate
         '⚠ off-grid — clearance/openings leave no 0.5 m grid position near the elected spot',
       )
     }
-    // …and row siblings / verbatim scenes never carry the class (the
-    // verbatim assertion lives in the A4 test below — drags never snap,
-    // so they can never exhaust a snap)
+    // a GENUINE user drag (not a machine spelling — metres/centimetres
+    // away, not nanometres) never carries the class: drags don't snap, so
+    // they can't exhaust a snap (A4)
     const dragged = layoutHvac(walls, rooms, LOD400, {
-      heatPump: { position: [1.63, 0, -1.1846] },
+      heatPump: { position: [1.68, 0, -1.9] },
+    })
+    for (const m of [...padsOf(dragged.members), ...cabinetsOf(dragged.members)]) {
+      expect(m.flag ?? '').not.toContain('off-grid')
+    }
+  })
+
+  test('the off-grid flag SURVIVES the default seed lifecycle: recognized machine seed replays it, byte-equal, N recomposes (round-2 F1)', () => {
+    // The exhibit that broke round 1 (visual scene fbd31d0a5faf): the
+    // editor auto-seeds the service node at the machine spot on first
+    // load, the next compose runs verbatim, a verbatim row never snaps —
+    // so the honesty flag lived for exactly ONE compose and vanished
+    // silently on every activated exhaustion-class scene. Now the FULL
+    // snap outcome (unit1OffGrid included) rides recognized machine
+    // seeds: post-seed == auto BYTE-equal on the exhaustion class too,
+    // and the flag persists across arbitrarily many seed→compose cycles.
+    const win1 = opening('win1', 0.6, 0.5)
+    const win2 = opening('win2', 2.4, 0.5)
+    const { walls, rooms } = shell(0, [0.13, 0], 0.2, [win1, win2])
+    const auto = layoutHvac(walls, rooms, LOD400)
+    expect(
+      cabinetsOf(auto.members)[0]?.flag ?? '',
+    ).toContain('off-grid') // non-vacuous: this IS the exhaustion class
+    // seed = the composed unit-#1 anchor (the auto-seed lifecycle)
+    let seed = placeCondenserSeedSpot(walls, rooms)
+    expect(seed?.[0]).toBe(cabinetsOf(auto.members)[0]?.position[0] as number)
+    expect(seed?.[1]).toBe(cabinetsOf(auto.members)[0]?.position[2] as number)
+    // N recomposes, each feeding the previous compose's unit-#1 spot back
+    // as the node position (what reconcile/seeding does): byte-stable,
+    // flag never laundered
+    for (let n = 0; n < 3; n++) {
+      const post = layoutHvac(walls, rooms, LOD400, {
+        heatPump: { position: [seed?.[0] as number, 0, seed?.[1] as number] },
+      })
+      expect(JSON.stringify(post.members)).toBe(JSON.stringify(auto.members))
+      expect(JSON.stringify(post.fixtures)).toBe(JSON.stringify(auto.fixtures))
+      expect(JSON.stringify(post.warnings)).toBe(JSON.stringify(auto.warnings))
+      const cab = cabinetsOf(post.members)[0] as Member
+      expect(cab.flag ?? '').toContain('off-grid')
+      seed = [cab.position[0], cab.position[2]]
+    }
+    // …and a genuine off-machine drag on the SAME scene clears it (A4)
+    const dragged = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { position: [1.63, 0, -1.35] },
     })
     for (const m of [...padsOf(dragged.members), ...cabinetsOf(dragged.members)]) {
       expect(m.flag ?? '').not.toContain('off-grid')

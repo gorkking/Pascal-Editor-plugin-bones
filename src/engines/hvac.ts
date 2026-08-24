@@ -2187,6 +2187,18 @@ export function layoutHvac(
     // silently re-anchored); ε is a float round-trip tolerance, not a
     // snap radius — a deliberate drag lands metres away, not nanometres.
     let rowWall = hpPlan ? undefined : election?.wall
+    // OFF-GRID HONESTY RIDES MACHINE SEEDS (verify round 2, F1 — the flag
+    // died on the DEFAULT lifecycle): the editor auto-seeds the service
+    // node at the machine's own unit-#1 spot on first load, so the very
+    // next compose runs verbatim — and a verbatim row never snaps, hence
+    // never reports exhaustion. The auto compose's off-grid outcome must
+    // therefore ride every RECOGNIZED machine seed (the ε-anchor already
+    // proves the point is the machine's own), or the flag lives for
+    // exactly ONE compose on every activated exhaustion-class scene and
+    // post-seed == auto byte-equality breaks on the flag field. A real
+    // user drag — any position that is NOT a recognized machine spelling
+    // — stays flag-free (A4: the user's own point is the user's truth).
+    let machineSeedOffGrid = false
     if (hpPlan && election) {
       const near = (p: Pt, q: Pt): boolean =>
         Math.abs(p[0] - q[0]) < 1e-9 && Math.abs(p[1] - q[1]) < 1e-9
@@ -2203,6 +2215,7 @@ export function layoutHvac(
         (autoRow.unit1Presnap && near(hpPlan, autoRow.unit1Presnap))
       ) {
         rowWall = election.wall
+        machineSeedOffGrid = autoRow.unit1OffGrid
       }
     }
     // CONTRACT (never silent): placeHeatPumpSpot fails only when the level
@@ -2317,8 +2330,13 @@ export function layoutHvac(
           // Off-grid honesty (verify round F3): the world-grid search
           // exhausted — unit #1 stands at the honest un-snapped spot and
           // its pad + cabinet say so (' | ' composition, the B1 flag
-          // convention; verbatim anchors never snap ⇒ never this class).
-          if (i === 0 && row.unit1OffGrid) out = composeFlag(out, COND_OFF_GRID_FLAG)
+          // convention). The class reaches a compose two ways: the AUTO
+          // row's own exhaustion, or a RECOGNIZED machine seed replaying
+          // it (round-2 F1 — the default auto-seed lifecycle must not
+          // launder the flag). Real user drags carry neither (A4).
+          if (i === 0 && (row.unit1OffGrid || machineSeedOffGrid)) {
+            out = composeFlag(out, COND_OFF_GRID_FLAG)
+          }
           return out
         }
         const padCabinetFlag = slotFlag(rowFlag)
