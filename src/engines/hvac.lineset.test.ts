@@ -610,14 +610,15 @@ describe('whip — disconnect → unit, endpoint-adjacent', () => {
       ).toBe(true)
       // within sight — the NEC 440.14 proximity pin ("within sight" is a
       // visibility rule, <= 50 ft; the pin guards sanity). Wall box <-> unit
-      // center across the 24" face clearance + half the 0.95 m cabinet
-      // depth + the height difference ~= 1.29 m (unwarp round 2026-08-23).
+      // center across the >= 24" face clearance (grid-snapped outward by
+      // < one 0.5 m step, HP polish) + half the 0.95 m cabinet depth +
+      // the height difference ~= 1.56 m here (snapped stand-off 1.5).
       const dist = Math.hypot(
         disc.position[0] - unit.position[0],
         disc.position[1] - unit.position[1],
         disc.position[2] - unit.position[2],
       )
-      expect(dist).toBeLessThanOrEqual(1.35)
+      expect(dist).toBeLessThanOrEqual(1.7)
     }
   })
 })

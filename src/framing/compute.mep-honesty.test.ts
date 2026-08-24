@@ -362,9 +362,9 @@ describe('F3: condenser election validated at the computeLevel boundary (coverag
     // pre-fix class: inside the Bathroom zone; coverage-blind mutation:
     // the covered mid-plan void. The honest spot is condenserStandoff
     // (0.075 + 0.6096 + 0.475 = 1.1596, walls t = 0.15) SOUTH of the
-    // south wall.
+    // south wall, grid-snapped outward to the 0.5 host step (HP polish).
     expect(unit?.position[0]).toBeCloseTo(5, 6)
-    expect(unit?.position[2]).toBeCloseTo(-1.1596, 6)
+    expect(unit?.position[2]).toBeCloseTo(-1.5, 6)
     // unflagged + silent (the healthy validated path), disconnect present
     const boxes = result.members.filter(
       (m) => m.system === 'hvac' && m.role === 'equipment',

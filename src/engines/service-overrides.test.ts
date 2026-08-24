@@ -10,7 +10,7 @@ import {
   routeWiring,
 } from './electrical'
 import { cableConnects, endpointsOf, unreachableDevices } from './electrical.test-helpers'
-import { layoutHvac, placeHeatPumpSpot, placeThermostatSpot } from './hvac'
+import { layoutHvac, placeCondenserSeedSpot, placeThermostatSpot } from './hvac'
 import { layoutPlumbing, placeSewerExit } from './plumbing'
 import {
   buildingDrainExit,
@@ -404,8 +404,10 @@ describe('A4 gate — thermostat + heat-pump service nodes drive the hvac engine
     expect(reaches).toBe(true)
   })
 
-  test('auto pad at LOD 400 stands 0.6 m outside the nearest exterior wall', () => {
-    const spot = placeHeatPumpSpot(walls, rooms)
+  test('auto pad at LOD 400 stands outside the nearest exterior wall, at the seed spot', () => {
+    // The composed anchor = the SEED spot (RO slide + grid snap included,
+    // HP polish item 3); placeHeatPumpSpot is the raw pre-snap election.
+    const spot = placeCondenserSeedSpot(walls, rooms)
     expect(spot).not.toBeNull()
     const at400 = layoutHvac(walls, rooms, { ...DEFAULT_SPEC, detail: '400' })
     const condenser = at400.fixtures.find((f) => f.label?.includes('Condenser')) as Fixture

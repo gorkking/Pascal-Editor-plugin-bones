@@ -20,7 +20,9 @@ import {
   __setCondenserAssetLoaderForTests,
   AC_BLOCK_ASSET_ID,
   AC_BLOCK_GLB_URL,
+  CONDENSER_SCHEMATIC_TINT,
   condenserAssetSnapshot,
+  condenserSchematicMaterial,
   isCondenserCabinet,
   loadCondenserAsset,
   normalizeToUnitBox,
@@ -228,12 +230,18 @@ describe('renderer census — substitution and fallback (the both-ways gate)', (
       (m) => (m.material as MeshStandardMaterial).color.getHexString() === '8b8f96',
     )
     expect(steel).toBeUndefined()
-    // exactly one wrapper, holding a CLONE that shares geometry + material
+    // exactly one wrapper, holding a CLONE that shares geometry and wears
+    // the shared schematic tint (HP polish item 1 — never the GLB's
+    // authored material)
     const wrappers = assetWrappers(group)
     expect(wrappers).toHaveLength(1)
     let shared = 0
     wrappers[0]?.traverse((obj) => {
-      if (obj instanceof Mesh && obj.geometry === mesh.geometry && obj.material === mesh.material) {
+      if (
+        obj instanceof Mesh &&
+        obj.geometry === mesh.geometry &&
+        obj.material === condenserSchematicMaterial()
+      ) {
         shared++
       }
     })
@@ -302,16 +310,17 @@ describe('renderer census — substitution and fallback (the both-ways gate)', (
   })
 
   test('material cache untouched: GLB materials never enter the bucket cache, rebuilds share objects', () => {
-    const { asset, mesh } = loadedAsset()
+    const { asset } = loadedAsset()
     const before = materialCensus()
     const a = buildGroup([CABINET, PAD, STUD], [], 'xray', asset)
     const b = buildGroup([CABINET, PAD, STUD], [], 'xray', asset)
     expect(materialCensus()).toBe(before)
-    // both builds' clones share the SAME material instance (no re-mint)
+    // both builds' clones share the SAME material instance (no re-mint):
+    // the module-cached schematic tint, never the authored GLB material
     for (const g of [a, b]) {
       g.traverse((obj) => {
         if (obj instanceof Mesh && !(obj instanceof InstancedMesh)) {
-          expect(obj.material).toBe(mesh.material)
+          expect(obj.material).toBe(condenserSchematicMaterial())
         }
       })
     }
@@ -454,7 +463,7 @@ describe('the loader — never a rejection into the renderer', () => {
 })
 
 describe('prepareCondenserClone', () => {
-  test('clones share geometry/materials and carry their OWN raycast no-op', () => {
+  test('clones share geometry, wear the schematic tint, and carry their OWN raycast no-op', () => {
     const { asset, mesh } = loadedAsset()
     const clone = prepareCondenserClone(asset)
     let found = 0
@@ -462,12 +471,46 @@ describe('prepareCondenserClone', () => {
       if (!(obj instanceof Mesh)) return
       found++
       expect(obj.geometry).toBe(mesh.geometry)
-      expect(obj.material).toBe(mesh.material)
+      expect(obj.material).toBe(condenserSchematicMaterial())
       expect(Object.hasOwn(obj, 'raycast')).toBe(true)
     })
     expect(found).toBe(1)
-    // the source asset's meshes were NOT mutated by the clone pass
+    // the source asset's meshes were NOT mutated by the clone pass —
+    // neither the raycast override nor the retint touch the cache
     expect(Object.hasOwn(mesh, 'raycast')).toBe(false)
+    expect((mesh.material as MeshStandardMaterial).color.getHexString()).toBe('dddddd')
+  })
+
+  test("color census (HP polish item 1 — 'first of all it's red'): no authored material survives the clone, tint pinned to the steel-equipment family", () => {
+    // A worst-case authored asset: SATURATED RED materials, one mesh with
+    // a MULTI-material array — the exact class Julien saw in the viewport.
+    const red = () => new MeshStandardMaterial({ color: '#ff0000' })
+    const single = new Mesh(new BoxGeometry(1, 1, 1), red())
+    const multi = new Mesh(new BoxGeometry(0.4, 0.4, 0.4), [red(), red()])
+    multi.position.set(0, 0.7, 0)
+    const scene = new Group()
+    scene.add(single)
+    scene.add(multi)
+    const clone = prepareCondenserClone(normalizeToUnitBox(scene))
+    const seen: MeshStandardMaterial[] = []
+    clone.traverse((obj) => {
+      if (!(obj instanceof Mesh)) return
+      const mats = Array.isArray(obj.material) ? obj.material : [obj.material]
+      for (const m of mats) seen.push(m as MeshStandardMaterial)
+    })
+    expect(seen.length).toBe(3) // non-vacuous: single + the 2-slot array
+    for (const m of seen) {
+      expect(m).toBe(condenserSchematicMaterial())
+      expect(`#${m.color.getHexString()}`).toBe(CONDENSER_SCHEMATIC_TINT)
+    }
+    // the tint IS the bones equipment-gray family: byte-equal to the steel
+    // tone the cabinet box rendered before the asset swap (colorOf 'steel')
+    expect(CONDENSER_SCHEMATIC_TINT).toBe('#8b8f96')
+    // …and the SOURCE asset keeps its authored red (clone-only retint)
+    expect((single.material as MeshStandardMaterial).color.getHexString()).toBe('ff0000')
+    expect(
+      ((multi.material as MeshStandardMaterial[])[0] as MeshStandardMaterial).color.getHexString(),
+    ).toBe('ff0000')
   })
 })
 
