@@ -2085,6 +2085,41 @@ describe('LGS steel walls compose SAT-clean (Phase 1 / S1)', () => {
     expect(JSON.stringify(others(steel.members))).toBe(JSON.stringify(others(raw.members)))
   })
 
+  test('round-3 F2: an OBLIQUE CMU stem — the strap-plane offset shifts the crossing; the widened band covers it', () => {
+    // The skeptic's ground truth: 45° stem [23,0]→[25.5,2.5] t=0.19 into
+    // steel [20,0]→[26,0]. The straps live at z = ±(wFit/2 + strap/2) ≈
+    // ±0.045 off the centerline, and the stem's crossing of that offset
+    // plane shifts along u by z·cot45° = 0.045 — past the round-2
+    // centerline band, so the +z strap penetrated a grouted block 32 mm.
+    // The band half-width now widens by |z|·cosθ/sinθ.
+    const steelThru = wall({ id: 'w_othru', start: [20, 0], end: [26, 0], thickness: 0.114 })
+    const obliqueStem = wall({ id: 'w_ostem', start: [23, 0], end: [25.5, 2.5], thickness: 0.19 })
+    const eng = lgsMap(['w_othru'])
+    const steel = lgsFrameWalls([steelThru], spec400, eng, { cmuNeighbors: [obliqueStem] })
+    const straps = steel.members.filter((m) => m.role === 'strap-bracing')
+    expect(straps.length).toBeGreaterThan(0)
+    const masonry = cmuWalls([obliqueStem], spec400)
+    expect(masonry.some((m) => m.role === 'block')).toBe(true)
+    // the non-maskable straps-only OBB scan (the skeptic's ground truth)
+    expect(violations([...straps, ...masonry])).toEqual([])
+    // guard for the widening itself: the round-2 centerline-only band
+    // (reconstructed here) leaves a strap crossing the stem's offset-plane
+    // band — the scenario is non-vacuous, not a geometry accident
+    const sinT = Math.SQRT1_2
+    const oldHalf = 0.19 / (2 * sinT)
+    const crossesOldBandEdge = straps.some((m) => {
+      const min = m.position[0] - m.dims[0] / 2
+      const max = m.position[0] + m.dims[0] / 2
+      // a strap ending strictly INSIDE (23 − oldHalf, 23 + oldHalf) would
+      // mean the old band already governed; the widened band must push
+      // every strap edge PAST the old band edge on at least one side
+      return min > 23 + oldHalf + 1e-9 || max < 23 - oldHalf - 1e-9
+    })
+    expect(crossesOldBandEdge).toBe(true)
+    // perpendicular stems keep the exact round-2 band (byte parity): the
+    // round-2 A exhibit above pins [3 − 0.075, 3 + 0.075] unchanged.
+  })
+
   test('round-2 B: trim attribution is honest — a stub teeing into LUMBER never claims CMU', () => {
     // Short steel stub into a lumber through wall: the 4·tS minimum-run
     // re-extension (u0 0.057 + 0.165 = 0.222 > the 0.215 m drawn length)

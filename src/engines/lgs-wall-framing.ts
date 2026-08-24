@@ -733,17 +733,25 @@ function frameLgsWall(
     const strapU1 = Math.min(lenU1, len - cmuIns.endInset)
     // Masonry stems teeing INTO this wall: block bodies cross the strap
     // plane over the stem's width-aware station band (the S5 oblique
-    // convention, stem side).
+    // convention, stem side). The straps live OFF the centerline — at
+    // z = ±(wFit/2 + strap/2) — and an OBLIQUE stem's crossing of that
+    // offset plane shifts along u by z·cotθ (round-3 F2: a 45° stem bored
+    // a grouted cell 32 mm past the centerline band), so the band half-
+    // width widens by |z|·cosθ/sinθ; both faces share the same |z|, so
+    // one widened band covers both. Perpendicular stems (cosθ = 0) keep
+    // the exact round-2 band — byte parity.
     const stemBands: { min: number; max: number }[] = []
     if (ctx.cmuNeighbors.length > 0) {
       const cmuIds = new Set(ctx.cmuNeighbors.map((n) => n.id))
+      const strapZ = wFit / 2 + LGS_STRAP_THICKNESS / 2
       for (const tee of detectTees([wall, ...ctx.cmuNeighbors])) {
         if (tee.through.id !== wall.id || !cmuIds.has(tee.stem.id)) continue
         const sinT = Math.max(
           0.2,
           Math.abs(tee.stem.dir[0] * wall.dir[1] - tee.stem.dir[1] * wall.dir[0]),
         )
-        const half = tee.stem.thickness / (2 * sinT)
+        const cosT = Math.abs(tee.stem.dir[0] * wall.dir[0] + tee.stem.dir[1] * wall.dir[1])
+        const half = tee.stem.thickness / (2 * sinT) + (strapZ * cosT) / sinT
         stemBands.push({ min: tee.u - half, max: tee.u + half })
       }
     }

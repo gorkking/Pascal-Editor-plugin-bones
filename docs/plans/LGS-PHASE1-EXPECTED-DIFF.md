@@ -200,8 +200,14 @@ LOD-200 convention).
   residual, lumber-twin symmetry kept). The NEW strap-bracing role does
   NOT join that class IN EITHER DIRECTION: strap ENDS trim clear of CMU
   corner/through walls via `mixedWallInsets`, and strap RUNS split around
-  the station band of every CMU stem teeing INTO the steel wall (the
-  width-aware S5 band) — advisory states the trimmed anchorage; the pure-
+  the station band of every CMU stem teeing INTO the steel wall — the
+  band is the width-aware S5 half-width PLUS the strap-plane offset term
+  |z|·cosθ/sinθ (round-3 F2: the straps live at z = ±(wFit/2 + strap/2)
+  off the centerline, and an oblique stem's crossing of that offset plane
+  shifts along u by z·cotθ — a 45° stem bored a grouted cell 32 mm past
+  the centerline-only band; perpendicular stems keep the exact
+  centerline band, byte parity) — advisory states the trimmed
+  anchorage; the pure-
   length clamp (minimum-run re-extension on stubs) states its own truth
   ('strap run clamped to the wall length'), never a masonry claim
   (round-2 B). Gated on the FL-default composition AND the CMU-stem-into-
