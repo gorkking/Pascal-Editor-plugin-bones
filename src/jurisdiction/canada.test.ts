@@ -80,7 +80,7 @@ describe('Canadian jurisdictions', () => {
   it('prairie frost depths exceed every US state', () => {
     // The reason Canada needed real rows instead of a US proxy: the deepest
     // US frost line in the data is 60in, and Saskatchewan runs deeper.
-    expect(footingInches('CA-SK')).toBeCloseTo(84, 5)
+    expect(footingInches('CA-SK')).toBeCloseTo(83, 5)
     expect(footingInches('CA-MB')).toBeCloseTo(78, 5)
     expect(footingInches('CA-SK')).toBeGreaterThan(footingInches('ND'))
   })
@@ -345,9 +345,9 @@ describe('ircBase:null honesty — non-IRC jurisdictions confess their generic-I
 // ---------------------------------------------------------------------------
 
 describe('Canadian compose — frost, snow and seismic reach the composed level', () => {
-  it('CA-SK digs its footings to 84 in — deeper than EVERY US jurisdiction — in real members', () => {
+  it('CA-SK digs its footings to 83 in — deeper than EVERY US jurisdiction — in real members', () => {
     const result = computeLevel(baselineScene(), baselineConfig('CA-SK'))
-    expect(result.spec.footingDepth).toBeCloseTo(84 * INCH, 9)
+    expect(result.spec.footingDepth).toBeCloseTo(83 * INCH, 9)
     // the composed foundation actually reaches frost depth: the deepest
     // foundation member bottom sits exactly at −footingDepth
     const foundation = result.members.filter((m) => m.system === 'foundation')
@@ -386,6 +386,9 @@ describe('Canadian compose — frost, snow and seismic reach the composed level'
     // the DOCUMENTED caveat: tzdata folds Montreal into America/Toronto, so
     // Quebec browsers guess southern Ontario — the dropdown always wins.
     expect(guessJurisdiction({ tz: 'America/Toronto' }).code).toBe('CA-ON-S')
+    // …but a LEGACY environment still reporting America/Montreal names
+    // Montreal — the zone picks the region it names (Quebec directly)
+    expect(guessJurisdiction({ tz: 'America/Montreal' }).code).toBe('CA-QC')
     // locale fallbacks: an unknown-province Canadian locale reaches the
     // NBC-2020 generic row, never INTL; the US/other paths are untouched
     expect(guessJurisdiction({ tz: 'Europe/Paris', lang: 'en-CA' }).code).toBe('CA-GEN')

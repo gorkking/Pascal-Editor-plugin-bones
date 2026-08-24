@@ -49,7 +49,7 @@ derived sets. One follow-up commit per concern, my authorship:
 1. NEW-INPUT CLASS ONLY — the 16 CA-* jurisdictions. Everything they
    compose (members, fixtures, takeoff, paper, warnings) is a NEW class:
    no scene could select these codes before. Notable inside the class:
-   - frost: CA-SK composes 84-in footings — deeper than every US state
+   - frost: CA-SK composes 83-in footings — deeper than every US state
      (the PR's motivating case; deepest US row is 60 in) — gated to reach
      real foundation GEOMETRY, not just the spec;
    - snow: kPa-converted psf drives the 2x8/2x10 rafter bumps, the
@@ -95,8 +95,11 @@ derived sets. One follow-up commit per concern, my authorship:
    and the CA rows keep the governing-code tail byte-for-byte (their
    strings are examiner-verified on paper).
 4. PANEL RENDER-ONLY: the JurisdictionPicker now renders `profile.notes`
-   (all jurisdictions — US rows gain their researched amendment/frost/snow
-   notes line too). UI-only; zero compute bytes.
+   — COUNT: all 51 US rows (50 states + DC) gain their researched
+   amendment/frost/snow notes line in the picker, INTL gains its one-line
+   generic pointer, and the 16 CA rows render theirs (incl. the
+   territories' PERMAFROST warning — the channel this change exists for).
+   UI-only; zero compute bytes.
 5. DATA-FILE PROSE: one sentence appended to the climate disclaimer
    stating the CA conversion factors (1 kPa = 20.885 psf, 25.4 mm = 1 in).
    No US row content touched anywhere in the branch.
@@ -136,7 +139,7 @@ engine; queued on the board, not smuggled into a cherry-pick adoption.
   factors, PERMAFROST escape pinned to exactly YT/NT/NU); non-IRC
   confession presence (CA-GEN/CA-SK/CA-QC + WI + VT with the
   local-requirements tail), absence (TX/California/INTL/LOD-200), and the
-  exact-18 confession-set enumeration; Canadian compose gate (84-in footings in
+  exact-18 confession-set enumeration; Canadian compose gate (83-in footings in
   real members + deeper-than-every-US sweep, kPa→psf snow into rafter/
   header machinery, live seismic field on the Ontario split); tz-guess
   gates (every mapped zone code resolves to a real row, split-Ontario

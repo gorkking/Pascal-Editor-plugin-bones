@@ -55,6 +55,11 @@ const TZ_STATE: Record<string, string> = {
   'America/Atikokan': 'CA-ON-N',
   'America/Rainy_River': 'CA-ON-N',
   'America/Blanc-Sablon': 'CA-QC',
+  // Legacy tzdata id (pre-fold): an environment still reporting
+  // America/Montreal NAMES Montreal, so the zone picks the region it names
+  // — Quebec directly, no Toronto detour. Modern tzdata reports
+  // America/Toronto for Montreal (the caveat above).
+  'America/Montreal': 'CA-QC',
   'America/Winnipeg': 'CA-MB',
   'America/Regina': 'CA-SK',
   'America/Swift_Current': 'CA-SK',
