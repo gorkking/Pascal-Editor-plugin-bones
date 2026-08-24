@@ -294,8 +294,19 @@ ROUND-4 FIXES (tip 36859f1, F2→F1→F3 order): band widened
 |z|·cotθ + skeptic's 45° SAT scenario, per-wall bracing warnings
 (interrupted w/ exact extent + omitted variants, CMU-conditioned,
 pure-steel byte parity by engine swap-in), -33/(Gr 33) pin. ROUND 4
-closing skeptic died on SSO — RESUMED (wf_229e6b29). Examiner
-APPROVE carries (paper gains only the gate-scene warnings).
+(3rd attempt after 2 API deaths): skeptic APPROVE closing-grade —
+z re-derived to 1e-9, independent no-allowance SAT (45° residual
+0.31mm < 2mm skin), 20° widened-band-dominates proof + the 0.2·sinθ
+floor shown DEAD CODE (detectTees sinθ≥0.3 domain), near-parallel
+crossings stay in the documented pre-existing junction family
+(boarded), 7/7 mutants die, 13/14 dump keys byte-identical (14th =
+exactly the widening), corpora + E5 clean. Wording nit carried:
+omitted-variant text says 'run(s) shorter than 6 in' even when the
+band swallows the span (conservative, same remedy).
+★ MERGED TO MASTER 17bdd64 + S18 checklist row ca2a1ab (2026-08-24;
+suite 1883, tsc clean). LGS PHASE 1 COMPLETE — steel walls live
+behind the 'lgs' override. SHIP CHAIN: master ca2a1ab (hp-polish +
+lgs-phase1 + S18) → editor pin → private-editor → prod.
 PHASES: 0 data model + catalog (delivered, above — both
 research reports DELIVERED 2026-08-23: FRAMECAD/Howick vendor specs
 [archived vendor PDFs + live tables, discrepancies recorded both-ways
