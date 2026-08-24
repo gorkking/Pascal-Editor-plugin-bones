@@ -49,8 +49,10 @@ be." Base `1a5e627`. Anything outside the classes below is a defect.
    a deterministic lattice-candidate search within ±3 steps of the honest
    (RO-slid) spot: VALID = on the wall span, RO-keepout-clear, stand-off ≥
    the honest stand-off (away-only — the 24" face clearance is a FLOOR the
-   snap can only raise); PICK = nearest, ties by least extra stand-off
-   then smaller along-coordinate. The chosen lattice point is taken
+   snap can only raise); PICK = least stand-off first (round-2 F2a — the
+   accepted stand-off is the window minimum, which is what makes the M2
+   reach bounds provable), then nearest, then smaller along-coordinate.
+   The chosen lattice point is taken
    VERBATIM (exact world multiples) and u/out/stand-off re-derive with the
    exact verbatim-path expressions — post-seed == auto stays BYTE-equal by
    construction, obliques included. Window exhausted (clearance/openings/
@@ -145,13 +147,26 @@ labels — byte-equal (the compute.devices byte gate re-pins it live).
   complete class list.
 - **F2** CHECKLIST M2 disconnect row amended (the ≤ 1 m/≤ 1.5 m figures
   went stale at the unwarp round; the batch's silent 1.7 test allowance is
-  gone): 3D box↔unit-center ≤ **1.73 m** unobstructed — basis
-  √((S − t/2 − 0.02)² + 0.725²), S < condenserStandoff(t) + 0.5 (plan ≤
-  1.57; corpus-measured max 1.71/1.55) — + the ±1.2 m RO slide budget ⇒
-  plan ≤ 1.98. Row and test allowances agree to the digit. Geometry
-  option (a) was vacuous: the box already mounts at the unit's along-wall
-  projection (lateral = 0), so the reach IS the clearance-floored
-  stand-off.
+  gone). ROUND 2 (the round-1 restatement repeated the class in subtler
+  form — 'S < S0 + 0.5' is an axis-aligned theorem only): the pick is now
+  LEAST-STAND-OFF-FIRST (tie-break s → d² → u, total + deterministic —
+  distinct lattice points cannot share both s and u; axis-parallel picks
+  unchanged, PROVEN by the byte-identical E5 recapture cmp), and the row
+  splits by wall class: axis-parallel S ≤ S0 + 0.5 ⇒ plan ≤ 1.57 / 3D ≤
+  1.73 (keepouts are u-only, the minimal s-row is always reachable or the
+  search exhausts honestly); OBLIQUE window-supremum theorem S ≤ S0 +
+  1.75·(|sin θ|+|cos θ|) ≤ S0 + 2.475 ⇒ plan ≤ 3.54 / 3D ≤ 3.62 (keepouts
+  cut diagonal lattice stripes — composed exhibit θ = π/5, t = 0.2,
+  S − S0 ≈ 2.17, reach 3.32, on-grid, flag-free); exhausted ⇒ S = S0
+  exactly + the flag. Gates agree to the digit PER CLASS: the axis scene
+  gates keep 1.73; a CLASS-SWEEP gate (loop lesson: numeric class bounds
+  for a search need a class-sweep gate, not a scene gate — sentence added
+  to the M2 row) asserts the S-theorems + reach digits + byte-equal
+  recompose determinism on every composed pick across azimuth × t ×
+  shift × window sets, non-vacuous on both beyond-axis picks and
+  exhaustion firings. Geometry option (a) alone was insufficient: the
+  tie-break minimizes S but the only-valid-candidate case remains — the
+  row covers it by theorem.
 - **F3** off-grid honesty flag implemented + mutation-gated (above).
 - **F5** (pre-unwarp seed → disconnect 'w_fence' orphan) is pre-existing
   at base — queued on the board by the coordinator, not this branch.

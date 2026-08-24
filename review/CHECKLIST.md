@@ -1281,21 +1281,38 @@ AND a gate — a checklist line without a test is a wish.
   the plumbing convention (E3): suction cold-blue / liquid warm-red in 3D
   AND on the MEP sheet, each with its own legend row. A disconnect mounts
   within sight of each unit (NEC 440.14 — a visibility rule, ≤ 50 ft; the
-  figures below are the engine's own proximity-sanity bounds). AMENDED,
-  HP-polish fix round 2026-08-23 (verify F2): the box mounts at the
-  unit's along-wall projection (lateral = 0 unobstructed — nothing to
-  slide closer), so the reach is the clearance-floored stand-off itself.
-  3D box↔unit-center reach ≤ 1.73 m at an unobstructed anchor — basis
-  √((S − t/2 − 0.02)² + 0.725²) with the world-grid-snapped stand-off
-  S < condenserStandoff(t) + 0.5 ⇒ plan ≤ 1.57 m (measured corpus max
-  1.71 3D / 1.55 plan); + the ±1.2 m along-wall slide budget when the box
-  clears a fronting RO ⇒ plan ≤ √(1.57² + 1.2²) ≈ 1.98 m. History: the
-  original ≤ 1 m unobstructed / ≤ 1.5 m slid figures were true for the
-  slim pre-unwarp cabinet and went stale at the unwarp round (24" face
-  clearance + the 0.95 m cabinet floor the plan reach at 1.10 m); the
-  grid snap raised the ceiling by < one 0.5 m step. Test allowances agree
-  to the digit (hvac.condensers / hvac.lineset: 1.73;
-  starter-template pins its scene-true plan 1.5). The disconnect keeps an
+  figures below are the engine's own proximity-sanity bounds).
+  LOOP LESSON (round-2 F2): a numeric class bound for a SEARCH needs a
+  CLASS-SWEEP gate, not a scene gate — a scene allowance can be true of
+  its scene and false of the class (this row went stale twice that way).
+  AMENDED, HP-polish round 2 (verify F2): the box mounts at the unit's
+  along-wall projection (lateral = 0 unobstructed — nothing to slide
+  closer), so the reach is the clearance-floored stand-off itself, and
+  the grid search picks the LEAST stand-off the window permits
+  (tie-break s → d² → u; total because distinct lattice points cannot
+  share both s and u). Reach basis √((S − t/2 − 0.02)² + 0.725²), split
+  by wall class because the two are different THEOREMS:
+  - AXIS-PARALLEL walls: keepouts are u-only, so the minimal s-row is
+    always reachable (or the search exhausts honestly) ⇒
+    S ≤ condenserStandoff(t) + 0.5 ⇒ plan ≤ 1.57 m, 3D ≤ 1.73 m
+    (measured corpus max 1.71 / 1.55).
+  - OBLIQUE walls: keepouts cut diagonal lattice stripes, so the minimal
+    valid candidate can sit rows out (composed exhibit: θ = π/5, t = 0.2,
+    S − S0 ≈ 2.17). Window-supremum theorem: candidates lie within
+    1.5 m + 0.25 m rounding of the honest spot per world axis ⇒
+    S ≤ S0 + 1.75·(|sin θ|+|cos θ|) ≤ S0 + 1.75√2 ≈ S0 + 2.475 ⇒
+    plan ≤ 3.54 m, 3D ≤ 3.62 m.
+  - EXHAUSTED window ⇒ the honest un-snapped spot: S = S0 exactly, pad +
+    cabinet carry the off-grid flag.
+  + the ±1.2 m along-wall slide budget when the box clears a fronting RO
+  ⇒ plan ≤ √(plan_class² + 1.2²) per class. History: the original ≤ 1 m /
+  ≤ 1.5 m figures went stale at the unwarp round (24" clearance + 0.95 m
+  cabinet floor the plan reach at 1.10 m); round-1 restated them for the
+  snap but only for axis-aligned walls — the oblique class needed its own
+  theorem. Gates agree to the digit per class: hvac.condensers /
+  hvac.lineset 1.73 (axis scenes); hvac.polish class-sweep + oblique
+  exhibit 3.62 with the S-theorems asserted on every composed pick;
+  starter-template pins its scene-true plan 1.5. The disconnect keeps an
   endpoint-adjacent whip; the
   dedicated AC-n branch circuit (30A/10 or 40A/8, 2-pole) is panel-homerun
   by compute's post-HVAC pass (gated in compute.devices.test.ts).

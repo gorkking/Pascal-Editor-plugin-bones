@@ -223,6 +223,156 @@ describe('grid-snapped auto anchor — aligned normally, clearance never violate
     expect(checked).toBe(24)
   })
 
+  test('oblique + fronting-RO exhibit: the pick can legitimately exceed the axis-aligned bound — the M2 OBLIQUE row digits cover it (round-2 F2)', () => {
+    // The round-2 skeptic class: on oblique walls keepouts cut DIAGONAL
+    // stripes through the lattice, so the minimal-valid-stand-off
+    // candidate can sit rows beyond the first — 'S < S0 + 0.5' is an
+    // AXIS-ALIGNED theorem only. This composed exhibit (θ = π/5, t = 0.2,
+    // long low window + a second window past the slide edge) accepts a
+    // lattice spot at S − S0 ≈ 2.17: beyond the axis bound, WITHIN the
+    // window-supremum theorem S ≤ S0 + 1.75·(|sin θ|+|cos θ|), on the
+    // world grid, flag-free (a valid spot exists — the honest path), and
+    // the disconnect reach stays inside the M2 oblique digits.
+    const theta = Math.PI / 5
+    const t = 0.2
+    const opens = [opening('a', 1.2, 3.2), opening('b', 4.45, 1.0)]
+    const { walls, rooms } = shell(theta, [0.29, 0.23], t, opens)
+    const r = layoutHvac(walls, rooms, LOD400)
+    const cab = cabinetsOf(r.members)[0] as Member
+    const disc = r.fixtures.find((f) => f.kind === 'disconnect') as Fixture
+    const unit = condensersOf(r.fixtures)[0] as Fixture
+    // world-grid + healthy path (no off-grid class — a candidate WAS found)
+    expect(onGrid(cab.position[0])).toBe(true)
+    expect(onGrid(cab.position[2])).toBe(true)
+    expect(cab.flag).toBeUndefined()
+    // stand-off vs the row wall: beyond the axis bound, within the theorem
+    const w = walls.find((x) => x.id === disc.sourceId) as WallSlice
+    const n: [number, number] = [-w.dir[1], w.dir[0]]
+    const side =
+      (cab.position[0] - w.start[0]) * n[0] + (cab.position[2] - w.start[1]) * n[1] >= 0
+        ? 1
+        : -1
+    const sVal =
+      ((cab.position[0] - w.start[0]) * n[0] + (cab.position[2] - w.start[1]) * n[1]) * side
+    const s0 = w.thickness / 2 + 0.6096 + 0.475
+    expect(sVal - s0).toBeGreaterThan(0.5) // non-vacuous: axis digits do NOT cover this
+    expect(sVal).toBeLessThanOrEqual(s0 + 1.75 * (Math.abs(n[0]) + Math.abs(n[1])) + 1e-9)
+    expect(sVal - s0).toBeCloseTo(2.17445, 4) // the pinned exhibit
+    // disconnect reach: beyond the axis-row digit, inside the oblique digit
+    const reach = Math.hypot(
+      disc.position[0] - unit.position[0],
+      disc.position[1] - unit.position[1],
+      disc.position[2] - unit.position[2],
+    )
+    expect(reach).toBeGreaterThan(1.73) // the round-1 scene-gate blind spot, exercised
+    expect(reach).toBeLessThanOrEqual(3.62) // == the amended M2 oblique digits
+    // machinery invariants hold out here too: byte seed parity + determinism
+    const seed = placeCondenserSeedSpot(walls, rooms)
+    expect(seed?.[0]).toBe(unit.position[0])
+    expect(seed?.[1]).toBe(unit.position[2])
+    const post = layoutHvac(walls, rooms, LOD400, {
+      heatPump: { position: [seed?.[0] as number, 0, seed?.[1] as number] },
+    })
+    expect(JSON.stringify(post.members)).toBe(JSON.stringify(r.members))
+  })
+
+  test('tie-break is LEAST-STAND-OFF-FIRST: a nearer lattice spot with more stand-off loses (round-2 F2a pin)', () => {
+    // Discriminating scene (θ = atan2(2,3), t = 0.1, windows u = 1.2 rw 1.0
+    // + u = 2.9 rw 0.8): the window candidates include (4.0, 1.0) at
+    // d² ≈ 0.065 / S ≈ 1.387 and (4.5, 1.5) at d² ≈ 0.540 / S ≈ 1.248.
+    // Nearest-first accepts the former; the M2 bounds are provable only
+    // because the pick minimizes the ACCEPTED stand-off — (4.5, 1.5) must
+    // win. (The class-sweep's supremum theorem holds for ANY window pick,
+    // so only this pin bites a tie-break regression.)
+    const theta = Math.atan2(2, 3)
+    const opens = [opening('a', 1.2, 1.0), opening('b', 2.9, 0.8)]
+    const { walls, rooms } = shell(theta, [0, 0], 0.1, opens)
+    const cab = cabinetsOf(layoutHvac(walls, rooms, LOD400).members)[0] as Member
+    expect(cab.position[0]).toBe(4.5)
+    expect(cab.position[2]).toBe(1.5)
+    expect(cab.flag).toBeUndefined()
+  })
+
+  test('CLASS-SWEEP S-theorem (round-2 loop lesson: a numeric class bound for a search needs a class-sweep gate, not a scene gate)', () => {
+    // Every composed pick across azimuth × thickness × shift × window
+    // combinations satisfies the M2 theorems: floor S ≥ S0 (away-only);
+    // accepted picks S ≤ S0 + 1.75·(|sin θ|+|cos θ|) (window supremum —
+    // ≤ S0 + 0.5 degenerates out of it on axis-parallel walls only
+    // because keepouts are u-only there; the sweep includes both);
+    // flagged (exhausted) composes stand at the honest stand-off S0
+    // exactly; disconnect 3D reach ≤ 3.62 (the M2 oblique row digit,
+    // 1.73 on axis-parallel walls); and the search is DETERMINISTIC
+    // (byte-equal recompose).
+    const thetas = [0, Math.PI / 2, Math.atan2(2, 3), Math.PI / 5, Math.PI / 7]
+    const windowSets: OpeningSlice[][] = [
+      [],
+      [opening('a', 1.2, 3.2), opening('b', 4.45, 1.0)],
+      [opening('a', 0.6, 0.5), opening('b', 2.4, 0.5)],
+      [opening('a', 1.8, 2.4), opening('b', 4.75, 1.0)],
+    ]
+    let composed = 0
+    let beyondAxis = 0
+    let flagged = 0
+    for (const theta of thetas) {
+      const axisParallel = theta === 0 || theta === Math.PI / 2
+      for (const t of [0.1, 0.2]) {
+        for (const shift of [[0, 0], [0.13, 0], [0.29, 0.23]] as const) {
+          for (const opens of windowSets) {
+            const { walls, rooms } = shell(theta, [shift[0], shift[1]], t, opens)
+            const r = layoutHvac(walls, rooms, LOD400)
+            const cab = cabinetsOf(r.members)[0] as Member
+            const disc = r.fixtures.find((f) => f.kind === 'disconnect') as Fixture | undefined
+            const unit = condensersOf(r.fixtures)[0] as Fixture | undefined
+            if (!cab || !disc || !unit) continue
+            const w = walls.find((x) => x.id === disc.sourceId) as WallSlice
+            const n: [number, number] = [-w.dir[1], w.dir[0]]
+            const side =
+              (cab.position[0] - w.start[0]) * n[0] +
+                (cab.position[2] - w.start[1]) * n[1] >=
+              0
+                ? 1
+                : -1
+            const sVal =
+              ((cab.position[0] - w.start[0]) * n[0] +
+                (cab.position[2] - w.start[1]) * n[1]) *
+              side
+            const s0 = w.thickness / 2 + 0.6096 + 0.475
+            const isOffGrid = (cab.flag ?? '').includes('off-grid')
+            // floor: never toward the wall
+            expect(sVal).toBeGreaterThanOrEqual(s0 - 1e-9)
+            if (isOffGrid) {
+              // exhausted ⇒ the fully honest spot: stand-off is S0 exactly
+              expect(sVal).toBeCloseTo(s0, 9)
+              flagged++
+            } else {
+              const cap = axisParallel ? 0.5 : 1.75 * (Math.abs(n[0]) + Math.abs(n[1]))
+              expect(sVal).toBeLessThanOrEqual(s0 + cap + 1e-9)
+              if (sVal - s0 > 0.5) beyondAxis++
+            }
+            // reach digits == the amended M2 row, per class
+            const reach = Math.hypot(
+              disc.position[0] - unit.position[0],
+              disc.position[1] - unit.position[1],
+              disc.position[2] - unit.position[2],
+            )
+            expect(reach).toBeLessThanOrEqual(axisParallel ? 1.73 : 3.62)
+            // deterministic: byte-equal recompose (totality of the
+            // (s, d², u) order — distinct lattice points cannot tie on
+            // both s and u)
+            const r2 = layoutHvac(walls, rooms, LOD400)
+            expect(JSON.stringify(r2.members)).toBe(JSON.stringify(r.members))
+            composed++
+          }
+        }
+      }
+    }
+    // the sweep is a CLASS gate, not a scene gate: it must actually
+    // contain beyond-axis picks AND exhaustion firings, or it gates nothing
+    expect(composed).toBeGreaterThanOrEqual(100)
+    expect(beyondAxis).toBeGreaterThan(0)
+    expect(flagged).toBeGreaterThan(0)
+  })
+
   test('off-axis azimuth: the snap lives on the WORLD XZ grid — the lattice the editor renders (verify F1)', () => {
     // The skeptic's exhibit class: wall-frame multiples sit visibly OFF
     // the world lattice on oblique walls (residuals 0.153/0.496). The host

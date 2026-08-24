@@ -1396,9 +1396,18 @@ function condenserRow(
   //  - VALID = on the wall span, clear of the RO keepouts, AND standing at
   //    least the honest stand-off from the wall line (the snap only ever
   //    moves AWAY from the wall — the ≥ 24" face clearance is a FLOOR);
-  //  - PICK = nearest to the honest spot; ties prefer the LEAST additional
-  //    stand-off (outward-normal-dominant correction first), then the
-  //    smaller along-wall coordinate — fully deterministic;
+  //  - PICK (round-2 F2a): LEAST STAND-OFF first — the accepted stand-off
+  //    is the minimum the window permits, which is what makes the M2
+  //    reach bounds provable — then nearest to the honest spot, then the
+  //    smaller along-wall coordinate. TOTAL + DETERMINISTIC: two distinct
+  //    lattice points cannot share both s and u (orthogonal coordinates
+  //    of the plan), so the (s, d², u) triple always strictly orders
+  //    distinct candidates; fixed iteration order breaks nothing else.
+  //    On axis-parallel walls this picks EXACTLY what nearest-first
+  //    picked (keepouts are u-only there, so every s-row offers the same
+  //    u-columns and the minimal valid row always contained the overall
+  //    nearest candidate) — PROVEN by the byte-identical E5 recapture,
+  //    not assumed;
   //  - EXHAUSTED window (clearance/openings/span leave no lattice spot) =
   //    the honest un-snapped position + COND_OFF_GRID_FLAG (verify F3) —
   //    physics beats the grid, and it says so.
@@ -1436,8 +1445,8 @@ function condenserRow(
         const d2 = dx * dx + dz * dz
         if (
           !best ||
-          d2 < best.d2 ||
-          (d2 === best.d2 && (sG < best.s || (sG === best.s && uG < best.u)))
+          sG < best.s ||
+          (sG === best.s && (d2 < best.d2 || (d2 === best.d2 && uG < best.u)))
         ) {
           best = { g, d2, s: sG, u: uG }
         }
