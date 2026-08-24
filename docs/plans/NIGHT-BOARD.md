@@ -21,11 +21,22 @@ additive nullable yawOverride (bones:service → ServicePointOverride.yaw
 steppedRotation semantics MIRRORED (host doesn't export it — drift
 risk pinned); STATED LIMITATION: host group-rotate writes raw rotation,
 no registry seam — group-rotate won't turn the assembly.
-VERIFY ROUND: wf_5c97d6cc-d1d (skeptic: material aliasing across
-multi-unit splits, oblique-wall wall-frame-vs-world-grid gap — the
-heart of the complaint, ε 4th-spelling hunt, steppedRotation drift;
-examiner: pad-label ≥24" wording; visual: 4 complaints reproduced at
-308ee22 pin + prod-regression compare). Merge only after APPROVE.
+ROUND 1 (wf_5c97d6cc-d1d): visual PASS (all 4 complaints verified
+fixed in-browser; R=45° is exact host parity ROTATION_QUANTUM π/4;
+no red — residual red pixels are the pre-existing liquid-line/copper
+palette), examiner APPROVE (scorecard blueprint-hp-polish-r1.json;
+REC-1: manifest missed the 4 moving takeoff lf cells + E/W elevation
+−4.9px recenter), skeptic REVISE → FIX ROUND DISPATCHED to pilot:
+F1 world-XZ-grid snap (host floorStrategy convention — wall-frame
+snap left oblique units off the rendered lattice, residuals
+0.153/0.496; axis-aligned scenes unchanged so E5 baseline pins
+survive), F2 disconnect plan reach 1.5636m > CHECKLIST M2 ≤1.5m with
+a silently-raised 1.7 test allowance (constrain-or-amend, no orphan
+allowance), F3 the promised off-grid honesty flag was never emitted
+(physics-beats-grid scene lands x=1.63 silent). QUEUED from round:
+pre-unwarp seeds elect disconnect sourceId 'w_fence' orphan
+(pre-existing at base, unwarp-era, fence scene). Merge only after
+re-verify APPROVE.
 
 # LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
 
