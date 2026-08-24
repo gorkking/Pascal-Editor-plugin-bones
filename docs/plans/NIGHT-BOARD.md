@@ -343,7 +343,17 @@ F2 card fallback count reads stud+track only (prints 1 where truth
 is 2 — backing class missed), F3 'never changes geometry' claim
 byte-false at LOD 200 (machine narrows the generic pick -33→-43;
 vendor-own dims draw) — scope to 300+/constrains+brands wording.
-FIX ROUND DISPATCHED. Closing round after tip.
+FIX TIP 2e3346d (one commit each; manifest retraction stated
+in-text, corrected 14/14). ROUND 2 (wf_fa0a90f9): skeptic APPROVE
+closing-grade — 3 mutants die at exactly the new gates, resolver
+move proven pure refactor by 2.47MB/42-scenario byte-diff, 14/14
+re-tallied true, behavior pins mutation-live (doc-only prose sites
+stated honestly), zero-backing arm verified not trusted.
+★ MERGED TO MASTER c5b1bae (2026-08-24; suite 1912, tsc clean, E5
+pin green). LGS PHASE 2 COMPLETE — machine selection UX live behind
+the panel. Ships with Canada when its round closes. Phase 3
+(floors/roofs R505/R804 + export research) is the remaining LGS
+phase.
 ★ SHIPPED TO PROD 2026-08-24: plugin 9f86f12 → editor #716
 (e7b5abdf) → private-editor #405 (75a8afa8), full-stack CI green
 incl. both E2E + Bugbot, Vercel prod deploy. HP 4-part feedback +
