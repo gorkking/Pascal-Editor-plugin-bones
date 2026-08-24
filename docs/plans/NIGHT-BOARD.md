@@ -175,8 +175,14 @@ attack held, worst 3D 3.5307 ≤ 3.62; tie-break totality proven;
 mutants A-F bite exactly incl. the round-2 bug reintroduced → caught
 by 1 gate), examiner APPROVE (86/86 corpus files byte-identical;
 round-2 laundering REPRODUCED on paper at the old pin; independent
-600-scene sweep zero violations). Visual died on SSO before the
-acid test — RESUMED (cached verdicts replay). Merge on visual PASS.
+600-scene sweep zero violations). Visual (resumed): PASS/SHIP —
+acid test witnessed auto-seed from scratch on a fresh clone, flag
+persists w/ new wording + prints on the takeoff Flags row, cmd-drag
+clears it (A4); healthy scenes zero flags, all placements exact
+world multiples; oblique pick moved closer as the tie-break
+promises (1.2697 < 1.4083 standoff); starter byte-reproduced.
+★ MERGED TO MASTER (2026-08-24; suite 1815, tsc clean, E5 11/11).
+Julien's 4-part HP feedback CLOSED. Ships with LGS Phase 1.
 
 # LGS (LIGHT GAUGE STEEL) — NEW FEATURE TRACK (X.com feedback, 2026-08-23)
 
