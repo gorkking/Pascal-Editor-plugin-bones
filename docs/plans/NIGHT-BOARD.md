@@ -35,10 +35,23 @@ keystone interpenetrates; 38 members/jurisdiction pin churn; x-ray
 lip) → QUEUED, host self-heal also covers it. NEW RESIDUAL QUEUED:
 u-direction end-face class (bond-beam/lintel END faces on host wall
 end caps at CMU×CMU corners; blocks immune via length shrink).
-VERIFY: wf_193a3cd0-502 (skeptic: all-roles coplanarity sweep +
-boundary t's + pre-bury takeoff re-derivation; examiner: the one
-buy cell; visual: paint-a-CMU-wall repro — flicker must be GONE,
-framed still flickers honestly, x-ray unchanged at distance).
+ROUND 1 (wf_193a3cd0): skeptic APPROVE (18-thickness all-roles
+coplanarity sweep; pour-row arithmetic re-derived — old ≈0.2 was
+real ceil-to-batch, new ≈0.1 honest; NEW corner butt-gap class
+found+quantified, absorbed into the end-face queue item), visual
+PASS (flicker reproducibly GONE — 0/196,444 px on every return/
+temporal pair, both wall modes, white+brick, hover-preview clean;
+baseline contrast reproduced Julien's quilt exactly; x-ray look
+0.6% at working distance; framed class confirmed NOT fixed,
+honestly — host self-heal owns it), examiner APPROVE (pour cell
+re-derived to the digit; FLAG: sheets that draw CMU members move
+numeric-only ≤1.5px — manifest addendum landed at merge).
+★ MERGED TO MASTER 8aad1b3 + addenda 7ee49a9 (2026-08-24; suite
+1783, tsc clean, E5 pin green). QUEUE: u-direction end-face +
+corner butt-gap (one end-treatment item); framed-layers bury
+(not-contained assessment stands); host WallCutout self-heal.
+SHIP CHAIN STARTING: master 7ee49a9 → editor pin → private-editor
+(carries LGS Phase 0 inert + CMU bury).
 
 # HP POLISH — feat/hp-polish DELIVERED, VERIFY ROUND RUNNING (2026-08-23)
 
