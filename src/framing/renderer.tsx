@@ -343,6 +343,16 @@ const scratchScale = new Vector3()
 const scratchTranslation = new Vector3()
 const scratchEuler = new Euler()
 
+/** Render-only shrink, split across a box's two faces per axis. Wall-layer
+ * faces (gypsum/cladding) and CMU wythes are BY DESIGN exactly flush with
+ * the host's drawn wall face — coplanar with it, they z-fight as a flicker
+ * of "two textures on the same level" (owner report 2026-08-25, editor AND
+ * in-game). 0.6 mm per face tucks every member face just behind the host
+ * surface (the X-ray ghost pass still shows it) and is invisible at
+ * architectural scale. Engine data and takeoff never see this — it exists
+ * only in the instance matrix. */
+const RENDER_SHRINK = 0.0012
+
 /** Compose one entry's instance matrix (position, rotation, scale = dims,
  * with the same degenerate-dim clamp the buckets always used). Shared by
  * the box buckets AND the condenser-asset wrappers, so the asset sits at
@@ -357,9 +367,9 @@ export function composeEntryMatrix(
   scratchQuaternion.setFromEuler(scratchEuler)
   scratchTranslation.set(position[0], position[1], position[2])
   scratchScale.set(
-    Math.max(dims[0], 0.001),
-    Math.max(dims[1], 0.001),
-    Math.max(dims[2], 0.001),
+    Math.max(dims[0] - RENDER_SHRINK, 0.001),
+    Math.max(dims[1] - RENDER_SHRINK, 0.001),
+    Math.max(dims[2] - RENDER_SHRINK, 0.001),
   )
   return out.compose(scratchTranslation, scratchQuaternion, scratchScale)
 }
